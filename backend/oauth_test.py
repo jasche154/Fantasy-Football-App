@@ -13,7 +13,7 @@ params = {
     "client_id": CLIENT_ID,
     "redirect_uri": REDIRECT_URI,
     "response_type": "code",
-    "scope": "fspt-r",  # fantasy sports, read-only
+    "scope": "fspt-r",  # fantasy sports, read-only, working on getting access to Fantasy Sports API
 }
 
 auth_url = f"{AUTH_BASE_URL}?{urllib.parse.urlencode(params)}"
