@@ -1,6 +1,15 @@
-from fastapi import FastAPI #pydantic schemas natural fit for separating the data in from the data out
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
 app = FastAPI()
 
-@app.get("/")
-def read_root():
-    return{"message": "API is running"}
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],  # Vite's default dev port
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.get("/api/health")
+def health_check():
+    return {"status": "ok", "message": "Backend is alive"}
