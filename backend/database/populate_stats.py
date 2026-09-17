@@ -1,15 +1,14 @@
 import nflreadpy as nfl
-from sqlalchemy import create_engine, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
-from models import (
+from database.models import (
     Base, Player, PlayerStatsWeekly,
     PlayerPassingAdvancedWeekly, PlayerReceivingAdvancedWeekly, PlayerRushingAdvancedWeekly
 )
+from database.db import engine
 
-engine = create_engine("sqlite:///fantasy.db")
 Base.metadata.create_all(engine)
 SEASONS = [2021, 2022, 2023, 2024, 2025]
-
 
 def get_or_create_player(session, gsis_id, display_name, position, team):
     statement = select(Player).where(Player.gsis_id == gsis_id)

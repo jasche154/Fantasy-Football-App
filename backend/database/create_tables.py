@@ -1,7 +1,6 @@
-from sqlalchemy import create_engine
-from models import Base
+from database.models import Base
+from database.db import engine
 
-engine = create_engine("sqlite:///fantasy.db")
 Base.metadata.create_all(engine)
 
 print("Tables created.")
