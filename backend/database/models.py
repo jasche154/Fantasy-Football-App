@@ -46,6 +46,7 @@ class Player(Base):
     gsis_id: Mapped[str | None]
     yahoo_player_id: Mapped[str | None]
     sleeper_player_id: Mapped[str | None]
+    pfr_player_id: Mapped[str | None]
     full_name: Mapped[str]
     position: Mapped[str | None]
     nfl_team: Mapped[str | None]
