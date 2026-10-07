@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Fantasy Football Rankings</title>
+    <style>
+      * { box-sizing: border-box; font-family: system-ui, sans-serif; }
+      body { max-width: 800px; margin: 2rem auto; padding: 0 1rem; }
+      h1 { margin-bottom: 1.5rem; }
+      .controls { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; align-items: flex-end; }
+      .controls label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.875rem; }
+      .controls input, .controls select { padding: 0.5rem; border: 1px solid #ccc; border-radius: 4px; }
+      .controls button { padding: 0.5rem 1rem; background: #2563eb; color: white; border: none; border-radius: 4px; cursor: pointer; }
+      .controls button:disabled { background: #93c5fd; cursor: not-allowed; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { padding: 0.75rem; text-align: left; border-bottom: 1px solid #e5e7eb; }
+      th { background: #f9fafb; font-weight: 600; }
+      tr:hover { background: #f3f4f6; }
+      #error { color: #dc2626; margin: 1rem 0; display: none; }
+      #loading { color: #6b7280; display: none; }
+    </style>
+  </head>
+  <body>
+    <h1>Rushing Efficiency Rankings</h1>
+    
+    <div class="controls">
+      <label>
+        Metric
+        <select id="metric-select"></select>
+      </label>
+      <label>
+        Season
+        <input type="number" id="season-input" value="2025" min="2021" max="2026" />
+      </label>
+      <label>
+        Limit
+        <input type="number" id="limit-input" value="15" min="1" max="100" />
+      </label>
+      <label>
+        Min Attempts
+        <input type="number" id="min-attempts-input" value="50" min="0" max="500" />
+      </label>
+      <button id="fetch-btn">Fetch</button>
+    </div>
+
+    <div id="loading">Loading...</div>
+    <div id="error"></div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Rank</th>
+          <th>Player</th>
+          <th id="metric-header">Value</th>
+        </tr>
+      </thead>
+      <tbody id="table-body"></tbody>
+    </table>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
