@@ -1,14 +1,16 @@
 import nflreadpy as nfl
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.orm import Session
-from database.models import (
+from models import (
     Base, Player, PlayerStatsWeekly,
     PlayerPassingAdvancedWeekly, PlayerReceivingAdvancedWeekly, PlayerRushingAdvancedWeekly
 )
-from database.db import engine
+from db import engine
 
 Base.metadata.create_all(engine)
-SEASONS = [2021, 2022, 2023, 2024, 2025]
+SEASONS = [2021, 2022, 2023, 2024, 2025, 2026]
+CURRENT_SEASONS = [nfl.get_current_season()]  # re-deleted and reloaded every run
+
 
 def get_or_create_player(session, gsis_id, display_name, position, team):
     statement = select(Player).where(Player.gsis_id == gsis_id)
@@ -23,8 +25,13 @@ def get_or_create_player(session, gsis_id, display_name, position, team):
 with Session(engine) as session:
 
     # --- Normal weekly stats ---
+    session.execute(delete(PlayerStatsWeekly).where(PlayerStatsWeekly.season.in_(CURRENT_SEASONS)))
+    session.commit()
+
     player_stats = nfl.load_player_stats(SEASONS)
     for row in player_stats.iter_rows(named=True):
+        if row["season"] not in CURRENT_SEASONS:
+            continue
         if row["player_id"] is None or row["player_display_name"] is None:
             continue
         player = get_or_create_player(
@@ -98,8 +105,13 @@ with Session(engine) as session:
     print("Normal weekly stats done.")
 
     # --- Passing advanced ---
+    session.execute(delete(PlayerPassingAdvancedWeekly).where(PlayerPassingAdvancedWeekly.season.in_(CURRENT_SEASONS)))
+    session.commit()
+
     passing_ngs = nfl.load_nextgen_stats(seasons=SEASONS, stat_type="passing")
     for row in passing_ngs.iter_rows(named=True):
+        if row["season"] not in CURRENT_SEASONS:
+            continue
         if row["player_gsis_id"] is None:
             continue
         player = get_or_create_player(
@@ -135,8 +147,13 @@ with Session(engine) as session:
     print("Passing advanced stats done.")
 
     # --- Receiving advanced ---
+    session.execute(delete(PlayerReceivingAdvancedWeekly).where(PlayerReceivingAdvancedWeekly.season.in_(CURRENT_SEASONS)))
+    session.commit()
+
     receiving_ngs = nfl.load_nextgen_stats(seasons=SEASONS, stat_type="receiving")
     for row in receiving_ngs.iter_rows(named=True):
+        if row["season"] not in CURRENT_SEASONS:
+            continue
         if row["player_gsis_id"] is None:
             continue
         player = get_or_create_player(
@@ -166,8 +183,13 @@ with Session(engine) as session:
     print("Receiving advanced stats done.")
 
     # --- Rushing advanced ---
+    session.execute(delete(PlayerRushingAdvancedWeekly).where(PlayerRushingAdvancedWeekly.season.in_(CURRENT_SEASONS)))
+    session.commit()
+
     rushing_ngs = nfl.load_nextgen_stats(seasons=SEASONS, stat_type="rushing")
     for row in rushing_ngs.iter_rows(named=True):
+        if row["season"] not in CURRENT_SEASONS:
+            continue
         if row["player_gsis_id"] is None:
             continue
         player = get_or_create_player(

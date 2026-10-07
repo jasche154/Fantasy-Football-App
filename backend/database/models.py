@@ -216,3 +216,57 @@ class Recommendation(Base):
     explanation_text: Mapped[str | None]
     supporting_data: Mapped[str | None]        # JSON stored as text, same as before
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    
+class PlayerExpectedPointsWeekly(Base):
+    __tablename__ = "player_expected_points_weekly"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    player_id: Mapped[int] = mapped_column(ForeignKey("players.id"))
+    season: Mapped[int]
+    week: Mapped[int]
+    game_id: Mapped[str | None]
+    posteam: Mapped[str | None]
+
+    # expected
+    pass_completions_exp: Mapped[float | None]
+    receptions_exp: Mapped[float | None]
+    pass_yards_gained_exp: Mapped[float | None]
+    rec_yards_gained_exp: Mapped[float | None]
+    rush_yards_gained_exp: Mapped[float | None]
+    pass_touchdown_exp: Mapped[float | None]
+    rec_touchdown_exp: Mapped[float | None]
+    rush_touchdown_exp: Mapped[float | None]
+    pass_first_down_exp: Mapped[float | None]
+    rec_first_down_exp: Mapped[float | None]
+    rush_first_down_exp: Mapped[float | None]
+    pass_interception_exp: Mapped[float | None]
+    rec_interception_exp: Mapped[float | None]
+    pass_fantasy_points_exp: Mapped[float | None]
+    rec_fantasy_points_exp: Mapped[float | None]
+    rush_fantasy_points_exp: Mapped[float | None]
+    total_yards_gained_exp: Mapped[float | None]
+    total_touchdown_exp: Mapped[float | None]
+    total_first_down_exp: Mapped[float | None]
+    total_fantasy_points_exp: Mapped[float | None]
+
+    # diff (actual minus expected, precomputed by the source)
+    pass_completions_diff: Mapped[float | None]
+    receptions_diff: Mapped[float | None]
+    pass_yards_gained_diff: Mapped[float | None]
+    rec_yards_gained_diff: Mapped[float | None]
+    rush_yards_gained_diff: Mapped[float | None]
+    pass_touchdown_diff: Mapped[float | None]
+    rec_touchdown_diff: Mapped[float | None]
+    rush_touchdown_diff: Mapped[float | None]
+    pass_first_down_diff: Mapped[float | None]
+    rec_first_down_diff: Mapped[float | None]
+    rush_first_down_diff: Mapped[float | None]
+    pass_interception_diff: Mapped[float | None]
+    rec_interception_diff: Mapped[float | None]
+    pass_fantasy_points_diff: Mapped[float | None]
+    rec_fantasy_points_diff: Mapped[float | None]
+    rush_fantasy_points_diff: Mapped[float | None]
+    total_yards_gained_diff: Mapped[float | None]
+    total_touchdown_diff: Mapped[float | None]
+    total_first_down_diff: Mapped[float | None]
+    total_fantasy_points_diff: Mapped[float | None]
