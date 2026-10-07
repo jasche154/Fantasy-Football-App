@@ -1,60 +1,103 @@
-import './style.css'
-import heroImg from './assets/hero.png'
-import typescriptLogo from './assets/typescript.svg'
-import viteLogo from './assets/vite.svg'
-import { setupCounter } from './counter.ts'
+const API_BASE = "http://localhost:8000";
 
-document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
-<section id="center">
-  <div class="hero">
-    <img src="${heroImg}" class="base" width="170" height="179">
-    <img src="${typescriptLogo}" class="framework" alt="TypeScript logo"/>
-    <img src="${viteLogo}" class="vite" alt="Vite logo" />
-  </div>
-  <div>
-    <h1>Get started</h1>
-    <p>Edit <code>src/main.ts</code> and save to test <code>HMR</code></p>
-  </div>
-  <button id="counter" type="button" class="counter"></button>
-</section>
+interface RankingRow {
+  player: string;
+  [key: string]: string | number;
+}
 
-<div class="ticks"></div>
+interface ApiResponse {
+  metric: string;
+  season: number;
+  results: RankingRow[];
+  error?: string;
+}
 
-<section id="next-steps">
-  <div id="docs">
-    <svg class="icon" role="presentation" aria-hidden="true"><use href="/icons.svg#documentation-icon"></use></svg>
-    <h2>Documentation</h2>
-    <p>Your questions, answered</p>
-    <ul>
-      <li>
-        <a href="https://vite.dev/" target="_blank">
-          <img class="logo" src="${viteLogo}" alt="" />
-          Explore Vite
-        </a>
-      </li>
-      <li>
-        <a href="https://www.typescriptlang.org" target="_blank">
-          <img class="button-icon" src="${typescriptLogo}" alt="">
-          Learn more
-        </a>
-      </li>
-    </ul>
-  </div>
-  <div id="social">
-    <svg class="icon" role="presentation" aria-hidden="true"><use href="/icons.svg#social-icon"></use></svg>
-    <h2>Connect with us</h2>
-    <p>Join the Vite community</p>
-    <ul>
-      <li><a href="https://github.com/vitejs/vite" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#github-icon"></use></svg>GitHub</a></li>
-      <li><a href="https://chat.vite.dev/" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#discord-icon"></use></svg>Discord</a></li>
-      <li><a href="https://x.com/vite_js" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#x-icon"></use></svg>X.com</a></li>
-      <li><a href="https://bsky.app/profile/vite.dev" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#bluesky-icon"></use></svg>Bluesky</a></li>
-    </ul>
-  </div>
-</section>
+const metricSelect = document.getElementById("metric-select") as HTMLSelectElement;
+const seasonInput = document.getElementById("season-input") as HTMLInputElement;
+const limitInput = document.getElementById("limit-input") as HTMLInputElement;
+const minAttemptsInput = document.getElementById("min-attempts-input") as HTMLInputElement;
+const fetchBtn = document.getElementById("fetch-btn") as HTMLButtonElement;
+const tableBody = document.getElementById("table-body") as HTMLTableSectionElement;
+const errorDiv = document.getElementById("error") as HTMLDivElement;
+const loadingDiv = document.getElementById("loading") as HTMLDivElement;
+const metricHeader = document.getElementById("metric-header") as HTMLTableHeaderCellElement;
 
-<div class="ticks"></div>
-<section id="spacer"></section>
-`
+const METRICS = [
+  { value: "rush_yards_over_expected", label: "Rush Yards Over Expected / Att" },
+  { value: "rush_pct_over_expected", label: "Rush % Over Expected" },
+];
 
-setupCounter(document.querySelector<HTMLButtonElement>('#counter')!)
+function initSelect() {
+  METRICS.forEach((m) => {
+    const opt = document.createElement("option");
+    opt.value = m.value;
+    opt.textContent = m.label;
+    metricSelect.appendChild(opt);
+  });
+  updateMetricHeader();
+}
+
+function updateMetricHeader() {
+  const selected = METRICS.find(m => m.value === metricSelect.value);
+  if (selected && metricHeader) {
+    metricHeader.textContent = selected.label;
+  }
+}
+
+async function fetchRankings() {
+  const metric = metricSelect.value;
+  const season = parseInt(seasonInput.value, 10);
+  const limit = parseInt(limitInput.value, 10);
+  const minAttempts = parseInt(minAttemptsInput.value, 10);
+
+  loadingDiv.style.display = "block";
+  errorDiv.style.display = "none";
+  tableBody.innerHTML = "";
+
+  try {
+    const resp = await fetch(
+      `${API_BASE}/api/rankings/rushing?metric=${metric}&season=${season}&limit=${limit}&min_attempts=${minAttempts}`
+    );
+    const data: ApiResponse = await resp.json();
+
+    if (data.error) {
+      showError(data.error);
+      return;
+    }
+
+    renderTable(data.results, metric);
+  } catch (err) {
+    showError(`Network error: ${err}`);
+  } finally {
+    loadingDiv.style.display = "none";
+  }
+}
+
+function renderTable(rows: RankingRow[], metric: string) {
+  if (rows.length === 0) {
+    tableBody.innerHTML = `<tr><td colspan="3" style="text-align:center;">No data</td></tr>`;
+    return;
+  }
+
+  rows.forEach((row, idx) => {
+    const tr = document.createElement("tr");
+    const value = row[metric];
+    const displayValue = typeof value === "number" ? value.toFixed(2) : value;
+    tr.innerHTML = `
+      <td>${idx + 1}</td>
+      <td>${row.player}</td>
+      <td>${displayValue}</td>
+    `;
+    tableBody.appendChild(tr);
+  });
+}
+
+function showError(msg: string) {
+  errorDiv.textContent = msg;
+  errorDiv.style.display = "block";
+}
+
+fetchBtn.addEventListener("click", fetchRankings);
+metricSelect.addEventListener("change", updateMetricHeader);
+initSelect();
+fetchRankings();
