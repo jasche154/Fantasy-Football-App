@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 load_dotenv()
 client = Groq(api_key=os.environ["GROQ_API_KEY"])
 
-messages = [{"role": "user", "content": "Where does Bhasyhul Tuten rank in efficiency per attempt in 2025"}]
+messages = [{"role": "user", "content": "how is rushing "}]
 
 # Round 1: let the model decide whether/how to call a tool
 response = client.chat.completions.create(
