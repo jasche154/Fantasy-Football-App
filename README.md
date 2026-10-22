@@ -1,124 +1,109 @@
-# Fantasy Football AI Assistant
+# Fantasy Football Toolkit
 
 > "Your fantasy platform tells you what happened. This tells you what to do next."
 
-An AI-powered assistant that connects to your existing fantasy football league (Yahoo, Sleeper, ESPN) and gives personalized, explained recommendations — start/sit calls, waiver targets, trade suggestions — grounded in real player and league data, not guesses.
+A FantasyPros / Flock-style fantasy football toolkit built on free, open NFL data
+(nflverse), with optional FantasyPros and Yahoo integrations.
 
-This is an early-stage personal project, currently in **Phase 1 (MVP foundation)**.
+**Core rule:** every number comes from real data and deterministic, tested code. The LLM
+only *explains* numbers that came back from a tool call. Every output is labeled as one of:
 
-## Core idea
-
-Recommendations flow through a pipeline, not a single LLM call:
-
-```
-Fantasy/NFL data → data processing → statistical analysis → recommendation → AI explanation
-```
-
-The LLM's job is to **explain and personalize** a recommendation already backed by real numbers — never to invent a stat or guess a projection on its own.
-
-## Tech stack
-
-| Layer | Choice | Why |
+| Label | Meaning | Source |
 |---|---|---|
-| Backend | FastAPI (Python) | Async support for calling external APIs without blocking |
-| Frontend | React (Vite) | Fast dev server, standard React setup |
-| Database | SQLite + SQLAlchemy ORM | Zero-config for solo development; ORM makes a future Postgres migration a connection-string change, not a rewrite |
-| NFL stats data | [`nflreadpy`](https://github.com/nflverse/nflreadpy) | Free, open, no API key — reads published nflverse data (weekly stats, rosters, etc.) |
-| League data | Yahoo Fantasy Sports API | Read-only OAuth access (pending Yahoo's app approval) |
+| **Actual** | What happened (box score, fantasy points) | nflverse weekly stats |
+| **Expected** | What the player's usage was worth (targets, carries, air yards, red-zone looks) | nflverse `ff_opportunity` model |
+| **Projection / trade value** | Rest-of-season outlook | This app's model (explained below) |
+| **ECR** | Expert consensus ranking | FantasyPros (free weekly snapshot, or your API key) |
 
-## Project structure
+## Features
 
-```
-fantasy-football-app/
-├── frontend/               # React + Vite app
-├── backend/
-│   ├── main.py             # FastAPI app entrypoint
-│   ├── database/
-│   │   ├── models.py       # SQLAlchemy table definitions
-│   │   ├── create_tables.py
-│   │   ├── populate_stats.py   # pulls nflreadpy data into the DB
-│   │   └── fantasy.db      # not committed — generated locally
-│   └── .env                # not committed — secrets/config
-└── .gitignore
-```
+- **Data pipeline:** six seasons of weekly stats, Next Gen Stats, expected fantasy points,
+  snap counts, cross-platform player IDs, and FantasyPros weekly ECR, loaded into SQLite by one command
 
-## Database schema (current)
+## Quick start
 
-- **users** — app accounts
-- **platform_connections** — stored OAuth tokens per user, per platform (Yahoo, Sleeper, etc.)
-- **leagues** — a user's imported league(s), including scoring settings
-- **teams** — teams within a league
-- **players** — a platform-agnostic player identity hub, with crosswalk IDs (`gsis_id`, `yahoo_player_id`, `sleeper_player_id`) so the same real player can be matched across data sources
-- **rosters** — weekly roster snapshots per team
-- **player_stats_weekly** — standard box-score stats (yards, TDs by type, receptions, targets)
-- **player_advanced_stats_weekly** — advanced/Next Gen-style metrics (separation, time to throw, etc.) — *not yet populated*
-- **recommendations** — generated recommendations, including a stored data snapshot so every recommendation can be explained after the fact
+Prerequisites: Python 3.11+.
 
-Foreign keys are enforced at the connection level (SQLite has them off by default).
-
-## Getting started
-
-### Prerequisites
-- Python 3.11+
-- Node.js (for the frontend)
-
-### Backend setup
+### 1. Backend setup
 
 ```bash
 cd backend
 python -m venv venv
-venv\Scripts\activate          # Windows
-# source venv/bin/activate     # Mac/Linux
-pip install fastapi uvicorn sqlalchemy nflreadpy python-dotenv httpx
+venv\Scripts\activate            # Windows
+# source venv/bin/activate       # macOS / Linux
+pip install -r requirements.txt
+copy .env.example .env           # macOS / Linux: cp .env.example .env
 ```
 
-Create a `.env` file in `backend/` with:
-
-```
-YAHOO_CLIENT_ID=your_client_id
-YAHOO_CLIENT_SECRET=your_client_secret
-YAHOO_REDIRECT_URI=http://localhost:8000/callback
-```
-
-Create the database:
+### 2. Database and data
 
 ```bash
-cd database
-python create_tables.py
+python -m database.create_tables      # brand-new database: creates tables, stamps the migration version
+alembic upgrade head                  # existing database: applies new migrations instead
+python -m database.populate_stats     # downloads 2021 through the current season (~1 minute)
 ```
 
-Populate it with real NFL stats:
+Re-run `python -m database.populate_stats` weekly during the season. It reloads the current
+season and fills in any missing ones. Other options:
 
 ```bash
-python populate_stats.py
+python -m database.populate_stats --seasons 2025 2026   # reload specific seasons
+python -m database.populate_stats --all                 # reload everything
 ```
 
-Run the API:
+A season only replaces existing rows after its download succeeds, so a network hiccup
+never wipes data.
+
+## Configuration
+
+Settings come from environment variables or `backend/.env` (never commit it; see `backend/.env.example`).
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `DATABASE_URL` | `sqlite:///backend/database/fantasy.db` | Any SQLAlchemy URL |
+| `CORS_ORIGINS` | `["http://localhost:5173","http://127.0.0.1:5173"]` | JSON list of allowed web origins |
+| `FANTASY_END_WEEK` | `17` | Last fantasy week (drives weeks remaining) |
+
+## Data sources
+
+All the core data is free and needs no key, via [`nflreadpy`](https://github.com/nflverse/nflreadpy).
+[`docs/DATA_SOURCES.md`](docs/DATA_SOURCES.md) covers every source the app uses or could use:
+what it has, how to access it, license terms, update schedule, and which ones to avoid
+(KeepTradeCut, FantasyCalc for calculators, Sports-Reference scraping).
+
+## Testing
 
 ```bash
-cd ..
-uvicorn main:app --reload
+cd backend
+pip install -r requirements-dev.txt
+python -m pytest                                   # all tests run on an in-memory database
+python -m pytest --cov=. --cov-report=term-missing # with coverage
 ```
 
-### Frontend setup
+Tests never touch `database/fantasy.db` or read `backend/.env`.
 
-```bash
-cd frontend
-npm install
-npm run dev
+## Project structure
+
+```
+backend/
+  config.py                 settings from env / .env
+  database/                 models, migrations helpers, data loader
+  alembic/                  schema migrations
+  tests/                    pytest suite
+docs/                       plan, data sources
 ```
 
-## Current status
+## Design notes
 
-- [x] Database schema designed and implemented (SQLAlchemy + SQLite)
-- [x] Weekly player stats populated from `nflreadpy`
-- [x] FastAPI + React talking to each other (basic health check endpoint)
-- [ ] Yahoo OAuth flow (pending Yahoo API access approval)
-- [ ] Advanced/Next Gen stats populated
-- [ ] Start/sit recommendation logic (Phase 2)
+- **Player identity crosswalk:** Yahoo, Sleeper, FantasyPros, PFR, and nflverse each use
+  different IDs. `players` is the hub, keyed by nflverse's `gsis_id` (unique) and filled
+  from the DynastyProcess crosswalk.
+- **Foreign keys are enforced** on every SQLite connection.
+- **SQLite is a deliberate, temporary choice.** It's zero-config for solo use; moving to
+  Postgres is a `DATABASE_URL` change.
 
-## Design notes worth knowing
+## Roadmap
 
-- **Player identity crosswalk**: Yahoo, Sleeper, and nflverse each use different IDs for the same player. The `players` table is the hub every other table joins through, using `gsis_id` as the anchor from nflverse data.
-- **OAuth tokens are currently stored as plain text.** This is acceptable for solo local development only — before any real user other than the developer connects an account, tokens need encryption at rest.
-- **SQLite is a deliberate, temporary choice**, not a permanent one. It's zero-config for solo iteration, but only supports one writer at a time and typically doesn't persist on ephemeral hosting disks. The plan is to migrate to Postgres once there's more than one real concurrent user or a real deploy target.
+See [`docs/PLAN.md`](docs/PLAN.md) for the full plan and what's out of scope for now: dynasty values,
+injury-aware projections, bye weeks, multi-user auth, deployment.
+Research work: [`FutureWork.md`](FutureWork.md) (RB Vision Score) and [`DATA_AUDIT.md`](DATA_AUDIT.md) (Big Data Bowl audit).

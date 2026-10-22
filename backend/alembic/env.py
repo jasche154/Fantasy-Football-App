@@ -18,8 +18,14 @@ if config.config_file_name is not None:
 # for 'autogenerate' support
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
+from config import get_settings
 from database.models import Base
 target_metadata = Base.metadata
+
+# Use the same database as the app (DATABASE_URL / backend/.env), not a path relative to
+# wherever alembic happens to be run from. Callers such as create_tables can pass their own.
+database_url = config.attributes.get("database_url") or get_settings().database_url
+config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:

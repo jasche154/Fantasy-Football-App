@@ -1,286 +1,264 @@
+"""Load nflverse data into the local database.
+
+Run from backend/:
+    python -m database.populate_stats                     # load missing seasons + refresh the current one
+    python -m database.populate_stats --seasons 2025 2026 # reload specific seasons
+    python -m database.populate_stats --all               # reload every season since FIRST_SEASON
+
+Each season is downloaded on its own and only replaces existing rows once the download
+succeeds, so a network failure never wipes data that is already loaded.
+"""
+import argparse
+import logging
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
+from typing import Any
+
 import nflreadpy as nfl
-from sqlalchemy import select, delete
+import polars as pl
+from sqlalchemy import delete, insert, select
 from sqlalchemy.orm import Session
-from models import (
-    Base, Player, PlayerStatsWeekly,
-    PlayerPassingAdvancedWeekly, PlayerReceivingAdvancedWeekly, PlayerRushingAdvancedWeekly,
-    PlayerExpectedPointsWeekly
+
+from database.db import engine
+from database.models import (
+    Base, ExpertRanking, Player, PlayerExpectedPointsWeekly, PlayerPassingAdvancedWeekly,
+    PlayerReceivingAdvancedWeekly, PlayerRushingAdvancedWeekly, PlayerSnapCountsWeekly,
+    PlayerStatsWeekly,
 )
-from db import engine
 
-Base.metadata.create_all(engine)
-SEASONS = [2021, 2022, 2023, 2024, 2025, 2026]
-CURRENT_SEASONS = [nfl.get_current_season()]  # re-deleted and reloaded every run
+log = logging.getLogger("populate_stats")
 
-
-def get_or_create_player(session, gsis_id, display_name, position, team):
-    statement = select(Player).where(Player.gsis_id == gsis_id)
-    player = session.execute(statement).scalar_one_or_none()
-    if player is None:
-        player = Player(gsis_id=gsis_id, full_name=display_name, position=position, nfl_team=team)
-        session.add(player)
-        session.flush()
-    return player
+FIRST_SEASON = 2021
+BATCH_SIZE = 5000
+SKIPPED_COLUMNS = {"id", "player_id"}
+EXPERT_PAGES = {"qb": None, "ppr-rb": "ppr", "ppr-wr": "ppr", "ppr-te": "ppr"}
 
 
-with Session(engine) as session:
+@dataclass(frozen=True)
+class Feed:
+    """One nflverse dataset keyed by GSIS id, mapped onto one weekly table."""
 
-    # --- Normal weekly stats ---
-    session.execute(delete(PlayerStatsWeekly).where(PlayerStatsWeekly.season.in_(CURRENT_SEASONS)))
+    name: str
+    model: type[Base]
+    fetch: Callable[[list[int]], pl.DataFrame]
+    id_column: str
+    name_column: str
+    position_column: str
+    team_column: str
+
+
+FEEDS = [
+    Feed("weekly stats", PlayerStatsWeekly, lambda s: nfl.load_player_stats(s),
+         "player_id", "player_display_name", "position", "team"),
+    Feed("passing NGS", PlayerPassingAdvancedWeekly,
+         lambda s: nfl.load_nextgen_stats(seasons=s, stat_type="passing"),
+         "player_gsis_id", "player_display_name", "player_position", "team_abbr"),
+    Feed("receiving NGS", PlayerReceivingAdvancedWeekly,
+         lambda s: nfl.load_nextgen_stats(seasons=s, stat_type="receiving"),
+         "player_gsis_id", "player_display_name", "player_position", "team_abbr"),
+    Feed("rushing NGS", PlayerRushingAdvancedWeekly,
+         lambda s: nfl.load_nextgen_stats(seasons=s, stat_type="rushing"),
+         "player_gsis_id", "player_display_name", "player_position", "team_abbr"),
+    Feed("expected points", PlayerExpectedPointsWeekly,
+         lambda s: nfl.load_ff_opportunity(seasons=s, stat_type="weekly"),
+         "player_id", "full_name", "position", "posteam"),
+]
+
+
+def as_int(value: Any) -> int | None:
+    return None if value is None else int(float(value))
+
+
+def as_id(value: Any) -> str | None:
+    """Crosswalk ids arrive as ints or strings; store them as plain strings."""
+    if value is None:
+        return None
+    return str(int(value)) if isinstance(value, float) else str(value)
+
+
+class PlayerIndex:
+    """Maps source ids to players.id, creating players the first time they appear."""
+
+    def __init__(self, session: Session):
+        self.session = session
+        rows = session.execute(select(Player.id, Player.gsis_id, Player.pfr_player_id,
+                                      Player.fantasypros_id)).all()
+        self.by_gsis = {r.gsis_id: r.id for r in rows if r.gsis_id}
+        self.by_pfr = {r.pfr_player_id: r.id for r in rows if r.pfr_player_id}
+        self.by_fantasypros = {r.fantasypros_id: r.id for r in rows if r.fantasypros_id}
+        self.latest_team: dict[int, tuple[tuple[int, int], str | None, str | None]] = {}
+
+    def resolve(self, gsis_id: str | None, name: str | None, position: str | None,
+                team: str | None) -> int | None:
+        if not gsis_id:
+            return None
+        player_id = self.by_gsis.get(gsis_id)
+        if player_id is None and name:
+            player = Player(gsis_id=gsis_id, full_name=name, position=position, nfl_team=team)
+            self.session.add(player)
+            self.session.flush()
+            player_id = self.by_gsis[gsis_id] = player.id
+        return player_id
+
+    def note_team(self, player_id: int, season: int, week: int, team: str | None,
+                  position: str | None) -> None:
+        current = self.latest_team.get(player_id)
+        if current is None or (season, week) >= current[0]:
+            self.latest_team[player_id] = ((season, week), team, position)
+
+
+def data_columns(model: type[Base]) -> list[str]:
+    return [c.name for c in model.__table__.columns if c.name not in SKIPPED_COLUMNS]
+
+
+def bulk_insert(session: Session, model: type[Base], rows: list[dict]) -> None:
+    for start in range(0, len(rows), BATCH_SIZE):
+        session.execute(insert(model), rows[start:start + BATCH_SIZE])
+
+
+def feed_rows(feed: Feed, frame: pl.DataFrame, index: PlayerIndex) -> list[dict]:
+    columns = [c for c in data_columns(feed.model) if c in frame.columns]
+    rows = []
+    for source in frame.iter_rows(named=True):
+        player_id = index.resolve(source[feed.id_column], source[feed.name_column],
+                                  source[feed.position_column], source[feed.team_column])
+        if player_id is None:
+            continue
+        row = {c: source[c] for c in columns}
+        row.update(player_id=player_id, season=as_int(source["season"]), week=as_int(source["week"]))
+        if feed.model is PlayerStatsWeekly:
+            index.note_team(player_id, row["season"], row["week"], source["team"], source["position"])
+        rows.append(row)
+    return rows
+
+
+def fetch_season(fetch: Callable[[list[int]], pl.DataFrame], label: str, season: int) -> pl.DataFrame | None:
+    try:
+        return fetch([season])
+    except Exception as exc:  # nflreadpy raises a mix of HTTP and parsing errors
+        log.warning("%s %s: download failed, keeping existing rows (%s)", label, season, exc)
+        return None
+
+
+def load_feed(session: Session, feed: Feed, seasons: Iterable[int], index: PlayerIndex) -> None:
+    for season in seasons:
+        frame = fetch_season(feed.fetch, feed.name, season)
+        if frame is None:
+            continue
+        rows = feed_rows(feed, frame, index)
+        session.execute(delete(feed.model).where(feed.model.season == season))
+        bulk_insert(session, feed.model, rows)
+        session.commit()
+        log.info("%s %s: %d rows", feed.name, season, len(rows))
+
+
+def apply_latest_teams(session: Session, index: PlayerIndex) -> None:
+    players = session.scalars(select(Player).where(Player.id.in_(list(index.latest_team)))).all()
+    for player in players:
+        _, team, position = index.latest_team[player.id]
+        player.nfl_team = team or player.nfl_team
+        player.position = position or player.position
     session.commit()
 
-    player_stats = nfl.load_player_stats(SEASONS)
-    for row in player_stats.iter_rows(named=True):
-        if row["season"] not in CURRENT_SEASONS:
-            continue
-        if row["player_id"] is None or row["player_display_name"] is None:
-            continue
-        player = get_or_create_player(
-            session, row["player_id"], row["player_display_name"],
-            row["position"], row["team"]
-        )
-        session.add(PlayerStatsWeekly(
-            player_id=player.id,
-            season=row["season"],
-            week=row["week"],
-            season_type=row["season_type"],
-            game_id=row["game_id"],
-            opponent_team=row["opponent_team"],
-            completions=row["completions"],
-            attempts=row["attempts"],
-            passing_yards=row["passing_yards"],
-            passing_tds=row["passing_tds"],
-            passing_interceptions=row["passing_interceptions"],
-            sacks_suffered=row["sacks_suffered"],
-            sack_yards_lost=row["sack_yards_lost"],
-            sack_fumbles=row["sack_fumbles"],
-            sack_fumbles_lost=row["sack_fumbles_lost"],
-            passing_air_yards=row["passing_air_yards"],
-            passing_yards_after_catch=row["passing_yards_after_catch"],
-            passing_first_downs=row["passing_first_downs"],
-            passing_epa=row["passing_epa"],
-            passing_cpoe=row["passing_cpoe"],
-            passing_2pt_conversions=row["passing_2pt_conversions"],
-            pacr=row["pacr"],
-            passing_10=row["passing_10"],
-            passing_16=row["passing_16"],
-            passing_20=row["passing_20"],
-            passing_40=row["passing_40"],
-            carries=row["carries"],
-            rushing_yards=row["rushing_yards"],
-            rushing_tds=row["rushing_tds"],
-            rushing_fumbles=row["rushing_fumbles"],
-            rushing_fumbles_lost=row["rushing_fumbles_lost"],
-            rushing_first_downs=row["rushing_first_downs"],
-            rushing_epa=row["rushing_epa"],
-            rushing_2pt_conversions=row["rushing_2pt_conversions"],
-            rushing_10=row["rushing_10"],
-            rushing_12=row["rushing_12"],
-            rushing_20=row["rushing_20"],
-            rushing_40=row["rushing_40"],
-            receptions=row["receptions"],
-            targets=row["targets"],
-            receiving_yards=row["receiving_yards"],
-            receiving_tds=row["receiving_tds"],
-            receiving_fumbles=row["receiving_fumbles"],
-            receiving_fumbles_lost=row["receiving_fumbles_lost"],
-            receiving_air_yards=row["receiving_air_yards"],
-            receiving_yards_after_catch=row["receiving_yards_after_catch"],
-            receiving_first_downs=row["receiving_first_downs"],
-            receiving_epa=row["receiving_epa"],
-            receiving_2pt_conversions=row["receiving_2pt_conversions"],
-            receiving_10=row["receiving_10"],
-            receiving_16=row["receiving_16"],
-            receiving_20=row["receiving_20"],
-            receiving_40=row["receiving_40"],
-            racr=row["racr"],
-            target_share=row["target_share"],
-            air_yards_share=row["air_yards_share"],
-            wopr=row["wopr"],
-            special_teams_tds=row["special_teams_tds"],
-            fantasy_points=row["fantasy_points"],
-            fantasy_points_ppr=row["fantasy_points_ppr"],
-        ))
 
+def sync_crosswalk(session: Session, index: PlayerIndex) -> None:
+    """Fill platform ids (Yahoo, Sleeper, PFR, FantasyPros) from the DynastyProcess crosswalk."""
+    frame = nfl.load_ff_playerids().filter(pl.col("gsis_id").is_not_null())
+    frame = frame.sort("db_season", descending=True).unique(subset="gsis_id", keep="first")
+    crosswalk = {row["gsis_id"]: row for row in frame.iter_rows(named=True)}
+    players = session.scalars(select(Player).where(Player.gsis_id.in_(list(crosswalk)))).all()
+    for player in players:
+        ids = crosswalk[player.gsis_id]
+        player.yahoo_player_id = as_id(ids["yahoo_id"]) or player.yahoo_player_id
+        player.sleeper_player_id = as_id(ids["sleeper_id"]) or player.sleeper_player_id
+        player.pfr_player_id = as_id(ids["pfr_id"]) or player.pfr_player_id
+        player.fantasypros_id = as_id(ids["fantasypros_id"]) or player.fantasypros_id
+        if player.pfr_player_id:
+            index.by_pfr[player.pfr_player_id] = player.id
+        if player.fantasypros_id:
+            index.by_fantasypros[player.fantasypros_id] = player.id
     session.commit()
-    print("Normal weekly stats done.")
+    log.info("crosswalk: updated ids for %d players", len(players))
 
-    # --- Passing advanced ---
-    session.execute(delete(PlayerPassingAdvancedWeekly).where(PlayerPassingAdvancedWeekly.season.in_(CURRENT_SEASONS)))
-    session.commit()
 
-    passing_ngs = nfl.load_nextgen_stats(seasons=SEASONS, stat_type="passing")
-    for row in passing_ngs.iter_rows(named=True):
-        if row["season"] not in CURRENT_SEASONS:
+def load_snap_counts(session: Session, seasons: Iterable[int], index: PlayerIndex) -> None:
+    for season in seasons:
+        frame = fetch_season(lambda s: nfl.load_snap_counts(seasons=s), "snap counts", season)
+        if frame is None:
             continue
-        if row["player_gsis_id"] is None:
-            continue
-        player = get_or_create_player(
-            session, row["player_gsis_id"], row["player_display_name"],
-            row["player_position"], row["team_abbr"]
-        )
-        session.add(PlayerPassingAdvancedWeekly(
-            player_id=player.id,
-            season=row["season"],
-            week=row["week"],
-            season_type=row["season_type"],
-            avg_time_to_throw=row["avg_time_to_throw"],
-            avg_completed_air_yards=row["avg_completed_air_yards"],
-            avg_intended_air_yards=row["avg_intended_air_yards"],
-            avg_air_yards_differential=row["avg_air_yards_differential"],
-            aggressiveness=row["aggressiveness"],
-            max_completed_air_distance=row["max_completed_air_distance"],
-            avg_air_yards_to_sticks=row["avg_air_yards_to_sticks"],
-            attempts=row["attempts"],
-            pass_yards=row["pass_yards"],
-            pass_touchdowns=row["pass_touchdowns"],
-            interceptions=row["interceptions"],
-            passer_rating=row["passer_rating"],
-            completions=row["completions"],
-            completion_percentage=row["completion_percentage"],
-            expected_completion_percentage=row["expected_completion_percentage"],
-            completion_percentage_above_expectation=row["completion_percentage_above_expectation"],
-            avg_air_distance=row["avg_air_distance"],
-            max_air_distance=row["max_air_distance"],
-        ))
+        rows, unmatched = [], 0
+        for source in frame.iter_rows(named=True):
+            player_id = index.by_pfr.get(source["pfr_player_id"])
+            if player_id is None:
+                unmatched += 1
+                continue
+            rows.append({
+                "player_id": player_id, "season": as_int(source["season"]),
+                "week": as_int(source["week"]), "game_type": source["game_type"],
+                "team": source["team"], "opponent": source["opponent"],
+                "offense_snaps": as_int(source["offense_snaps"]), "offense_pct": source["offense_pct"],
+            })
+        session.execute(delete(PlayerSnapCountsWeekly).where(PlayerSnapCountsWeekly.season == season))
+        bulk_insert(session, PlayerSnapCountsWeekly, rows)
+        session.commit()
+        log.info("snap counts %s: %d rows (%d without a PFR id match)", season, len(rows), unmatched)
 
+
+def load_expert_rankings(session: Session, index: PlayerIndex) -> None:
+    """Snapshot the current week's FantasyPros ECR as published (free) by DynastyProcess."""
+    frame = fetch_season(lambda _: nfl.load_ff_rankings(type="week"), "weekly ECR", nfl.get_current_season())
+    if frame is None:
+        return
+    season, week = nfl.get_current_season(), nfl.get_current_week()
+    rows = []
+    for source in frame.filter(pl.col("page").is_in(list(EXPERT_PAGES))).iter_rows(named=True):
+        fantasypros_id = as_id(source["fantasypros_id"])
+        rows.append({
+            "player_id": index.by_fantasypros.get(fantasypros_id), "fantasypros_id": fantasypros_id,
+            "player_name": source["player_name"], "position": source["pos"], "team": source["team"],
+            "source": "nflverse_ffrankings", "ranking_type": "weekly",
+            "scoring": EXPERT_PAGES[source["page"]], "season": season, "week": week,
+            "rank": as_int(source["rank"]), "ecr": source["ecr"], "pos_rank": source["pos_rank"],
+            "sd": source["sd"], "best": as_int(source["best"]), "worst": as_int(source["worst"]),
+        })
+    session.execute(delete(ExpertRanking).where(ExpertRanking.source == "nflverse_ffrankings"))
+    bulk_insert(session, ExpertRanking, rows)
     session.commit()
-    print("Passing advanced stats done.")
+    log.info("weekly ECR (season %s week %s): %d rows", season, week, len(rows))
 
-    # --- Receiving advanced ---
-    session.execute(delete(PlayerReceivingAdvancedWeekly).where(PlayerReceivingAdvancedWeekly.season.in_(CURRENT_SEASONS)))
-    session.commit()
 
-    receiving_ngs = nfl.load_nextgen_stats(seasons=SEASONS, stat_type="receiving")
-    for row in receiving_ngs.iter_rows(named=True):
-        if row["season"] not in CURRENT_SEASONS:
-            continue
-        if row["player_gsis_id"] is None:
-            continue
-        player = get_or_create_player(
-            session, row["player_gsis_id"], row["player_display_name"],
-            row["player_position"], row["team_abbr"]
-        )
-        session.add(PlayerReceivingAdvancedWeekly(
-            player_id=player.id,
-            season=row["season"],
-            week=row["week"],
-            season_type=row["season_type"],
-            avg_cushion=row["avg_cushion"],
-            avg_separation=row["avg_separation"],
-            avg_intended_air_yards=row["avg_intended_air_yards"],
-            percent_share_of_intended_air_yards=row["percent_share_of_intended_air_yards"],
-            receptions=row["receptions"],
-            targets=row["targets"],
-            catch_percentage=row["catch_percentage"],
-            yards=row["yards"],
-            rec_touchdowns=row["rec_touchdowns"],
-            avg_yac=row["avg_yac"],
-            avg_expected_yac=row["avg_expected_yac"],
-            avg_yac_above_expectation=row["avg_yac_above_expectation"],
-        ))
+def seasons_to_load(session: Session, current_season: int, reload_all: bool) -> list[int]:
+    every_season = list(range(FIRST_SEASON, current_season + 1))
+    if reload_all:
+        return every_season
+    loaded = set(session.scalars(select(PlayerStatsWeekly.season).distinct()))
+    return [s for s in every_season if s not in loaded or s == current_season]
 
-    session.commit()
-    print("Receiving advanced stats done.")
 
-    # --- Rushing advanced ---
-    session.execute(delete(PlayerRushingAdvancedWeekly).where(PlayerRushingAdvancedWeekly.season.in_(CURRENT_SEASONS)))
-    session.commit()
+def parse_args(argv: list[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--seasons", type=int, nargs="+", help="seasons to (re)load")
+    group.add_argument("--all", action="store_true", help=f"reload every season since {FIRST_SEASON}")
+    return parser.parse_args(argv)
 
-    rushing_ngs = nfl.load_nextgen_stats(seasons=SEASONS, stat_type="rushing")
-    for row in rushing_ngs.iter_rows(named=True):
-        if row["season"] not in CURRENT_SEASONS:
-            continue
-        if row["player_gsis_id"] is None:
-            continue
-        player = get_or_create_player(
-            session, row["player_gsis_id"], row["player_display_name"],
-            row["player_position"], row["team_abbr"]
-        )
-        session.add(PlayerRushingAdvancedWeekly(
-            player_id=player.id,
-            season=row["season"],
-            week=row["week"],
-            season_type=row["season_type"],
-            efficiency=row["efficiency"],
-            percent_attempts_gte_eight_defenders=row["percent_attempts_gte_eight_defenders"],
-            avg_time_to_los=row["avg_time_to_los"],
-            rush_attempts=row["rush_attempts"],
-            rush_yards=row["rush_yards"],
-            avg_rush_yards=row["avg_rush_yards"],
-            rush_touchdowns=row["rush_touchdowns"],
-            expected_rush_yards=row["expected_rush_yards"],
-            rush_yards_over_expected=row["rush_yards_over_expected"],
-            rush_yards_over_expected_per_att=row["rush_yards_over_expected_per_att"],
-            rush_pct_over_expected=row["rush_pct_over_expected"],
-        ))
 
-    session.commit()
-    print("Rushing advanced stats done.")
+def main(argv: list[str] | None = None) -> None:
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    args = parse_args(argv)
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        seasons = args.seasons or seasons_to_load(session, nfl.get_current_season(), args.all)
+        log.info("Loading seasons: %s", seasons)
+        index = PlayerIndex(session)
+        for feed in FEEDS:
+            load_feed(session, feed, seasons, index)
+        apply_latest_teams(session, index)
+        sync_crosswalk(session, index)
+        load_snap_counts(session, seasons, index)
+        load_expert_rankings(session, index)
+    log.info("Done.")
 
-    # --- Expected Points Weekly ---
-    session.execute(delete(PlayerExpectedPointsWeekly).where(PlayerExpectedPointsWeekly.season.in_(CURRENT_SEASONS)))
-    session.commit()
 
-    expected_points = nfl.load_ff_opportunity(seasons=SEASONS, stat_type="weekly")
-    for row in expected_points.iter_rows(named=True):
-        if row["season"] not in CURRENT_SEASONS:
-            continue
-        if row["player_id"] is None or row["full_name"] is None:
-            continue
-        player = get_or_create_player(
-            session, row["player_id"], row["full_name"],
-            row["position"], row["posteam"]
-        )
-        session.add(PlayerExpectedPointsWeekly(
-            player_id=player.id,
-            season=row["season"],
-            week=row["week"],
-            game_id=row["game_id"],
-            posteam=row["posteam"],
-            # expected
-            pass_completions_exp=row["pass_completions_exp"],
-            receptions_exp=row["receptions_exp"],
-            pass_yards_gained_exp=row["pass_yards_gained_exp"],
-            rec_yards_gained_exp=row["rec_yards_gained_exp"],
-            rush_yards_gained_exp=row["rush_yards_gained_exp"],
-            pass_touchdown_exp=row["pass_touchdown_exp"],
-            rec_touchdown_exp=row["rec_touchdown_exp"],
-            rush_touchdown_exp=row["rush_touchdown_exp"],
-            pass_first_down_exp=row["pass_first_down_exp"],
-            rec_first_down_exp=row["rec_first_down_exp"],
-            rush_first_down_exp=row["rush_first_down_exp"],
-            pass_interception_exp=row["pass_interception_exp"],
-            rec_interception_exp=row["rec_interception_exp"],
-            pass_fantasy_points_exp=row["pass_fantasy_points_exp"],
-            rec_fantasy_points_exp=row["rec_fantasy_points_exp"],
-            rush_fantasy_points_exp=row["rush_fantasy_points_exp"],
-            total_yards_gained_exp=row["total_yards_gained_exp"],
-            total_touchdown_exp=row["total_touchdown_exp"],
-            total_first_down_exp=row["total_first_down_exp"],
-            total_fantasy_points_exp=row["total_fantasy_points_exp"],
-            # diff (actual minus expected, precomputed by the source)
-            pass_completions_diff=row["pass_completions_diff"],
-            receptions_diff=row["receptions_diff"],
-            pass_yards_gained_diff=row["pass_yards_gained_diff"],
-            rec_yards_gained_diff=row["rec_yards_gained_diff"],
-            rush_yards_gained_diff=row["rush_yards_gained_diff"],
-            pass_touchdown_diff=row["pass_touchdown_diff"],
-            rec_touchdown_diff=row["rec_touchdown_diff"],
-            rush_touchdown_diff=row["rush_touchdown_diff"],
-            pass_first_down_diff=row["pass_first_down_diff"],
-            rec_first_down_diff=row["rec_first_down_diff"],
-            rush_first_down_diff=row["rush_first_down_diff"],
-            pass_interception_diff=row["pass_interception_diff"],
-            rec_interception_diff=row["rec_interception_diff"],
-            pass_fantasy_points_diff=row["pass_fantasy_points_diff"],
-            rec_fantasy_points_diff=row["rec_fantasy_points_diff"],
-            rush_fantasy_points_diff=row["rush_fantasy_points_diff"],
-            total_yards_gained_diff=row["total_yards_gained_diff"],
-            total_touchdown_diff=row["total_touchdown_diff"],
-            total_first_down_diff=row["total_first_down_diff"],
-            total_fantasy_points_diff=row["total_fantasy_points_diff"],
-        ))
-
-    session.commit()
-    print("Expected points weekly stats done.")
+if __name__ == "__main__":
+    main()
