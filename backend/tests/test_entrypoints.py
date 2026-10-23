@@ -36,6 +36,12 @@ def test_alembic_runs_from_the_repo_root(tmp_path):
     assert "No module named" not in result.stderr
 
 
+def test_groq_test_script_runs_by_file_path(tmp_path):
+    result = run([str(BACKEND / "testing" / "groq_test.py")], REPO_ROOT, tmp_path)
+    assert "No module named" not in result.stderr
+    assert "Set GROQ_API_KEY" in result.stderr        # reaches its own key check
+
+
 def test_populate_stats_progress_survives_the_schema_upgrade(caplog, engine, monkeypatch):
     """Running migrations in-process must not silence populate_stats' progress logging."""
     import logging
@@ -49,4 +55,3 @@ def test_populate_stats_progress_survives_the_schema_upgrade(caplog, engine, mon
     with caplog.at_level(logging.INFO, logger="populate_stats"):
         populate_stats.main(["--seasons", "2026"])
     assert "Loading seasons: [2026]" in caplog.text and "Done." in caplog.text
-

@@ -30,7 +30,8 @@ def integration_status(session: Session) -> dict:
     connection = yahoo_sync.get_connection(session)
     return {"fantasypros": bool(settings.fantasypros_api_key),
             "yahoo_configured": bool(settings.yahoo_client_id and settings.yahoo_client_secret),
-            "yahoo_connected": bool(connection and connection.access_token)}
+            "yahoo_connected": bool(connection and connection.access_token),
+            "llm": bool(settings.groq_api_key)}
 
 
 @router.get("/integrations/status")

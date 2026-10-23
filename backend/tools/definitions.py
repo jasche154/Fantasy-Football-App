@@ -1,0 +1,203 @@
+"""The fantasy-football tools an agent can call. Every number comes from the database or a
+deterministic service; tools never make up values.
+
+Players can be passed by name (case-insensitive, typo-tolerant) or numeric id.
+"""
+from typing import Any
+
+from sqlalchemy.orm import Session
+
+from config import get_settings
+from integrations.sleeper import SleeperError, trending_players
+from services import serialize
+from services.experts import expert_rankings, weekly_ecr_by_player
+from services.insights import find_insights
+from services.leaderboards import catalog, leaderboard
+from services.league import POSITIONS, LeagueSettings
+from services.players import AmbiguousPlayer, PlayerNotFound, player_profile, resolve_player, search_players
+from services.projections import available_seasons, latest_season
+from services.trade import evaluate_trade
+from services.valuation import NoDataError, build_valuation
+from tools.registry import Tool, ToolError, ToolRegistry, ToolUnavailable
+
+PROFILE_GAMES_SHOWN = 5
+PFR_REASON_PREFIX = "Snap share"
+# Spelled out in the result because models otherwise misread whose win a verdict describes.
+TRADE_PERSPECTIVE = ("Values are from the user's side: `give` lists players the user sends away, `get` lists "
+                     "players the user receives, and difference = get minus give. A positive difference or a "
+                     "'slight_win' / 'big_win' verdict means the USER comes out ahead.")
+
+POSITION = {"type": "string", "enum": list(POSITIONS), "description": "Limit to one position."}
+MAX_TEXT = 80
+PLAYER = {"type": "string", "maxLength": MAX_TEXT,
+          "description": "Player name (e.g. \"Bijan Robinson\") or numeric player id."}
+SEASON = {"type": "integer", "minimum": 2021, "maximum": 2100,
+          "description": "NFL season year. Defaults to the latest season in the database."}
+LEAGUE = {
+    "scoring": {"type": "string", "enum": ["ppr", "half", "std"], "description": "Scoring format. Default ppr."},
+    "teams": {"type": "integer", "minimum": 4, "maximum": 20, "description": "League size. Default 12."},
+    "superflex": {"type": "boolean", "description": "True for superflex / 2-QB leagues. Default false."},
+}
+
+
+def _schema(properties: dict, required: list[str] | None = None) -> dict:
+    return {"type": "object", "properties": properties, "required": required or []}
+
+
+def _league(scoring: str = "ppr", teams: int = 12, superflex: bool = False) -> LeagueSettings:
+    return LeagueSettings(scoring=scoring, teams=teams, superflex=superflex)
+
+
+def _limit(maximum: int, default: int) -> dict:
+    return {"type": "integer", "minimum": 1, "maximum": maximum, "description": f"Max results (default {default})."}
+
+
+# Errors whose messages are written for the user/model. Anything else is a bug: log it, and
+# show only a generic failure.
+TOOL_ERRORS = (ToolError, ToolUnavailable, PlayerNotFound, AmbiguousPlayer, NoDataError, ValueError)
+
+
+def _checked_season(session: Session, season: int | None) -> int | None:
+    if season is not None and season not in available_seasons(session):
+        raise ToolError(f"No data loaded for season {season}. Available: {available_seasons(session)}.")
+    return season
+
+
+def sanitize_for_agent(value: Any) -> Any:
+    """Drop PFR-sourced snap data from tool output unless the config opts in."""
+    if get_settings().agent_share_pfr_data:
+        return value
+    if isinstance(value, dict):
+        return {k: sanitize_for_agent(v) for k, v in value.items() if k != "snap_pct"}
+    if isinstance(value, list):
+        return [sanitize_for_agent(v) for v in value
+                if not (isinstance(v, str) and v.startswith(PFR_REASON_PREFIX))]
+    return value
+
+
+def _search(session: Session, query: str, position: str | None = None, limit: int = 10) -> dict:
+    return {"results": [serialize.player_ref(r) for r in search_players(session, query, position, limit)]}
+
+
+def _profile(session: Session, player: str, season: int | None = None, **league: Any) -> dict:
+    profile = player_profile(session, resolve_player(session, player).id, _league(**league),
+                             _checked_season(session, season))
+    return {**profile, "game_log": profile["game_log"][-PROFILE_GAMES_SHOWN:],
+            "note": f"game_log shows the last {PROFILE_GAMES_SHOWN} games; use get_player_game_log for all."}
+
+
+def _game_log(session: Session, player: str, season: int | None = None, last_n: int | None = None,
+              scoring: str = "ppr") -> dict:
+    profile = player_profile(session, resolve_player(session, player).id, _league(scoring),
+                             _checked_season(session, season))
+    games = profile["game_log"][-last_n:] if last_n else profile["game_log"]
+    return {"player": profile["player"], "season": profile["season"], "scoring": scoring, "games": games}
+
+
+def _compare(session: Session, players: list[str], season: int | None = None, **league: Any) -> dict:
+    settings, season = _league(**league), _checked_season(session, season)
+    profiles = [player_profile(session, resolve_player(session, name).id, settings, season) for name in players]
+    return {"season": profiles[0]["season"],
+            "players": [{key: p[key] for key in ("player", "summary", "projection", "signals")} for p in profiles]}
+
+
+def _rankings(session: Session, position: str | None = None, limit: int = 20, **league: Any) -> dict:
+    valuation = build_valuation(session, _league(**league))
+    values = [v for v in valuation.values if position is None or v.position == position][:limit]
+    return serialize.rankings(valuation, values, weekly_ecr_by_player(session))
+
+
+def _leaderboard(session: Session, category: str, metric: str, season: int | None = None,
+                 position: str | None = None, min_volume: int | None = None, limit: int = 15,
+                 ascending: bool = False) -> dict:
+    season = _checked_season(session, season) or latest_season(session)
+    rows = leaderboard(session, category, metric, season, min_volume, limit, ascending, position)
+    return {"category": category, "metric": metric, "season": season,
+            "results": [serialize.leaderboard_row(r) for r in rows]}
+
+
+def _trade(session: Session, give: list[str], get: list[str], **league: Any) -> dict:
+    valuation = build_valuation(session, _league(**league))
+
+    def values_for(names: list[str]):
+        resolved = []
+        for name in names:
+            ref = resolve_player(session, name)
+            value = valuation.by_id.get(ref.id)
+            if value is None:
+                raise ValueError(f"{ref.name} has no {valuation.season} regular-season games, "
+                                 "so there is no rest-of-season value.")
+            resolved.append(value)
+        return resolved
+
+    evaluation = evaluate_trade(values_for(give), values_for(get), valuation.values, valuation.weeks_remaining)
+    return {"perspective": TRADE_PERSPECTIVE, **serialize.trade(evaluation, valuation.weeks_remaining)}
+
+
+def _insights(kind: str):
+    def handler(session: Session, position: str | None = None, limit: int = 8, **league: Any) -> dict:
+        valuation = build_valuation(session, _league(**league))
+        return serialize.insights(valuation, find_insights(valuation, kind, position, limit))
+    return handler
+
+
+def _experts(session: Session, position: str | None = None, limit: int = 25) -> dict:
+    return expert_rankings(session, position, limit)
+
+
+def _trending(session: Session, type: str = "add", limit: int = 10) -> dict:
+    try:
+        return {"type": type, "source": "Sleeper", "results": trending_players(session, type, limit)}
+    except SleeperError as exc:
+        raise ToolUnavailable("Sleeper trending data is unavailable right now.") from exc
+
+
+TOOLS = ToolRegistry([
+    Tool("search_players", "Find QB/RB/WR/TE players by (partial) name. Returns ids, positions, teams.",
+         _schema({"query": {"type": "string", "maxLength": MAX_TEXT, "description": "Name or part of a name."},
+                  "position": POSITION, "limit": _limit(25, 10)}, ["query"]), _search),
+    Tool("get_player_profile",
+         "One player's season summary (actual and expected fantasy points), rest-of-season projection "
+         "and trade value (app model), Next Gen advanced stats, recent games, and buy-low/sell-high signals.",
+         _schema({"player": PLAYER, "season": SEASON, **LEAGUE}, ["player"]), _profile),
+    Tool("get_player_game_log", "Week-by-week stats and fantasy points (actual and expected) for one player.",
+         _schema({"player": PLAYER, "season": SEASON, "last_n": _limit(25, 25),
+                  "scoring": LEAGUE["scoring"]}, ["player"]), _game_log),
+    Tool("compare_players", "Side-by-side summary, projection, and signals for 2-5 players.",
+         _schema({"players": {"type": "array", "items": PLAYER, "minItems": 2, "maxItems": 5},
+                  "season": SEASON, **LEAGUE}, ["players"]), _compare),
+    Tool("get_fantasy_rankings",
+         "Rest-of-season rankings by trade value (app model: actual and expected points blended with last "
+         "season), with FantasyPros weekly ECR when available.",
+         _schema({"position": POSITION, "limit": _limit(50, 20), **LEAGUE}), _rankings),
+    Tool("list_leaderboard_metrics", "List the advanced-stat categories and metrics get_leaderboard accepts.",
+         _schema({}), lambda session: {"categories": catalog()}),
+    Tool("get_leaderboard",
+         "Rank players by an advanced stat (Next Gen Stats rushing/receiving/passing, or usage/EPA). "
+         "Call list_leaderboard_metrics first if unsure of the metric key.",
+         _schema({"category": {"type": "string", "enum": ["rushing", "receiving", "passing", "usage"]},
+                  "metric": {"type": "string", "maxLength": MAX_TEXT, "description": "Metric key, e.g. ryoe_per_att."},
+                  "season": SEASON, "position": POSITION,
+                  "min_volume": {"type": "integer", "minimum": 0, "maximum": 1000,
+                                 "description": "Minimum attempts/targets/games (metric default if omitted)."},
+                  "limit": _limit(50, 15),
+                  "ascending": {"type": "boolean", "description": "Lowest values first."}},
+                 ["category", "metric"]), _leaderboard),
+    Tool("evaluate_trade",
+         "Evaluate a fantasy trade from the user's side: `give` is what they send, `get` what they receive. "
+         "Returns rest-of-season values, a verdict, and players that would balance it.",
+         _schema({"give": {"type": "array", "items": PLAYER, "minItems": 1, "maxItems": 6},
+                  "get": {"type": "array", "items": PLAYER, "minItems": 1, "maxItems": 6}, **LEAGUE},
+                 ["give", "get"]), _trade),
+    Tool("get_buy_low_candidates",
+         "Players scoring below what their usage predicts (expected fantasy points), with valuable roles "
+         "and stable usage: likely to rebound.", _schema({"position": POSITION, "limit": _limit(20, 8), **LEAGUE}),
+         _insights("buy_low")),
+    Tool("get_sell_high_candidates",
+         "Players scoring well above what their usage predicts (often touchdown-driven): likely to cool off.",
+         _schema({"position": POSITION, "limit": _limit(20, 8), **LEAGUE}), _insights("sell_high")),
+    Tool("get_expert_rankings", "FantasyPros expert consensus rankings (ECR), the latest stored snapshot.",
+         _schema({"position": POSITION, "limit": _limit(100, 25)}), _experts),
+    Tool("get_trending_players", "Most added or dropped players on Sleeper over the last 24 hours.",
+         _schema({"type": {"type": "string", "enum": ["add", "drop"]}, "limit": _limit(25, 10)}), _trending),
+])

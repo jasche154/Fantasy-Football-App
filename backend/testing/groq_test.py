@@ -1,42 +1,32 @@
-import json
-from groq import Groq
-from tools.rushleaders import get_rushing_leaders
-from tools.schemas import tools
-import os
-from dotenv import load_dotenv
-load_dotenv()
-client = Groq(api_key=os.environ["GROQ_API_KEY"])
+"""Manual end-to-end check of the AI assistant against Groq (needs GROQ_API_KEY).
 
-messages = [{"role": "user", "content": "how is rushing "}]
+Run from backend/:
+    python -m testing.groq_test "Who are the best buy-low running backs right now?"
+"""
+import sys
+from pathlib import Path
 
-# Round 1: let the model decide whether/how to call a tool
-response = client.chat.completions.create(
-    model="openai/gpt-oss-20b",
-    messages=messages,
-    tools=tools,
-    tool_choice="auto",
-)
+if __package__ in (None, ""):
+    # Run by file path (`python testing/groq_test.py`): make backend/ importable.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-response_message = response.choices[0].message
-tool_call = response_message.tool_calls[0]  # assume one call for now
-args = json.loads(tool_call.function.arguments)
+from config import get_settings  # noqa: E402
+from database.db import SessionLocal
+from services.agent import GroqClient, run_agent
 
-# Round 2: actually run YOUR function with the model's chosen arguments
-result = get_rushing_leaders(**args)
 
-# Send the real result back so the model can explain it
-messages.append(response_message)
-messages.append({
-    "role": "tool",
-    "tool_call_id": tool_call.id,
-    "content": json.dumps(result),
-})
+def main() -> None:
+    question = " ".join(sys.argv[1:]) or "How is rushing efficiency looking this season?"
+    settings = get_settings()
+    if not settings.groq_api_key:
+        raise SystemExit("Set GROQ_API_KEY in backend/.env first.")
+    with SessionLocal() as session:
+        reply = run_agent(session, GroqClient(settings.groq_api_key, settings.groq_model),
+                          [{"role": "user", "content": question}])
+    for call in reply.tool_calls:
+        print(f"[tool] {call.name} {dict(call.arguments)} ok={call.ok}")
+    print(reply.reply)
 
-final_response = client.chat.completions.create(
-    model="openai/gpt-oss-20b",
-    messages=messages,
-    tools = tools,
-    tool_choice = "none",
-)
 
-print(final_response.choices[0].message.content)
+if __name__ == "__main__":
+    main()
