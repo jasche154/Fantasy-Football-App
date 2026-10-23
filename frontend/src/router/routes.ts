@@ -4,6 +4,7 @@ export type StaticRouteName =
   | 'dashboard'
   | 'rankings'
   | 'weekly'
+  | 'charts'
   | 'stats'
   | 'trade'
   | 'market'
@@ -25,6 +26,7 @@ export interface HashLocation {
 const STATIC_ROUTES: Readonly<Record<string, StaticRouteName>> = {
   rankings: 'rankings',
   weekly: 'weekly',
+  charts: 'charts',
   stats: 'stats',
   trade: 'trade',
   market: 'market',
@@ -36,6 +38,7 @@ export const paths = {
   dashboard: '/',
   rankings: '/rankings',
   weekly: '/weekly',
+  charts: '/charts',
   stats: '/stats',
   trade: '/trade',
   market: '/market',

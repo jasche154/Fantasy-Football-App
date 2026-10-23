@@ -6,25 +6,26 @@
   color-scheme: dark light;
 
   /* Surfaces */
-  --color-bg: light-dark(#f2f4fa, #060a14);
-  --color-surface-1: light-dark(#ffffff, #0d1426);
-  --color-surface-2: light-dark(#f1f4fa, #131c32);
-  --color-surface-3: light-dark(#e5eaf4, #1a2541);
-  --color-surface-overlay: light-dark(rgb(255 255 255 / 0.92), rgb(10 16 31 / 0.88));
-  --color-border: light-dark(#dde3ef, #1d2843);
-  --color-border-strong: light-dark(#c5cee0, #2b3a5e);
+  /* Editorial sports look: near-black with charcoal cards (light: warm paper). */
+  --color-bg: light-dark(#f4f3f1, #0e0e10);
+  --color-surface-1: light-dark(#ffffff, #1a1a1d);
+  --color-surface-2: light-dark(#f3f2ef, #212125);
+  --color-surface-3: light-dark(#e8e6e2, #2a2a2f);
+  --color-surface-overlay: light-dark(rgb(255 255 255 / 0.92), rgb(14 14 16 / 0.9));
+  --color-border: light-dark(#e2dfda, #2a2a2f);
+  --color-border-strong: light-dark(#cbc7c0, #3a3a41);
 
   /* Text */
-  --color-text: light-dark(#0c1424, #e8edf8);
-  --color-text-muted: light-dark(#475470, #9ba7c2);
-  --color-text-subtle: light-dark(#5f6b86, #7886a6);
+  --color-text: light-dark(#161618, #f2f1ee);
+  --color-text-muted: light-dark(#4f4d4a, #b4b1ab);
+  --color-text-subtle: light-dark(#6b6863, #8d8a84);
 
   /* One vivid accent */
-  --color-accent: light-dark(#5a43ee, #8f80ff);
-  --color-accent-strong: light-dark(#4630d9, #aa9eff);
-  --color-accent-contrast: light-dark(#ffffff, #0b0820);
-  --color-accent-soft: light-dark(rgb(90 67 238 / 0.1), rgb(143 128 255 / 0.15));
-  --color-accent-glow: light-dark(rgb(90 67 238 / 0.08), rgb(143 128 255 / 0.14));
+  --color-accent: light-dark(#b8322a, #e4513f);
+  --color-accent-strong: light-dark(#9c2820, #f26b5a);
+  --color-accent-contrast: light-dark(#ffffff, #160807);
+  --color-accent-soft: light-dark(rgb(184 50 42 / 0.1), rgb(228 81 63 / 0.16));
+  --color-accent-glow: light-dark(rgb(184 50 42 / 0.07), rgb(228 81 63 / 0.12));
 
   /* Semantic (always paired with text or symbols, never colour alone) */
   --color-pos: light-dark(#047857, #34d399);
@@ -59,8 +60,8 @@
   --focus-ring: 0 0 0 2px var(--color-bg), 0 0 0 4px var(--color-accent-strong);
 
   /* Type */
-  --font-sans: 'Inter', 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
-  --font-display: 'Inter Display', 'Segoe UI Variable Display', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-sans: 'Mulish', 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  --font-display: 'Kanit', 'Segoe UI Variable Display', 'Segoe UI', system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', 'Cascadia Code', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --text-2xs: 0.6875rem;
   --text-xs: 0.75rem;
