@@ -1,4 +1,13 @@
+import logging
+import sys
 from logging.config import fileConfig
+from pathlib import Path
+
+# Make backend/ importable even when alembic runs from another folder
+# (e.g. `alembic -c backend/alembic.ini upgrade head` from the repo root).
+BACKEND_DIR = str(Path(__file__).resolve().parents[1])
+if BACKEND_DIR not in sys.path:
+    sys.path.insert(0, BACKEND_DIR)
 
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
@@ -11,15 +20,23 @@ config = context.config
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+# Only configure logging for the alembic CLI. When the app runs migrations in-process
+# (populate_stats), it has already set up logging and its progress lines must stay visible.
+if config.config_file_name is not None and not logging.getLogger().handlers:
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # add your model's MetaData object here
 # for 'autogenerate' support
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
+from config import get_settings
 from database.models import Base
 target_metadata = Base.metadata
+
+# Use the same database as the app (DATABASE_URL / backend/.env), not a path relative to
+# wherever alembic happens to be run from. Callers such as create_tables can pass their own.
+database_url = config.attributes.get("database_url") or get_settings().database_url
+config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:

@@ -1,6 +1,11 @@
-from sqlalchemy import ForeignKey
+from sqlalchemy import ForeignKey, Index
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from datetime import datetime
+from datetime import datetime, timezone
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
 
 class Base(DeclarativeBase):
     pass
@@ -11,7 +16,7 @@ class User(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     email: Mapped[str] = mapped_column(unique=True)
     hashed_password: Mapped[str]
-    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)
 class PlatformConnection(Base):
     __tablename__ = "platform_connections"
 
@@ -37,16 +42,19 @@ class Team(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     league_id: Mapped[int] = mapped_column(ForeignKey("leagues.id"))
     platform_team_id: Mapped[str]
+    name: Mapped[str | None]
     owner_display_name: Mapped[str | None]
-    is_users_team: Mapped[bool] = mapped_column(default=0)
+    is_users_team: Mapped[bool] = mapped_column(default=False)
     
 class Player(Base):
     __tablename__ = "players"
+    __table_args__ = (Index("ix_players_gsis_id", "gsis_id", unique=True),)
     id: Mapped[int] = mapped_column(primary_key=True)
     gsis_id: Mapped[str | None]
     yahoo_player_id: Mapped[str | None]
     sleeper_player_id: Mapped[str | None]
     pfr_player_id: Mapped[str | None]
+    fantasypros_id: Mapped[str | None]
     full_name: Mapped[str]
     position: Mapped[str | None]
     nfl_team: Mapped[str | None]
@@ -64,6 +72,7 @@ class Roster(Base):
 
 class PlayerStatsWeekly(Base):
     __tablename__ = "player_stats_weekly"
+    __table_args__ = (Index("ix_player_stats_weekly_player_season_week", "player_id", "season", "week"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id"))
@@ -134,6 +143,7 @@ class PlayerStatsWeekly(Base):
 
 class PlayerPassingAdvancedWeekly(Base):
     __tablename__ = "player_passing_advanced_weekly"
+    __table_args__ = (Index("ix_player_passing_advanced_weekly_player_season_week", "player_id", "season", "week"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id"))
@@ -163,6 +173,7 @@ class PlayerPassingAdvancedWeekly(Base):
 
 class PlayerReceivingAdvancedWeekly(Base):
     __tablename__ = "player_receiving_advanced_weekly"
+    __table_args__ = (Index("ix_player_receiving_advanced_weekly_player_season_week", "player_id", "season", "week"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id"))
@@ -186,6 +197,7 @@ class PlayerReceivingAdvancedWeekly(Base):
 
 class PlayerRushingAdvancedWeekly(Base):
     __tablename__ = "player_rushing_advanced_weekly"
+    __table_args__ = (Index("ix_player_rushing_advanced_weekly_player_season_week", "player_id", "season", "week"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id"))
@@ -204,6 +216,8 @@ class PlayerRushingAdvancedWeekly(Base):
     rush_yards_over_expected: Mapped[float | None]
     rush_yards_over_expected_per_att: Mapped[float | None]
     rush_pct_over_expected: Mapped[float | None]
+
+
 class Recommendation(Base):
     __tablename__ = "recommendations"
 
@@ -215,10 +229,12 @@ class Recommendation(Base):
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id"))
     explanation_text: Mapped[str | None]
     supporting_data: Mapped[str | None]        # JSON stored as text, same as before
-    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
-    
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)
+
+
 class PlayerExpectedPointsWeekly(Base):
     __tablename__ = "player_expected_points_weekly"
+    __table_args__ = (Index("ix_player_expected_points_weekly_player_season_week", "player_id", "season", "week"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id"))
@@ -270,3 +286,54 @@ class PlayerExpectedPointsWeekly(Base):
     total_touchdown_diff: Mapped[float | None]
     total_first_down_diff: Mapped[float | None]
     total_fantasy_points_diff: Mapped[float | None]
+
+
+class PlayerSnapCountsWeekly(Base):
+    __tablename__ = "player_snap_counts_weekly"
+    __table_args__ = (Index("ix_player_snap_counts_weekly_player_season_week", "player_id", "season", "week"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    player_id: Mapped[int] = mapped_column(ForeignKey("players.id"))
+    season: Mapped[int]
+    week: Mapped[int]
+    game_type: Mapped[str | None]
+    team: Mapped[str | None]
+    opponent: Mapped[str | None]
+    offense_snaps: Mapped[int | None]
+    offense_pct: Mapped[float | None]          # 0-1 fraction, as published by nflverse
+
+
+class ExpertRanking(Base):
+    """A snapshot of FantasyPros expert consensus rankings (ECR)."""
+
+    __tablename__ = "expert_rankings"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    player_id: Mapped[int | None] = mapped_column(ForeignKey("players.id"))
+    fantasypros_id: Mapped[str | None]
+    player_name: Mapped[str]
+    position: Mapped[str | None]
+    team: Mapped[str | None]
+    source: Mapped[str]                        # "nflverse_ffrankings" or "fantasypros_api"
+    ranking_type: Mapped[str]                  # e.g. "weekly", "ros"
+    scoring: Mapped[str | None]
+    season: Mapped[int | None]
+    week: Mapped[int | None]
+    rank: Mapped[int | None]
+    ecr: Mapped[float | None]
+    pos_rank: Mapped[str | None]
+    sd: Mapped[float | None]
+    best: Mapped[int | None]
+    worst: Mapped[int | None]
+    fetched_at: Mapped[datetime] = mapped_column(default=utc_now)
+
+
+class DataLoad(Base):
+    """One finished populate_stats run. Its id changes whenever data is reloaded, which lets
+    caches notice reloads that keep row counts the same (e.g. stat corrections)."""
+
+    __tablename__ = "data_loads"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    seasons: Mapped[str]                       # e.g. "2025,2026"
+    finished_at: Mapped[datetime] = mapped_column(default=utc_now)

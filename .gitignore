@@ -3,3 +3,6 @@ backend/.env
 backend/database/fantasy.db
 **/__pycache__/
 frontend/node_modules/
+# Big Data Bowl downloads (500+ MB) stay local
+backend/data/
+.coverage
