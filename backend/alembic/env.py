@@ -1,4 +1,12 @@
+import sys
 from logging.config import fileConfig
+from pathlib import Path
+
+# Make backend/ importable even when alembic runs from another folder
+# (e.g. `alembic -c backend/alembic.ini upgrade head` from the repo root).
+BACKEND_DIR = str(Path(__file__).resolve().parents[1])
+if BACKEND_DIR not in sys.path:
+    sys.path.insert(0, BACKEND_DIR)
 
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
