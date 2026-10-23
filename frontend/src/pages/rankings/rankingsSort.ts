@@ -9,6 +9,7 @@ export type RankingSortKey =
   | 'ppg'
   | 'expected_ppg'
   | 'ros_ppg'
+  | 'schedule_factor'
   | 'trade_value'
   | 'ecr';
 

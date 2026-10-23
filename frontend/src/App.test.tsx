@@ -39,7 +39,7 @@ describe('App routing and shell', () => {
     expect(heading).toHaveFocus();
     expect(document.title).toBe('Rankings · Gridiron Edge');
     const nav = screen.getByRole('navigation', { name: 'Main' });
-    expect(within(nav).getByRole('link', { name: /Rankings/ })).toHaveAttribute('aria-current', 'page');
+    expect(within(nav).getByRole('link', { name: /^Rankings/ })).toHaveAttribute('aria-current', 'page');
 
     act(() => navigate('/stats'));
     expect(await screen.findByText('No leaderboard metrics are available.')).toBeInTheDocument();

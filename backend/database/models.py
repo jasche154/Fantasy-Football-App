@@ -55,6 +55,7 @@ class Player(Base):
     sleeper_player_id: Mapped[str | None]
     pfr_player_id: Mapped[str | None]
     fantasypros_id: Mapped[str | None]
+    espn_player_id: Mapped[str | None]
     full_name: Mapped[str]
     position: Mapped[str | None]
     nfl_team: Mapped[str | None]
@@ -337,6 +338,56 @@ class DataLoad(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     seasons: Mapped[str]                       # e.g. "2025,2026"
     finished_at: Mapped[datetime] = mapped_column(default=utc_now)
+
+
+class NflGame(Base):
+    """One game from the nflverse schedule, including the closing Vegas spread and total.
+
+    spread_line is the home team's expected margin (positive = home favored).
+    """
+
+    __tablename__ = "nfl_games"
+    __table_args__ = (Index("ix_nfl_games_season_week", "season", "week"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[str] = mapped_column(unique=True)
+    season: Mapped[int]
+    week: Mapped[int]
+    game_type: Mapped[str]
+    gameday: Mapped[str | None]
+    home_team: Mapped[str]
+    away_team: Mapped[str]
+    home_score: Mapped[int | None]
+    away_score: Mapped[int | None]
+    spread_line: Mapped[float | None]
+    total_line: Mapped[float | None]
+
+
+class WeeklySourceProjection(Base):
+    """One player's line from an outside weekly source (Vegas props, Yahoo experts, ESPN).
+
+    Rows for a (season, week, source) are replaced on each refresh. `stats` holds projected
+    raw stats as JSON (scored locally, so any scoring format works); `rank` holds a
+    positional expert rank. `expert` names the ranker for expert sources.
+    """
+
+    __tablename__ = "weekly_source_projections"
+    __table_args__ = (Index("ix_weekly_source_projections_lookup", "season", "week", "source", "scoring"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    season: Mapped[int]
+    week: Mapped[int]
+    source: Mapped[str]                        # "vegas_props", "yahoo_experts", "espn"
+    scoring: Mapped[str | None]                # set for rank sources; None when stats are raw
+    expert: Mapped[str | None]
+    player_id: Mapped[int | None] = mapped_column(ForeignKey("players.id"))
+    player_name: Mapped[str]
+    position: Mapped[str | None]
+    team: Mapped[str | None]
+    opponent: Mapped[str | None]
+    rank: Mapped[float | None]
+    stats: Mapped[str | None]
+    fetched_at: Mapped[datetime] = mapped_column(default=utc_now)
 
 
 class ExternalApiCall(Base):

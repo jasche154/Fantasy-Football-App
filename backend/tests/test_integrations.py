@@ -408,7 +408,8 @@ def test_parse_code_accepts_url_or_bare_code():
 
 def test_integration_status_endpoint(client):
     assert client.get("/api/integrations/status").json() == {
-        "fantasypros": False, "yahoo_configured": False, "yahoo_connected": False, "llm": False}
+        "fantasypros": False, "odds_api": False, "yahoo_configured": False, "yahoo_connected": False,
+        "llm": False}
     assert client.get("/api/meta").json()["integrations"]["yahoo_connected"] is False
 
 

@@ -6,6 +6,7 @@ import type {
   ToolDef,
   TradeRequest,
   TradeResult,
+  WeeklyRefreshResponse,
   YahooImportResult,
   YahooLeague,
 } from './types';
@@ -63,4 +64,9 @@ export function importYahooLeague(
     `/api/integrations/yahoo/leagues/${encodeURIComponent(leagueKey)}/import`,
     { method: 'POST', signal },
   );
+}
+
+/** Re-fetch Yahoo and ESPN for a week (force skips their caches). Props keep their credit budget. */
+export function refreshWeeklySources(week: number, force = true): Promise<WeeklyRefreshResponse> {
+  return apiRequest('/api/rankings/weekly/refresh', { method: 'POST', query: { week, force } });
 }

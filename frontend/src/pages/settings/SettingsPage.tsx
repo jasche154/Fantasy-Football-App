@@ -46,6 +46,16 @@ function IntegrationList({ status, onChanged }: { status: IntegrationsStatus; on
           </p>
         )}
       </IntegrationRow>
+      <IntegrationRow name="Vegas player props (The Odds API)" isOk={status.odds_api} okLabel="Configured" missingLabel="Not configured">
+        {status.odds_api ? (
+          <p>Week X rankings include Vegas player props, the most heavily weighted source.</p>
+        ) : (
+          <p>
+            Add <code>ODDS_API_KEY</code> (free at the-odds-api.com, 500 credits/month) to <code>backend/.env</code> and
+            restart the backend. Until then, Week X rankings blend the other sources.
+          </p>
+        )}
+      </IntegrationRow>
       <IntegrationRow name="AI assistant (Groq)" isOk={status.llm} okLabel="Configured" missingLabel="Not configured">
         {status.llm ? (
           <p>Ask AI is ready.</p>

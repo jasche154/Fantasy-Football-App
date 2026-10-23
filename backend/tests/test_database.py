@@ -77,11 +77,11 @@ def test_sync_crosswalk_fills_platform_ids(db, monkeypatch):
     db.commit()
     crosswalk = pl.DataFrame([
         {"gsis_id": "00-1", "yahoo_id": "29279", "sleeper_id": 3198, "pfr_id": "HenrDe00",
-         "fantasypros_id": 15514, "db_season": 2026},
+         "fantasypros_id": 15514, "espn_id": 4429795, "db_season": 2026},
         {"gsis_id": "00-1", "yahoo_id": "old", "sleeper_id": None, "pfr_id": None, "fantasypros_id": None,
-         "db_season": 2020},
+         "espn_id": None, "db_season": 2020},
         {"gsis_id": None, "yahoo_id": "x", "sleeper_id": None, "pfr_id": None, "fantasypros_id": None,
-         "db_season": 2026},
+         "espn_id": None, "db_season": 2026},
     ])
     monkeypatch.setattr(populate.nfl, "load_ff_playerids", lambda: crosswalk)
     index = populate.PlayerIndex(db)
@@ -89,7 +89,25 @@ def test_sync_crosswalk_fills_platform_ids(db, monkeypatch):
     player = db.query(Player).one()
     assert (player.yahoo_player_id, player.sleeper_player_id, player.pfr_player_id, player.fantasypros_id) == (
         "29279", "3198", "HenrDe00", "15514")
+    assert player.espn_player_id == "4429795"
     assert index.by_pfr["HenrDe00"] == player.id and index.by_fantasypros["15514"] == player.id
+
+
+def test_load_schedules_replaces_a_season_and_keeps_lines(db, monkeypatch):
+    from database.models import NflGame
+
+    game = {"game_id": "2026_07_GB_DET", "season": 2026, "week": 7, "game_type": "REG",
+            "gameday": "2026-10-25", "home_team": "DET", "away_team": "GB", "home_score": None,
+            "away_score": None, "spread_line": 3.0, "total_line": 53.5, "stadium": "ignored"}
+    monkeypatch.setattr(populate.nfl, "load_schedules", lambda seasons: pl.DataFrame([game]))
+    populate.load_schedules(db, [2026])
+    populate.load_schedules(db, [2026])                       # reloading replaces, never duplicates
+    stored = db.query(NflGame).one()
+    assert (stored.home_team, stored.spread_line, stored.total_line, stored.home_score) == ("DET", 3.0, 53.5, None)
+
+    monkeypatch.setattr(populate.nfl, "load_schedules", lambda seasons: (_ for _ in ()).throw(OSError("down")))
+    populate.load_schedules(db, [2026])                       # a failed download keeps the old rows
+    assert db.query(NflGame).count() == 1
 
 
 def test_parse_args():

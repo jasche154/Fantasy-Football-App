@@ -20,7 +20,7 @@ export const KELCE = player(3, 'Travis Kelce', 'TE', 'KC');
 export const ALLEN = player(4, 'Josh Allen', 'QB', 'BUF');
 
 export function integrations(overrides: Partial<IntegrationsStatus> = {}): IntegrationsStatus {
-  return { fantasypros: false, yahoo_configured: true, yahoo_connected: false, llm: true, ...overrides };
+  return { fantasypros: false, odds_api: false, yahoo_configured: true, yahoo_connected: false, llm: true, ...overrides };
 }
 
 export function meta(overrides: Partial<Meta> = {}): Meta {
@@ -47,6 +47,7 @@ export function ranked(rank: number, who: PlayerSummary, overrides: Partial<Rank
     vorp_per_game: 8 - rank,
     trade_value: 100 - rank * 10,
     ecr: rank,
+    schedule_factor: 1,
     ...overrides,
   };
 }

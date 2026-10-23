@@ -35,7 +35,7 @@ interface Meta {
   seasons: number[];                   // seasons available in DB, ascending
   positions: Position[];
   scoring_presets: Scoring[];
-  integrations: { fantasypros: boolean; yahoo_configured: boolean; yahoo_connected: boolean; llm: boolean; };
+  integrations: { fantasypros: boolean; odds_api: boolean; yahoo_configured: boolean; yahoo_connected: boolean; llm: boolean; };
 }
 
 interface RankedPlayer {
@@ -49,6 +49,7 @@ interface RankedPlayer {
   vorp_per_game: number;
   trade_value: number;         // ROS points above replacement (>= 0)
   ecr: number | null;          // FantasyPros weekly ECR if available
+  schedule_factor: number;     // remaining-schedule strength already applied to ros_ppg (>1 = easier)
 }
 
 interface RankingsResponse { season: number; through_week: number | null; scoring: Scoring; weeks_remaining: number; results: RankedPlayer[]; }
@@ -128,6 +129,34 @@ interface ToolDef { name: string; description: string; parameters: object; }
 interface ChatMessage { role: "user" | "assistant"; content: string; }
 interface ToolCallTrace { name: string; arguments: Record<string, unknown>; ok: boolean; }
 interface ChatResponse { reply: string; tool_calls: ToolCallTrace[]; }
+
+// ---- Week X rankings ----
+type WeeklySourceKey = "vegas_props" | "josh_hayden" | "model" | "yahoo_consensus" | "espn";
+interface WeeklySourceWeight { key: WeeklySourceKey; label: string; weight: number; players: number; }  // players = coverage this week
+interface WeeklyMatchup {
+  opponent: string; home: boolean;
+  sos_factor: number;            // opponent-adjusted defense factor at the position (>1 = easier)
+  sos_rank: number | null;       // 1 = easiest defense at the position
+  implied_total: number | null;  // Vegas implied team points
+  team_ppg: number | null; game_final: boolean;
+}
+interface WeeklySourceValue { points: number; rank: number | null; }  // rank: positional rank behind expert points
+interface WeeklyPlayer {
+  rank: number; pos_rank: string; player: PlayerSummary; projection: number; matchup: WeeklyMatchup;
+  sources: Partial<Record<WeeklySourceKey, WeeklySourceValue>>;
+  expert_ranks: Record<string, number>;   // e.g. {"Hayden Winks": 1, "Josh Norris": 2, "Yahoo consensus": 3}
+}
+interface SourceRefreshStatus { state: "updated" | "fresh" | "not_configured" | "disabled" | "busy" | "error"; rows: number | null; message: string | null; }
+interface WeeklyRankingsResponse {
+  season: number; week: number; scoring: Scoring; weights: WeeklySourceWeight[]; sos_tilt: number;
+  refresh: Record<"yahoo_experts" | "espn" | "vegas_props", SourceRefreshStatus> | null;  // null when not refreshed
+  results: WeeklyPlayer[];
+}
+interface ScheduleStrengthResponse {
+  season: number; week: number; position: Position;
+  defenses: { rank: number; team: string; sos_factor: number; games: number; allowed_per_game: number; this_week_opponent: string | null; }[];
+  offenses: { team: string; this_week: string | null; next_weeks: { opponent: string; sos_factor: number }[]; rest_of_season: number; games_left: number; }[];
+}
 ```
 
 ## Endpoints
@@ -139,6 +168,9 @@ interface ChatResponse { reply: string; tool_calls: ToolCallTrace[]; }
 | GET | `/api/players/search` | `q` (≥1 char), `position?`, `limit=10` | `{results: PlayerSummary[]}` (QB/RB/WR/TE only, best match first) |
 | GET | `/api/players/{id}` | `season?` (default current), league params | `PlayerProfile` (404 if unknown) |
 | GET | `/api/rankings` | `position?`, `limit=100`, league params | `RankingsResponse` |
+| GET | `/api/rankings/weekly` | `week?` (1-18, default current), `position?`, `limit=150`, `refresh=true`, league params | `WeeklyRankingsResponse`. For the current week only, stale outside sources are refreshed first unless `refresh=false`, `WEEKLY_AUTO_REFRESH=false`, or the request is cross-site (`refresh` is then `null`) |
+| POST | `/api/rankings/weekly/refresh` | `week?`, `force=false` (query; re-fetches Yahoo and ESPN, never re-buys props) | `{season, week, sources: Record<source, SourceRefreshStatus>}` |
+| GET | `/api/schedule-strength` | `position=WR`, `week?`, league params | `ScheduleStrengthResponse` |
 | GET | `/api/leaderboards/metrics` | | `{categories: MetricCategory[]}` |
 | GET | `/api/leaderboards` | `category`, `metric`, `season?`, `min_volume?` (default per metric), `limit=25`, `ascending=false`, `position?` | `LeaderboardResponse` |
 | GET | `/api/rankings/rushing` | legacy (unchanged params) | `{metric, season, results: [{player, <metric>}]}` |
@@ -150,7 +182,7 @@ interface ChatResponse { reply: string; tool_calls: ToolCallTrace[]; }
 | GET | `/api/agent/tools` | | `{tools: ToolDef[]}` |
 | POST | `/api/agent/tools/{name}` | `{arguments: {...}}` | `{result: any}` (404 unknown tool or player, 422 bad args or season, 502 upstream source down, 503 no data) |
 | POST | `/api/agent/chat` | `{messages: ChatMessage[]}` | `ChatResponse` (503 if no LLM key) |
-| GET | `/api/integrations/status` | | `{fantasypros: bool, yahoo_configured: bool, yahoo_connected: bool, llm: bool}` |
+| GET | `/api/integrations/status` | | `{fantasypros: bool, odds_api: bool, yahoo_configured: bool, yahoo_connected: bool, llm: bool}` |
 | GET | `/api/integrations/yahoo/auth-url` | | `{url: string}` |
 | POST | `/api/integrations/yahoo/exchange` | `{code: string}` | `{connected: true}` |
 | GET | `/api/integrations/yahoo/leagues` | | `{leagues: [{league_key, name, season, num_teams, scoring_type}]}` |

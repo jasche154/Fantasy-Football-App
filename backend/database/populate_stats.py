@@ -29,7 +29,7 @@ from sqlalchemy.orm import Session
 from database.create_tables import ensure_schema
 from database.db import engine
 from database.models import (
-    Base, DataLoad, ExpertRanking, Player, PlayerExpectedPointsWeekly, PlayerPassingAdvancedWeekly,
+    Base, DataLoad, ExpertRanking, NflGame, Player, PlayerExpectedPointsWeekly, PlayerPassingAdvancedWeekly,
     PlayerReceivingAdvancedWeekly, PlayerRushingAdvancedWeekly, PlayerSnapCountsWeekly,
     PlayerStatsWeekly,
 )
@@ -170,7 +170,7 @@ def apply_latest_teams(session: Session, index: PlayerIndex) -> None:
 
 
 def sync_crosswalk(session: Session, index: PlayerIndex) -> None:
-    """Fill platform ids (Yahoo, Sleeper, PFR, FantasyPros) from the DynastyProcess crosswalk."""
+    """Fill platform ids (Yahoo, Sleeper, PFR, FantasyPros, ESPN) from the DynastyProcess crosswalk."""
     frame = nfl.load_ff_playerids().filter(pl.col("gsis_id").is_not_null())
     frame = frame.sort("db_season", descending=True).unique(subset="gsis_id", keep="first")
     crosswalk = {row["gsis_id"]: row for row in frame.iter_rows(named=True)}
@@ -181,6 +181,7 @@ def sync_crosswalk(session: Session, index: PlayerIndex) -> None:
         player.sleeper_player_id = as_id(ids["sleeper_id"]) or player.sleeper_player_id
         player.pfr_player_id = as_id(ids["pfr_id"]) or player.pfr_player_id
         player.fantasypros_id = as_id(ids["fantasypros_id"]) or player.fantasypros_id
+        player.espn_player_id = as_id(ids.get("espn_id")) or player.espn_player_id
         if player.pfr_player_id:
             index.by_pfr[player.pfr_player_id] = player.id
         if player.fantasypros_id:
@@ -210,6 +211,23 @@ def load_snap_counts(session: Session, seasons: Iterable[int], index: PlayerInde
         bulk_insert(session, PlayerSnapCountsWeekly, rows)
         session.commit()
         log.info("snap counts %s: %d rows (%d without a PFR id match)", season, len(rows), unmatched)
+
+
+GAME_COLUMNS = ("game_id", "season", "week", "game_type", "gameday", "home_team", "away_team",
+                "home_score", "away_score", "spread_line", "total_line")
+
+
+def load_schedules(session: Session, seasons: Iterable[int]) -> None:
+    """Games with scores and closing Vegas lines; drives matchups and schedule strength."""
+    for season in seasons:
+        frame = fetch_season(lambda s: nfl.load_schedules(s), "schedule", season)
+        if frame is None:
+            continue
+        rows = [{c: source[c] for c in GAME_COLUMNS} for source in frame.iter_rows(named=True)]
+        session.execute(delete(NflGame).where(NflGame.season == season))
+        bulk_insert(session, NflGame, rows)
+        session.commit()
+        log.info("schedule %s: %d games", season, len(rows))
 
 
 def load_expert_rankings(session: Session, index: PlayerIndex) -> None:
@@ -271,6 +289,7 @@ def main(argv: list[str] | None = None) -> None:
         apply_latest_teams(session, index)
         sync_crosswalk(session, index)
         load_snap_counts(session, seasons, index)
+        load_schedules(session, seasons)
         load_expert_rankings(session, index)
         record_load(session, seasons)
     log.info("Done.")

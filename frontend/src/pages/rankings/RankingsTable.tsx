@@ -3,6 +3,7 @@ import type { RankedPlayer } from '../../api/types';
 import { PlayerLink } from '../../components/PlayerLink';
 import { nextSort, SortableHeader, type SortState } from '../../components/SortableHeader';
 import { formatInteger, formatNumber } from '../../lib/format';
+import { factorLabel, factorTone } from '../../lib/matchup';
 import {
   DEFAULT_RANKING_SORT,
   defaultRankingDirection,
@@ -26,6 +27,7 @@ export const RANKING_COLUMNS: readonly ColumnDef[] = [
   { key: 'ppg', label: 'PPG', tag: 'Actual', align: 'end', title: 'Actual fantasy points per game' },
   { key: 'expected_ppg', label: 'xPPG', tag: 'Expected', align: 'end', title: 'Expected fantasy points per game from opportunity (nflverse)' },
   { key: 'ros_ppg', label: 'ROS PPG', tag: 'Projection (model)', align: 'end', title: 'Rest-of-season points per game, our model' },
+  { key: 'schedule_factor', label: 'Sched', tag: 'Projection (model)', align: 'end', title: 'Remaining schedule vs average, opponent-adjusted (+ = easier); already included in ROS PPG' },
   { key: 'trade_value', label: 'Value', tag: 'Projection (model)', align: 'end', title: 'Rest-of-season points above replacement, our model' },
   { key: 'ecr', label: 'ECR', tag: 'Expert', align: 'end', title: 'FantasyPros expert consensus rank' },
 ];
@@ -42,6 +44,7 @@ function RankingRow({ row }: { row: RankedPlayer }) {
       <td className="num num--strong">{formatNumber(row.ppg)}</td>
       <td className="num">{formatNumber(row.expected_ppg)}</td>
       <td className="num">{formatNumber(row.ros_ppg)}</td>
+      <td className={`num sos-text sos-text--${factorTone(row.schedule_factor)}`}>{factorLabel(row.schedule_factor)}</td>
       <td className="num">
         <span className="value-pill">{formatNumber(row.trade_value, 0)}</span>
       </td>

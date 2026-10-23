@@ -1,6 +1,7 @@
 const ICON_PATHS = {
   home: 'M3 11.5 12 4l9 7.5M5.5 10v10h5v-6h3v6h5V10',
   rankings: 'M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01',
+  calendar: 'M4 6h16v14H4zM4 10h16M8 3v4M16 3v4',
   stats: 'M4 20V11M10 20V4M16 20v-6M21 20H3',
   trade: 'M7 4 3 8l4 4M3 8h13M17 20l4-4-4-4M21 16H8',
   market: 'm3 17 6-6 4 4 8-8M15 7h6v6',

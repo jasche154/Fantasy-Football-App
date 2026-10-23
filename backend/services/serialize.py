@@ -5,7 +5,12 @@ from services.insights import Insight
 from services.leaderboards import LeaderboardRow
 from services.players import PlayerRef
 from services.trade import TradeEvaluation, TradeSide
+from config import get_settings
 from services.valuation import PlayerValue, Valuation
+from services.weekly_model import Matchup
+from services.weekly_rankings import SOURCE_LABELS, WEIGHTS, WeeklyPlayer, WeeklyRankings, FINAL_SOS_TILT
+
+NEXT_WEEKS = 4
 
 
 def player_ref(ref: PlayerRef | PlayerValue | Insight | LeaderboardRow) -> dict:
@@ -19,6 +24,7 @@ def ranked_player(value: PlayerValue, ecr: Mapping[int, float] | None = None) ->
         "games": value.games, "ppg": value.ppg, "expected_ppg": value.expected_ppg,
         "ros_ppg": value.ros_ppg, "vorp_per_game": value.vorp_per_game,
         "trade_value": value.trade_value, "ecr": (ecr or {}).get(value.player_id),
+        "schedule_factor": value.schedule_factor,
     }
 
 
@@ -67,3 +73,59 @@ def trade(evaluation: TradeEvaluation, weeks_remaining: int) -> dict:
 
 def leaderboard_row(row: LeaderboardRow) -> dict:
     return {"rank": row.rank, "player": player_ref(row), "value": row.value, "volume": row.volume}
+
+
+def matchup(item: Matchup) -> dict:
+    return {"opponent": item.opponent, "home": item.home, "sos_factor": item.sos_factor,
+            "sos_rank": item.sos_rank, "implied_total": item.implied_total, "team_ppg": item.team_ppg,
+            "game_final": item.game_final}
+
+
+def weekly_player(player: WeeklyPlayer) -> dict:
+    return {
+        "rank": player.rank, "pos_rank": player.pos_rank,
+        "player": {"id": player.player_id, "name": player.name, "position": player.position,
+                   "team": player.team},
+        "projection": player.projection, "matchup": matchup(player.matchup),
+        "sources": {key: {"points": round(v.points, 2), "rank": v.rank} for key, v in player.sources.items()},
+        "expert_ranks": dict(player.expert_ranks),
+    }
+
+
+def weekly_rankings(rankings: WeeklyRankings, position: str | None, limit: int,
+                    statuses: Mapping[str, dict] | None) -> dict:
+    players = [p for p in rankings.players if position is None or p.position == position][:limit]
+    return {
+        "season": rankings.season, "week": rankings.week, "scoring": rankings.scoring,
+        "weights": [{"key": k, "label": SOURCE_LABELS[k], "weight": w, "players": rankings.source_counts.get(k, 0)}
+                    for k, w in WEIGHTS.items()],
+        "sos_tilt": FINAL_SOS_TILT, "refresh": statuses,
+        "results": [{**weekly_player(p), "rank": i} if position else weekly_player(p)
+                    for i, p in enumerate(players, start=1)],
+    }
+
+
+def schedule_strength(valuation: Valuation, position: str, week: int) -> dict:
+    """Defenses by opponent-adjusted points allowed, plus each offense's upcoming schedule."""
+    defense, schedule = valuation.defense, valuation.schedule
+    end_week = get_settings().fantasy_end_week
+    defenses = sorted(((d, f) for (d, p), f in defense.factors.items() if p == position),
+                      key=lambda item: -item[1])
+    teams = sorted({g.home_team for g in schedule.games} | {g.away_team for g in schedule.games})
+    offenses = []
+    for team in teams:
+        upcoming = schedule.remaining_opponents(team, week - 1, end_week)
+        offenses.append({
+            "team": team, "this_week": schedule.opponent(team, week),
+            "next_weeks": [{"opponent": o, "sos_factor": defense.factor(o, position)} for o in upcoming[:NEXT_WEEKS]],
+            "rest_of_season": defense.schedule_factor(upcoming, position), "games_left": len(upcoming),
+        })
+    offenses.sort(key=lambda o: -o["rest_of_season"])
+    return {
+        "season": valuation.season, "week": week, "position": position,
+        "defenses": [{"rank": i, "team": d, "sos_factor": f, "games": defense.games[(d, position)],
+                      "allowed_per_game": defense.allowed_per_game[(d, position)],
+                      "this_week_opponent": schedule.opponent(d, week)}
+                     for i, (d, f) in enumerate(defenses, start=1)],
+        "offenses": offenses,
+    }
