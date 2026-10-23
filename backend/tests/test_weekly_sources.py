@@ -130,7 +130,7 @@ def test_odds_refresh_buys_each_game_once_inside_the_window(session, seeded):
     calls = []
     events = [_event("evt1", "Cincinnati Bengals", "Baltimore Ravens"),
               _event("old", "Kansas City Chiefs", "Buffalo Bills", hours_from_now=-1),   # kicked off
-              _event("later", "Dallas Cowboys", "New York Giants", hours_from_now=72),   # not due yet
+              _event("later", "Dallas Cowboys", "New York Giants", hours_from_now=100),   # not due yet
               _event("other", "Miami Dolphins", "New York Jets")]                         # not this week
     client = odds_api.OddsApiClient("key", mock_client(odds_handler(calls, events)))
     assert odds_api.refresh(session, client, SEASON, WEEK) == 1
@@ -265,8 +265,9 @@ def test_yahoo_refresh_fetches_every_position_and_scoring(session, seeded):
         seen.append((request.url.params["position"], request.url.params["scoring"]))
         return httpx.Response(200, json=yahoo_payload(request.url.params["position"]))
 
-    assert yahoo_experts.refresh(session, mock_client(handler), SEASON, WEEK) == 12   # 4 rows x 3 formats
-    assert len(seen) == 12 and ("TE", "HALF") in seen
+    assert yahoo_experts.refresh(session, mock_client(handler), SEASON, WEEK) == 24   # 4 rows x 3 formats x (week, ROS)
+    assert len(seen) == 24 and ("TE", "HALF") in seen
+    assert {r.source for r in session.query(WeeklySourceProjection)} == {"yahoo_experts", "yahoo_ros"}
     assert {r.scoring for r in rows_for(session, yahoo_experts.SOURCE)} == {"ppr", "half", "std"}
 
 
@@ -352,7 +353,7 @@ def test_refresh_sources_isolates_failures_and_caches(session, seeded, monkeypat
     monkeypatch.setitem(weekly_refresh.FREE_SOURCES, espn.SOURCE, espn_down)
     http = mock_client(lambda r: httpx.Response(500))
     statuses = weekly_refresh.refresh_sources(session, SEASON, WEEK, Settings(), http=http)
-    assert statuses["yahoo_experts"] == {"state": "updated", "rows": 12, "message": None}
+    assert statuses["yahoo_experts"] == {"state": "updated", "rows": 24, "message": None}
     assert statuses["espn"]["state"] == "error" and "503" in statuses["espn"]["message"]
     assert statuses["vegas_props"]["state"] == "not_configured"
 
@@ -432,3 +433,33 @@ def test_refresh_sources_skips_disabled_sources(session, seeded, monkeypatch):
     statuses = weekly_refresh.refresh_sources(session, SEASON, WEEK, settings, http=mock_client(lambda r: httpx.Response(500)))
     assert calls == ["yahoo"]
     assert statuses["espn"]["state"] == statuses["vegas_props"]["state"] == "disabled"
+
+
+def test_background_refresh_starts_only_for_stale_sources(session, seeded, monkeypatch):
+    import threading
+
+    started = []
+    monkeypatch.setattr(weekly_refresh.threading, "Thread",
+                        lambda target, args, name, daemon: type("T", (), {"start": lambda self: started.append(args)})())
+    settings = Settings(weekly_sources=["yahoo_experts", "espn"])
+    statuses = weekly_refresh.start_background_refresh(session, SEASON, WEEK, settings)
+    assert set(statuses) == {"yahoo_experts", "espn"} and statuses["espn"]["state"] == "refreshing"
+    assert started and started[0][1:] == (SEASON, WEEK)
+
+    yahoo_experts.refresh(session, mock_client(lambda r: httpx.Response(
+        200, json=yahoo_payload(r.url.params["position"]))), SEASON, WEEK)
+    assert set(weekly_refresh.start_background_refresh(session, SEASON, WEEK, settings)) == {"espn"}   # yahoo fresh
+
+    assert weekly_refresh._refresh_lock.acquire(blocking=False)
+    try:
+        assert weekly_refresh.start_background_refresh(session, SEASON, WEEK, settings) is None   # already running
+    finally:
+        weekly_refresh._refresh_lock.release()
+    assert threading.Lock  # stdlib untouched
+
+
+def test_background_runner_logs_failures(monkeypatch, caplog):
+    monkeypatch.setattr(weekly_refresh, "refresh_sources", lambda *a, **k: 1 / 0)
+    with caplog.at_level("ERROR"):
+        weekly_refresh._run_in_background(None, SEASON, WEEK)
+    assert "background refresh failed" in caplog.text

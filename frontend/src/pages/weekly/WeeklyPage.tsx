@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { refreshWeeklySources } from '../../api/actions';
 import { errorMessage } from '../../api/client';
 import { getWeeklyRankings } from '../../api/data';
@@ -22,6 +22,8 @@ import { RefreshNotes, SourceWeights } from './SourceWeights';
 import { WeeklyTable } from './WeeklyTable';
 
 const WEEKLY_LIMIT = 200;
+/** After the backend starts a background refresh, reload once to pick up the new data. */
+export const REFRESH_RELOAD_MS = 25_000;
 const LAST_WEEK = 18;
 const WEEK_OPTIONS = Array.from({ length: LAST_WEEK }, (_, index) => ({ value: index + 1, label: `Week ${index + 1}` }));
 type View = 'rankings' | 'startsit' | 'schedule';
@@ -98,6 +100,13 @@ export function WeeklyPage() {
     [week, position, settings],
   );
   const shownWeek = week ?? rankings.data?.week;
+  const isRefreshing = Object.values(rankings.data?.refresh ?? {}).some((s) => s.state === 'refreshing');
+  const { reload } = rankings;
+  useEffect(() => {
+    if (!isRefreshing) return undefined;
+    const timer = window.setTimeout(reload, REFRESH_RELOAD_MS);
+    return () => window.clearTimeout(timer);
+  }, [isRefreshing, reload]);
   useDocumentTitle(shownWeek ? `Week ${shownWeek} Rankings` : 'Weekly Rankings');
   const label = positionFilterLabel(filter);
 

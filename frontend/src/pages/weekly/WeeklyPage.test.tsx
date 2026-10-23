@@ -1,12 +1,12 @@
-import { screen, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { ScheduleStrengthResponse, WeeklyPlayer, WeeklyRankingsResponse } from '../../api/types';
 import { factorLabel, factorTone, rankTone } from '../../lib/matchup';
 import { BIJAN, CHASE } from '../../test/fixtures';
 import { json, mockFetch } from '../../test/mockFetch';
 import { META_ROUTE, renderWithProviders } from '../../test/render';
-import { WeeklyPage } from './WeeklyPage';
+import { REFRESH_RELOAD_MS, WeeklyPage } from './WeeklyPage';
 
 function weeklyPlayer(rank: number, overrides: Partial<WeeklyPlayer> = {}): WeeklyPlayer {
   return {
@@ -146,6 +146,25 @@ describe('WeeklyPage', () => {
     expect(screen.getByText('Bye')).toBeInTheDocument();
     expect(screen.getAllByText('+19%').length).toBeGreaterThan(0);
     expect(api.callsTo('/api/schedule-strength')[0].url.searchParams.get('week')).toBe('7');
+  });
+
+  it('says when sources update in the background and reloads once afterwards', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let calls = 0;
+      mockFetch([META_ROUTE, { path: '/api/rankings/weekly', reply: () => {
+        calls += 1;
+        return json(weekly(7, { refresh: calls === 1
+          ? { sleeper_status: { state: 'refreshing', rows: null, message: null } } : null }));
+      } }]);
+      renderWithProviders(<WeeklyPage />);
+      expect(await screen.findByText(/Updating Sleeper injury status in the background/)).toBeInTheDocument();
+      await vi.advanceTimersByTimeAsync(REFRESH_RELOAD_MS + 10);
+      await waitFor(() => expect(calls).toBe(2));
+      await waitFor(() => expect(screen.queryByText(/in the background/)).not.toBeInTheDocument());
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('shows an empty state when nothing is projected', async () => {

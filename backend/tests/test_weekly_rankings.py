@@ -233,10 +233,10 @@ def test_weekly_rankings_endpoint_refreshes_when_enabled(week_client, monkeypatc
     monkeypatch.setenv("WEEKLY_AUTO_REFRESH", "true")
     from config import get_settings
     get_settings.cache_clear()
-    monkeypatch.setattr(routes, "refresh_sources", lambda session, season, week, **kw: calls.append(week) or
-                        {"espn": {"state": "fresh", "rows": None, "message": None}})
+    monkeypatch.setattr(routes, "start_background_refresh", lambda session, season, week, **kw: calls.append(week) or
+                        {"espn": {"state": "refreshing", "rows": None, "message": None}})
     body = week_client.get("/api/rankings/weekly").json()
-    assert calls == [WEEK] and body["refresh"]["espn"]["state"] == "fresh"
+    assert calls == [WEEK] and body["refresh"]["espn"]["state"] == "refreshing"
     week_client.get("/api/rankings/weekly", params={"refresh": "false"})
     assert calls == [WEEK]
 
@@ -341,7 +341,7 @@ def test_weekly_endpoint_only_auto_refreshes_the_current_week_same_site(week_cli
     calls = []
     monkeypatch.setenv("WEEKLY_AUTO_REFRESH", "true")
     get_settings.cache_clear()
-    monkeypatch.setattr(routes, "refresh_sources", lambda session, season, week, **kw: calls.append(week) or {})
+    monkeypatch.setattr(routes, "start_background_refresh", lambda session, season, week, **kw: calls.append(week) or {})
     week_client.get("/api/rankings/weekly", params={"week": 9})                       # not the current week
     week_client.get("/api/rankings/weekly", headers={"Sec-Fetch-Site": "cross-site"})  # another website
     assert calls == []

@@ -27,7 +27,7 @@ from statistics import mean
 from threading import Lock
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session, aliased
+from sqlalchemy.orm import Session
 
 from database.models import DataLoad, DepthChartEntry, InjuryReport, PlayerStatsWeekly, PlayerStatus
 from integrations.weekly_sources import utc
@@ -123,17 +123,21 @@ def learned_play_rates(session: Session, exclude_season: int | None = None) -> d
     with _rate_lock:
         if version in _rate_cache:
             return _rate_cache[version]
-    prev, now = aliased(PlayerStatsWeekly), aliased(PlayerStatsWeekly)
-    rows = session.execute(
-        select(InjuryReport.report_status, InjuryReport.practice_status, func.count(),
-               func.avg(func.coalesce(now.id * 0 + 1, 0)))
-        .join(prev, (prev.player_id == InjuryReport.player_id) & (prev.season == InjuryReport.season)
-              & (prev.week == InjuryReport.week - 1) & (prev.season_type == "REG"))
-        .outerjoin(now, (now.player_id == InjuryReport.player_id) & (now.season == InjuryReport.season)
-                   & (now.week == InjuryReport.week) & (now.season_type == "REG"))
-        .where(InjuryReport.week <= LAST_REGULAR_WEEK, InjuryReport.season != (exclude_season or -1))
-        .group_by(InjuryReport.report_status, InjuryReport.practice_status)).all()
-    observed = {_key(s, p): (n, rate) for s, p, n, rate in rows if n >= MIN_RATE_SAMPLE}
+    # A set lookup in Python: the equivalent SQL self-join takes over a minute on SQLite.
+    played = set(session.execute(select(PlayerStatsWeekly.player_id, PlayerStatsWeekly.season, PlayerStatsWeekly.week)
+                                 .where(PlayerStatsWeekly.season_type == "REG")).tuples())
+    reports = session.execute(select(InjuryReport.player_id, InjuryReport.season, InjuryReport.week,
+                                     InjuryReport.report_status, InjuryReport.practice_status)
+                              .where(InjuryReport.week <= LAST_REGULAR_WEEK,
+                                     InjuryReport.season != (exclude_season or -1))).all()
+    tallies: dict[tuple[str, str], list[int]] = defaultdict(lambda: [0, 0])
+    for player_id, season, week, status, practice in reports:
+        if (player_id, season, week - 1) not in played:
+            continue                                   # only players who contributed the week before
+        tally = tallies[_key(status, practice)]
+        tally[0] += 1
+        tally[1] += (player_id, season, week) in played
+    observed = {key: (n, hits / n) for key, (n, hits) in tallies.items() if n >= MIN_RATE_SAMPLE}
     healthy = observed.get(HEALTHY, (0, None))[1]
     rates = dict(DEFAULT_RATES)
     if healthy:
