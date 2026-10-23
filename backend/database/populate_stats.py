@@ -259,6 +259,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+    logging.getLogger("alembic").setLevel(logging.WARNING)   # keep the output to load progress
     args = parse_args(argv)
     log.info("Schema: %s", ensure_schema(engine))
     with Session(engine) as session:
