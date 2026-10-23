@@ -22,6 +22,8 @@ from services.projections import (
     MIN_PRIOR_GAMES, PlayerSeason, current_rate, latest_season, latest_week,
     load_player_seasons, project_ros_ppg,
 )
+from services.ros_consensus import RosInputs, ros_inputs
+from services.ros_consensus import data_version as ros_data_version
 from services.schedule_strength import NEUTRAL, DefenseStrength, Schedule, defense_strength, load_schedule
 
 # Exponent on the remaining-schedule factor; 1.0 applies the matchup difference in full.
@@ -44,6 +46,11 @@ class PlayerValue:
     pos_rank: str = ""
     base_ros_ppg: float = 0.0          # before the schedule adjustment
     schedule_factor: float = 1.0       # >1 = easier remaining schedule
+    model_ros_ppg: float = 0.0         # the model alone (with schedule), before the consensus blend
+    expert_ros_rank: float | None = None
+    expert_ros_ppg: float | None = None
+    weekly_ppg: float | None = None
+    availability: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -83,7 +90,8 @@ def _rank(values: list[PlayerValue]) -> tuple[PlayerValue, ...]:
 
 def value_players(current: Sequence[PlayerSeason], previous: Sequence[PlayerSeason],
                   league: LeagueSettings, remaining: int,
-                  schedule_factors: Mapping[int, float] | None = None) -> tuple[tuple[PlayerValue, ...], dict[str, float]]:
+                  schedule_factors: Mapping[int, float] | None = None,
+                  consensus: Mapping[int, "RosInputs"] | None = None) -> tuple[tuple[PlayerValue, ...], dict[str, float]]:
     """Pure valuation step, separated from data loading so it can be tested directly."""
     rates = {p.player_id: current_rate(p) for p in current}
     first_pass = replacement_levels(((p.position, rates[p.player_id]) for p in current), league)
@@ -92,7 +100,9 @@ def value_players(current: Sequence[PlayerSeason], previous: Sequence[PlayerSeas
                                          priors.get(p.player_id, first_pass.get(p.position, 0.0)))
             for p in current}
     factors = {pid: (schedule_factors or {}).get(pid, 1.0) ** ROS_SCHEDULE_WEIGHT for pid in base}
-    projected = {pid: round(base[pid] * factors[pid], 2) for pid in base}
+    model = {pid: round(base[pid] * factors[pid], 2) for pid in base}
+    consensus = consensus or {}
+    projected = {pid: consensus[pid].blended() if pid in consensus else model[pid] for pid in base}
     replacement = replacement_levels(((p.position, projected[p.player_id]) for p in current), league)
 
     values = []
@@ -103,9 +113,18 @@ def value_players(current: Sequence[PlayerSeason], previous: Sequence[PlayerSeas
             games=p.games_played, ppg=p.ppg, expected_ppg=p.expected_ppg,
             ros_ppg=projected[p.player_id], vorp_per_game=vorp,
             trade_value=round(vorp * remaining, 1), base_ros_ppg=base[p.player_id],
-            schedule_factor=round(factors[p.player_id], 3),
+            schedule_factor=round(factors[p.player_id], 3), model_ros_ppg=model[p.player_id],
+            **_consensus_fields(consensus.get(p.player_id)),
         ))
     return _rank(values), replacement
+
+
+def _consensus_fields(inputs: "RosInputs | None") -> dict:
+    if inputs is None:
+        return {}
+    return {"expert_ros_rank": inputs.expert_rank, "expert_ros_ppg": inputs.experts,
+            "weekly_ppg": None if inputs.weekly is None else round(inputs.weekly, 2),
+            "availability": round(inputs.availability, 3)}
 
 
 def _compute(session: Session, league: LeagueSettings, season: int) -> Valuation:
@@ -119,7 +138,11 @@ def _compute(session: Session, league: LeagueSettings, season: int) -> Valuation
     defense = defense_strength(current, schedule)
     factors = {p.player_id: defense.schedule_factor(
         schedule.remaining_opponents(p.team, through or 0, end_week), p.position) for p in current}
-    values, replacement = value_players(current, previous, league, remaining, factors)
+    model_values, _ = value_players(current, previous, league, remaining, factors)
+    consensus = ros_inputs(session, season, league.scoring, scoring,
+                           {v.player_id: v.model_ros_ppg for v in model_values},
+                           {v.player_id: v.position or "" for v in model_values}, remaining)
+    values, replacement = value_players(current, previous, league, remaining, factors, consensus)
     return Valuation(season=season, through_week=through, weeks_remaining=remaining, league=league,
                      replacement=MappingProxyType(replacement), values=values,
                      seasons=tuple(current), by_id=MappingProxyType({v.player_id: v for v in values}),
@@ -143,7 +166,7 @@ def _data_version(session: Session, season: int) -> tuple:
     """
     stats = session.execute(select(func.count(PlayerStatsWeekly.id), func.max(PlayerStatsWeekly.id))
                             .where(PlayerStatsWeekly.season == season)).one()
-    return (*stats, session.scalar(select(func.max(DataLoad.id))))
+    return (*stats, session.scalar(select(func.max(DataLoad.id))), *ros_data_version(session, season))
 
 
 def build_valuation(session: Session, league: LeagueSettings, season: int | None = None) -> Valuation:

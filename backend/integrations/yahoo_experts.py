@@ -6,7 +6,9 @@ notice; this client is for personal use, caches results, and only stores the lat
 snapshot for each week. Weekly ranks are positional (QB1, RB1, ...).
 
 Stored per player: the 40+ expert consensus rank plus the individual ranks of the experts
-in TRACKED_EXPERTS (Josh Norris and Hayden Winks lead the weekly blend).
+in TRACKED_EXPERTS (Josh Norris and Hayden Winks lead the weekly blend). Both the week's
+ranks (type=WK, source yahoo_experts) and rest-of-season ranks (type=RO, source yahoo_ros)
+are fetched; the ROS ranks feed services/ros_consensus.py.
 """
 import httpx
 from sqlalchemy.orm import Session
@@ -25,9 +27,14 @@ TRACKED_EXPERTS = {**JOSH_AND_HAYDEN, "285": "Dalton Del Don", "317": "Justin Bo
                    "747": "Matt Harmon", "7": "Andy Behrens", "9": "Scott Pianowski"}
 
 
-def fetch_position(http: httpx.Client, season: int, week: int, position: str, scoring: str) -> dict:
+ROS_SOURCE = "yahoo_ros"
+RANK_TYPES = {SOURCE: "WK", ROS_SOURCE: "RO"}      # weekly ranks, rest-of-season ranks
+
+
+def fetch_position(http: httpx.Client, season: int, week: int, position: str, scoring: str,
+                   rank_type: str = "WK") -> dict:
     params = {"sport": "NFL", "experts": "show", "year": season, "scoring": SCORING_PARAMS[scoring],
-              "position": position, "type": "WK", "week": week, "wtype": "WK"}
+              "position": position, "type": rank_type, "week": week, "wtype": rank_type}
     try:
         response = http.get(URL, params=params, headers={"User-Agent": USER_AGENT})
     except httpx.HTTPError as exc:
@@ -47,7 +54,8 @@ def _rank(value) -> float | None:
         return None
 
 
-def ranking_rows(payload: dict, season: int, week: int, scoring: str, matcher: PlayerMatcher) -> list[dict]:
+def ranking_rows(payload: dict, season: int, week: int, scoring: str, matcher: PlayerMatcher,
+                 source: str = SOURCE) -> list[dict]:
     """One consensus row per player plus one row per tracked expert who ranked them."""
     rows = []
     for item in payload.get("players") or []:
@@ -60,10 +68,10 @@ def ranking_rows(payload: dict, season: int, week: int, scoring: str, matcher: P
         opponent = next(iter((item.get("opponent") or "").split()[-1:]), None)   # "vs. GB" -> "GB"
         common = dict(player_id=player_id, name=name, position=position, team=item.get("team"),
                       opponent=opponent, scoring=scoring)
-        rows.append(source_row(season, week, SOURCE, expert=CONSENSUS, rank=_rank(item.get("rank")), **common))
+        rows.append(source_row(season, week, source, expert=CONSENSUS, rank=_rank(item.get("rank")), **common))
         for expert_id, rank in (item.get("experts") or {}).items():
             if expert_id in TRACKED_EXPERTS and _rank(rank) is not None:
-                rows.append(source_row(season, week, SOURCE, expert=expert_id, rank=_rank(rank), **common))
+                rows.append(source_row(season, week, source, expert=expert_id, rank=_rank(rank), **common))
     return rows
 
 
@@ -74,14 +82,18 @@ def refresh(session: Session, http: httpx.Client, season: int, week: int) -> int
     leaves one scoring format fresh and another stale. The first failed request stops it.
     """
     matcher = PlayerMatcher(session)
-    by_scoring: dict[str, list[dict]] = {}
-    for scoring in SCORING_PARAMS:
-        rows = []
-        for position in POSITIONS:
-            payload = fetch_position(http, season, week, position, scoring)
-            if not isinstance(payload, dict):
-                raise SourceError("Yahoo rankings returned an unexpected response.")
-            rows.extend(ranking_rows(payload, season, week, scoring, matcher))
-        by_scoring[scoring] = rows
-    return sum(replace_snapshot(session, season, week, SOURCE, rows, scoring=scoring)
-               for scoring, rows in by_scoring.items())
+    fetched: dict[tuple[str, str], list[dict]] = {}
+    for source, rank_type in RANK_TYPES.items():
+        for scoring in SCORING_PARAMS:
+            rows = []
+            for position in POSITIONS:
+                payload = fetch_position(http, season, week, position, scoring, rank_type)
+                if not isinstance(payload, dict):
+                    raise SourceError("Yahoo rankings returned an unexpected response.")
+                rows.extend(ranking_rows(payload, season, week, scoring, matcher, source))
+            fetched[(source, scoring)] = rows
+    stored = 0
+    for (source, scoring), rows in fetched.items():
+        if rows or source == SOURCE:                 # ROS ranks are optional; weekly ones are required
+            stored += replace_snapshot(session, season, week, source, rows, scoring=scoring)
+    return stored

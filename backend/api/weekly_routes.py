@@ -13,7 +13,7 @@ from services.league import LeagueSettings
 from services.valuation import Valuation
 from services.waivers import DEFAULT_MAX_ROSTERED, waiver_candidates
 from services.weekly_rankings import FIRST_WEEK, LAST_WEEK, WeeklyRankings, build_weekly_rankings, default_week
-from services.weekly_refresh import refresh_sources
+from services.weekly_refresh import refresh_sources, start_background_refresh
 
 router = APIRouter(prefix="/api")
 Week = Query(None, ge=FIRST_WEEK, le=LAST_WEEK, description="NFL week (default: the current week)")
@@ -40,7 +40,9 @@ def weekly_rankings(request: Request, week: int | None = Week, position: Positio
     valuation = valuation_or_503(session, league)
     current_week = default_week(valuation)
     week = week or current_week
-    statuses = (refresh_sources(session, valuation.season, week)
+    # Never make the page wait on Sleeper/Yahoo/ESPN/props: stale sources refresh in a
+    # background thread and the response says so; the page reloads when it's done.
+    statuses = (start_background_refresh(session, valuation.season, week)
                 if _may_auto_refresh(request, refresh, week, current_week) else None)
     rankings = build_weekly_rankings(session, league, week)
     wanted = _parse_ids(ids)

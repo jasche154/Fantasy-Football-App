@@ -268,3 +268,5 @@
 .market-grid--flags { margin-block-start: var(--space-5); }
 .flag-list { display: grid; gap: var(--space-3); }
 .flag-list__row { display: grid; gap: var(--space-1); padding-block-end: var(--space-3); border-block-end: 1px solid var(--color-border); }
+
+.refresh-note--refreshing { color: var(--color-text-muted); background: var(--color-surface-2); }

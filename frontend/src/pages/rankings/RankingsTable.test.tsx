@@ -28,7 +28,7 @@ describe('RankingsTable', () => {
     expect(header(/^Rank/)).toHaveAttribute('aria-sort', 'ascending');
     expect(header(/^PPG Actual/)).toHaveAttribute('aria-sort', 'none');
     expect(header(/^xPPG Expected/)).toBeInTheDocument();
-    expect(header(/^ROS PPG Projection \(model\)/)).toBeInTheDocument();
+    expect(header(/^ROS PPG Projection \(blend\)/)).toBeInTheDocument();
   });
 
   it('sorts by a column on click and toggles direction on a second click', async () => {

@@ -2,7 +2,7 @@
 
 The free plan gives 500 credits a month. Listing events is free; each game's props cost
 (markets x regions) = 7 credits. To fit a season in the free plan, each game's props are
-bought ONCE, inside PROPS_WINDOW_HOURS before kickoff (about 16 x 7 = ~112 credits a week).
+bought ONCE, inside PROPS_WINDOW_HOURS (72) before kickoff (about 16 x 7 = ~112 credits a week).
 Lines move a little after that; buying again needs an explicit force (CLI --force-props).
 
 - Every purchase is logged per event in external_api_calls, so the budget survives
@@ -32,7 +32,7 @@ BASE_URL = "https://api.the-odds-api.com/v4/sports/americanfootball_nfl"
 SOURCE = "vegas_props"
 CALL_LOG_SOURCE = "odds_api"
 REGIONS = "us"
-PROPS_WINDOW_HOURS = 30
+PROPS_WINDOW_HOURS = 72          # books post most player props 2-3 days out
 EMPTY_RETRY_HOURS = 6
 CREDIT_RESERVE = 10
 PARSE_ERRORS = (KeyError, TypeError, ValueError, AttributeError)

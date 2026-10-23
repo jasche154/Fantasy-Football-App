@@ -26,11 +26,21 @@ export const RANKING_COLUMNS: readonly ColumnDef[] = [
   { key: 'games', label: 'GP', tag: 'Actual', align: 'end', title: 'Games played' },
   { key: 'ppg', label: 'PPG', tag: 'Actual', align: 'end', title: 'Actual fantasy points per game' },
   { key: 'expected_ppg', label: 'xPPG', tag: 'Expected', align: 'end', title: 'Expected fantasy points per game from opportunity (nflverse)' },
-  { key: 'ros_ppg', label: 'ROS PPG', tag: 'Projection (model)', align: 'end', title: 'Rest-of-season points per game, our model' },
+  { key: 'ros_ppg', label: 'ROS PPG', tag: 'Projection (blend)', align: 'end', title: 'Rest-of-season points per game: 45% model, 35% Yahoo ROS experts, 20% this week\'s ESPN/props, adjusted for injuries' },
   { key: 'schedule_factor', label: 'Sched', tag: 'Projection (model)', align: 'end', title: 'Remaining schedule vs average, opponent-adjusted (+ = easier); already included in ROS PPG' },
   { key: 'trade_value', label: 'Value', tag: 'Projection (model)', align: 'end', title: 'Rest-of-season points above replacement, our model' },
   { key: 'ecr', label: 'ECR', tag: 'Expert', align: 'end', title: 'FantasyPros expert consensus rank' },
 ];
+
+function rosTitle(row: RankedPlayer): string {
+  const s = row.ros_sources;
+  if (!s) return 'Rest-of-season points per game';
+  const parts = [`model ${formatNumber(s.model)}`];
+  if (s.experts !== null) parts.push(`Yahoo ROS experts ${formatNumber(s.experts)} (rank ${formatNumber(s.expert_rank, 1)})`);
+  if (s.weekly !== null) parts.push(`this week ${formatNumber(s.weekly)}`);
+  if (s.availability < 1) parts.push(`expected to play ${Math.round(s.availability * 100)}% of remaining games`);
+  return `Blend of ${parts.join(', ')}`;
+}
 
 function RankingRow({ row }: { row: RankedPlayer }) {
   return (
@@ -43,7 +53,11 @@ function RankingRow({ row }: { row: RankedPlayer }) {
       <td className="num">{formatInteger(row.games)}</td>
       <td className="num num--strong">{formatNumber(row.ppg)}</td>
       <td className="num">{formatNumber(row.expected_ppg)}</td>
-      <td className="num">{formatNumber(row.ros_ppg)}</td>
+      <td className="num" title={rosTitle(row)}>{formatNumber(row.ros_ppg)}
+        {row.ros_sources?.expert_rank != null && (
+          <span className="source-rank">experts {row.player.position}{formatNumber(row.ros_sources.expert_rank, 0)}</span>
+        )}
+      </td>
       <td className={`num sos-text sos-text--${factorTone(row.schedule_factor)}`}>{factorLabel(row.schedule_factor)}</td>
       <td className="num">
         <span className="value-pill">{formatNumber(row.trade_value, 0)}</span>

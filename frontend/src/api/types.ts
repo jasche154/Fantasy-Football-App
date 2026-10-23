@@ -50,6 +50,14 @@ export interface RankedPlayer {
   ecr: number | null;
   /** Remaining-schedule strength applied to ros_ppg (>1 = easier). */
   schedule_factor: number;
+  /** Inputs to the blended ros_ppg. */
+  ros_sources?: {
+    model: number;
+    experts: number | null;
+    expert_rank: number | null;
+    weekly: number | null;
+    availability: number;
+  };
 }
 
 export interface RankingsResponse {
@@ -407,7 +415,7 @@ export interface TradeOffer {
   evaluation: TradeResult;
 }
 
-export type SourceRefreshState = 'updated' | 'fresh' | 'not_configured' | 'disabled' | 'busy' | 'error';
+export type SourceRefreshState = 'updated' | 'fresh' | 'not_configured' | 'disabled' | 'busy' | 'refreshing' | 'error';
 
 export interface SourceRefreshStatus {
   state: SourceRefreshState;

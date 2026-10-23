@@ -126,10 +126,58 @@ def _refresh_one(session: Session, http: httpx.Client, settings: Settings, sourc
         return _status("error", f"{LABELS[source]} returned data this app couldn't read; kept the last snapshot.")
 
 
+PROPS_CHECK_HOURS = 2         # how often a page view may look for props that came due
+
+
+def _stale_sources(session: Session, settings: Settings, season: int, week: int) -> list[str]:
+    """Sources a refresh would actually touch right now (cheap: database reads only)."""
+    now = datetime.now(timezone.utc)
+    stale = []
+    for source in settings.weekly_sources:
+        if source in FREE_SOURCES:
+            if not _is_fresh(session, season, week, source) and not in_backoff(session, source):
+                stale.append(source)
+        elif source == sleeper.PLAYERS_SOURCE:
+            latest = last_call(session, source)
+            if not (latest and latest[1] and now - latest[0] < timedelta(hours=STATUS_CACHE_HOURS)):
+                stale.append(source)
+        elif source == odds_api.SOURCE and settings.odds_api_key:
+            latest = last_call(session, odds_api.CALL_LOG_SOURCE)
+            if latest is None or now - latest[0] >= timedelta(hours=PROPS_CHECK_HOURS):
+                stale.append(source)
+    return stale
+
+
+def _run_in_background(bind, season: int, week: int) -> None:
+    try:
+        with Session(bind) as session:
+            refresh_sources(session, season, week)
+    except Exception:                                   # never let a background thread die silently
+        log.exception("background refresh failed")
+
+
+def start_background_refresh(session: Session, season: int, week: int,
+                             settings: Settings | None = None) -> dict[str, dict] | None:
+    """Kick off a refresh of stale sources without making the page wait.
+
+    Returns {source: "refreshing" status} for what was started, None when nothing is stale
+    or a refresh is already running.
+    """
+    settings = settings or get_settings()
+    stale = _stale_sources(session, settings, season, week)
+    if not stale or _refresh_lock.locked():
+        return None
+    threading.Thread(target=_run_in_background, args=(session.get_bind(), season, week),
+                     name="weekly-refresh", daemon=True).start()
+    return {source: _status("refreshing", "Updating in the background; reload in a moment.") for source in stale}
+
+
 def refresh_sources(session: Session, season: int, week: int, settings: Settings | None = None,
                     force: bool = False, http: httpx.Client | None = None,
                     force_props: bool = False) -> dict[str, dict]:
     """{source: {"state": updated|fresh|not_configured|disabled|busy|error, "rows", "message"}}.
+
+    Runs in the caller's thread; page requests use start_background_refresh instead.
 
     `force` re-fetches the free sources (Yahoo, ESPN). Props follow their credit budget
     unless `force_props` re-buys games already bought.

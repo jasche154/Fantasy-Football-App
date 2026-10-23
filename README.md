@@ -168,8 +168,19 @@ For each QB/RB/WR/TE this season:
 2. `base = w × rate + (1 − w) × prior`, where `w = games / (games + 4)`. The prior is
    last season's PPG if the player had at least 4 games, otherwise the position's
    replacement level.
-3. `ros_ppg = base × remaining-schedule factor`: the average adjusted defense factor (below)
+3. `model = base × remaining-schedule factor`: the average adjusted defense factor (below)
    of the opponents left on the player's schedule. The Rankings page shows it as **Sched**.
+4. **Consensus blend:**
+   `ros_ppg = 45% model + 35% Yahoo ROS experts + 20% this week's ESPN/props projection`,
+   re-weighted when an input is missing.
+   - Expert ROS ranks (Yahoo's 40+ expert consensus and Josh & Hayden) become points:
+     ROS rank N gets the Nth best model projection at the position.
+   - Players on IR, PUP or suspended lose 4 games; Out or Doubtful lose 1.
+   - Hover a ROS PPG value to see its inputs.
+   - Example: Jonathan Taylor (standard) goes from model 17.9 to 15.6 (RB7) because the experts
+     rank him around RB10 and ESPN projects 12.7 this week.
+   - The blend can't be backtested (there's no stored history of expert ROS ranks). The model
+     part is backtested below.
 
 ### Adjusted strength of schedule
 Raw "fantasy points allowed" flatters a defense that happened to face weak offenses. For
@@ -408,8 +419,8 @@ either one, remove it from `WEEKLY_SOURCES`.
 **The Odds API:** sign up at <https://the-odds-api.com> for a free key and add it to
 `backend/.env` as `ODDS_API_KEY`. Listing games is free; each game's props cost 7 credits
 (7 markets × 1 region). To fit the free plan, **each game's props are bought once, in the
-30 hours before kickoff** (about 16 × 7 = 112 credits a week), so expect props to appear
-the day before each game. Every purchase is logged in the database, so restarts don't
+72 hours before kickoff** (about 16 × 7 = 112 credits a week), so props show up two to three
+days before each game. Every purchase is logged in the database, so restarts don't
 re-buy anything; each game is stored as soon as it's bought, so a failure partway through
 keeps what was paid for. Refreshes stop while fewer than 17 credits remain and back off
 30 minutes after a failed call. Re-buying lines that moved is only possible on purpose:

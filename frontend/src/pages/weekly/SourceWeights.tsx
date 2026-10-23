@@ -4,6 +4,7 @@ import { formatFraction } from '../../lib/format';
 
 /** Backend source keys used by the refresh report (not the blend keys). */
 const REFRESH_LABELS: Readonly<Record<string, string>> = {
+  sleeper_status: 'Sleeper injury status',
   vegas_props: 'Vegas player props',
   yahoo_experts: 'Yahoo experts',
   espn: 'ESPN',
@@ -52,9 +53,15 @@ export function RefreshNotes({ statuses }: RefreshNotesProps) {
   const notes = Object.entries(statuses ?? {}).filter(
     ([, status]) => status.state === 'error' || status.state === 'not_configured',
   );
-  if (notes.length === 0) return null;
+  const refreshing = Object.entries(statuses ?? {}).filter(([, status]) => status.state === 'refreshing');
+  if (notes.length === 0 && refreshing.length === 0) return null;
   return (
     <ul className="refresh-notes" aria-label="Source status">
+      {refreshing.length > 0 && (
+        <li className="refresh-note refresh-note--refreshing" role="status">
+          <span>Updating {refreshing.map(([source]) => REFRESH_LABELS[source] ?? source).join(', ')} in the background. The rankings below use the last stored data and will update shortly.</span>
+        </li>
+      )}
       {notes.map(([source, status]) => (
         <li key={source} className={`refresh-note refresh-note--${status.state}`}>
           <Icon name="alert" size={14} />
