@@ -258,6 +258,10 @@ def test_refresh_keeps_old_refresh_token_when_not_rotated_and_errors():
         yahoo.refresh_token(client, "cid", "cs", "uri", yahoo.YahooToken("A", None, 0))
     with pytest.raises(yahoo.YahooAuthError):
         yahoo.exchange_code(mock_client(lambda r: httpx.Response(400)), "c", "s", "u", "bad")
+    yahoo_says = mock_client(lambda r: httpx.Response(401, json={"error": "invalid_client",
+                                                                   "error_description": "client authentication failed"}))
+    with pytest.raises(yahoo.YahooAuthError, match="invalid_client - client authentication failed"):
+        yahoo.exchange_code(yahoo_says, "c", "s", "u", "bad")
 
 
 def test_api_get_requests_json_with_bearer_and_maps_errors():
@@ -300,20 +304,21 @@ def issue_state(settings: Settings | None = None) -> str:
     return dict(httpx.URL(url).params)["state"]
 
 
-def test_yahoo_state_is_required_single_use_and_bounded():
-    state = issue_state()
-    yahoo_sync.check_state(state, REDIRECT)
-    with pytest.raises(yahoo.YahooAuthError, match="stale"):
-        yahoo_sync.check_state(state, REDIRECT)              # single use
+def test_yahoo_state_is_signed_expires_and_survives_restarts(monkeypatch):
+    settings = yahoo_settings()
+    state = issue_state(settings)
+    yahoo_sync.check_state(state, settings)                   # no server memory needed (restart-safe)
+    yahoo_sync.check_state(state, yahoo_settings())           # a "restarted" process with the same key
+    with pytest.raises(yahoo.YahooAuthError, match="expired or wasn't created"):
+        yahoo_sync.check_state(state, yahoo_settings(token_encryption_key=Fernet.generate_key().decode()))
+    with pytest.raises(yahoo.YahooAuthError, match="expired or wasn't created"):
+        yahoo_sync.check_state("forged-state", settings)
+    monkeypatch.setattr(yahoo_sync, "STATE_TTL_SECONDS", -1)
+    with pytest.raises(yahoo.YahooAuthError, match="expired"):
+        yahoo_sync.check_state(state, settings)
     with pytest.raises(yahoo.YahooAuthError, match="whole redirected URL"):
-        yahoo_sync.check_state(None, REDIRECT)               # bare code can't skip the check
-    yahoo_sync.check_state(None, "oob")                      # out-of-band flow has no state
-    oldest = issue_state()
-    for _ in range(yahoo_sync.MAX_PENDING_STATES):
-        issue_state()
-    assert len(yahoo_sync._pending_states) == yahoo_sync.MAX_PENDING_STATES
-    with pytest.raises(yahoo.YahooAuthError):
-        yahoo_sync.check_state(oldest, REDIRECT)             # evicted
+        yahoo_sync.check_state(None, settings)                # bare code can't skip the check
+    yahoo_sync.check_state(None, yahoo_settings(yahoo_redirect_uri="oob"))
 
 
 def test_yahoo_config_and_key_checked_before_any_oauth_step(session, seeded):
