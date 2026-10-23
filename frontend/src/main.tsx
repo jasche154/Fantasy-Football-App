@@ -7,6 +7,7 @@ import './styles/layout.css';
 import './styles/components.css';
 import './styles/tables.css';
 import './styles/weekly.css';
+import './styles/charts.css';
 import './styles/dashboard.css';
 import './styles/trade.css';
 import './styles/player.css';

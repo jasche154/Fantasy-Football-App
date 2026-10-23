@@ -28,6 +28,8 @@ only *explains* numbers that came back from a tool call. Every output is labeled
   corrected for the offenses it faced; drives weekly matchups and rest-of-season values
 - **Rankings:** rest-of-season rankings for your league's scoring (PPR, half, standard,
   TE premium, superflex) with actual, expected, and projected points side by side
+- **Chart Studio:** charts built automatically from your selection (two metrics → scatter split at
+  the medians, one → ranked bars, players → week-by-week trend), five one-click presets, SVG download
 - **Advanced-stat leaderboards:** 26 whitelisted metrics (RYOE, separation, YAC over
   expected, CPOE, time to throw, target share, EPA per play, and more), volume-weighted the right way
 - **Player pages:** season summary, weekly game log, NGS advanced stats, projection
@@ -115,6 +117,7 @@ Open <http://localhost:5173>. The UI talks to `http://localhost:8000` by default
 | **Dashboard** | Top buy-low and sell-high players with the reason behind each, Sleeper's most-added players, data freshness |
 | **Week X Rankings** | This week's projections by position; pick any week. Each row shows the matchup grade (opponent-adjusted, #1 = easiest), the Vegas implied team total, the blended projection, and every source's number (props, Josh & Hayden, Yahoo, ESPN, model). **Schedule strength** switches to defenses ranked by adjusted points allowed and each team's upcoming opponents. **Refresh sources** re-pulls Yahoo and ESPN (Vegas props follow their credit budget) |
 | **Rankings** | Rest-of-season rankings by position; sort by actual, expected, or projected points, schedule strength, trade value, or ECR |
+| **Chart Studio** | Click a quick chart (Volume pays, Separators, RYOE leaders, Downfield QBs, Opportunity score) or pick one or two season metrics and a position; the chart type is chosen for you. Add players to highlight them, or add players with no metric for a weekly trend of any stat. **Download SVG** saves the chart |
 | **Advanced Stats** | Pick a category and metric, season, and minimum volume, then rank every qualified player |
 | **Trade Calculator** | Search players into "You give" / "You get". See each side's value, the verdict meter, and suggestions that even it out; the URL is shareable |
 | **Buy / Sell** | Full buy-low and sell-high lists with every reason, filtered by position |
@@ -404,6 +407,8 @@ docs/                       plan, data sources, API contract
 
 ## Design notes
 
+- **Look and feel:** an editorial sports style (near-black and charcoal, brick-red accent, Kanit italic
+  headings, Mulish body text from Google Fonts), with a matching light theme. Charts are plain SVG; no chart library.
 - **Player identity crosswalk:** Yahoo, Sleeper, FantasyPros, PFR, ESPN, and nflverse each use
   different IDs. `players` is the hub, keyed by nflverse's `gsis_id` (unique) and filled
   from the DynastyProcess crosswalk.
