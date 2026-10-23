@@ -326,3 +326,14 @@ class ExpertRanking(Base):
     best: Mapped[int | None]
     worst: Mapped[int | None]
     fetched_at: Mapped[datetime] = mapped_column(default=utc_now)
+
+
+class DataLoad(Base):
+    """One finished populate_stats run. Its id changes whenever data is reloaded, which lets
+    caches notice reloads that keep row counts the same (e.g. stat corrections)."""
+
+    __tablename__ = "data_loads"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    seasons: Mapped[str]                       # e.g. "2025,2026"
+    finished_at: Mapped[datetime] = mapped_column(default=utc_now)

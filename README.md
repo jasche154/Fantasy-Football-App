@@ -38,8 +38,7 @@ copy .env.example .env           # macOS / Linux: cp .env.example .env
 ### 2. Database and data
 
 ```bash
-python -m database.create_tables      # brand-new database: creates tables, stamps the migration version
-alembic upgrade head                  # existing database: applies new migrations instead
+python -m database.create_tables      # creates a new database, or upgrades an existing one to the latest schema
 python -m database.populate_stats     # downloads 2021 through the current season (~1 minute)
 ```
 
@@ -52,7 +51,9 @@ python -m database.populate_stats --all                 # reload everything
 ```
 
 A season only replaces existing rows after its download succeeds, so a network hiccup
-never wipes data.
+never wipes data. `populate_stats` also brings the schema up to date first, and it works on
+databases built by the project's older scripts (all migrations are idempotent).
+`alembic upgrade head` still works for databases Alembic already tracks.
 
 ## Configuration
 
@@ -80,6 +81,7 @@ python -m pytest                                   # all tests run on an in-memo
 python -m pytest --cov=. --cov-report=term-missing # with coverage
 ```
 
+GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs the suite on every pull request.
 Tests never touch `database/fantasy.db` or read `backend/.env`.
 
 ## Project structure

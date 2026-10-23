@@ -19,9 +19,10 @@ import polars as pl
 from sqlalchemy import delete, insert, select
 from sqlalchemy.orm import Session
 
+from database.create_tables import ensure_schema
 from database.db import engine
 from database.models import (
-    Base, ExpertRanking, Player, PlayerExpectedPointsWeekly, PlayerPassingAdvancedWeekly,
+    Base, DataLoad, ExpertRanking, Player, PlayerExpectedPointsWeekly, PlayerPassingAdvancedWeekly,
     PlayerReceivingAdvancedWeekly, PlayerRushingAdvancedWeekly, PlayerSnapCountsWeekly,
     PlayerStatsWeekly,
 )
@@ -227,6 +228,12 @@ def load_expert_rankings(session: Session, index: PlayerIndex) -> None:
     log.info("weekly ECR (season %s week %s): %d rows", season, week, len(rows))
 
 
+def record_load(session: Session, seasons: Iterable[int]) -> None:
+    """Stamp the finished run so cached valuations notice the reload."""
+    session.add(DataLoad(seasons=",".join(str(s) for s in seasons)))
+    session.commit()
+
+
 def seasons_to_load(session: Session, current_season: int, reload_all: bool) -> list[int]:
     every_season = list(range(FIRST_SEASON, current_season + 1))
     if reload_all:
@@ -246,7 +253,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = parse_args(argv)
-    Base.metadata.create_all(engine)
+    log.info("Schema: %s", ensure_schema(engine))
     with Session(engine) as session:
         seasons = args.seasons or seasons_to_load(session, nfl.get_current_season(), args.all)
         log.info("Loading seasons: %s", seasons)
@@ -257,6 +264,7 @@ def main(argv: list[str] | None = None) -> None:
         sync_crosswalk(session, index)
         load_snap_counts(session, seasons, index)
         load_expert_rankings(session, index)
+        record_load(session, seasons)
     log.info("Done.")
 
 

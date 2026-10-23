@@ -110,8 +110,63 @@ def test_create_tables_builds_and_stamps_fresh_database(tmp_path, monkeypatch, c
     create_tables.main()
     assert inspect(fresh).has_table("player_snap_counts_weekly")
     assert inspect(fresh).has_table("alembic_version")
-    create_tables.main()
-    assert "already exists" in capsys.readouterr().out
+    create_tables.main()                                    # re-running is safe
+    assert capsys.readouterr().out.splitlines() == ["Tables created.", "Database is on the latest schema."]
+
+
+def _legacy_database(path):
+    """A database as main's old scripts left it: create_all() of the old models, never stamped."""
+    from sqlalchemy import text
+
+    from database.db import make_engine
+    from database.models import Base
+
+    legacy = make_engine(f"sqlite:///{path}")
+    Base.metadata.create_all(legacy)
+    with legacy.begin() as connection:
+        for table in ("expert_rankings", "player_snap_counts_weekly", "data_loads"):
+            connection.execute(text(f"DROP TABLE {table}"))
+        connection.execute(text("DROP INDEX ix_players_gsis_id"))
+        connection.execute(text("ALTER TABLE players DROP COLUMN fantasypros_id"))
+        connection.execute(text("ALTER TABLE teams DROP COLUMN name"))
+    return legacy
+
+
+def test_untracked_legacy_database_is_upgraded_not_stamped(tmp_path):
+    from sqlalchemy import inspect
+
+    from database.create_tables import ensure_schema
+
+    legacy = _legacy_database(tmp_path / "legacy.db")
+    assert ensure_schema(legacy) == "upgraded-legacy"
+    inspector = inspect(legacy)
+    assert "fantasypros_id" in {c["name"] for c in inspector.get_columns("players")}
+    assert "name" in {c["name"] for c in inspector.get_columns("teams")}
+    assert inspector.has_table("expert_rankings") and inspector.has_table("data_loads")
+    assert ensure_schema(legacy) == "upgraded"              # now tracked; no-op upgrade
+
+
+def test_migrations_downgrade_and_upgrade_cleanly(tmp_path):
+    from alembic import command
+    from sqlalchemy import inspect
+
+    from database.create_tables import alembic_config, ensure_schema
+
+    legacy = _legacy_database(tmp_path / "roundtrip.db")
+    ensure_schema(legacy)
+    config = alembic_config(legacy)
+    command.downgrade(config, "d7b5c4e6f566")
+    assert not inspect(legacy).has_table("expert_rankings")
+    command.upgrade(config, "head")
+    assert inspect(legacy).has_table("expert_rankings")
+
+
+def test_record_load_stamps_each_run(db):
+    from database.models import DataLoad
+
+    populate.record_load(db, [2025, 2026])
+    populate.record_load(db, [2026])
+    assert [r.seasons for r in db.query(DataLoad).order_by(DataLoad.id)] == ["2025,2026", "2026"]
 
 
 def test_foreign_keys_are_enforced(tmp_path):

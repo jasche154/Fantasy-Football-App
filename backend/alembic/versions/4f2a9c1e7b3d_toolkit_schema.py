@@ -105,14 +105,17 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Downgrade schema."""
-    op.drop_table("expert_rankings")
-    op.drop_index("ix_player_snap_counts_weekly_player_season_week", "player_snap_counts_weekly")
-    op.drop_table("player_snap_counts_weekly")
+    """Downgrade schema. Mirrors the guarded upgrade: only drops what exists."""
+    for table in ("expert_rankings", "player_snap_counts_weekly"):
+        if _has_table(table):
+            op.drop_table(table)
     for table in WEEKLY_TABLES:
-        op.drop_index(f"ix_{table}_player_season_week", table)
-    op.drop_index("ix_players_gsis_id", "players")
-    with op.batch_alter_table("teams") as batch:
-        batch.drop_column("name")
-    with op.batch_alter_table("players") as batch:
-        batch.drop_column("fantasypros_id")
+        index = f"ix_{table}_player_season_week"
+        if _has_table(table) and _has_index(table, index):
+            op.drop_index(index, table)
+    if _has_index("players", "ix_players_gsis_id"):
+        op.drop_index("ix_players_gsis_id", "players")
+    for table, column in (("teams", "name"), ("players", "fantasypros_id")):
+        if _has_column(table, column):
+            with op.batch_alter_table(table) as batch:
+                batch.drop_column(column)
