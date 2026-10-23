@@ -5,6 +5,7 @@ import type {
   IntegrationsStatus,
   ToolDef,
   TradeRequest,
+  TradeOffer,
   TradeResult,
   WeeklyRefreshResponse,
   YahooImportResult,
@@ -69,4 +70,17 @@ export function importYahooLeague(
 /** Re-fetch Yahoo and ESPN for a week (force skips their caches). Props keep their credit budget. */
 export function refreshWeeklySources(week: number, force = true): Promise<WeeklyRefreshResponse> {
   return apiRequest('/api/rankings/weekly/refresh', { method: 'POST', query: { week, force } });
+}
+
+export function findTrades(
+  myPlayers: readonly number[],
+  settings: TradeRequest['settings'],
+  wantPosition?: string,
+  signal?: AbortSignal,
+): Promise<{ weeks_remaining: number; results: TradeOffer[] }> {
+  return apiRequest('/api/trade/find', {
+    method: 'POST',
+    body: { my_players: [...myPlayers], want_position: wantPosition || undefined, settings },
+    signal,
+  });
 }

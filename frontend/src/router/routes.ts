@@ -5,6 +5,7 @@ export type StaticRouteName =
   | 'rankings'
   | 'weekly'
   | 'charts'
+  | 'waivers'
   | 'stats'
   | 'trade'
   | 'market'
@@ -27,6 +28,7 @@ const STATIC_ROUTES: Readonly<Record<string, StaticRouteName>> = {
   rankings: 'rankings',
   weekly: 'weekly',
   charts: 'charts',
+  waivers: 'waivers',
   stats: 'stats',
   trade: 'trade',
   market: 'market',
@@ -39,6 +41,7 @@ export const paths = {
   rankings: '/rankings',
   weekly: '/weekly',
   charts: '/charts',
+  waivers: '/waivers',
   stats: '/stats',
   trade: '/trade',
   market: '/market',

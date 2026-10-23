@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     weekly_auto_refresh: bool = True
     # Outside sources to fetch. Yahoo's and ESPN's endpoints are unofficial (see
     # docs/DATA_SOURCES.md); drop either here to stop contacting it.
-    weekly_sources: list[str] = ["yahoo_experts", "espn", "vegas_props"]
+    weekly_sources: list[str] = ["sleeper_status", "yahoo_experts", "espn", "vegas_props"]
 
     yahoo_client_id: str | None = None
     yahoo_client_secret: str | None = None

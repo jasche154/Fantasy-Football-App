@@ -109,7 +109,8 @@ def test_model_stats_scales_to_rate_and_matchup():
                                                           receiving_tds=1), line(2, "D", 8, receptions=4, receiving_yards=40)))
     easy = Matchup("OPP", True, sos_factor=1.2, sos_rank=1, implied_total=27.5, team_ppg=22.0, game_final=False)
     stats = model_stats(player, 15.0, easy, PPR)
-    expected = 15.0 * 1.2 * (27.5 / 22.0) ** 0.5
+    from services.weekly_model import IMPLIED_TOTAL_WEIGHT, SOS_WEIGHT
+    expected = 15.0 * 1.2 ** SOS_WEIGHT * (27.5 / 22.0) ** IMPLIED_TOTAL_WEIGHT
     assert points_from_stats(stats, "WR", PPR) == pytest.approx(expected, abs=0.05)
     capped = Matchup("OPP", True, 1.0, None, implied_total=60.0, team_ppg=20.0, game_final=False)
     assert capped.implied_factor == 1.25

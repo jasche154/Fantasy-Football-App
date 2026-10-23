@@ -1,5 +1,5 @@
 """Convert service results into JSON-ready dicts shared by the REST API and agent tools."""
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 from services.insights import Insight
 from services.leaderboards import LeaderboardRow
@@ -81,27 +81,46 @@ def matchup(item: Matchup) -> dict:
             "game_final": item.game_final}
 
 
-def weekly_player(player: WeeklyPlayer) -> dict:
+def flag(item) -> dict:
+    return {"key": item.key, "kind": item.kind, "direction": item.direction, "label": item.label,
+            "detail": item.detail}
+
+
+def weekly_player(player: WeeklyPlayer, flags: Sequence = ()) -> dict:
     return {
         "rank": player.rank, "pos_rank": player.pos_rank,
         "player": {"id": player.player_id, "name": player.name, "position": player.position,
                    "team": player.team},
-        "projection": player.projection, "matchup": matchup(player.matchup),
+        "projection": player.projection, "if_active": player.if_active, "play_prob": player.play_prob,
+        "status": player.status, "floor": player.floor, "ceiling": player.ceiling,
+        "boost_points": player.boost_points, "pct_rostered": player.pct_rostered,
+        "scenarios": [{"teammate": s.teammate, "teammate_status": s.teammate_status,
+                       "extra_points": s.extra_points, "projection": s.projection} for s in player.scenarios],
+        "matchup": matchup(player.matchup),
         "sources": {key: {"points": round(v.points, 2), "rank": v.rank} for key, v in player.sources.items()},
         "expert_ranks": dict(player.expert_ranks),
+        "flags": [flag(f) for f in flags],
     }
 
 
+def explanation(player: WeeklyPlayer, flags: Sequence = ()) -> dict:
+    return {**weekly_player(player, flags),
+            "steps": [{"label": s.label, "value": s.value, "detail": s.detail} for s in player.explanation]}
+
+
 def weekly_rankings(rankings: WeeklyRankings, position: str | None, limit: int,
-                    statuses: Mapping[str, dict] | None) -> dict:
-    players = [p for p in rankings.players if position is None or p.position == position][:limit]
+                    statuses: Mapping[str, dict] | None, flags: Mapping[int, Sequence] | None = None,
+                    ids: Sequence[int] | None = None) -> dict:
+    flags = flags or {}
+    players = [p for p in rankings.players if (position is None or p.position == position)
+               and (not ids or p.player_id in ids)][:limit]
     return {
         "season": rankings.season, "week": rankings.week, "scoring": rankings.scoring,
         "weights": [{"key": k, "label": SOURCE_LABELS[k], "weight": w, "players": rankings.source_counts.get(k, 0)}
                     for k, w in WEIGHTS.items()],
         "sos_tilt": FINAL_SOS_TILT, "refresh": statuses,
-        "results": [{**weekly_player(p), "rank": i} if position else weekly_player(p)
-                    for i, p in enumerate(players, start=1)],
+        "results": [{**weekly_player(p, flags.get(p.player_id, ())), "rank": i} if position
+                    else weekly_player(p, flags.get(p.player_id, ())) for i, p in enumerate(players, start=1)],
     }
 
 
@@ -129,3 +148,18 @@ def schedule_strength(valuation: Valuation, position: str, week: int) -> dict:
                      for i, (d, f) in enumerate(defenses, start=1)],
         "offenses": offenses,
     }
+
+
+def waiver(candidate) -> dict:
+    from services.waivers import faab_label
+
+    return {**weekly_player(candidate.player, candidate.flags), "pct_rostered": candidate.pct_rostered,
+            "ros_value": candidate.ros_value, "week_value": candidate.week_value,
+            "schedule_factor": round(candidate.schedule_factor, 3), "score": candidate.score,
+            "faab_pct": candidate.faab_pct, "faab_label": faab_label(candidate.faab_pct),
+            "reasons": list(candidate.reasons)}
+
+
+def trade_offer(offer, weeks_remaining: int) -> dict:
+    return {"give": [player_ref(p) for p in offer.give], "get": player_ref(offer.get),
+            "get_ros_ppg": offer.get.ros_ppg, "evaluation": trade(offer.evaluation, weeks_remaining)}

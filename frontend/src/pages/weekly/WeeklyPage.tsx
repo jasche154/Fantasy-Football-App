@@ -17,15 +17,17 @@ import { filterToPosition, positionFilterLabel, type PositionFilterValue } from 
 import { describeSettings } from '../../state/leagueSettings';
 import { useLeagueSettings } from '../../state/SettingsContext';
 import { ScheduleStrengthView } from './ScheduleStrengthView';
+import { StartSit } from './StartSit';
 import { RefreshNotes, SourceWeights } from './SourceWeights';
 import { WeeklyTable } from './WeeklyTable';
 
 const WEEKLY_LIMIT = 200;
 const LAST_WEEK = 18;
 const WEEK_OPTIONS = Array.from({ length: LAST_WEEK }, (_, index) => ({ value: index + 1, label: `Week ${index + 1}` }));
-type View = 'rankings' | 'schedule';
+type View = 'rankings' | 'startsit' | 'schedule';
 const VIEWS: readonly { value: View; label: string }[] = [
   { value: 'rankings', label: 'Rankings' },
+  { value: 'startsit', label: 'Start / Sit' },
   { value: 'schedule', label: 'Schedule strength' },
 ];
 
@@ -50,7 +52,7 @@ function ViewToggle({ value, onChange }: { value: View; onChange: (view: View) =
 function Legend({ sosTilt }: { sosTilt: number }) {
   return (
     <p className="legend">
-      <span><strong>Proj</strong> = weighted blend of every source covering the player (weights above, re-balanced when one is missing).</span>
+      <span><strong>Proj</strong> = weighted blend of every source covering the player (weights above, re-balanced when one is missing), plus teammate-injury boosts, times the chance to play. The small range is the 10th–90th percentile outcome. Click <strong>Why?</strong> for the full reasoning.</span>
       <span><strong>Expert ranks</strong> become points: rank N gets the Nth best numeric projection at the position.</span>
       <span>
         <strong>Matchup</strong> = opponent-adjusted defense strength (#1 = easiest); it drives the model and adds a
@@ -114,7 +116,7 @@ export function WeeklyPage() {
         }
       />
       <ViewToggle value={view} onChange={setView} />
-      {view === 'schedule' ? (
+      {view === 'startsit' ? <StartSit week={shownWeek} /> : view === 'schedule' ? (
         <section aria-label="Schedule strength">
           {!position && <p className="field__hint">Showing WR. Pick a position above to rate defenses against it.</p>}
           <ScheduleStrengthView position={position ?? 'WR'} week={shownWeek} />
@@ -136,7 +138,7 @@ export function WeeklyPage() {
                 </div>
                 <RefreshNotes statuses={data.refresh} />
                 <Legend sosTilt={data.sos_tilt} />
-                <WeeklyTable rows={data.results} caption={`${label} projections for ${weekContext(data)}.`} />
+                <WeeklyTable rows={data.results} week={data.week} caption={`${label} projections for ${weekContext(data)}.`} />
               </>
             )}
           </AsyncView>

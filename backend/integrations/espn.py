@@ -70,8 +70,11 @@ def projection_rows(payload: dict, season: int, week: int, matcher: PlayerMatche
             continue
         team = TEAMS.get(player.get("proTeamId"))
         player_id = matcher.match(player["fullName"], team, position, espn_id=str(player.get("id")))
-        rows.append(source_row(season, week, SOURCE, player_id=player_id, name=player["fullName"],
-                               position=position, team=team, stats=stats))
+        row = source_row(season, week, SOURCE, player_id=player_id, name=player["fullName"],
+                         position=position, team=team, stats=stats)
+        owned = (player.get("ownership") or {}).get("percentOwned")
+        row["pct_rostered"] = round(float(owned), 1) if isinstance(owned, (int, float)) else None
+        rows.append(row)
     return rows
 
 

@@ -9,6 +9,7 @@ from services import serialize
 from services.insights import find_insights
 from services.league import LeagueSettings
 from services.trade import evaluate_trade
+from services.trade_finder import find_trades
 
 router = APIRouter(prefix="/api")
 
@@ -54,3 +55,19 @@ def sell_high(position: Position | None = None, limit: int = Query(10, ge=1, le=
               league: LeagueSettings = Depends(league_params), session: Session = Depends(get_session)) -> dict:
     valuation = valuation_or_503(session, league)
     return serialize.insights(valuation, find_insights(valuation, "sell_high", position, limit))
+
+
+class TradeFindRequest(BaseModel):
+    my_players: list[int] = Field(..., min_length=1, max_length=10)
+    want_position: Position | None = None
+    limit: int = Field(10, ge=1, le=25)
+    settings: LeagueBody = LeagueBody()
+
+
+@router.post("/trade/find")
+def trade_find(request: TradeFindRequest, session: Session = Depends(get_session)) -> dict:
+    """Offers the other manager should accept: fair or slight-edge 1-for-1 and 2-for-1 deals."""
+    valuation = valuation_or_503(session, request.settings.to_settings())
+    offers = find_trades(valuation, request.my_players, request.want_position, request.limit)
+    return {"weeks_remaining": valuation.weeks_remaining,
+            "results": [serialize.trade_offer(o, valuation.weeks_remaining) for o in offers]}

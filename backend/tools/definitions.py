@@ -18,6 +18,8 @@ from services.players import AmbiguousPlayer, PlayerNotFound, player_profile, re
 from services.projections import available_seasons, latest_season
 from services.trade import evaluate_trade
 from services.valuation import NoDataError, build_valuation
+from services.trade_finder import find_trades
+from services.waivers import waiver_candidates
 from services.weekly_rankings import FIRST_WEEK, LAST_WEEK, build_weekly_rankings, default_week
 from tools.registry import Tool, ToolError, ToolRegistry, ToolUnavailable
 
@@ -153,6 +155,32 @@ def _weekly(session: Session, week: int | None = None, position: str | None = No
     return serialize.weekly_rankings(rankings, position, limit, None)
 
 
+def _explain(session: Session, player: str, week: int | None = None, **league: Any) -> dict:
+    ref = resolve_player(session, player)
+    rankings = build_weekly_rankings(session, _league(**league), week)
+    item = next((p for p in rankings.players if p.player_id == ref.id), None)
+    if item is None:
+        raise ToolError(f"{ref.name} has no projection for week {rankings.week} (bye, ruled out, or not covered).")
+    return {"week": rankings.week, **serialize.explanation(item)}
+
+
+def _waivers(session: Session, position: str | None = None, max_rostered: float = 50, limit: int = 10,
+             **league: Any) -> dict:
+    settings = _league(**league)
+    valuation = build_valuation(session, settings)
+    rankings = build_weekly_rankings(session, settings)
+    return {"week": rankings.week, "results": [serialize.waiver(c) for c in
+                                               waiver_candidates(rankings, valuation, position, max_rostered, limit)]}
+
+
+def _find_trades(session: Session, my_players: list[str], want_position: str | None = None, **league: Any) -> dict:
+    valuation = build_valuation(session, _league(**league))
+    ids = [resolve_player(session, name).id for name in my_players]
+    return {"perspective": TRADE_PERSPECTIVE,
+            "results": [serialize.trade_offer(o, valuation.weeks_remaining)
+                        for o in find_trades(valuation, ids, want_position, 8)]}
+
+
 def _schedule_strength(session: Session, position: str = "WR", week: int | None = None, **league: Any) -> dict:
     valuation = build_valuation(session, _league(**league))
     return serialize.schedule_strength(valuation, position, week or default_week(valuation))
@@ -224,6 +252,20 @@ TOOLS = ToolRegistry([
          "team's upcoming and rest-of-season schedule.",
          _schema({"position": {**POSITION, "description": "Position to rate defenses against (default WR)."},
                   "week": WEEK, **LEAGUE}), _schedule_strength),
+    Tool("explain_projection",
+         "Step-by-step explanation of one player's projection for a week: recent production, matchup, each "
+         "source's number and weight, injury status and play probability, teammate injury boosts, and range.",
+         _schema({"player": PLAYER, "week": WEEK, **LEAGUE}, ["player"]), _explain),
+    Tool("get_waiver_targets",
+         "Waiver-wire adds for this week (rostered in at most max_rostered% of ESPN leagues), with scores, "
+         "FAAB bid suggestions, and reasons including injury-driven opportunity.",
+         _schema({"position": POSITION, "max_rostered": {"type": "number", "minimum": 0, "maximum": 100},
+                  "limit": _limit(25, 10), **LEAGUE}), _waivers),
+    Tool("find_trades",
+         "Find trade offers built around players the user is willing to move: fair or slight-edge 1-for-1 "
+         "and 2-for-1 deals, optionally for a wanted position.",
+         _schema({"my_players": {"type": "array", "items": PLAYER, "minItems": 1, "maxItems": 6},
+                  "want_position": POSITION, **LEAGUE}, ["my_players"]), _find_trades),
     Tool("get_expert_rankings", "FantasyPros expert consensus rankings (ECR), the latest stored snapshot.",
          _schema({"position": POSITION, "limit": _limit(100, 25)}), _experts),
     Tool("get_trending_players", "Most added or dropped players on Sleeper over the last 24 hours.",

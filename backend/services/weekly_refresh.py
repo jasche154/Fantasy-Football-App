@@ -26,9 +26,9 @@ import httpx
 from sqlalchemy.orm import Session
 
 from config import Settings, get_settings
-from integrations import espn, odds_api, yahoo_experts
+from integrations import espn, odds_api, sleeper, yahoo_experts
 from integrations.weekly_sources import (
-    FAILURE_BACKOFF_MINUTES, TIMEOUT_SECONDS, SourceError, in_backoff, last_fetched, record_call,
+    FAILURE_BACKOFF_MINUTES, TIMEOUT_SECONDS, SourceError, in_backoff, last_call, last_fetched, record_call,
 )
 
 log = logging.getLogger(__name__)
@@ -38,8 +38,10 @@ FREE_SOURCES: dict[str, Callable[[Session, httpx.Client, int, int], int]] = {
     yahoo_experts.SOURCE: yahoo_experts.refresh,
     espn.SOURCE: espn.refresh,
 }
-ALL_SOURCES = (*FREE_SOURCES, odds_api.SOURCE)
-LABELS = {yahoo_experts.SOURCE: "Yahoo", espn.SOURCE: "ESPN", odds_api.SOURCE: "The Odds API"}
+ALL_SOURCES = (sleeper.PLAYERS_SOURCE, *FREE_SOURCES, odds_api.SOURCE)
+LABELS = {yahoo_experts.SOURCE: "Yahoo", espn.SOURCE: "ESPN", odds_api.SOURCE: "The Odds API",
+          sleeper.PLAYERS_SOURCE: "Sleeper"}
+STATUS_CACHE_HOURS = 1       # live injury designations
 _refresh_lock = threading.Lock()
 
 
@@ -73,6 +75,23 @@ def _refresh_free(session: Session, http: httpx.Client, source: str, season: int
     return _status("updated", rows=rows)
 
 
+def _refresh_status(session: Session, http: httpx.Client, force: bool) -> dict:
+    """Sleeper live injury status (one 14 MB call, at most hourly)."""
+    latest = last_call(session, sleeper.PLAYERS_SOURCE)
+    if not force and latest and latest[1] and datetime.now(timezone.utc) - latest[0] < timedelta(hours=STATUS_CACHE_HOURS):
+        return _status("fresh")
+    if in_backoff(session, sleeper.PLAYERS_SOURCE):
+        return _status("error", f"The last Sleeper refresh failed; retrying after {FAILURE_BACKOFF_MINUTES} min.")
+    try:
+        rows = sleeper.refresh_status(session, http)
+    except sleeper.SleeperError as exc:
+        session.rollback()
+        record_call(session, sleeper.PLAYERS_SOURCE, ok=False)
+        raise SourceError(str(exc)) from exc
+    record_call(session, sleeper.PLAYERS_SOURCE, ok=True)
+    return _status("updated", rows=rows)
+
+
 def _refresh_props(session: Session, http: httpx.Client, settings: Settings, season: int,
                    week: int, force_props: bool) -> dict:
     if not settings.odds_api_key:
@@ -92,6 +111,8 @@ def _refresh_one(session: Session, http: httpx.Client, settings: Settings, sourc
     if source not in settings.weekly_sources:
         return _disabled()
     try:
+        if source == sleeper.PLAYERS_SOURCE:
+            return _refresh_status(session, http, force)
         if source == odds_api.SOURCE:
             return _refresh_props(session, http, settings, season, week, force_props)
         return _refresh_free(session, http, source, season, week, force)

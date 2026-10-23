@@ -15,6 +15,9 @@ import type {
   ScheduleStrengthResponse,
   TrendingRow,
   WeeklyRankingsResponse,
+  FlagsResponse,
+  ProjectionExplanation,
+  WaiversResponse,
 } from './types';
 
 export function getHealth(signal?: AbortSignal): Promise<{ status: string }> {
@@ -157,6 +160,8 @@ export function getExpertRankings(
 
 export interface WeeklyOptions extends ListOptions {
   week?: number;
+  /** Only these players (start/sit comparisons). */
+  ids?: readonly number[];
 }
 
 export function getWeeklyRankings(
@@ -165,7 +170,10 @@ export function getWeeklyRankings(
   signal?: AbortSignal,
 ): Promise<WeeklyRankingsResponse> {
   return apiRequest('/api/rankings/weekly', {
-    query: { week: options.week, position: options.position, limit: options.limit, ...settingsToParams(settings) },
+    query: {
+      week: options.week, position: options.position, limit: options.limit,
+      ids: options.ids?.length ? options.ids.join(',') : undefined, ...settingsToParams(settings),
+    },
     signal,
   });
 }
@@ -177,4 +185,35 @@ export function getScheduleStrength(
   signal?: AbortSignal,
 ): Promise<ScheduleStrengthResponse> {
   return apiRequest('/api/schedule-strength', { query: { position, week, ...settingsToParams(settings) }, signal });
+}
+
+export function getProjectionExplanation(
+  playerId: number,
+  settings: LeagueSettings,
+  week?: number,
+  signal?: AbortSignal,
+): Promise<ProjectionExplanation> {
+  return apiRequest(`/api/rankings/weekly/${encodeURIComponent(String(playerId))}/explain`, {
+    query: { week, ...settingsToParams(settings) },
+    signal,
+  });
+}
+
+export function getFlags(
+  settings: LeagueSettings,
+  options: { kind?: 'breakout' | 'regression' | 'risk'; position?: Position; limit?: number } = {},
+  signal?: AbortSignal,
+): Promise<FlagsResponse> {
+  return apiRequest('/api/insights/flags', { query: { ...options, ...settingsToParams(settings) }, signal });
+}
+
+export function getWaivers(
+  settings: LeagueSettings,
+  options: { position?: Position; maxRostered?: number; limit?: number } = {},
+  signal?: AbortSignal,
+): Promise<WaiversResponse> {
+  return apiRequest('/api/waivers', {
+    query: { position: options.position, max_rostered: options.maxRostered, limit: options.limit, ...settingsToParams(settings) },
+    signal,
+  });
 }

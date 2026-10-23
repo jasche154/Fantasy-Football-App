@@ -223,3 +223,48 @@
   font-weight: 700;
   text-align: center;
 }
+
+/* ---------- Injuries, flags, explanations, start/sit, waivers, trade finder ---------- */
+.injury-badge { margin-inline-start: var(--space-2); color: var(--color-warn); background: var(--color-warn-soft); }
+.injury-badge--high { color: var(--color-neg); background: var(--color-neg-soft); }
+
+.flag-chips { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-block-start: var(--space-1); }
+.flag-chip { padding: 1px var(--space-2); border-radius: var(--radius-pill); font-size: var(--text-2xs); font-weight: 700; white-space: nowrap; }
+.flag-chip--breakout { color: var(--color-pos); background: var(--color-pos-soft); }
+.flag-chip--regression.flag-chip--down, .flag-chip--risk { color: var(--color-neg); background: var(--color-neg-soft); }
+.flag-chip--regression.flag-chip--up { color: var(--color-pos); background: var(--color-pos-soft); }
+
+.why-btn { margin-inline-start: var(--space-2); padding: 0 var(--space-2); border: 1px solid var(--color-border-strong); border-radius: var(--radius-pill); font-size: var(--text-2xs); font-weight: 700; color: var(--color-text-muted); }
+.why-btn:hover, .why-btn[aria-expanded='true'] { color: var(--color-accent-strong); border-color: var(--color-accent); }
+.explain-row td { background: var(--color-surface-2); }
+.explain-steps { display: grid; gap: var(--space-2); padding: var(--space-2) 0; counter-reset: step; }
+.explain-step { display: grid; grid-template-columns: 11rem 9rem 1fr; gap: var(--space-3); align-items: baseline; font-size: var(--text-sm); white-space: normal; }
+.explain-step__label { font-weight: 700; }
+.explain-step__value { color: var(--color-accent-strong); }
+.explain-step__detail { color: var(--color-text-muted); }
+@media (max-width: 760px) { .explain-step { grid-template-columns: 1fr; gap: 2px; } }
+
+.start-sit__controls { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-end; margin-block: var(--space-4); }
+.start-sit__advice { margin-block-end: var(--space-3); padding: var(--space-3) var(--space-4); border-inline-start: 3px solid var(--color-accent); background: var(--color-accent-soft); border-radius: var(--radius-sm); }
+.compare-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: var(--space-4); }
+.compare-card { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-1); }
+.compare-card.is-pick { border-color: var(--color-accent); box-shadow: 0 0 0 1px var(--color-accent); }
+.compare-card__pick { font-size: var(--text-2xs); font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-accent); }
+.compare-card__name { font-family: var(--font-display); font-style: italic; font-weight: 700; text-transform: uppercase; font-size: var(--text-lg); }
+.compare-card__meta, .compare-card__range, .compare-card__scenario { font-size: var(--text-sm); color: var(--color-text-muted); }
+.compare-card__projection { font-family: var(--font-display); font-size: 2.2rem; font-weight: 700; line-height: 1; }
+
+.waiver-list { display: grid; gap: var(--space-3); }
+.waiver { padding: var(--space-4); border: 1px solid var(--color-border); border-inline-start: 3px solid var(--color-accent); border-radius: var(--radius-sm); background: var(--color-surface-1); }
+.waiver__head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.waiver__rostered { font-size: var(--text-xs); color: var(--color-text-subtle); }
+.waiver__bid { margin-inline-start: auto; font-weight: 800; color: var(--color-accent-strong); }
+.waiver__numbers { margin-block: var(--space-2); font-size: var(--text-sm); color: var(--color-text-muted); }
+
+.trade-offers { display: grid; gap: var(--space-2); margin-block-start: var(--space-3); }
+.trade-offer { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-sm); }
+.trade-offer > span:first-child { flex: 1 1 18rem; }
+
+.market-grid--flags { margin-block-start: var(--space-5); }
+.flag-list { display: grid; gap: var(--space-3); }
+.flag-list__row { display: grid; gap: var(--space-1); padding-block-end: var(--space-3); border-block-end: 1px solid var(--color-border); }

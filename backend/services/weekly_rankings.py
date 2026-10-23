@@ -15,15 +15,19 @@ from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
-from sqlalchemy import select
+from threading import Lock
+
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from database.models import WeeklySourceProjection
+from database.models import DataLoad, InjuryReport, PlayerStatus, WeeklySourceProjection
 from integrations import espn, odds_api, yahoo_experts
 from services.league import POSITIONS, LeagueSettings
 from services.projections import PlayerSeason
-from services.valuation import PlayerValue, Valuation, build_valuation
-from services.weekly_model import Matchup, matchup_for, model_stats, points_from_stats, props_line
+from services.injuries import InjuryContext, build_context
+from services.valuation import Valuation, build_valuation
+from services.weekly_adjust import Adjusted, Scenario, Step, adjust, explain
+from services.weekly_model import Matchup, matchup_for, model_stats, points_from_stats, props_line, weekly_rate
 
 WEIGHTS = {"vegas_props": 0.35, "josh_hayden": 0.30, "model": 0.15, "yahoo_consensus": 0.10, "espn": 0.10}
 ANCHOR_SOURCES = ("vegas_props", "espn", "model")
@@ -53,6 +57,15 @@ class WeeklyPlayer:
     expert_ranks: Mapping[str, float]
     rank: int = 0
     pos_rank: str = ""
+    if_active: float = 0.0
+    play_prob: float = 1.0
+    status: str | None = None
+    floor: float | None = None
+    ceiling: float | None = None
+    boost_points: float = 0.0
+    scenarios: tuple[Scenario, ...] = ()
+    explanation: tuple[Step, ...] = ()
+    pct_rostered: float | None = None
 
 
 @dataclass(frozen=True)
@@ -62,6 +75,7 @@ class WeeklyRankings:
     scoring: str
     players: tuple[WeeklyPlayer, ...]
     source_counts: Mapping[str, int] = field(default_factory=dict)
+    context: InjuryContext | None = None
 
 
 @dataclass
@@ -73,6 +87,7 @@ class _Candidate:
     props: dict | None = None
     espn: dict | None = None
     expert_ranks: dict = field(default_factory=dict)
+    pct_rostered: float | None = None
 
     @property
     def has_outside_row(self) -> bool:
@@ -97,6 +112,7 @@ def _load_sources(session: Session, season: int, week: int, scoring: str) -> dic
             candidate.props = json.loads(row.stats or "{}")
         elif row.source == espn.SOURCE:
             candidate.espn = json.loads(row.stats or "{}")
+            candidate.pct_rostered = row.pct_rostered
         elif row.source == yahoo_experts.SOURCE and row.rank is not None:
             candidate.expert_ranks[row.expert] = row.rank
     return candidates
@@ -121,12 +137,12 @@ def _rank_to_points(curve: list[float], rank: float) -> float:
     return curve[low] + (curve[high] - curve[low]) * (index - low)
 
 
-def _numeric_sources(candidate: _Candidate, matchup: Matchup, value: PlayerValue | None,
+def _numeric_sources(candidate: _Candidate, matchup: Matchup, rate: float | None,
                      season_line: PlayerSeason | None, league: LeagueSettings) -> dict[str, SourceValue]:
     scoring = league.scoring_settings()
     sources: dict[str, SourceValue] = {}
-    model = (model_stats(season_line, value.base_ros_ppg, matchup, scoring)
-             if value is not None and season_line is not None else {})
+    model = (model_stats(season_line, rate, matchup, scoring)
+             if rate is not None and season_line is not None else {})
     if model:
         sources["model"] = SourceValue(points_from_stats(model, candidate.position, scoring))
     props = props_line(candidate.props or {}, candidate.position, model)
@@ -162,8 +178,14 @@ def _ranked(players: list[WeeklyPlayer]) -> tuple[WeeklyPlayer, ...]:
     return tuple(ranked)
 
 
+def player_rates(valuation: Valuation) -> dict[int, float]:
+    """Recency-weighted model rate per player, before matchup and injuries."""
+    return {p.player_id: weekly_rate(p, valuation.priors.get(p.player_id)) for p in valuation.seasons}
+
+
 def blend(candidates: Mapping[int, _Candidate], valuation: Valuation, week: int,
-          league: LeagueSettings, require_outside_source: bool = False) -> tuple[WeeklyPlayer, ...]:
+          league: LeagueSettings, require_outside_source: bool = False,
+          context: InjuryContext | None = None, rates: Mapping[int, float] | None = None) -> tuple[WeeklyPlayer, ...]:
     """Pure blending step over already-loaded sources.
 
     With require_outside_source, players that no outside source projects or ranks are left
@@ -171,6 +193,8 @@ def blend(candidates: Mapping[int, _Candidate], valuation: Valuation, week: int,
     is injured or inactive, and the model alone can't know that.
     """
     seasons = {p.player_id: p for p in valuation.seasons}
+    context = context or InjuryContext(availability={})
+    rates = rates if rates is not None else player_rates(valuation)
     prepared = []
     for candidate in candidates.values():
         if require_outside_source and not candidate.has_outside_row:
@@ -178,7 +202,7 @@ def blend(candidates: Mapping[int, _Candidate], valuation: Valuation, week: int,
         matchup = matchup_for(candidate.team, candidate.position, week, valuation.schedule, valuation.defense)
         if matchup is None:
             continue                                   # bye week, or team unknown
-        numeric = _numeric_sources(candidate, matchup, valuation.by_id.get(candidate.player_id),
+        numeric = _numeric_sources(candidate, matchup, rates.get(candidate.player_id),
                                    seasons.get(candidate.player_id), league)
         prepared.append((candidate, matchup, numeric))
 
@@ -197,12 +221,24 @@ def blend(candidates: Mapping[int, _Candidate], valuation: Valuation, week: int,
         if combined is None:
             continue
         expert_names = {**yahoo_experts.TRACKED_EXPERTS, yahoo_experts.CONSENSUS: "Yahoo consensus"}
+        tilt = matchup.sos_factor ** FINAL_SOS_TILT
+        model_share = WEIGHTS["model"] / sum(WEIGHTS[k] for k in sources) if "model" in sources else 0.0
+        adjusted: Adjusted = adjust(candidate.position, combined, tilt, matchup, model_share,
+                                    candidate.player_id, context)
+        if adjusted.projection <= 0:
+            continue                                   # ruled out
+        steps = explain(candidate.name, candidate.position, rates.get(candidate.player_id),
+                        valuation.priors.get(candidate.player_id), matchup, sources, WEIGHTS, SOURCE_LABELS,
+                        combined, tilt, adjusted, context.boosts.get(candidate.player_id, ()))
         players.append(WeeklyPlayer(
             player_id=candidate.player_id, name=candidate.name, position=candidate.position,
-            team=candidate.team, matchup=matchup,
-            projection=round(combined * matchup.sos_factor ** FINAL_SOS_TILT, 2),
-            sources=sources,
-            expert_ranks={expert_names[e]: r for e, r in candidate.expert_ranks.items() if e in expert_names}))
+            team=candidate.team, matchup=matchup, projection=adjusted.projection, sources=sources,
+            expert_ranks={expert_names[e]: r for e, r in candidate.expert_ranks.items() if e in expert_names},
+            if_active=adjusted.if_active, play_prob=adjusted.availability.play_prob,
+            status=None if adjusted.availability.play_prob >= 1 and adjusted.availability.status is None
+            else adjusted.availability.label,
+            floor=adjusted.floor, ceiling=adjusted.ceiling, boost_points=adjusted.boost_points,
+            scenarios=adjusted.scenarios, explanation=steps, pct_rostered=candidate.pct_rostered))
     return _ranked(players)
 
 
@@ -212,15 +248,50 @@ def default_week(valuation: Valuation) -> int:
     return min(max(week, FIRST_WEEK), LAST_WEEK)
 
 
+_cache: dict[tuple, "WeeklyRankings"] = {}
+_cache_lock = Lock()
+CACHE_SIZE = 16
+
+
+def _version(session: Session, season: int, week: int) -> tuple:
+    """Changes whenever any input to the week's rankings changes."""
+    return (str(session.get_bind().url),
+            session.scalar(select(func.max(WeeklySourceProjection.fetched_at)).where(
+                WeeklySourceProjection.season == season, WeeklySourceProjection.week == week)),
+            session.scalar(select(func.max(PlayerStatus.fetched_at))),
+            session.scalar(select(func.count(InjuryReport.id)).where(
+                InjuryReport.season == season, InjuryReport.week == week)),
+            session.scalar(select(func.max(DataLoad.id))))
+
+
 def build_weekly_rankings(session: Session, league: LeagueSettings, week: int | None = None) -> WeeklyRankings:
+    """Cached per league settings, week, and data version (sources, live status, reports, loads)."""
     valuation = build_valuation(session, league)
     week = week or default_week(valuation)
+    key = (league, week, _version(session, valuation.season, week))
+    with _cache_lock:
+        if key in _cache:
+            return _cache[key]
+    rankings = _build(session, league, valuation, week)
+    with _cache_lock:
+        if len(_cache) >= CACHE_SIZE:
+            _cache.pop(next(iter(_cache)))
+        _cache[key] = rankings
+    return rankings
+
+
+def _build(session: Session, league: LeagueSettings, valuation: Valuation, week: int) -> WeeklyRankings:
     candidates = _load_sources(session, valuation.season, week, league.scoring)
     # Only Yahoo/ESPN cover the whole week; props alone (e.g. just Thursday's game) don't
     # say anything about who is active in the other games.
     has_outside_sources = any(c.espn is not None or c.expert_ranks for c in candidates.values())
     _add_model_players(candidates, valuation)
-    players = blend(candidates, valuation, week, league, require_outside_source=has_outside_sources)
+    rates = player_rates(valuation)
+    # Sleeper tags and today's depth chart describe now, so they only apply to the current week.
+    context = build_context(session, valuation.seasons, rates, valuation.season, week, valuation.schedule,
+                            use_live=week == default_week(valuation))
+    players = blend(candidates, valuation, week, league, require_outside_source=has_outside_sources,
+                    context=context, rates=rates)
     counts = {key: sum(1 for p in players if key in p.sources) for key in WEIGHTS}
     return WeeklyRankings(season=valuation.season, week=week, scoring=league.scoring,
-                          players=players, source_counts=counts)
+                          players=players, source_counts=counts, context=context)
