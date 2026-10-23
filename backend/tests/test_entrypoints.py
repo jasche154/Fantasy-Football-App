@@ -34,3 +34,19 @@ def test_alembic_runs_from_the_repo_root(tmp_path):
     result = run(["-m", "alembic", "-c", str(BACKEND / "alembic.ini"), "upgrade", "head"], REPO_ROOT, tmp_path)
     assert result.returncode == 0, result.stderr
     assert "No module named" not in result.stderr
+
+
+def test_populate_stats_progress_survives_the_schema_upgrade(caplog, engine, monkeypatch):
+    """Running migrations in-process must not silence populate_stats' progress logging."""
+    import logging
+
+    from database import populate_stats
+
+    monkeypatch.setattr(populate_stats, "engine", engine)
+    monkeypatch.setattr(populate_stats, "FEEDS", [])
+    for step in ("sync_crosswalk", "load_snap_counts", "load_expert_rankings", "apply_latest_teams"):
+        monkeypatch.setattr(populate_stats, step, lambda *args, **kwargs: None)
+    with caplog.at_level(logging.INFO, logger="populate_stats"):
+        populate_stats.main(["--seasons", "2026"])
+    assert "Loading seasons: [2026]" in caplog.text and "Done." in caplog.text
+
