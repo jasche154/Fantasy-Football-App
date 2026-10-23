@@ -1,0 +1,87 @@
+"""Read-only data endpoints: meta, players, rankings, leaderboards, expert rankings."""
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session
+
+from api.deps import Position, league_params, valuation_or_503
+from database.db import get_session
+from services import serialize
+from services.experts import expert_rankings, weekly_ecr_by_player
+from services.leaderboards import catalog, leaderboard
+from services.league import POSITIONS, LeagueSettings
+from services.players import PlayerNotFound, player_profile, search_players
+from services.projections import available_seasons, latest_season, latest_week
+from services.scoring import POINTS_PER_RECEPTION
+from services.valuation import NoDataError
+
+router = APIRouter(prefix="/api")
+
+
+@router.get("/health")
+def health() -> dict:
+    return {"status": "ok"}
+
+
+@router.get("/meta")
+def meta(session: Session = Depends(get_session)) -> dict:
+    season = latest_season(session)
+    return {
+        "current_season": season, "latest_week": latest_week(session, season) if season else None,
+        "seasons": available_seasons(session), "positions": list(POSITIONS),
+        "scoring_presets": list(POINTS_PER_RECEPTION),
+    }
+
+
+@router.get("/players/search")
+def players_search(q: str = Query(..., min_length=1, max_length=60), position: Position | None = None,
+                   limit: int = Query(10, ge=1, le=25), session: Session = Depends(get_session)) -> dict:
+    return {"results": [serialize.player_ref(r) for r in search_players(session, q, position, limit)]}
+
+
+@router.get("/players/{player_id}")
+def player_detail(player_id: int, season: int | None = Query(None, ge=1999, le=2100),
+                  league: LeagueSettings = Depends(league_params),
+                  session: Session = Depends(get_session)) -> dict:
+    if season is not None and season not in available_seasons(session):
+        raise HTTPException(404, f"No data loaded for season {season}.")
+    try:
+        return player_profile(session, player_id, league, season)
+    except PlayerNotFound as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except NoDataError as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+
+@router.get("/rankings")
+def rankings(position: Position | None = None, limit: int = Query(100, ge=1, le=500),
+             league: LeagueSettings = Depends(league_params), session: Session = Depends(get_session)) -> dict:
+    valuation = valuation_or_503(session, league)
+    values = [v for v in valuation.values if position is None or v.position == position][:limit]
+    return serialize.rankings(valuation, values, weekly_ecr_by_player(session))
+
+
+@router.get("/leaderboards/metrics")
+def leaderboard_metrics() -> dict:
+    return {"categories": catalog()}
+
+
+@router.get("/leaderboards")
+def leaderboards(category: str, metric: str, season: int | None = Query(None, ge=1999, le=2100),
+                 min_volume: int | None = Query(None, ge=0, le=5000), limit: int = Query(25, ge=1, le=200),
+                 ascending: bool = False, position: Position | None = None,
+                 session: Session = Depends(get_session)) -> dict:
+    season = season or latest_season(session)
+    try:
+        rows = leaderboard(session, category, metric, season, min_volume, limit, ascending, position)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    definition = next(m for c in catalog() if c["key"] == category for m in c["metrics"] if m["key"] == metric)
+    return {"category": category, "metric": metric, "label": definition["label"], "season": season,
+            "min_volume": definition["default_min_volume"] if min_volume is None else min_volume,
+            "results": [serialize.leaderboard_row(r) for r in rows]}
+
+
+@router.get("/experts/rankings")
+def experts(position: Position | None = None, limit: int = Query(50, ge=1, le=500),
+            session: Session = Depends(get_session)) -> dict:
+    """The free weekly FantasyPros ECR snapshot loaded by populate_stats."""
+    return expert_rankings(session, position, limit)

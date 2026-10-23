@@ -8,15 +8,18 @@ os.environ["FANTASY_ENV_FILE"] = ""
 os.environ["DATABASE_URL"] = "sqlite://"
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, insert
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from config import get_settings
+from database.db import get_session
 from database.models import (
     Base, ExpertRanking, Player, PlayerExpectedPointsWeekly, PlayerReceivingAdvancedWeekly,
     PlayerRushingAdvancedWeekly, PlayerSnapCountsWeekly, PlayerStatsWeekly,
 )
+from services import valuation as valuation_module
 
 CURRENT, PRIOR = 2026, 2025
 CURRENT_WEEKS = range(1, 7)
@@ -150,12 +153,14 @@ SECRET_ENV_VARS = ("GROQ_API_KEY", "FANTASYPROS_API_KEY", "YAHOO_CLIENT_ID", "YA
 
 @pytest.fixture(autouse=True)
 def isolated_state(monkeypatch):
-    """Fresh settings (no secrets) for every test."""
+    """Fresh settings (no secrets) and an empty value cache for every test."""
     for name in SECRET_ENV_VARS:
         monkeypatch.delenv(name, raising=False)
     get_settings.cache_clear()
+    valuation_module._cache.clear()
     yield
     get_settings.cache_clear()
+    valuation_module._cache.clear()
 
 
 @pytest.fixture
@@ -168,3 +173,21 @@ def seeded(engine) -> dict[str, int]:
 def session(engine, seeded):
     with Session(engine) as db_session:
         yield db_session
+
+
+@pytest.fixture
+def client(engine, seeded, monkeypatch):
+    from main import create_app
+    import tools.rushleaders as rushleaders
+
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    def override():
+        with factory() as db_session:
+            yield db_session
+
+    monkeypatch.setattr(rushleaders, "engine", engine)
+    app = create_app(warm_cache=False)
+    app.dependency_overrides[get_session] = override
+    with TestClient(app, base_url="http://localhost") as test_client:
+        yield test_client

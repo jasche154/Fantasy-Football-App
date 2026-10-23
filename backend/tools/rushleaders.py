@@ -1,16 +1,15 @@
-from sqlalchemy import create_engine, select, func
 from sqlalchemy.orm import Session
-from database.models import Player, PlayerRushingAdvancedWeekly
-from pathlib import Path
+
 from database.db import engine
-from difflib import get_close_matches
+from services.leaderboards import leaderboard
 
 # Whitelist: only metrics we've deliberately vetted can be requested.
-# Maps a safe, model-facing name -> the actual SQLAlchemy column to average.
+# Maps a safe, model-facing name -> (leaderboard metric key, scale applied to its value).
+# Values keep the scale this tool always returned: RYOE per attempt, and the share of
+# carries beating expectation as a 0-1 fraction.
 RUSHING_METRICS = {
-    "rush_yards_over_expected": PlayerRushingAdvancedWeekly.rush_yards_over_expected_per_att,
-    "rush_pct_over_expected": PlayerRushingAdvancedWeekly.rush_pct_over_expected,
-    # add more here as you build features that need them
+    "rush_yards_over_expected": ("ryoe_per_att", 1.0),
+    "rush_pct_over_expected": ("rush_pct_over_expected", 0.01),
 }
 
 
@@ -18,52 +17,36 @@ def get_rushing_leaders(metric: str, season: int, min_attempts: int = 50,
                         limit: int = 15, ascending: bool = False, player_name: str | None = None):
     if metric not in RUSHING_METRICS:
         raise ValueError(f"Unknown metric '{metric}'. Valid options: {list(RUSHING_METRICS)}")
-
-    metric_column = RUSHING_METRICS[metric]
-    avg_expression = func.avg(metric_column)
-
-    order_expression = avg_expression if ascending else avg_expression.desc()
+    if limit < 1:
+        raise ValueError("limit must be at least 1")
+    metric_key, scale = RUSHING_METRICS[metric]
 
     with Session(engine) as session:
-        statement = (
-            select(
-                Player.full_name,
-                avg_expression,
-            )
-            .join(Player, Player.id == PlayerRushingAdvancedWeekly.player_id)
-            .where(PlayerRushingAdvancedWeekly.season == season)
-            .group_by(Player.id)
-            .having(func.sum(PlayerRushingAdvancedWeekly.rush_attempts) >= min_attempts)
-            .order_by(order_expression)
-            
-        )
-        results = session.execute(statement).all()
-        if player_name is None:
-            statement = statement.limit(limit)
+        rows = leaderboard(session, "rushing", metric_key, season, min_volume=min_attempts,
+                           limit=None if player_name else limit, ascending=ascending)
 
-        results = session.execute(statement).all()
+    def value(row) -> float:
+        return round(row.value * scale, 2)
 
-        if player_name is None:
-            return [{"player": name, metric: round(value, 2)} for name, value in results]
-        else:
-            # Try exact match first
-            for rank, (name, value) in enumerate(results, start=1):
-                if name.lower() == player_name.lower():
-                    return {"rank": rank, "player": name, metric: round(value, 2)}
+    if player_name is None:
+        return [{"player": row.name, metric: value(row)} for row in rows]
 
-            # Fallback: fuzzy match if exact match found nothing
-            all_names = [name for name, _ in results]
-            close = get_close_matches(player_name, all_names, n=1, cutoff=0.7)
+    exact = next((r for r in rows if r.name.lower() == player_name.lower()), None)
+    if exact:
+        return {"rank": exact.rank, "player": exact.name, metric: value(exact)}
 
-            if close:
-                matched_name = close[0]
-                for rank, (name, value) in enumerate(results, start=1):
-                    if name == matched_name:
-                        return {"rank": rank, "player": matched_name, metric: round(value, 2),
-                                "note": f"No exact match for '{player_name}' — showing closest match: {matched_name}"}
+    # Fallback: fuzzy match if exact match found nothing
+    from difflib import get_close_matches
+    close = get_close_matches(player_name, [r.name for r in rows], n=1, cutoff=0.7)
+    if close:
+        match = next(r for r in rows if r.name == close[0])
+        return {"rank": match.rank, "player": match.name, metric: value(match),
+                "note": f"No exact match for '{player_name}' — showing closest match: {match.name}"}
 
-            # Nothing worked, even fuzzy
-            return {"player": player_name, "error": f"{player_name} not found — check spelling, or they may not meet the minimum attempts threshold."}
+    # Nothing worked, even fuzzy
+    return {"player": player_name, "error": f"{player_name} not found — check spelling, or they may not meet the minimum attempts threshold."}
+
+
 if __name__ == "__main__":
     for row in get_rushing_leaders("rush_yards_over_expected", season=2025, limit=15):
         print(row)
