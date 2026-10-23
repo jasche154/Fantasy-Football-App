@@ -28,7 +28,7 @@ class YahooExchange(BaseModel):
 def integration_status(session: Session) -> dict:
     settings = get_settings()
     connection = yahoo_sync.get_connection(session)
-    return {"fantasypros": bool(settings.fantasypros_api_key),
+    return {"fantasypros": bool(settings.fantasypros_api_key), "odds_api": bool(settings.odds_api_key),
             "yahoo_configured": bool(settings.yahoo_client_id and settings.yahoo_client_secret),
             "yahoo_connected": bool(connection and connection.access_token),
             "llm": bool(settings.groq_api_key)}

@@ -15,10 +15,11 @@ export interface NavItem {
 export const NAV_ITEMS: readonly NavItem[] = [
   { route: 'dashboard', path: paths.dashboard, label: 'Dashboard', shortLabel: 'Home', icon: 'home', isPrimary: true },
   { route: 'rankings', path: paths.rankings, label: 'Rankings', shortLabel: 'Ranks', icon: 'rankings', isPrimary: true },
+  { route: 'weekly', path: paths.weekly, label: 'Week X Rankings', shortLabel: 'Week', icon: 'calendar', isPrimary: true },
   { route: 'stats', path: paths.stats, label: 'Advanced Stats', shortLabel: 'Stats', icon: 'stats', isPrimary: false },
   { route: 'trade', path: paths.trade, label: 'Trade Calculator', shortLabel: 'Trade', icon: 'trade', isPrimary: true },
   { route: 'market', path: paths.market, label: 'Buy Low / Sell High', shortLabel: 'Market', icon: 'market', isPrimary: false },
-  { route: 'ask', path: paths.ask, label: 'Ask AI', shortLabel: 'Ask AI', icon: 'ask', isPrimary: true },
+  { route: 'ask', path: paths.ask, label: 'Ask AI', shortLabel: 'Ask AI', icon: 'ask', isPrimary: false },
   { route: 'settings', path: paths.settings, label: 'Settings', shortLabel: 'Settings', icon: 'settings', isPrimary: false },
 ];
 

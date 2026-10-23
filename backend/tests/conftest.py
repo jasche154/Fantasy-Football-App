@@ -6,6 +6,7 @@ import os
 
 os.environ["FANTASY_ENV_FILE"] = ""
 os.environ["DATABASE_URL"] = "sqlite://"
+os.environ["WEEKLY_AUTO_REFRESH"] = "false"     # never reach Yahoo/ESPN/The Odds API from tests
 
 import pytest
 from fastapi.testclient import TestClient
@@ -147,7 +148,7 @@ def engine():
     test_engine.dispose()
 
 
-SECRET_ENV_VARS = ("GROQ_API_KEY", "FANTASYPROS_API_KEY", "YAHOO_CLIENT_ID", "YAHOO_CLIENT_SECRET",
+SECRET_ENV_VARS = ("GROQ_API_KEY", "FANTASYPROS_API_KEY", "ODDS_API_KEY", "YAHOO_CLIENT_ID", "YAHOO_CLIENT_SECRET",
                    "YAHOO_REDIRECT_URI", "TOKEN_ENCRYPTION_KEY", "AGENT_SHARE_PFR_DATA")
 
 

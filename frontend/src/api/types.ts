@@ -14,6 +14,7 @@ export interface PlayerSummary {
 
 export interface IntegrationsStatus {
   fantasypros: boolean;
+  odds_api: boolean;
   yahoo_configured: boolean;
   yahoo_connected: boolean;
   llm: boolean;
@@ -47,6 +48,8 @@ export interface RankedPlayer {
   vorp_per_game: number;
   trade_value: number;
   ecr: number | null;
+  /** Remaining-schedule strength applied to ros_ppg (>1 = easier). */
+  schedule_factor: number;
 }
 
 export interface RankingsResponse {
@@ -293,4 +296,94 @@ export interface YahooImportResult {
   teams: number;
   roster_spots: number;
   unmatched_players: string[];
+}
+
+/* ---------- Week X rankings & schedule strength ---------- */
+
+export type WeeklySourceKey = 'vegas_props' | 'josh_hayden' | 'model' | 'yahoo_consensus' | 'espn';
+
+export interface WeeklySourceWeight {
+  key: WeeklySourceKey;
+  label: string;
+  weight: number;
+  /** How many ranked players this source covers this week. */
+  players: number;
+}
+
+export interface WeeklyMatchup {
+  opponent: string;
+  home: boolean;
+  /** Opponent-adjusted defense factor at the player's position (>1 = easier). */
+  sos_factor: number;
+  /** 1 = easiest defense at the position. */
+  sos_rank: number | null;
+  implied_total: number | null;
+  team_ppg: number | null;
+  game_final: boolean;
+}
+
+export interface WeeklySourceValue {
+  points: number;
+  /** Positional rank behind expert-derived points. */
+  rank: number | null;
+}
+
+export interface WeeklyPlayer {
+  rank: number;
+  pos_rank: string;
+  player: PlayerSummary;
+  projection: number;
+  matchup: WeeklyMatchup;
+  sources: Partial<Record<WeeklySourceKey, WeeklySourceValue>>;
+  expert_ranks: Record<string, number>;
+}
+
+export type SourceRefreshState = 'updated' | 'fresh' | 'not_configured' | 'disabled' | 'busy' | 'error';
+
+export interface SourceRefreshStatus {
+  state: SourceRefreshState;
+  rows: number | null;
+  message: string | null;
+}
+
+export interface WeeklyRankingsResponse {
+  season: number;
+  week: number;
+  scoring: Scoring;
+  weights: WeeklySourceWeight[];
+  sos_tilt: number;
+  /** null when the backend skipped refreshing outside sources. */
+  refresh: Record<string, SourceRefreshStatus> | null;
+  results: WeeklyPlayer[];
+}
+
+export interface WeeklyRefreshResponse {
+  season: number;
+  week: number;
+  sources: Record<string, SourceRefreshStatus>;
+}
+
+export interface DefenseStrengthRow {
+  rank: number;
+  team: string;
+  sos_factor: number;
+  games: number;
+  allowed_per_game: number;
+  this_week_opponent: string | null;
+}
+
+export interface OffenseScheduleRow {
+  team: string;
+  this_week: string | null;
+  next_weeks: { opponent: string; sos_factor: number }[];
+  rest_of_season: number;
+  games_left: number;
+}
+
+export interface ScheduleStrengthResponse {
+  season: number;
+  week: number;
+  position: Position;
+  defenses: DefenseStrengthRow[];
+  offenses: OffenseScheduleRow[];
 }

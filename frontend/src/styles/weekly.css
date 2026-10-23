@@ -1,0 +1,225 @@
+/* ---------- Week X rankings & schedule strength ---------- */
+:root {
+  /* One hue per projection source, reused by the weight bar, legend dots and column heads. */
+  --source-props: light-dark(#b7791f, #f6c453);
+  --source-josh-hayden: light-dark(#6d28d9, #b794ff);
+  --source-consensus: light-dark(#a78bfa, #7c6bd6);
+  --source-espn: light-dark(#c8102e, #ff6b81);
+  --source-model: light-dark(#0f766e, #2dd4bf);
+}
+
+.source--vegas_props { --source-color: var(--source-props); }
+.source--josh_hayden { --source-color: var(--source-josh-hayden); }
+.source--yahoo_consensus { --source-color: var(--source-consensus); }
+.source--espn { --source-color: var(--source-espn); }
+.source--model { --source-color: var(--source-model); }
+
+.weekly-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.weekly-sources {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-block: var(--space-4) var(--space-3);
+}
+
+.source-weights {
+  flex: 1 1 32rem;
+  margin: 0;
+}
+
+.source-weights__caption {
+  margin-block-end: var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-subtle);
+}
+
+.source-weights__bar {
+  display: flex;
+  gap: 3px;
+  height: 0.7rem;
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+  box-shadow: var(--inner-highlight);
+}
+
+.source-weights__segment {
+  flex-basis: 0;
+  background: var(--source-color);
+  transition: opacity 150ms ease;
+}
+
+.source-weights__segment.is-empty {
+  opacity: 0.25;
+  background-image: repeating-linear-gradient(135deg, transparent 0 4px, rgb(0 0 0 / 0.18) 4px 6px);
+}
+
+.source-weights__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+  margin-block-start: var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.source-weights__legend li {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.source-weights__legend li.is-empty {
+  color: var(--color-text-subtle);
+}
+
+.source-weights__coverage {
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
+}
+
+.source-dot {
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.55rem;
+  margin-inline-end: var(--space-1);
+  border-radius: 50%;
+  background: var(--source-color);
+  vertical-align: 0.05em;
+}
+
+.refresh-action {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-1);
+}
+
+.refresh-notes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-block-end: var(--space-3);
+}
+
+.refresh-note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  color: var(--color-warn);
+  background: var(--color-warn-soft);
+}
+
+.refresh-note--error {
+  color: var(--color-neg);
+  background: var(--color-neg-soft);
+}
+
+.refresh-note span {
+  color: var(--color-text);
+}
+
+.weekly-table .th--accent {
+  color: var(--color-accent-strong);
+}
+
+.weekly-table .value-pill {
+  font-size: var(--text-base);
+}
+
+.num--muted {
+  color: var(--color-text-subtle);
+}
+
+.source-rank {
+  display: block;
+  font-size: var(--text-2xs);
+  color: var(--color-text-subtle);
+}
+
+/* ---------- Matchup grades ---------- */
+.matchup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  white-space: nowrap;
+}
+
+.matchup__opp {
+  min-width: 3.6em;
+  font-weight: 650;
+}
+
+.matchup-grade,
+.sos-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-2xs);
+  font-weight: 750;
+  letter-spacing: 0.02em;
+}
+
+.matchup-grade__rank {
+  font-weight: 600;
+  opacity: 0.8;
+}
+
+.matchup-grade--easy,
+.sos-pill--easy {
+  color: var(--color-pos);
+  background: var(--color-pos-soft);
+}
+
+.matchup-grade--neutral,
+.sos-pill--neutral {
+  color: var(--color-text-muted);
+  background: var(--color-surface-3);
+}
+
+.matchup-grade--tough,
+.sos-pill--tough {
+  color: var(--color-neg);
+  background: var(--color-neg-soft);
+}
+
+.sos-text--easy { color: var(--color-pos); }
+.sos-text--tough { color: var(--color-neg); }
+.sos-text--neutral { color: var(--color-text-muted); }
+
+/* ---------- Schedule strength view ---------- */
+.sos-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr));
+  gap: var(--space-5);
+  margin-block-start: var(--space-4);
+}
+
+.opponent-run {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.opponent-chip {
+  min-width: 2.6rem;
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-xs);
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  text-align: center;
+}

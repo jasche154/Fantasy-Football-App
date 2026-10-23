@@ -9,6 +9,7 @@ import { RankingsPage } from './pages/rankings/RankingsPage';
 import { SettingsPage } from './pages/settings/SettingsPage';
 import { StatsPage } from './pages/stats/StatsPage';
 import { TradePage } from './pages/trade/TradePage';
+import { WeeklyPage } from './pages/weekly/WeeklyPage';
 import type { HashLocation } from './router/routes';
 import { useHashLocation } from './router/useHashLocation';
 import { MetaProvider } from './state/MetaContext';
@@ -22,6 +23,8 @@ function renderRoute(location: HashLocation): ReactNode {
       return <DashboardPage />;
     case 'rankings':
       return <RankingsPage />;
+    case 'weekly':
+      return <WeeklyPage />;
     case 'stats':
       return <StatsPage />;
     case 'trade':

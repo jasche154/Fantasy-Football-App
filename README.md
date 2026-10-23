@@ -3,7 +3,8 @@
 > "Your fantasy platform tells you what happened. This tells you what to do next."
 
 A FantasyPros / Flock-style fantasy football toolkit built on free, open NFL data
-(nflverse), with optional FantasyPros and Yahoo integrations.
+(nflverse), with weekly rankings that blend Vegas player props, Yahoo's Josh Norris and
+Hayden Winks, Yahoo's expert consensus, ESPN, and an opponent-adjusted matchup model.
 
 **Core rule:** every number comes from real data and deterministic, tested code. The LLM
 only *explains* numbers that came back from a tool call. Every output is labeled as one of:
@@ -14,11 +15,17 @@ only *explains* numbers that came back from a tool call. Every output is labeled
 | **Expected** | What the player's usage was worth (targets, carries, air yards, red-zone looks) | nflverse `ff_opportunity` model |
 | **Projection / trade value** | Rest-of-season outlook | This app's model (explained below) |
 | **ECR** | Expert consensus ranking | FantasyPros (free weekly snapshot, or your API key) |
+| **Week X projection** | This week's projected points, with every source's number shown | Blend of Vegas props, Yahoo experts, ESPN, and this app's matchup model |
 
 ## Features
 
 - **Data pipeline:** six seasons of weekly stats, Next Gen Stats, expected fantasy points,
   snap counts, cross-platform player IDs, and FantasyPros weekly ECR, loaded into SQLite by one command
+- **Week X rankings:** projected points for the current (or any) week, blended from Vegas
+  player props (highest weight), Yahoo's Josh Norris & Hayden Winks, Yahoo's 40+ expert
+  consensus, ESPN, and a matchup model, with each source's number side by side
+- **Adjusted strength of schedule:** fantasy points each defense allows by position,
+  corrected for the offenses it faced; drives weekly matchups and rest-of-season values
 - **Rankings:** rest-of-season rankings for your league's scoring (PPR, half, standard,
   TE premium, superflex) with actual, expected, and projected points side by side
 - **Advanced-stat leaderboards:** 26 whitelisted metrics (RYOE, separation, YAC over
@@ -27,7 +34,7 @@ only *explains* numbers that came back from a tool call. Every output is labeled
 - **Trade calculator:** values both sides, applies a consolidation discount, gives a verdict, and suggests players that would balance the deal
 - **Buy low / sell high:** finds players whose production is out of line with their usage, with plain-English reasons
 - **Integrations:** Sleeper trending adds/drops, FantasyPros ROS rankings (with your key), and Yahoo league and roster import (OAuth)
-- **AI assistant and agent tools:** 12 validated tools that any agent can call over REST
+- **AI assistant and agent tools:** 14 validated tools that any agent can call over REST
   or MCP (Claude Desktop / Claude Code), plus a built-in Groq-powered chat
 - **Web app:** React UI with a dashboard, rankings, advanced stats, trade calculator, buy/sell market, player pages, AI chat, and settings; dark and light themes, mobile-friendly
 
@@ -61,6 +68,21 @@ python -m database.populate_stats --seasons 2025 2026   # reload specific season
 python -m database.populate_stats --all                 # reload everything
 ```
 
+`populate_stats` also loads the schedule with closing Vegas spreads and totals, which the
+Week X rankings and strength of schedule use.
+
+To pull this week's outside rankings (Yahoo experts, ESPN, and Vegas props if
+`ODDS_API_KEY` is set) without opening the web app:
+
+```bash
+python -m services.weekly_refresh                # current week, only sources older than their cache
+python -m services.weekly_refresh --week 8 --force # re-fetch Yahoo and ESPN now
+python -m services.weekly_refresh --force-props  # re-buy Vegas props already bought (costs credits)
+```
+
+Opening the Week X page refreshes stale sources for the current week too (other weeks just
+show what's stored, and only one refresh runs at a time).
+
 A season only replaces existing rows after its download succeeds, so a network hiccup
 never wipes data. `populate_stats` also brings the schema up to date first, and it works on
 databases built by the project's older scripts (all migrations are idempotent).
@@ -91,7 +113,8 @@ Open <http://localhost:5173>. The UI talks to `http://localhost:8000` by default
 | Page | What you can do |
 |---|---|
 | **Dashboard** | Top buy-low and sell-high players with the reason behind each, Sleeper's most-added players, data freshness |
-| **Rankings** | Rest-of-season rankings by position; sort by actual, expected, or projected points, trade value, or ECR |
+| **Week X Rankings** | This week's projections by position; pick any week. Each row shows the matchup grade (opponent-adjusted, #1 = easiest), the Vegas implied team total, the blended projection, and every source's number (props, Josh & Hayden, Yahoo, ESPN, model). **Schedule strength** switches to defenses ranked by adjusted points allowed and each team's upcoming opponents. **Refresh sources** re-pulls Yahoo and ESPN (Vegas props follow their credit budget) |
+| **Rankings** | Rest-of-season rankings by position; sort by actual, expected, or projected points, schedule strength, trade value, or ECR |
 | **Advanced Stats** | Pick a category and metric, season, and minimum volume, then rank every qualified player |
 | **Trade Calculator** | Search players into "You give" / "You get". See each side's value, the verdict meter, and suggestions that even it out; the URL is shareable |
 | **Buy / Sell** | Full buy-low and sell-high lists with every reason, filtered by position |
@@ -121,9 +144,47 @@ season row twice.
 For each QB/RB/WR/TE this season:
 
 1. `rate = 0.6 × actual PPG + 0.4 × expected PPG` (usage is stickier than production)
-2. `ros_ppg = w × rate + (1 − w) × prior`, where `w = games / (games + 4)`. The prior is
+2. `base = w × rate + (1 − w) × prior`, where `w = games / (games + 4)`. The prior is
    last season's PPG if the player had at least 4 games, otherwise the position's
    replacement level.
+3. `ros_ppg = base × remaining-schedule factor`: the average adjusted defense factor (below)
+   of the opponents left on the player's schedule. The Rankings page shows it as **Sched**.
+
+### Adjusted strength of schedule
+Raw "fantasy points allowed" flatters a defense that happened to face weak offenses. For
+each position, the app compares what every offense scored against a defense with what that
+offense usually scores, and judges each offense's "usual" against the defenses *it* faced.
+Alternating those two steps four times gives each defense a factor: **1.15 at WR = offenses
+score 15% more WR points than usual against it.** Factors are shrunk toward 1.0 with four
+games of neutral evidence and kept between 0.70 and 1.35, so a two-week sample can't
+produce an extreme matchup.
+
+### Week X rankings
+Each player's week projection is a weighted blend of every source that covers them:
+
+| Source | Weight | How it becomes points |
+|---|---|---|
+| Vegas player props | 35% | Yardage lines and over/under prices → expected yards; receptions, pass TDs, INTs → Poisson means; anytime-TD price → expected TDs. Scored with your league settings. Missing markets (e.g. an RB's receiving line) are filled from the model |
+| Josh Norris & Hayden Winks (Yahoo) | 30% | Their average positional rank for the week, converted to points (below) |
+| Matchup model | 15% | `base × defense factor × (Vegas implied team total ÷ team's scoring average)^0.5`, keeping the shape of the player's stat line |
+| Yahoo expert consensus | 10% | Consensus of Yahoo's 40+ rankers, converted to points |
+| ESPN | 10% | ESPN's projected stat line, scored with your league settings |
+
+- Weights re-balance over the sources a player has (a backup with no props line is
+  blended from the rest). Josh Norris doesn't publish every week; when he hasn't, Hayden's
+  rank is used alone.
+- **Ranks to points:** rank N at a position gets the Nth best numeric projection (props,
+  ESPN, and model blended) at that position, so "RB3" means RB3-level points.
+- **Extra schedule tilt:** the blended projection is multiplied by `defense factor^0.25`.
+  Props and experts already price in the matchup; this deliberately leans further on
+  schedule strength, on top of the model using it at full strength.
+- Players on bye are skipped. When outside sources have published the week, players none
+  of them cover are left out too (usually injured or inactive).
+- Weights and the tilt are constants in `backend/services/weekly_rankings.py`.
+
+On Week 7 of 2026 (before props were configured), the blend agreed closely with Hayden's
+own ranks (rank correlation 0.93 for the top 24 RBs, 0.97 for the top 36 WRs) while still
+moving players on matchup.
 
 ### Value over replacement and trade value
 - **Replacement level** depends on your league: starters league-wide (teams × slots, with
@@ -162,7 +223,10 @@ League parameters accepted by every valuation endpoint: `scoring=ppr|half|std`,
 | GET | `/api/meta` | Current season, latest week, seasons loaded, integration status |
 | GET | `/api/players/search?q=` | Name search (typo-tolerant), best match first |
 | GET | `/api/players/{id}` | Profile: summary, projection, NGS stats, game log, buy/sell signals |
-| GET | `/api/rankings?position=` | Rest-of-season rankings with trade value and weekly ECR |
+| GET | `/api/rankings?position=` | Rest-of-season rankings with trade value, schedule factor, and weekly ECR |
+| GET | `/api/rankings/weekly?week=&position=` | Week X projections with every source's number and the matchup. For the current week, refreshes stale outside sources first unless `refresh=false` |
+| POST | `/api/rankings/weekly/refresh?week=&force=` | Refresh outside sources (`force` re-fetches Yahoo and ESPN; props keep their budget); per-source status |
+| GET | `/api/schedule-strength?position=&week=` | Defenses by opponent-adjusted points allowed, plus each team's upcoming schedule |
 | GET | `/api/leaderboards/metrics` | The metric catalog |
 | GET | `/api/leaderboards?category=&metric=` | Advanced-stat leaderboard (`season`, `min_volume`, `position`, `ascending`, `limit`) |
 | GET | `/api/experts/rankings` | FantasyPros ECR (ROS via API key if set, else the free weekly snapshot) |
@@ -184,10 +248,12 @@ Full TypeScript types for every response: [`docs/API.md`](docs/API.md).
 
 ## AI assistant and agent tools
 
-The same 12 tools are exposed three ways: `search_players`, `get_player_profile`,
+The same 14 tools are exposed three ways: `search_players`, `get_player_profile`,
 `get_player_game_log`, `compare_players`, `get_fantasy_rankings`,
 `list_leaderboard_metrics`, `get_leaderboard`, `evaluate_trade`, `get_buy_low_candidates`,
-`get_sell_high_candidates`, `get_expert_rankings`, and `get_trending_players`.
+`get_sell_high_candidates`, `get_weekly_rankings`, `get_schedule_strength`,
+`get_expert_rankings`, and `get_trending_players`. The weekly tools read the stored
+snapshot; an agent never triggers outside fetches.
 Arguments are validated against each tool's JSON Schema, and players can be passed by name
 (typo-tolerant; ambiguous names like "Mike Williams" return the candidates) or by id.
 If a tool fails unexpectedly, the error is logged on the server and the model only sees a
@@ -224,8 +290,29 @@ prompt AI models, so they're withheld from tool results unless `AGENT_SHARE_PFR_
 | Integration | Needs | What it adds |
 |---|---|---|
 | Sleeper | nothing | Trending adds/drops (cached 15 min) |
+| Yahoo expert rankings | nothing | Weekly positional ranks from Josh Norris, Hayden Winks, and 40+ other Yahoo rankers (cached 3 h) |
+| ESPN projections | nothing | Weekly projected stat lines (cached 3 h) |
+| The Odds API | `ODDS_API_KEY` (free: 500 credits/month) | Vegas player props, the most heavily weighted Week X source (each game bought once, within 30 h of kickoff: about 112 credits a week) |
 | FantasyPros API | `FANTASYPROS_API_KEY` | ROS consensus rankings. Without a key you still get the free weekly ECR snapshot |
 | Yahoo Fantasy | `YAHOO_CLIENT_ID`, `YAHOO_CLIENT_SECRET`, `YAHOO_REDIRECT_URI`, `TOKEN_ENCRYPTION_KEY` | Import your leagues, teams, and rosters |
+
+**Yahoo expert rankings and ESPN projections** come from the JSON endpoints behind their
+public rankings pages. They're unofficial and can change without notice, and both sites'
+terms restrict automated collection, so treat them as personal-use only. The app makes
+about 13 small requests per refresh, at most every 3 hours, and keeps only each week's
+latest snapshot. After a failed refresh it waits 30 minutes before trying again, and a
+response it can't read shows up as an error for that source only. To stop contacting
+either one, remove it from `WEEKLY_SOURCES`.
+
+**The Odds API:** sign up at <https://the-odds-api.com> for a free key and add it to
+`backend/.env` as `ODDS_API_KEY`. Listing games is free; each game's props cost 7 credits
+(7 markets × 1 region). To fit the free plan, **each game's props are bought once, in the
+30 hours before kickoff** (about 16 × 7 = 112 credits a week), so expect props to appear
+the day before each game. Every purchase is logged in the database, so restarts don't
+re-buy anything; each game is stored as soon as it's bought, so a failure partway through
+keeps what was paid for. Refreshes stop while fewer than 17 credits remain and back off
+30 minutes after a failed call. Re-buying lines that moved is only possible on purpose:
+`python -m services.weekly_refresh --force-props`.
 
 **FantasyPros limits:** their terms allow 1 call/second and 100 calls/day for personal,
 non-commercial use. The app stores only the latest ranking snapshot and refreshes it at
@@ -263,6 +350,9 @@ Settings come from environment variables or `backend/.env` (never commit it; see
 | `YAHOO_CLIENT_ID` / `YAHOO_CLIENT_SECRET` | — | Yahoo OAuth app credentials |
 | `YAHOO_REDIRECT_URI` | `oob` | Must match the Yahoo app setting |
 | `TOKEN_ENCRYPTION_KEY` | — | Fernet key used to encrypt OAuth tokens at rest |
+| `ODDS_API_KEY` | — | Enables Vegas player props in Week X rankings |
+| `WEEKLY_SOURCES` | `["yahoo_experts","espn","vegas_props"]` | JSON list of outside weekly sources to fetch |
+| `WEEKLY_AUTO_REFRESH` | `true` | Let `/api/rankings/weekly` refresh the current week's stale sources before answering (never for cross-site requests) |
 | `GROQ_API_KEY` | — | Enables the AI chat |
 | `GROQ_MODEL` | `openai/gpt-oss-20b` | Groq model for the chat |
 | `AGENT_SHARE_PFR_DATA` | `false` | Include PFR-sourced snap counts in AI tool results |
@@ -285,7 +375,7 @@ python -m pytest --cov=. --cov-report=term-missing # with coverage
 
 GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs the suite on every pull request.
 Tests never touch `database/fantasy.db` or read `backend/.env`. All HTTP calls to
-Sleeper, FantasyPros, Yahoo, and Groq are mocked.
+Sleeper, FantasyPros, Yahoo, ESPN, The Odds API, and Groq are mocked.
 
 ```bash
 cd frontend
@@ -300,8 +390,9 @@ backend/
   config.py                 settings from env / .env
   main.py                   FastAPI app (uvicorn main:app)
   api/                      thin routers: data, market, integrations, agent, legacy
-  services/                 tested business logic (scoring, projections, valuation, leaderboards, players, trade, insights, agent)
-  integrations/             sleeper, fantasypros, yahoo, token encryption
+  services/                 tested business logic (scoring, projections, valuation, schedule strength,
+                            weekly model and rankings, props math, leaderboards, players, trade, insights, agent)
+  integrations/             sleeper, fantasypros, yahoo, yahoo experts, espn, the odds api, token encryption
   tools/                    agent tool registry and definitions
   mcp_server.py             MCP server over the same tools
   database/                 models, migrations helpers, data loader
@@ -313,7 +404,7 @@ docs/                       plan, data sources, API contract
 
 ## Design notes
 
-- **Player identity crosswalk:** Yahoo, Sleeper, FantasyPros, PFR, and nflverse each use
+- **Player identity crosswalk:** Yahoo, Sleeper, FantasyPros, PFR, ESPN, and nflverse each use
   different IDs. `players` is the hub, keyed by nflverse's `gsis_id` (unique) and filled
   from the DynastyProcess crosswalk.
 - **Foreign keys are enforced** on every SQLite connection.
@@ -330,5 +421,5 @@ docs/                       plan, data sources, API contract
 ## Roadmap
 
 See [`docs/PLAN.md`](docs/PLAN.md) for the full plan and what's out of scope for now: dynasty values,
-injury-aware projections, bye weeks, multi-user auth, deployment.
+injury-aware projections, multi-user auth, deployment.
 Research work: [`FutureWork.md`](FutureWork.md) (RB Vision Score) and [`DATA_AUDIT.md`](DATA_AUDIT.md) (Big Data Bowl audit).

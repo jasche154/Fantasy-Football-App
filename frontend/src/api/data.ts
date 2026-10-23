@@ -12,7 +12,9 @@ import type {
   Position,
   RankingsResponse,
   RushingLeadersResponse,
+  ScheduleStrengthResponse,
   TrendingRow,
+  WeeklyRankingsResponse,
 } from './types';
 
 export function getHealth(signal?: AbortSignal): Promise<{ status: string }> {
@@ -151,4 +153,28 @@ export function getExpertRankings(
     query: { position: options.position, limit: options.limit },
     signal,
   });
+}
+
+export interface WeeklyOptions extends ListOptions {
+  week?: number;
+}
+
+export function getWeeklyRankings(
+  settings: LeagueSettings,
+  options: WeeklyOptions = {},
+  signal?: AbortSignal,
+): Promise<WeeklyRankingsResponse> {
+  return apiRequest('/api/rankings/weekly', {
+    query: { week: options.week, position: options.position, limit: options.limit, ...settingsToParams(settings) },
+    signal,
+  });
+}
+
+export function getScheduleStrength(
+  settings: LeagueSettings,
+  position: Position,
+  week?: number,
+  signal?: AbortSignal,
+): Promise<ScheduleStrengthResponse> {
+  return apiRequest('/api/schedule-strength', { query: { position, week, ...settingsToParams(settings) }, signal });
 }

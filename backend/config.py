@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     agent_share_pfr_data: bool = False
 
     fantasypros_api_key: str | None = None
+    # The Odds API (free plan: 500 credits/month) for Vegas player props in Week X rankings.
+    odds_api_key: str | None = None
+    # Let the Week X rankings endpoint refresh stale Yahoo/ESPN/props snapshots itself.
+    weekly_auto_refresh: bool = True
+    # Outside sources to fetch. Yahoo's and ESPN's endpoints are unofficial (see
+    # docs/DATA_SOURCES.md); drop either here to stop contacting it.
+    weekly_sources: list[str] = ["yahoo_experts", "espn", "vegas_props"]
 
     yahoo_client_id: str | None = None
     yahoo_client_secret: str | None = None

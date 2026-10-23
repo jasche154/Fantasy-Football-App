@@ -18,6 +18,7 @@ from services.players import AmbiguousPlayer, PlayerNotFound, player_profile, re
 from services.projections import available_seasons, latest_season
 from services.trade import evaluate_trade
 from services.valuation import NoDataError, build_valuation
+from services.weekly_rankings import FIRST_WEEK, LAST_WEEK, build_weekly_rankings, default_week
 from tools.registry import Tool, ToolError, ToolRegistry, ToolUnavailable
 
 PROFILE_GAMES_SHOWN = 5
@@ -141,6 +142,22 @@ def _insights(kind: str):
     return handler
 
 
+WEEK = {"type": "integer", "minimum": FIRST_WEEK, "maximum": LAST_WEEK,
+        "description": "NFL week. Defaults to the current week."}
+
+
+def _weekly(session: Session, week: int | None = None, position: str | None = None, limit: int = 20,
+            **league: Any) -> dict:
+    # Reads the stored snapshot only; agents never trigger outside fetches.
+    rankings = build_weekly_rankings(session, _league(**league), week)
+    return serialize.weekly_rankings(rankings, position, limit, None)
+
+
+def _schedule_strength(session: Session, position: str = "WR", week: int | None = None, **league: Any) -> dict:
+    valuation = build_valuation(session, _league(**league))
+    return serialize.schedule_strength(valuation, position, week or default_week(valuation))
+
+
 def _experts(session: Session, position: str | None = None, limit: int = 25) -> dict:
     return expert_rankings(session, position, limit)
 
@@ -196,6 +213,17 @@ TOOLS = ToolRegistry([
     Tool("get_sell_high_candidates",
          "Players scoring well above what their usage predicts (often touchdown-driven): likely to cool off.",
          _schema({"position": POSITION, "limit": _limit(20, 8), **LEAGUE}), _insights("sell_high")),
+    Tool("get_weekly_rankings",
+         "Projected fantasy points for one NFL week (start/sit), blended from Vegas player props, Yahoo's "
+         "Josh Norris & Hayden Winks, Yahoo expert consensus, ESPN, and the app's matchup model, adjusted "
+         "for opponent strength. Each result lists every source's number and the matchup.",
+         _schema({"week": WEEK, "position": POSITION, "limit": _limit(100, 20), **LEAGUE}), _weekly),
+    Tool("get_schedule_strength",
+         "Opponent-adjusted strength of schedule for one position: which defenses give up more fantasy "
+         "points than the offenses they face usually score (sos_factor > 1 = easier matchup), and each "
+         "team's upcoming and rest-of-season schedule.",
+         _schema({"position": {**POSITION, "description": "Position to rate defenses against (default WR)."},
+                  "week": WEEK, **LEAGUE}), _schedule_strength),
     Tool("get_expert_rankings", "FantasyPros expert consensus rankings (ECR), the latest stored snapshot.",
          _schema({"position": POSITION, "limit": _limit(100, 25)}), _experts),
     Tool("get_trending_players", "Most added or dropped players on Sleeper over the last 24 hours.",
