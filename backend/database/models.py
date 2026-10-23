@@ -337,3 +337,15 @@ class DataLoad(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     seasons: Mapped[str]                       # e.g. "2025,2026"
     finished_at: Mapped[datetime] = mapped_column(default=utc_now)
+
+
+class ExternalApiCall(Base):
+    """One call to a rate-limited third-party API; persisted so quotas survive restarts."""
+
+    __tablename__ = "external_api_calls"
+    __table_args__ = (Index("ix_external_api_calls_source_called_at", "source", "called_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source: Mapped[str]
+    called_at: Mapped[datetime] = mapped_column(default=utc_now)
+    ok: Mapped[bool]

@@ -26,6 +26,7 @@ only *explains* numbers that came back from a tool call. Every output is labeled
 - **Player pages:** season summary, weekly game log, NGS advanced stats, projection
 - **Trade calculator:** values both sides, applies a consolidation discount, gives a verdict, and suggests players that would balance the deal
 - **Buy low / sell high:** finds players whose production is out of line with their usage, with plain-English reasons
+- **Integrations:** Sleeper trending adds/drops, FantasyPros ROS rankings (with your key), and Yahoo league and roster import (OAuth)
 
 ## Quick start
 
@@ -131,17 +132,53 @@ League parameters accepted by every valuation endpoint: `scoring=ppr|half|std`,
 | Method | Path | What it returns |
 |---|---|---|
 | GET | `/api/health` | `{"status": "ok"}` |
-| GET | `/api/meta` | Current season, latest week, seasons loaded |
+| GET | `/api/meta` | Current season, latest week, seasons loaded, integration status |
 | GET | `/api/players/search?q=` | Name search (typo-tolerant), best match first |
 | GET | `/api/players/{id}` | Profile: summary, projection, NGS stats, game log, buy/sell signals |
 | GET | `/api/rankings?position=` | Rest-of-season rankings with trade value and weekly ECR |
 | GET | `/api/leaderboards/metrics` | The metric catalog |
 | GET | `/api/leaderboards?category=&metric=` | Advanced-stat leaderboard (`season`, `min_volume`, `position`, `ascending`, `limit`) |
-| GET | `/api/experts/rankings` | FantasyPros ECR |
+| GET | `/api/experts/rankings` | FantasyPros ECR (ROS via API key if set, else the free weekly snapshot) |
 | POST | `/api/trade/evaluate` | Body `{"give": [ids], "get": [ids], "settings": {...}}`; values, verdict, balance suggestions |
 | GET | `/api/insights/buy-low` | Buy-low candidates with reasons |
 | GET | `/api/insights/sell-high` | Sell-high candidates with reasons |
+| GET | `/api/insights/trending?type=add\|drop` | Sleeper trending players |
+| GET | `/api/integrations/status` | Which integrations are configured and connected |
+| GET | `/api/integrations/yahoo/auth-url` | Yahoo sign-in URL |
+| POST | `/api/integrations/yahoo/exchange` | Body `{"code": "<code or full redirect URL>"}` |
+| GET | `/api/integrations/yahoo/leagues` | Your Yahoo NFL leagues |
+| POST | `/api/integrations/yahoo/leagues/{key}/import` | Import teams and rosters |
 | GET | `/api/rankings/rushing` | Original rushing endpoint (kept for compatibility; now uses the fixed leaderboard math) |
+
+## Integrations
+
+| Integration | Needs | What it adds |
+|---|---|---|
+| Sleeper | nothing | Trending adds/drops (cached 15 min) |
+| FantasyPros API | `FANTASYPROS_API_KEY` | ROS consensus rankings. Without a key you still get the free weekly ECR snapshot |
+| Yahoo Fantasy | `YAHOO_CLIENT_ID`, `YAHOO_CLIENT_SECRET`, `YAHOO_REDIRECT_URI`, `TOKEN_ENCRYPTION_KEY` | Import your leagues, teams, and rosters |
+
+**FantasyPros limits:** their terms allow 1 call/second and 100 calls/day for personal,
+non-commercial use. The app stores only the latest ranking snapshot and refreshes it at
+most every 6 hours. Every call is logged in the database, so the daily cap survives
+restarts, and after a failed call it waits 30 minutes before trying again. Attribution is required.
+
+### Connecting Yahoo
+1. Generate an encryption key for stored tokens and add it to `backend/.env` as `TOKEN_ENCRYPTION_KEY`:
+   ```bash
+   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+   ```
+2. Your Yahoo app's redirect URI must match `YAHOO_REDIRECT_URI` exactly (Yahoo requires
+   HTTPS, e.g. `https://localhost:8000/callback`).
+3. Get the sign-in link from `GET /api/integrations/yahoo/auth-url`
+   and approve access. Yahoo redirects to your HTTPS redirect URI, which the dev server
+   can't serve, so the browser shows an error page. **That's expected.** Copy the whole URL from the address bar.
+4. Paste it into `POST /api/integrations/yahoo/exchange`. The app
+   pulls out the `code`, checks the one-time `state`, and stores encrypted tokens. Tokens refresh automatically.
+5. List your leagues and import one. Rosters are matched to players through the nflverse ID
+   crosswalk, and anything unmatched (kickers, defenses) is listed in the response.
+
+Yahoo requires showing "Fantasy data provided by Yahoo Fantasy" wherever its data appears.
 
 ## Configuration
 
@@ -153,6 +190,10 @@ Settings come from environment variables or `backend/.env` (never commit it; see
 | `CORS_ORIGINS` | `["http://localhost:5173","http://127.0.0.1:5173"]` | JSON list of allowed web origins |
 | `FANTASY_END_WEEK` | `17` | Last fantasy week (drives weeks remaining) |
 | `ALLOWED_HOSTS` | `["localhost","127.0.0.1"]` | Host headers the API accepts (blocks DNS rebinding) |
+| `FANTASYPROS_API_KEY` | — | Enables FantasyPros ROS rankings |
+| `YAHOO_CLIENT_ID` / `YAHOO_CLIENT_SECRET` | — | Yahoo OAuth app credentials |
+| `YAHOO_REDIRECT_URI` | `oob` | Must match the Yahoo app setting |
+| `TOKEN_ENCRYPTION_KEY` | — | Fernet key used to encrypt OAuth tokens at rest |
 
 ## Data sources
 
@@ -171,7 +212,8 @@ python -m pytest --cov=. --cov-report=term-missing # with coverage
 ```
 
 GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs the suite on every pull request.
-Tests never touch `database/fantasy.db` or read `backend/.env`.
+Tests never touch `database/fantasy.db` or read `backend/.env`. All HTTP calls to
+Sleeper, FantasyPros, Yahoo are mocked.
 
 ## Project structure
 
@@ -179,8 +221,9 @@ Tests never touch `database/fantasy.db` or read `backend/.env`.
 backend/
   config.py                 settings from env / .env
   main.py                   FastAPI app (uvicorn main:app)
-  api/                      thin routers: data, market, legacy
+  api/                      thin routers: data, market, integrations, legacy
   services/                 tested business logic (scoring, projections, valuation, leaderboards, players, trade, insights)
+  integrations/             sleeper, fantasypros, yahoo, token encryption
   database/                 models, migrations helpers, data loader
   alembic/                  schema migrations
   tests/                    pytest suite
@@ -200,6 +243,8 @@ docs/                       plan, data sources
   `populate_stats` run, so reloads (stat corrections included) show up immediately.
 - **SQLite is a deliberate, temporary choice.** It's zero-config for solo use; moving to
   Postgres is a `DATABASE_URL` change.
+- **OAuth tokens are encrypted at rest** (Fernet). The app is single-user for now, so a
+  connection belongs to one local user row.
 
 ## Roadmap
 

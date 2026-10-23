@@ -124,7 +124,7 @@ def _legacy_database(path):
     legacy = make_engine(f"sqlite:///{path}")
     Base.metadata.create_all(legacy)
     with legacy.begin() as connection:
-        for table in ("expert_rankings", "player_snap_counts_weekly", "data_loads"):
+        for table in ("expert_rankings", "player_snap_counts_weekly", "data_loads", "external_api_calls"):
             connection.execute(text(f"DROP TABLE {table}"))
         connection.execute(text("DROP INDEX ix_players_gsis_id"))
         connection.execute(text("ALTER TABLE players DROP COLUMN fantasypros_id"))

@@ -1,9 +1,14 @@
 """Read-only data endpoints: meta, players, rankings, leaderboards, expert rankings."""
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from api.deps import Position, league_params, valuation_or_503
+from api.integration_routes import integration_status
+from config import get_settings
 from database.db import get_session
+from integrations.fantasypros import FantasyProsClient, FantasyProsError, refresh_rankings
 from services import serialize
 from services.experts import expert_rankings, weekly_ecr_by_player
 from services.leaderboards import catalog, leaderboard
@@ -13,6 +18,7 @@ from services.projections import available_seasons, latest_season, latest_week
 from services.scoring import POINTS_PER_RECEPTION
 from services.valuation import NoDataError
 
+log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
 
 
@@ -27,7 +33,7 @@ def meta(session: Session = Depends(get_session)) -> dict:
     return {
         "current_season": season, "latest_week": latest_week(session, season) if season else None,
         "seasons": available_seasons(session), "positions": list(POSITIONS),
-        "scoring_presets": list(POINTS_PER_RECEPTION),
+        "scoring_presets": list(POINTS_PER_RECEPTION), "integrations": integration_status(session),
     }
 
 
@@ -83,5 +89,14 @@ def leaderboards(category: str, metric: str, season: int | None = Query(None, ge
 @router.get("/experts/rankings")
 def experts(position: Position | None = None, limit: int = Query(50, ge=1, le=500),
             session: Session = Depends(get_session)) -> dict:
-    """The free weekly FantasyPros ECR snapshot loaded by populate_stats."""
-    return expert_rankings(session, position, limit)
+    """FantasyPros ROS ECR when a key is configured (refreshed at most every few hours),
+    otherwise the free weekly ECR snapshot loaded by populate_stats."""
+    warning = None
+    api_key = get_settings().fantasypros_api_key
+    if api_key:
+        try:
+            refresh_rankings(session, FantasyProsClient(api_key), latest_season(session))
+        except FantasyProsError as exc:
+            log.warning("FantasyPros refresh failed: %s", exc)
+            warning = f"FantasyPros refresh failed ({exc}); showing the last stored rankings."
+    return {**expert_rankings(session, position, limit), "warning": warning}

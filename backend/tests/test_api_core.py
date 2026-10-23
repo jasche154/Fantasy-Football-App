@@ -62,7 +62,7 @@ def test_free_ecr_is_positional_and_grouped_by_position(client, session):
 
 def test_expert_rankings_from_free_snapshot(client):
     body = client.get("/api/experts/rankings", params={"position": "WR"}).json()
-    assert body["source"] == "nflverse_ffrankings"
+    assert body["source"] == "nflverse_ffrankings" and body["warning"] is None
     assert body["results"][0]["pos_rank"] == "WR3"
 
 

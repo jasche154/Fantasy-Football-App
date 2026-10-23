@@ -19,6 +19,13 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
     allowed_hosts: list[str] = ["localhost", "127.0.0.1"]
 
+    fantasypros_api_key: str | None = None
+
+    yahoo_client_id: str | None = None
+    yahoo_client_secret: str | None = None
+    yahoo_redirect_uri: str = "oob"
+    token_encryption_key: str | None = None
+
     # Last week of the fantasy season (playoffs included); drives "weeks remaining".
     fantasy_end_week: int = 17
 
