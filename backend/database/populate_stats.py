@@ -8,7 +8,14 @@ Run from backend/:
 Each season is downloaded on its own and only replaces existing rows once the download
 succeeds, so a network failure never wipes data that is already loaded.
 """
-import argparse
+import sys
+from pathlib import Path
+
+if __package__ in (None, ""):
+    # Run by file path (`python populate_stats.py`, an IDE "Run" button): make backend/ importable.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import argparse  # noqa: E402
 import logging
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
