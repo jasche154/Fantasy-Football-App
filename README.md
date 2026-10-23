@@ -24,6 +24,8 @@ only *explains* numbers that came back from a tool call. Every output is labeled
 - **Advanced-stat leaderboards:** 26 whitelisted metrics (RYOE, separation, YAC over
   expected, CPOE, time to throw, target share, EPA per play, and more), volume-weighted the right way
 - **Player pages:** season summary, weekly game log, NGS advanced stats, projection
+- **Trade calculator:** values both sides, applies a consolidation discount, gives a verdict, and suggests players that would balance the deal
+- **Buy low / sell high:** finds players whose production is out of line with their usage, with plain-English reasons
 
 ## Quick start
 
@@ -102,6 +104,24 @@ For each QB/RB/WR/TE this season:
 - **`trade_value = max(0, ros_ppg − replacement_ppg) × weeks_remaining`**: rest-of-season
   fantasy points above what you'd get from waivers. Weeks remaining run through week 17.
 
+### Trade calculator
+Each side is sorted by value and weighted **1.0, 0.9, 0.8, …** (minimum 0.5). Lineup spots
+are limited, so two mid-tier players are worth less than their raw sum. Both sides get the
+same treatment, so an even 2-for-2 stays even. Verdict from the percent difference:
+**≤ 5% fair, ≤ 15% slight edge, more is lopsided.** "Balance it" suggests players not in
+the deal whose addition brings the trade closest to even.
+
+### Buy low / sell high
+Per player (3+ games):
+- **FPOE** = actual − expected fantasy points per game
+- **TD luck** = actual TDs − expected TDs
+- **Usage trend** = expected points over the last 3 games vs the season
+- **Recent form** = last-3 PPG vs season PPG (other managers react to this)
+
+**Buy low:** a valuable role (expected PPG at or above replacement), FPOE ≤ −1, usage not
+collapsing. **Sell high:** the mirror image. Only players with positive trade value qualify.
+Scores are a percent of expected points, so QBs don't drown out other positions.
+
 ## API reference
 
 All JSON. Errors use `{"detail": ...}` with a real status code (404, 422, 502, 503).
@@ -113,11 +133,14 @@ League parameters accepted by every valuation endpoint: `scoring=ppr|half|std`,
 | GET | `/api/health` | `{"status": "ok"}` |
 | GET | `/api/meta` | Current season, latest week, seasons loaded |
 | GET | `/api/players/search?q=` | Name search (typo-tolerant), best match first |
-| GET | `/api/players/{id}` | Profile: summary, projection, NGS stats, game log |
+| GET | `/api/players/{id}` | Profile: summary, projection, NGS stats, game log, buy/sell signals |
 | GET | `/api/rankings?position=` | Rest-of-season rankings with trade value and weekly ECR |
 | GET | `/api/leaderboards/metrics` | The metric catalog |
 | GET | `/api/leaderboards?category=&metric=` | Advanced-stat leaderboard (`season`, `min_volume`, `position`, `ascending`, `limit`) |
 | GET | `/api/experts/rankings` | FantasyPros ECR |
+| POST | `/api/trade/evaluate` | Body `{"give": [ids], "get": [ids], "settings": {...}}`; values, verdict, balance suggestions |
+| GET | `/api/insights/buy-low` | Buy-low candidates with reasons |
+| GET | `/api/insights/sell-high` | Sell-high candidates with reasons |
 | GET | `/api/rankings/rushing` | Original rushing endpoint (kept for compatibility; now uses the fixed leaderboard math) |
 
 ## Configuration
@@ -156,8 +179,8 @@ Tests never touch `database/fantasy.db` or read `backend/.env`.
 backend/
   config.py                 settings from env / .env
   main.py                   FastAPI app (uvicorn main:app)
-  api/                      thin routers: data, legacy
-  services/                 tested business logic (scoring, projections, valuation, leaderboards, players)
+  api/                      thin routers: data, market, legacy
+  services/                 tested business logic (scoring, projections, valuation, leaderboards, players, trade, insights)
   database/                 models, migrations helpers, data loader
   alembic/                  schema migrations
   tests/                    pytest suite

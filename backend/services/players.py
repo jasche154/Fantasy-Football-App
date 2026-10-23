@@ -10,6 +10,7 @@ from database.models import (
     Player, PlayerPassingAdvancedWeekly, PlayerReceivingAdvancedWeekly, PlayerRushingAdvancedWeekly,
     PlayerStatsWeekly,
 )
+from services.insights import player_signals
 from services.league import POSITIONS, LeagueSettings
 from services.projections import GameLine, PlayerSeason, load_game_lines
 from services.valuation import build_valuation
@@ -177,4 +178,5 @@ def player_profile(session: Session, player_id: int, league: LeagueSettings,
                         "trade_value": value.trade_value, "pos_rank": value.pos_rank} if value else None),
         "advanced": _advanced(session, player_id, season),
         "game_log": [_game_log_row(g) for g in all_games],
+        "signals": player_signals(player_season, valuation),
     }

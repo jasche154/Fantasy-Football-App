@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from api import data_routes, legacy_routes
+from api import data_routes, legacy_routes, market_routes
 from config import get_settings
 from database.db import SessionLocal
 from services.league import LeagueSettings
@@ -57,7 +57,7 @@ def create_app(warm_cache: bool = True) -> FastAPI:
             return JSONResponse({"detail": "Cross-site request blocked."}, status_code=403)
         return await call_next(request)
 
-    for module in (data_routes, legacy_routes):
+    for module in (data_routes, market_routes, legacy_routes):
         app.include_router(module.router)
     return app
 
