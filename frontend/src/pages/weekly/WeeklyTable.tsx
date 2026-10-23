@@ -1,7 +1,10 @@
+import { Fragment, useState } from 'react';
 import type { WeeklyMatchup, WeeklyPlayer, WeeklySourceKey, WeeklySourceValue } from '../../api/types';
+import { FlagChips, StatusBadge } from '../../components/FlagChips';
 import { PlayerLink } from '../../components/PlayerLink';
 import { EMPTY_VALUE, formatNumber } from '../../lib/format';
 import { factorLabel, rankTone, TONE_LABELS } from '../../lib/matchup';
+import { ExplainPanel } from './ExplainPanel';
 
 interface SourceColumn {
   key: WeeklySourceKey;
@@ -53,13 +56,21 @@ function SourceCell({ value, position }: { value: WeeklySourceValue | undefined;
   );
 }
 
-function WeeklyRow({ row }: { row: WeeklyPlayer }) {
+function WeeklyRow({ row, week }: { row: WeeklyPlayer; week: number }) {
   const position = row.player.position;
+  const [showWhy, setShowWhy] = useState(false);
   return (
+    <Fragment>
     <tr>
       <td className="num td--rank">{row.rank}</td>
       <td className="td--player">
         <PlayerLink player={row.player} />
+        <StatusBadge status={row.status} playProb={row.play_prob} />
+        <FlagChips flags={row.flags} />
+        <button type="button" className="why-btn" aria-expanded={showWhy}
+          aria-label={`Why ${row.player.name} projects ${formatNumber(row.projection)}`} onClick={() => setShowWhy((v) => !v)}>
+          Why?
+        </button>
       </td>
       <td className="td--pos">{row.pos_rank}</td>
       <td>
@@ -68,20 +79,30 @@ function WeeklyRow({ row }: { row: WeeklyPlayer }) {
       <td className="num">{formatNumber(row.matchup.implied_total)}</td>
       <td className="num">
         <span className="value-pill">{formatNumber(row.projection)}</span>
+        {row.floor !== null && row.ceiling !== null && (
+          <span className="source-rank" title="10th to 90th percentile outcome">{formatNumber(row.floor)}–{formatNumber(row.ceiling)}</span>
+        )}
       </td>
       {SOURCE_COLUMNS.map((column) => (
         <SourceCell key={column.key} value={row.sources[column.key]} position={position} />
       ))}
     </tr>
+    {showWhy && (
+      <tr className="explain-row">
+        <td colSpan={6 + SOURCE_COLUMNS.length}><ExplainPanel playerId={row.player.id} week={week} /></td>
+      </tr>
+    )}
+    </Fragment>
   );
 }
 
 interface WeeklyTableProps {
   rows: readonly WeeklyPlayer[];
   caption: string;
+  week: number;
 }
 
-export function WeeklyTable({ rows, caption }: WeeklyTableProps) {
+export function WeeklyTable({ rows, caption, week }: WeeklyTableProps) {
   return (
     <div className="table-wrap table-wrap--tall">
       <table className="data-table weekly-table">
@@ -93,7 +114,7 @@ export function WeeklyTable({ rows, caption }: WeeklyTableProps) {
             <th scope="col" title="Positional rank">Pos</th>
             <th scope="col" title="Opponent and opponent-adjusted matchup grade">Matchup</th>
             <th scope="col" className="num" title="Vegas implied team points (spread + total)">Team total</th>
-            <th scope="col" className="num th--accent" title="Blended projected fantasy points">Proj</th>
+            <th scope="col" className="num th--accent" title="Expected points (if active x chance to play), with the 10th-90th percentile range">Proj</th>
             {SOURCE_COLUMNS.map((column) => (
               <th key={column.key} scope="col" className="num" title={column.title}>
                 <span className={`source-dot source--${column.key}`} aria-hidden="true" />
@@ -104,7 +125,7 @@ export function WeeklyTable({ rows, caption }: WeeklyTableProps) {
         </thead>
         <tbody>
           {rows.map((row) => (
-            <WeeklyRow key={row.player.id} row={row} />
+            <WeeklyRow key={row.player.id} row={row} week={week} />
           ))}
         </tbody>
       </table>

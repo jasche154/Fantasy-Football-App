@@ -387,6 +387,51 @@ class WeeklySourceProjection(Base):
     opponent: Mapped[str | None]
     rank: Mapped[float | None]
     stats: Mapped[str | None]
+    pct_rostered: Mapped[float | None]         # ESPN league-wide roster rate, 0-100
+    fetched_at: Mapped[datetime] = mapped_column(default=utc_now)
+
+
+class InjuryReport(Base):
+    """The official weekly injury report (nflverse): game status and final practice status."""
+
+    __tablename__ = "injury_reports"
+    __table_args__ = (Index("ix_injury_reports_season_week", "season", "week"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    season: Mapped[int]
+    week: Mapped[int]
+    player_id: Mapped[int] = mapped_column(ForeignKey("players.id"))
+    team: Mapped[str | None]
+    report_status: Mapped[str | None]          # Out / Doubtful / Questionable / None
+    practice_status: Mapped[str | None]        # DNP / LP / FP (normalized)
+    injury: Mapped[str | None]
+
+
+class DepthChartEntry(Base):
+    """Latest depth chart per team for offensive skill positions (nflverse, ESPN-sourced)."""
+
+    __tablename__ = "depth_charts"
+    __table_args__ = (Index("ix_depth_charts_team", "team"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    team: Mapped[str]
+    player_id: Mapped[int] = mapped_column(ForeignKey("players.id"))
+    position: Mapped[str]                      # QB / RB / WR / TE
+    depth: Mapped[int]                         # 1 = starter
+    as_of: Mapped[str | None]
+
+
+class PlayerStatus(Base):
+    """Live status from Sleeper (refreshed hourly): injury designation and depth order."""
+
+    __tablename__ = "player_status"
+
+    player_id: Mapped[int] = mapped_column(ForeignKey("players.id"), primary_key=True)
+    injury_status: Mapped[str | None]          # Out, Doubtful, Questionable, IR, PUP, Sus, ...
+    injury_body_part: Mapped[str | None]
+    team: Mapped[str | None]
+    depth_position: Mapped[str | None]
+    depth_order: Mapped[int | None]
     fetched_at: Mapped[datetime] = mapped_column(default=utc_now)
 
 

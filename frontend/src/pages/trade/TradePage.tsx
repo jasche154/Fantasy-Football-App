@@ -1,3 +1,4 @@
+import { TradeFinder } from './TradeFinder';
 import { useRef } from 'react';
 import { AsyncView } from '../../components/AsyncView';
 import { Card, PageHeader } from '../../components/Card';
@@ -97,6 +98,7 @@ export function TradePage({ query }: { query: Readonly<Record<string, string>> }
       <Card title="Verdict" eyebrow="Projection (model)" className="card--verdict">
         <TradeEvaluation trade={trade} />
       </Card>
+      <TradeFinder giveIds={trade.ids.give} />
     </>
   );
 }

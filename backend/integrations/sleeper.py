@@ -1,4 +1,4 @@
-"""Sleeper public API (no key): trending adds and drops.
+"""Sleeper public API (no key): trending adds and drops, and live injury status.
 
 Docs: https://docs.sleeper.com/ . Read-only, free for non-commercial use, stay under
 1,000 calls/minute, and attribute Sleeper where the data is shown. Responses are cached
@@ -73,3 +73,53 @@ def trending_players(session: Session, trend_type: str, limit: int = 10,
             "sleeper_id": sleeper_id, "count": int(row.get("count") or 0),
         })
     return results
+
+
+PLAYERS_SOURCE = "sleeper_status"
+PLAYERS_TIMEOUT_SECONDS = 60.0
+
+
+def fetch_players(client: httpx.Client) -> dict:
+    """The full NFL player map (~14 MB). Sleeper asks callers to fetch it at most daily-ish;
+    the app refreshes it at most hourly and only while the Week X page is in use."""
+    try:
+        response = client.get(f"{BASE_URL}/players/nfl", timeout=PLAYERS_TIMEOUT_SECONDS)
+        response.raise_for_status()
+        players = response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        raise SleeperError(f"Sleeper players request failed: {exc}") from exc
+    if not isinstance(players, dict):
+        raise SleeperError("Unexpected Sleeper players response shape.")
+    return players
+
+
+def status_rows(players: dict, sleeper_to_player: dict[str, int]) -> list[dict]:
+    """PlayerStatus rows for our QB/RB/WR/TE players."""
+    rows = []
+    for sleeper_id, item in players.items():
+        player_id = sleeper_to_player.get(str(sleeper_id))
+        if player_id is None or not isinstance(item, dict):
+            continue
+        order = item.get("depth_chart_order")
+        rows.append({"player_id": player_id, "injury_status": item.get("injury_status") or None,
+                     "injury_body_part": item.get("injury_body_part") or None, "team": item.get("team"),
+                     "depth_position": item.get("depth_chart_position"),
+                     "depth_order": int(order) if isinstance(order, (int, float)) else None})
+    return rows
+
+
+def refresh_status(session: Session, client: httpx.Client) -> int:
+    """Replace the stored live statuses. Returns rows stored."""
+    from sqlalchemy import delete, insert
+
+    from database.models import PlayerStatus
+
+    mapping = {sid: pid for pid, sid in session.execute(
+        select(Player.id, Player.sleeper_player_id).where(Player.sleeper_player_id.is_not(None)))}
+    rows = status_rows(fetch_players(client), mapping)
+    if not rows:
+        raise SleeperError("Sleeper returned no matching players.")
+    session.execute(delete(PlayerStatus))
+    session.execute(insert(PlayerStatus), rows)
+    session.commit()
+    return len(rows)

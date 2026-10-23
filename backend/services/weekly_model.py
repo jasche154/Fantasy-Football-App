@@ -12,15 +12,70 @@ adjustment), keeps the shape of their season stat line, then applies this week's
 sos_factor is the opponent-adjusted defense factor at the player's position; implied_factor
 is the Vegas implied team total divided by the team's scoring average.
 """
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
 
-from services.projections import PlayerSeason
+from services.projections import ACTUAL_WEIGHT, PRIOR_STRENGTH_GAMES, PlayerSeason
 from services.schedule_strength import DefenseStrength, Schedule
 from services.scoring import ScoringSettings, reception_points
 
-SOS_WEIGHT = 1.0
+# Tuned with `python -m services.backtest --season 2025 --ablation` (3,641 player-weeks, weeks 4-18),
+# then checked on 2024 without re-tuning:
+#   season-long rate only             2025 MAE 6.81, rank r 0.359 | 2024 MAE 6.69, rank r 0.394
+#   half-life 4 + injuries + implied  2025 MAE 5.99, rank r 0.504 | 2024 MAE 6.03, rank r 0.528
+#   same with SOS^0.5 (chosen)        2025 MAE 6.01, rank r 0.502 | 2024 MAE 6.05, rank r 0.526
+# Vegas implied totals already price the opposing defense, so schedule strength adds little on
+# top; it is kept at 0.5 because the user asked for schedule to weigh in, at a ~0.3% MAE cost.
+SOS_WEIGHT = 0.5
 IMPLIED_TOTAL_WEIGHT = 0.5
+RECENCY_HALF_LIFE: float | None = 4.0     # games; None = every game this season counts equally
+RANGES_PATH = Path(__file__).with_name("projection_ranges.json")
+
+
+@dataclass(frozen=True)
+class WeeklyModelSettings:
+    """Tunable model knobs (see services/backtest.py for how they were chosen)."""
+
+    half_life: float | None = RECENCY_HALF_LIFE
+    sos_weight: float = SOS_WEIGHT
+    implied_weight: float = IMPLIED_TOTAL_WEIGHT
+    use_injuries: bool = True
+
+    def describe(self) -> str:
+        recency = "season" if self.half_life is None else f"half-life {self.half_life:g}"
+        return (f"{recency}, sos^{self.sos_weight:g}, implied^{self.implied_weight:g}, "
+                f"injuries {'on' if self.use_injuries else 'off'}")
+
+
+def weekly_rate(player: PlayerSeason, prior_ppg: float | None, half_life: float | None = RECENCY_HALF_LIFE) -> float:
+    """Recency-weighted points per game, shrunk toward last season.
+
+    Each game counts 0.6 x actual + 0.4 x expected points (usage is stickier than results);
+    a game half_life games ago counts half as much as the latest. With no prior, no shrinkage.
+    """
+    games = player.games
+    if not games:
+        return prior_ppg or 0.0
+    values = [ACTUAL_WEIGHT * g.fantasy_points + (1 - ACTUAL_WEIGHT) * g.expected_points
+              if g.expected_points is not None else g.fantasy_points for g in games]
+    weights = [1.0 if half_life is None else 0.5 ** ((len(games) - 1 - i) / half_life) for i in range(len(games))]
+    rate = sum(w * v for w, v in zip(weights, values)) / sum(weights)
+    if prior_ppg is None:
+        return round(rate, 2)
+    shrink = len(games) / (len(games) + PRIOR_STRENGTH_GAMES)
+    return round(shrink * rate + (1 - shrink) * prior_ppg, 2)
+
+
+@lru_cache(maxsize=1)
+def projection_ranges() -> dict[str, dict[str, float]]:
+    """Floor/ceiling multipliers by position, measured by the backtest."""
+    try:
+        return json.loads(RANGES_PATH.read_text(encoding="utf-8"))["positions"]
+    except (OSError, ValueError, KeyError):
+        return {}
 IMPLIED_FACTOR_LIMITS = (0.75, 1.25)
 # A props line only counts when the position's main yardage market is posted.
 PRIMARY_STAT = {"QB": "pass_yds", "RB": "rush_yds", "WR": "rec_yds", "TE": "rec_yds"}

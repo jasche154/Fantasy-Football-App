@@ -408,7 +408,7 @@ def test_refresh_sources_runs_one_at_a_time(session, seeded):
     finally:
         weekly_refresh._refresh_lock.release()
     assert {s["state"] for s in statuses.values()} == {"busy"}
-    assert set(statuses) == {"yahoo_experts", "espn", "vegas_props"}
+    assert set(statuses) == {"sleeper_status", "yahoo_experts", "espn", "vegas_props"}
 
 
 def test_weekly_refresh_cli(engine, seeded, monkeypatch, caplog):

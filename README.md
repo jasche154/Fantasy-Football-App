@@ -24,6 +24,17 @@ only *explains* numbers that came back from a tool call. Every output is labeled
 - **Week X rankings:** projected points for the current (or any) week, blended from Vegas
   player props (highest weight), Yahoo's Josh Norris & Hayden Winks, Yahoo's 40+ expert
   consensus, ESPN, and a matchup model, with each source's number side by side
+- **Injury-aware projections:**
+  - Sleeper's live injury tags and the official practice reports become a learned chance to
+    play.
+  - When a player may sit, his work is passed to teammates, using what happened in games he
+    missed this season. Example: *Braelon Allen +7.5 points if Breece Hall sits*.
+  - Backtests on 2025 and 2024 show the injury layer cuts weekly error by about 10%.
+- **Explanations on request:** a **Why?** button on every projection lists each step from
+  recent production to the final number.
+- **Floor/ceiling ranges** measured from 2025 outcomes, plus **breakout and regression flags**
+  that react to injury news.
+- **Start/Sit comparer, Waiver Wire assistant** (with FAAB bids), and **Trade finder**
 - **Adjusted strength of schedule:** fantasy points each defense allows by position,
   corrected for the offenses it faced; drives weekly matchups and rest-of-season values
 - **Rankings:** rest-of-season rankings for your league's scoring (PPR, half, standard,
@@ -36,7 +47,7 @@ only *explains* numbers that came back from a tool call. Every output is labeled
 - **Trade calculator:** values both sides, applies a consolidation discount, gives a verdict, and suggests players that would balance the deal
 - **Buy low / sell high:** finds players whose production is out of line with their usage, with plain-English reasons
 - **Integrations:** Sleeper trending adds/drops, FantasyPros ROS rankings (with your key), and Yahoo league and roster import (OAuth)
-- **AI assistant and agent tools:** 14 validated tools that any agent can call over REST
+- **AI assistant and agent tools:** 17 validated tools that any agent can call over REST
   or MCP (Claude Desktop / Claude Code), plus a built-in Groq-powered chat
 - **Web app:** React UI with a dashboard, rankings, advanced stats, trade calculator, buy/sell market, player pages, AI chat, and settings; dark and light themes, mobile-friendly
 
@@ -70,8 +81,12 @@ python -m database.populate_stats --seasons 2025 2026   # reload specific season
 python -m database.populate_stats --all                 # reload everything
 ```
 
-`populate_stats` also loads the schedule with closing Vegas spreads and totals, which the
-Week X rankings and strength of schedule use.
+`populate_stats` also loads:
+- the schedule with closing Vegas spreads and totals;
+- every season's official injury reports;
+- each team's latest depth chart.
+
+The Week X rankings, injury model and strength of schedule all use these.
 
 To pull this week's outside rankings (Yahoo experts, ESPN, and Vegas props if
 `ODDS_API_KEY` is set) without opening the web app:
@@ -117,6 +132,9 @@ Open <http://localhost:5173>. The UI talks to `http://localhost:8000` by default
 | **Dashboard** | Top buy-low and sell-high players with the reason behind each, Sleeper's most-added players, data freshness |
 | **Week X Rankings** | This week's projections by position; pick any week. Each row shows the matchup grade (opponent-adjusted, #1 = easiest), the Vegas implied team total, the blended projection, and every source's number (props, Josh & Hayden, Yahoo, ESPN, model). **Schedule strength** switches to defenses ranked by adjusted points allowed and each team's upcoming opponents. **Refresh sources** re-pulls Yahoo and ESPN (Vegas props follow their credit budget) |
 | **Rankings** | Rest-of-season rankings by position; sort by actual, expected, or projected points, schedule strength, trade value, or ECR |
+| **Week X → Start / Sit** | Add up to four players. Each shows its projection, floor–ceiling range, injury status, "if <teammate> sits" scenarios, flags, and a **Why?** breakdown. A tiebreaker (most points / safe / upside) decides close calls |
+| **Waiver Wire** | Players rostered in under 10–75% of ESPN leagues, ranked by rest-of-season value, this week's projection, next three matchups, and injury-driven opportunity, with a suggested FAAB bid |
+| **Trade Calculator → Trade finder** | Put the players you'd move in "You give", pick a position you want, and get fair or slight-edge 1-for-1 and 2-for-1 offers; **Load in calculator** opens one |
 | **Chart Studio** | Click a quick chart (Volume pays, Separators, RYOE leaders, Downfield QBs, Opportunity score) or pick one or two season metrics and a position; the chart type is chosen for you. Add players to highlight them, or add players with no metric for a weekly trend of any stat. **Download SVG** saves the chart |
 | **Advanced Stats** | Pick a category and metric, season, and minimum volume, then rank every qualified player |
 | **Trade Calculator** | Search players into "You give" / "You get". See each side's value, the verdict meter, and suggestions that even it out; the URL is shareable |
@@ -161,6 +179,80 @@ Alternating those two steps four times gives each defense a factor: **1.15 at WR
 score 15% more WR points than usual against it.** Factors are shrunk toward 1.0 with four
 games of neutral evidence and kept between 0.70 and 1.35, so a two-week sample can't
 produce an extreme matchup.
+
+### Injuries and vacated opportunity
+- **Where status comes from, newest first:**
+  1. **Sleeper's** live tags (Out, Doubtful, Questionable, IR, PUP, suspended), refreshed hourly.
+  2. The **official weekly injury report** from nflverse: the game status plus the final
+     practice (DNP, LP, FP).
+  Veteran rest days aren't treated as injuries.
+- **Chance to play** is learned from 2021–2025 reports: how often a player who recorded stats
+  the week before played again with that tag and practice status, compared with healthy
+  full-practice players.
+
+| Status, final practice | Played |
+|---|---|
+| Questionable, DNP | about 49% |
+| Questionable, limited | about 78% |
+| Questionable, full | about 85% |
+| Doubtful | 0–5% |
+| Out | 0% |
+
+- **Vacated work.** A player likely to sit leaves his expected points to teammates:
+  - Each position keeps a share (75% of a running back's work stays with the RBs; WR work
+    spreads to WRs and TEs).
+  - The next player on the depth chart gets the largest cut.
+  - When the season already has 2+ games without him, each teammate's *measured* change in
+    expected points in those games is used, shrunk toward the heuristic for small samples.
+  - Example: with Breece Hall Questionable, Braelon Allen gets **+7.5 points if Hall sits**,
+    measured from his 3 games without Hall. Weighted by Hall's 22% chance of sitting, that
+    adds +1.7 to Allen's projection.
+- **What gets shown.** The projection is the if-active number times the chance to play.
+  Each "If <teammate> sits" scenario shows the full upside.
+- **Avoiding double counting.** If a teammate is already ruled Out, experts and Vegas have
+  priced it in, so only the model's share of the boost is added.
+
+### Backtest and tuning
+`python -m services.backtest --season 2025` replays a past season week by week, using only
+information available before each game: stats so far, defense strength from earlier games,
+that week's Vegas lines and injury report. It scores projections against what happened
+(a player who sits scores 0).
+
+| Weeks 4–18 | 2025 MAE | 2025 rank corr. | 2024 MAE (out of sample) | 2024 rank corr. |
+|---|---|---|---|---|
+| Old model (season-long rate) | 6.81 | 0.359 | 6.69 | 0.394 |
+| Current model | **6.01** | **0.502** | **6.05** | **0.526** |
+| Current model without the injury layer | 6.65 | 0.384 | 6.63 | 0.415 |
+| … without recency weighting | 6.08 | 0.495 | 6.09 | 0.514 |
+| … without Vegas implied totals | 6.06 | 0.501 | 6.06 | 0.525 |
+| … without schedule strength | 5.99 | 0.504 | 6.03 | 0.528 |
+
+The settings were tuned on 2025 and then checked on 2024 without re-tuning; the gains carry over
+(about 10–12% lower error, rank correlation up about 35–40%). The replay uses each player's team as
+of that week, no live data or current depth charts, and play probabilities learned with the tested
+season left out.
+
+The grid search (`--ablation` for the table above) chose these settings:
+- **Recency:** a half-life of 4 games (a game four weeks ago counts half).
+- **Vegas:** implied team total^0.5.
+- **Schedule strength: 0.5.** Inside the model it adds nothing beyond Vegas lines, which
+  already price the defense. It's kept at 0.5, at a cost of about 0.02 MAE, because schedule
+  strength was requested as a factor.
+
+The run also writes `services/projection_ranges.json`: the 10th/90th percentile of actual ÷
+projected points by position. That's where the floor/ceiling ranges come from (RBs, for
+example, land between 0.28× and 1.97× their projection 80% of the time).
+
+### Breakout and regression flags
+
+| Flag | Meaning |
+|---|---|
+| Opportunity spike | A teammate may sit and this player would inherit 3+ pts of his work |
+| Role growing | Expected points or snap share rising over the last 3 games |
+| TDs due / TD-heavy | Touchdowns 2+ below or above what his looks predict |
+| Under/over-producing usage | Scoring 3+ pts/game away from what usage predicts |
+| Competition returning | A teammate who missed the last two games is back, so a fill-in's role may shrink |
+| Injury risk | His own chance to play is under 90% |
 
 ### Week X rankings
 Each player's week projection is a weighted blend of every source that covers them:
@@ -229,6 +321,11 @@ League parameters accepted by every valuation endpoint: `scoring=ppr|half|std`,
 | GET | `/api/rankings?position=` | Rest-of-season rankings with trade value, schedule factor, and weekly ECR |
 | GET | `/api/rankings/weekly?week=&position=` | Week X projections with every source's number and the matchup. For the current week, refreshes stale outside sources first unless `refresh=false` |
 | POST | `/api/rankings/weekly/refresh?week=&force=` | Refresh outside sources (`force` re-fetches Yahoo and ESPN; props keep their budget); per-source status |
+| GET | `/api/rankings/weekly?ids=1,2,3` | Only these players (start/sit). Every row has `projection`, `if_active`, `play_prob`, `status`, `floor`, `ceiling`, `scenarios`, `flags` |
+| GET | `/api/rankings/weekly/{id}/explain?week=` | Step-by-step explanation of one projection |
+| GET | `/api/insights/flags?kind=breakout\|regression\|risk` | Flagged players this week |
+| GET | `/api/waivers?max_rostered=&position=` | Waiver targets with score, FAAB bid, reasons |
+| POST | `/api/trade/find` | Body `{"my_players": [ids], "want_position": "RB"}`; acceptable trade offers |
 | GET | `/api/schedule-strength?position=&week=` | Defenses by opponent-adjusted points allowed, plus each team's upcoming schedule |
 | GET | `/api/leaderboards/metrics` | The metric catalog |
 | GET | `/api/leaderboards?category=&metric=` | Advanced-stat leaderboard (`season`, `min_volume`, `position`, `ascending`, `limit`) |
@@ -251,10 +348,11 @@ Full TypeScript types for every response: [`docs/API.md`](docs/API.md).
 
 ## AI assistant and agent tools
 
-The same 14 tools are exposed three ways: `search_players`, `get_player_profile`,
+The same 17 tools are exposed three ways: `search_players`, `get_player_profile`,
 `get_player_game_log`, `compare_players`, `get_fantasy_rankings`,
 `list_leaderboard_metrics`, `get_leaderboard`, `evaluate_trade`, `get_buy_low_candidates`,
-`get_sell_high_candidates`, `get_weekly_rankings`, `get_schedule_strength`,
+`get_sell_high_candidates`, `get_weekly_rankings`, `get_schedule_strength`, `explain_projection`,
+`get_waiver_targets`, `find_trades`,
 `get_expert_rankings`, and `get_trending_players`. The weekly tools read the stored
 snapshot; an agent never triggers outside fetches.
 Arguments are validated against each tool's JSON Schema, and players can be passed by name
@@ -354,7 +452,7 @@ Settings come from environment variables or `backend/.env` (never commit it; see
 | `YAHOO_REDIRECT_URI` | `oob` | Must match the Yahoo app setting |
 | `TOKEN_ENCRYPTION_KEY` | — | Fernet key used to encrypt OAuth tokens at rest |
 | `ODDS_API_KEY` | — | Enables Vegas player props in Week X rankings |
-| `WEEKLY_SOURCES` | `["yahoo_experts","espn","vegas_props"]` | JSON list of outside weekly sources to fetch |
+| `WEEKLY_SOURCES` | `["sleeper_status","yahoo_experts","espn","vegas_props"]` | JSON list of outside weekly sources to fetch |
 | `WEEKLY_AUTO_REFRESH` | `true` | Let `/api/rankings/weekly` refresh the current week's stale sources before answering (never for cross-site requests) |
 | `GROQ_API_KEY` | — | Enables the AI chat |
 | `GROQ_MODEL` | `openai/gpt-oss-20b` | Groq model for the chat |

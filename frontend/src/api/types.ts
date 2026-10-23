@@ -328,14 +328,83 @@ export interface WeeklySourceValue {
   rank: number | null;
 }
 
+export interface PlayerFlag {
+  key: 'opportunity' | 'competition_returning' | 'role_growth' | 'td_luck' | 'efficiency' | 'injury' | string;
+  kind: 'breakout' | 'regression' | 'risk';
+  direction: 'up' | 'down';
+  label: string;
+  detail: string;
+}
+
+export interface InjuryScenario {
+  teammate: string;
+  teammate_status: string;
+  extra_points: number;
+  projection: number;
+}
+
 export interface WeeklyPlayer {
   rank: number;
   pos_rank: string;
   player: PlayerSummary;
+  /** Expected points: if-active projection times the chance to play. */
   projection: number;
+  if_active: number;
+  play_prob: number;
+  /** Injury designation and practice status, or null when healthy. */
+  status: string | null;
+  floor: number | null;
+  ceiling: number | null;
+  /** Points added because injured teammates may sit. */
+  boost_points: number;
+  pct_rostered: number | null;
+  scenarios: InjuryScenario[];
   matchup: WeeklyMatchup;
   sources: Partial<Record<WeeklySourceKey, WeeklySourceValue>>;
   expert_ranks: Record<string, number>;
+  flags: PlayerFlag[];
+}
+
+export interface ExplanationStep {
+  label: string;
+  value: string;
+  detail: string;
+}
+
+export interface ProjectionExplanation extends WeeklyPlayer {
+  season: number;
+  week: number;
+  steps: ExplanationStep[];
+}
+
+export interface FlagsResponse {
+  season: number;
+  week: number;
+  results: WeeklyPlayer[];
+}
+
+export interface WaiverCandidate extends WeeklyPlayer {
+  ros_value: number;
+  week_value: number;
+  schedule_factor: number;
+  score: number;
+  faab_pct: number;
+  faab_label: string;
+  reasons: string[];
+}
+
+export interface WaiversResponse {
+  season: number;
+  week: number;
+  max_rostered: number;
+  results: WaiverCandidate[];
+}
+
+export interface TradeOffer {
+  give: PlayerSummary[];
+  get: PlayerSummary;
+  get_ros_ppg: number;
+  evaluation: TradeResult;
 }
 
 export type SourceRefreshState = 'updated' | 'fresh' | 'not_configured' | 'disabled' | 'busy' | 'error';

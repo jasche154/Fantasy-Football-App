@@ -12,6 +12,7 @@ import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { filterToPosition, positionFilterLabel, type PositionFilterValue } from '../../lib/positions';
 import { describeSettings } from '../../state/leagueSettings';
 import { useLeagueSettings } from '../../state/SettingsContext';
+import { FlagsCard } from './FlagsCard';
 
 const MARKET_LIMIT = 15;
 
@@ -77,6 +78,10 @@ export function MarketPage() {
       <div className="market-grid">
         <InsightList kind="buy-low" filter={filter} settings={settings} />
         <InsightList kind="sell-high" filter={filter} settings={settings} />
+      </div>
+      <div className="market-grid market-grid--flags">
+        <FlagsCard kind="breakout" position={filterToPosition(filter)} />
+        <FlagsCard kind="regression" position={filterToPosition(filter)} />
       </div>
     </>
   );

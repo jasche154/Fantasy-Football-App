@@ -1,0 +1,40 @@
+{
+  "season": 2025,
+  "settings": "half-life 4, sos^0.5, implied^0.5, injuries on",
+  "metrics": {
+    "n": 3641,
+    "mae": 6.0045470693845,
+    "rmse": 7.653190429664125,
+    "rank_corr": 0.5024342249198093
+  },
+  "positions": {
+    "QB": {
+      "floor": 0.225,
+      "median": 0.981,
+      "ceiling": 1.744,
+      "bust_rate": 0.206,
+      "n": 447
+    },
+    "RB": {
+      "floor": 0.247,
+      "median": 0.825,
+      "ceiling": 1.907,
+      "bust_rate": 0.271,
+      "n": 712
+    },
+    "WR": {
+      "floor": 0.149,
+      "median": 0.732,
+      "ceiling": 1.742,
+      "bust_rate": 0.338,
+      "n": 1169
+    },
+    "TE": {
+      "floor": 0.216,
+      "median": 0.829,
+      "ceiling": 1.91,
+      "bust_rate": 0.298,
+      "n": 490
+    }
+  }
+}

@@ -29,7 +29,7 @@ from sqlalchemy.orm import Session
 from database.create_tables import ensure_schema
 from database.db import engine
 from database.models import (
-    Base, DataLoad, ExpertRanking, NflGame, Player, PlayerExpectedPointsWeekly, PlayerPassingAdvancedWeekly,
+    Base, DataLoad, DepthChartEntry, ExpertRanking, InjuryReport, NflGame, Player, PlayerExpectedPointsWeekly, PlayerPassingAdvancedWeekly,
     PlayerReceivingAdvancedWeekly, PlayerRushingAdvancedWeekly, PlayerSnapCountsWeekly,
     PlayerStatsWeekly,
 )
@@ -230,6 +230,67 @@ def load_schedules(session: Session, seasons: Iterable[int]) -> None:
         log.info("schedule %s: %d games", season, len(rows))
 
 
+PRACTICE_CODES = {"did not participate": "DNP", "limited": "LP", "full": "FP"}
+SKILL_POSITIONS = {"QB", "RB", "WR", "TE"}
+INJURY_COLUMNS = ["season", "week", "gsis_id", "team", "position", "report_status", "practice_status",
+                  "report_primary_injury", "practice_primary_injury"]
+
+
+def practice_code(text: str | None) -> str | None:
+    """'Limited Participation in Practice' -> 'LP'."""
+    lowered = (text or "").lower()
+    return next((code for key, code in PRACTICE_CODES.items() if key in lowered), None)
+
+
+def load_injury_reports(session: Session, seasons: Iterable[int], index: PlayerIndex) -> None:
+    """Official weekly injury reports, for play probabilities and missed-game history."""
+    for season in seasons:
+        frame = fetch_season(lambda s: nfl.load_injuries(s), "injury reports", season)
+        if frame is None:
+            continue
+        # Only the needed columns: older seasons add tz-aware timestamps Windows can't decode without tzdata.
+        frame = frame.select(INJURY_COLUMNS)
+        rows = []
+        for source in frame.iter_rows(named=True):
+            player_id = index.by_gsis.get(source["gsis_id"])
+            if player_id is None or source["position"] not in SKILL_POSITIONS:
+                continue
+            rows.append({"season": as_int(source["season"]), "week": as_int(source["week"]),
+                         "player_id": player_id, "team": source["team"],
+                         "report_status": source["report_status"] or None,
+                         "practice_status": practice_code(source["practice_status"]),
+                         "injury": source["report_primary_injury"] or source["practice_primary_injury"]})
+        session.execute(delete(InjuryReport).where(InjuryReport.season == season))
+        bulk_insert(session, InjuryReport, rows)
+        session.commit()
+        log.info("injury reports %s: %d rows", season, len(rows))
+
+
+def load_depth_charts(session: Session, season: int, index: PlayerIndex) -> None:
+    """Each team's latest depth chart for QB/RB/WR/TE."""
+    frame = fetch_season(lambda s: nfl.load_depth_charts(s), "depth charts", season)
+    if frame is None:
+        return
+    frame = frame.filter(pl.col("pos_abb").is_in(list(SKILL_POSITIONS)))
+    latest = frame.group_by("team").agg(pl.col("dt").max().alias("latest"))
+    frame = frame.join(latest, on="team").filter(pl.col("dt") == pl.col("latest"))
+    rows, seen = [], set()
+    for source in frame.sort("pos_rank").iter_rows(named=True):
+        player_id = index.by_gsis.get(source["gsis_id"])
+        key = (source["team"], player_id)
+        if player_id is None or key in seen:
+            continue
+        seen.add(key)
+        rows.append({"team": source["team"], "player_id": player_id, "position": source["pos_abb"],
+                     "depth": as_int(source["pos_rank"]), "as_of": source["dt"]})
+    if not rows:
+        return
+    session.execute(delete(DepthChartEntry))
+    bulk_insert(session, DepthChartEntry, rows)
+    session.commit()
+    log.info("depth charts: %d skill-position entries", len(rows))
+
+
 def load_expert_rankings(session: Session, index: PlayerIndex) -> None:
     """Snapshot the current week's FantasyPros ECR as published (free) by DynastyProcess."""
     frame = fetch_season(lambda _: nfl.load_ff_rankings(type="week"), "weekly ECR", nfl.get_current_season())
@@ -290,6 +351,8 @@ def main(argv: list[str] | None = None) -> None:
         sync_crosswalk(session, index)
         load_snap_counts(session, seasons, index)
         load_schedules(session, seasons)
+        load_injury_reports(session, seasons, index)
+        load_depth_charts(session, max(seasons), index)
         load_expert_rankings(session, index)
         record_load(session, seasons)
     log.info("Done.")

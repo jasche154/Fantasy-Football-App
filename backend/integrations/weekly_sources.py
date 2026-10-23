@@ -118,7 +118,7 @@ def source_row(season: int, week: int, source: str, *, player_id: int | None, na
             "player_id": player_id, "player_name": name, "position": position,
             "team": normalize_team(team), "opponent": normalize_team(opponent), "rank": rank,
             "stats": json.dumps({k: round(v, 3) for k, v in stats.items()}) if stats else None,
-            "fetched_at": datetime.now(timezone.utc)}
+            "pct_rostered": None, "fetched_at": datetime.now(timezone.utc)}
 
 
 def replace_snapshot(session: Session, season: int, week: int, source: str, rows: list[dict],

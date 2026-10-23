@@ -58,6 +58,7 @@ class Valuation:
     by_id: Mapping[int, PlayerValue] = field(default_factory=dict)
     schedule: Schedule = field(default_factory=lambda: Schedule(games=()))
     defense: DefenseStrength = NEUTRAL
+    priors: Mapping[int, float] = field(default_factory=dict)      # last season's PPG (4+ games)
 
 
 def weeks_remaining(through_week: int | None, end_week: int) -> int:
@@ -122,7 +123,7 @@ def _compute(session: Session, league: LeagueSettings, season: int) -> Valuation
     return Valuation(season=season, through_week=through, weeks_remaining=remaining, league=league,
                      replacement=MappingProxyType(replacement), values=values,
                      seasons=tuple(current), by_id=MappingProxyType({v.player_id: v for v in values}),
-                     schedule=schedule, defense=defense)
+                     schedule=schedule, defense=defense, priors=MappingProxyType(_priors(previous)))
 
 
 _cache: dict[tuple, Valuation] = {}
