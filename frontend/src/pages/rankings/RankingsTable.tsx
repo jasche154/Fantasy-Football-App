@@ -1,0 +1,92 @@
+import { useMemo, useState } from 'react';
+import type { RankedPlayer } from '../../api/types';
+import { PlayerLink } from '../../components/PlayerLink';
+import { nextSort, SortableHeader, type SortState } from '../../components/SortableHeader';
+import { formatInteger, formatNumber } from '../../lib/format';
+import {
+  DEFAULT_RANKING_SORT,
+  defaultRankingDirection,
+  sortRankings,
+  type RankingSortKey,
+} from './rankingsSort';
+
+interface ColumnDef {
+  key: RankingSortKey;
+  label: string;
+  tag?: string;
+  title: string;
+  align: 'start' | 'end';
+}
+
+export const RANKING_COLUMNS: readonly ColumnDef[] = [
+  { key: 'rank', label: 'Rank', align: 'end', title: 'Overall rank by trade value' },
+  { key: 'name', label: 'Player', align: 'start', title: 'Player name' },
+  { key: 'pos_rank', label: 'Pos', align: 'start', title: 'Positional rank by trade value' },
+  { key: 'games', label: 'GP', tag: 'Actual', align: 'end', title: 'Games played' },
+  { key: 'ppg', label: 'PPG', tag: 'Actual', align: 'end', title: 'Actual fantasy points per game' },
+  { key: 'expected_ppg', label: 'xPPG', tag: 'Expected', align: 'end', title: 'Expected fantasy points per game from opportunity (nflverse)' },
+  { key: 'ros_ppg', label: 'ROS PPG', tag: 'Projection (model)', align: 'end', title: 'Rest-of-season points per game, our model' },
+  { key: 'trade_value', label: 'Value', tag: 'Projection (model)', align: 'end', title: 'Rest-of-season points above replacement, our model' },
+  { key: 'ecr', label: 'ECR', tag: 'Expert', align: 'end', title: 'FantasyPros expert consensus rank' },
+];
+
+function RankingRow({ row }: { row: RankedPlayer }) {
+  return (
+    <tr>
+      <td className="num td--rank">{row.rank}</td>
+      <td className="td--player">
+        <PlayerLink player={row.player} />
+      </td>
+      <td className="td--pos">{row.pos_rank}</td>
+      <td className="num">{formatInteger(row.games)}</td>
+      <td className="num num--strong">{formatNumber(row.ppg)}</td>
+      <td className="num">{formatNumber(row.expected_ppg)}</td>
+      <td className="num">{formatNumber(row.ros_ppg)}</td>
+      <td className="num">
+        <span className="value-pill">{formatNumber(row.trade_value, 0)}</span>
+      </td>
+      <td className="num">{row.ecr === null ? '—' : formatNumber(row.ecr, 1)}</td>
+    </tr>
+  );
+}
+
+interface RankingsTableProps {
+  rows: readonly RankedPlayer[];
+  caption: string;
+}
+
+export function RankingsTable({ rows, caption }: RankingsTableProps) {
+  const [sort, setSort] = useState<SortState<RankingSortKey>>(DEFAULT_RANKING_SORT);
+  const sorted = useMemo(() => sortRankings(rows, sort), [rows, sort]);
+  const handleSort = (key: RankingSortKey) =>
+    setSort((current) => nextSort(current, key, defaultRankingDirection));
+  return (
+    <div className="table-wrap table-wrap--tall">
+      <table className="data-table">
+        <caption className="sr-only">{caption}</caption>
+        <thead>
+          <tr>
+            {RANKING_COLUMNS.map((column) => (
+              <SortableHeader
+                key={column.key}
+                columnKey={column.key}
+                sort={sort}
+                onSort={handleSort}
+                tag={column.tag}
+                align={column.align}
+                title={column.title}
+              >
+                {column.label}
+              </SortableHeader>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((row) => (
+            <RankingRow key={row.player.id} row={row} />
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}

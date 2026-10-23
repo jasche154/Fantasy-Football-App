@@ -29,10 +29,11 @@ only *explains* numbers that came back from a tool call. Every output is labeled
 - **Integrations:** Sleeper trending adds/drops, FantasyPros ROS rankings (with your key), and Yahoo league and roster import (OAuth)
 - **AI assistant and agent tools:** 12 validated tools that any agent can call over REST
   or MCP (Claude Desktop / Claude Code), plus a built-in Groq-powered chat
+- **Web app:** React UI with a dashboard, rankings, advanced stats, trade calculator, buy/sell market, player pages, AI chat, and settings; dark and light themes, mobile-friendly
 
 ## Quick start
 
-Prerequisites: Python 3.11+.
+Prerequisites: Python 3.11+ and Node.js 20+.
 
 ### 1. Backend setup
 
@@ -73,6 +74,30 @@ uvicorn main:app --reload
 
 Interactive docs: <http://localhost:8000/docs>. Try
 <http://localhost:8000/api/rankings?position=RB&scoring=half&limit=10>.
+
+### 4. Run the web app
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open <http://localhost:5173>. The UI talks to `http://localhost:8000` by default; set
+`VITE_API_BASE` in `frontend/.env.local` to point it somewhere else.
+
+## Using the app
+
+| Page | What you can do |
+|---|---|
+| **Dashboard** | Top buy-low and sell-high players with the reason behind each, Sleeper's most-added players, data freshness |
+| **Rankings** | Rest-of-season rankings by position; sort by actual, expected, or projected points, trade value, or ECR |
+| **Advanced Stats** | Pick a category and metric, season, and minimum volume, then rank every qualified player |
+| **Trade Calculator** | Search players into "You give" / "You get". See each side's value, the verdict meter, and suggestions that even it out; the URL is shareable |
+| **Buy / Sell** | Full buy-low and sell-high lists with every reason, filtered by position |
+| **Player page** | Weekly chart of actual vs expected points, game log, NGS stats, projection, signals |
+| **Ask AI** | Ask questions in plain English; each answer shows which tools it used |
+| **Settings** | League scoring, size, superflex, and TE premium (used everywhere); connect Yahoo; check integrations |
 
 ## How the numbers work
 
@@ -155,6 +180,8 @@ League parameters accepted by every valuation endpoint: `scoring=ppr|half|std`,
 | POST | `/api/agent/chat` | Body `{"messages": [{"role": "user", "content": "..."}]}`; answer plus tool trace |
 | GET | `/api/rankings/rushing` | Original rushing endpoint (kept for compatibility; now uses the fixed leaderboard math) |
 
+Full TypeScript types for every response: [`docs/API.md`](docs/API.md).
+
 ## AI assistant and agent tools
 
 The same 12 tools are exposed three ways: `search_players`, `get_player_profile`,
@@ -212,10 +239,10 @@ restarts, and after a failed call it waits 30 minutes before trying again. Attri
    ```
 2. Your Yahoo app's redirect URI must match `YAHOO_REDIRECT_URI` exactly (Yahoo requires
    HTTPS, e.g. `https://localhost:8000/callback`).
-3. Get the sign-in link from `GET /api/integrations/yahoo/auth-url`
+3. Get the sign-in link from `GET /api/integrations/yahoo/auth-url` or **Settings → Connect Yahoo**
    and approve access. Yahoo redirects to your HTTPS redirect URI, which the dev server
    can't serve, so the browser shows an error page. **That's expected.** Copy the whole URL from the address bar.
-4. Paste it into `POST /api/integrations/yahoo/exchange`. The app
+4. Paste it into `POST /api/integrations/yahoo/exchange` or the Settings page. The app
    pulls out the `code`, checks the one-time `state`, and stores encrypted tokens. Tokens refresh automatically.
 5. List your leagues and import one. Rosters are matched to players through the nflverse ID
    crosswalk, and anything unmatched (kickers, defenses) is listed in the response.
@@ -260,6 +287,12 @@ GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs the
 Tests never touch `database/fantasy.db` or read `backend/.env`. All HTTP calls to
 Sleeper, FantasyPros, Yahoo, and Groq are mocked.
 
+```bash
+cd frontend
+npm test          # Vitest + Testing Library
+npm run build     # type-check and production build
+```
+
 ## Project structure
 
 ```
@@ -274,7 +307,8 @@ backend/
   database/                 models, migrations helpers, data loader
   alembic/                  schema migrations
   tests/                    pytest suite
-docs/                       plan, data sources
+frontend/                   React + TypeScript + Vite web app
+docs/                       plan, data sources, API contract
 ```
 
 ## Design notes
