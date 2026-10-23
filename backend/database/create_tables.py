@@ -9,7 +9,14 @@ Run from backend/:  python -m database.create_tables
   migration is applied from the start. They are all guarded, so steps that already exist
   are skipped.
 """
-from alembic import command
+import sys
+from pathlib import Path
+
+if __package__ in (None, ""):
+    # Run by file path (`python create_tables.py`, an IDE "Run" button): make backend/ importable.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from alembic import command  # noqa: E402  (after the path fix above)
 from alembic.config import Config
 from sqlalchemy import inspect
 from sqlalchemy.engine import Engine
