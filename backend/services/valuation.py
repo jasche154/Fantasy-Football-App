@@ -1,0 +1,143 @@
+"""Rest-of-season player values: projection -> value over replacement -> trade value.
+
+trade_value = max(0, ros_ppg - replacement_ppg) * weeks_remaining, i.e. the rest-of-season
+fantasy points a player is expected to score above the best waiver-wire option.
+"""
+from collections.abc import Sequence
+from dataclasses import dataclass, field
+from threading import Lock
+from types import MappingProxyType
+from typing import Mapping
+
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from config import get_settings
+from database.models import DataLoad, PlayerStatsWeekly
+from services.league import LeagueSettings, replacement_levels
+from services.projections import (
+    MIN_PRIOR_GAMES, PlayerSeason, current_rate, latest_season, latest_week,
+    load_player_seasons, project_ros_ppg,
+)
+
+
+@dataclass(frozen=True)
+class PlayerValue:
+    player_id: int
+    name: str
+    position: str | None
+    team: str | None
+    games: int
+    ppg: float
+    expected_ppg: float | None
+    ros_ppg: float
+    vorp_per_game: float
+    trade_value: float
+    rank: int = 0
+    pos_rank: str = ""
+
+
+@dataclass(frozen=True)
+class Valuation:
+    season: int
+    through_week: int | None
+    weeks_remaining: int
+    league: LeagueSettings
+    replacement: Mapping[str, float]
+    values: tuple[PlayerValue, ...]
+    seasons: tuple[PlayerSeason, ...] = ()
+    by_id: Mapping[int, PlayerValue] = field(default_factory=dict)
+
+
+def weeks_remaining(through_week: int | None, end_week: int) -> int:
+    return max(1, end_week - (through_week or 0))
+
+
+def _priors(previous: Sequence[PlayerSeason]) -> dict[int, float]:
+    return {p.player_id: p.ppg for p in previous if p.games_played >= MIN_PRIOR_GAMES}
+
+
+def _rank(values: list[PlayerValue]) -> tuple[PlayerValue, ...]:
+    ordered = sorted(values, key=lambda v: (-v.trade_value, -v.ros_ppg, v.name))
+    position_counts: dict[str, int] = {}
+    ranked = []
+    for overall, value in enumerate(ordered, start=1):
+        position = value.position or "?"
+        position_counts[position] = position_counts.get(position, 0) + 1
+        ranked.append(PlayerValue(**{**value.__dict__, "rank": overall,
+                                     "pos_rank": f"{position}{position_counts[position]}"}))
+    return tuple(ranked)
+
+
+def value_players(current: Sequence[PlayerSeason], previous: Sequence[PlayerSeason],
+                  league: LeagueSettings, remaining: int) -> tuple[tuple[PlayerValue, ...], dict[str, float]]:
+    """Pure valuation step, separated from data loading so it can be tested directly."""
+    rates = {p.player_id: current_rate(p) for p in current}
+    first_pass = replacement_levels(((p.position, rates[p.player_id]) for p in current), league)
+    priors = _priors(previous)
+    projected = {p.player_id: project_ros_ppg(rates[p.player_id], p.games_played,
+                                              priors.get(p.player_id, first_pass.get(p.position, 0.0)))
+                 for p in current}
+    replacement = replacement_levels(((p.position, projected[p.player_id]) for p in current), league)
+
+    values = []
+    for p in current:
+        vorp = round(max(0.0, projected[p.player_id] - replacement.get(p.position, 0.0)), 2)
+        values.append(PlayerValue(
+            player_id=p.player_id, name=p.name, position=p.position, team=p.team,
+            games=p.games_played, ppg=p.ppg, expected_ppg=p.expected_ppg,
+            ros_ppg=projected[p.player_id], vorp_per_game=vorp,
+            trade_value=round(vorp * remaining, 1),
+        ))
+    return _rank(values), replacement
+
+
+def _compute(session: Session, league: LeagueSettings, season: int) -> Valuation:
+    scoring = league.scoring_settings()
+    current = load_player_seasons(session, season, scoring)
+    previous = load_player_seasons(session, season - 1, scoring)
+    through = latest_week(session, season)
+    remaining = weeks_remaining(through, get_settings().fantasy_end_week)
+    values, replacement = value_players(current, previous, league, remaining)
+    return Valuation(season=season, through_week=through, weeks_remaining=remaining, league=league,
+                     replacement=MappingProxyType(replacement), values=values,
+                     seasons=tuple(current), by_id=MappingProxyType({v.player_id: v for v in values}))
+
+
+_cache: dict[tuple, Valuation] = {}
+_cache_lock = Lock()
+CACHE_SIZE = 32
+
+
+class NoDataError(LookupError):
+    """The requested season has no regular-season stats loaded."""
+
+
+def _data_version(session: Session, season: int) -> tuple:
+    """Changes whenever data is reloaded, which invalidates cached values.
+
+    The populate_stats load stamp catches reloads that keep row counts and ids identical
+    (SQLite reuses rowids); the stats count/max id catches rows written any other way.
+    """
+    stats = session.execute(select(func.count(PlayerStatsWeekly.id), func.max(PlayerStatsWeekly.id))
+                            .where(PlayerStatsWeekly.season == season)).one()
+    return (*stats, session.scalar(select(func.max(DataLoad.id))))
+
+
+def build_valuation(session: Session, league: LeagueSettings, season: int | None = None) -> Valuation:
+    season = season or latest_season(session)
+    if season is None:
+        raise NoDataError("No player stats loaded. Run `python -m database.populate_stats` first.")
+    if latest_week(session, season) is None:
+        raise NoDataError(f"No regular-season stats loaded for {season}.")
+    key = (str(session.get_bind().url), season, league, _data_version(session, season))
+    with _cache_lock:
+        cached = _cache.get(key)
+    if cached is not None:
+        return cached
+    valuation = _compute(session, league, season)
+    with _cache_lock:
+        if len(_cache) >= CACHE_SIZE:
+            _cache.pop(next(iter(_cache)))
+        _cache[key] = valuation
+    return valuation
