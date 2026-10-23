@@ -1,3 +1,4 @@
+import logging
 import sys
 from logging.config import fileConfig
 from pathlib import Path
@@ -19,8 +20,9 @@ config = context.config
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
-if config.config_file_name is not None:
-    # Keep app loggers alive when migrations run in-process (create_tables, populate_stats).
+# Only configure logging for the alembic CLI. When the app runs migrations in-process
+# (populate_stats), it has already set up logging and its progress lines must stay visible.
+if config.config_file_name is not None and not logging.getLogger().handlers:
     fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # add your model's MetaData object here
