@@ -8,3 +8,4 @@ polars>=1.0
 pydantic-settings>=2.4
 python-dotenv>=1.0
 httpx>=0.27
+cryptography>=42
