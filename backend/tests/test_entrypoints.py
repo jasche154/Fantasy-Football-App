@@ -34,3 +34,9 @@ def test_alembic_runs_from_the_repo_root(tmp_path):
     result = run(["-m", "alembic", "-c", str(BACKEND / "alembic.ini"), "upgrade", "head"], REPO_ROOT, tmp_path)
     assert result.returncode == 0, result.stderr
     assert "No module named" not in result.stderr
+
+
+def test_groq_test_script_runs_by_file_path(tmp_path):
+    result = run([str(BACKEND / "testing" / "groq_test.py")], REPO_ROOT, tmp_path)
+    assert "No module named" not in result.stderr
+    assert "Set GROQ_API_KEY" in result.stderr        # reaches its own key check
