@@ -92,6 +92,16 @@ def refresh_token(http: httpx.Client, client_id: str, client_secret: str, redire
         refreshed.access_token, token.refresh_token, refreshed.expires_at)
 
 
+def _api_reason(response: httpx.Response) -> str:
+    """Yahoo's error description from an API error body ({"error": {"description": ...}})."""
+    try:
+        error = response.json().get("error") or {}
+        description = error.get("description") if isinstance(error, dict) else None
+    except (ValueError, AttributeError):
+        return ""
+    return f' ("{str(description)[:200]}")' if description else ""
+
+
 def api_get(http: httpx.Client, token: YahooToken, path: str) -> dict:
     try:
         response = http.get(f"{API_BASE}/{path.lstrip('/')}", params={"format": "json"},
@@ -100,8 +110,12 @@ def api_get(http: httpx.Client, token: YahooToken, path: str) -> dict:
         raise YahooError(f"Yahoo API request failed: {exc}") from exc
     if response.status_code == 401:
         raise YahooAuthError("Yahoo access token was rejected.")
+    if response.status_code == 403:
+        raise YahooError(f"Yahoo refused the request{_api_reason(response)}. Your Yahoo app isn't allowed to "
+                         "use the Fantasy Sports API: enable Fantasy Sports (Read) for the app at "
+                         "developer.yahoo.com, or get Yahoo's approval for Fantasy API access.")
     if response.status_code >= 400:
-        raise YahooError(f"Yahoo API returned HTTP {response.status_code} for {path}.")
+        raise YahooError(f"Yahoo API returned HTTP {response.status_code} for {path}{_api_reason(response)}.")
     try:
         return response.json()["fantasy_content"]
     except (ValueError, KeyError) as exc:

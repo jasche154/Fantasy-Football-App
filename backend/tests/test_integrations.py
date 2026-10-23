@@ -278,6 +278,10 @@ def test_api_get_requests_json_with_bearer_and_maps_errors():
         yahoo.api_get(mock_client(lambda r: httpx.Response(401)), token, "x")
     with pytest.raises(yahoo.YahooError):
         yahoo.api_get(mock_client(lambda r: httpx.Response(500)), token, "x")
+    forbidden = mock_client(lambda r: httpx.Response(403, json={"error": {
+        "description": "This application is not authorized to perform this action."}}))
+    with pytest.raises(yahoo.YahooError, match="not authorized to perform this action.*Fantasy Sports"):
+        yahoo.api_get(forbidden, token, "game/nfl")
     with pytest.raises(yahoo.YahooError):
         yahoo.api_get(mock_client(lambda r: httpx.Response(200, json={"nope": 1})), token, "x")
 
