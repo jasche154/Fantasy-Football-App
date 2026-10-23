@@ -27,6 +27,8 @@ only *explains* numbers that came back from a tool call. Every output is labeled
 - **Trade calculator:** values both sides, applies a consolidation discount, gives a verdict, and suggests players that would balance the deal
 - **Buy low / sell high:** finds players whose production is out of line with their usage, with plain-English reasons
 - **Integrations:** Sleeper trending adds/drops, FantasyPros ROS rankings (with your key), and Yahoo league and roster import (OAuth)
+- **AI assistant and agent tools:** 12 validated tools that any agent can call over REST
+  or MCP (Claude Desktop / Claude Code), plus a built-in Groq-powered chat
 
 ## Quick start
 
@@ -148,7 +150,47 @@ League parameters accepted by every valuation endpoint: `scoring=ppr|half|std`,
 | POST | `/api/integrations/yahoo/exchange` | Body `{"code": "<code or full redirect URL>"}` |
 | GET | `/api/integrations/yahoo/leagues` | Your Yahoo NFL leagues |
 | POST | `/api/integrations/yahoo/leagues/{key}/import` | Import teams and rosters |
+| GET | `/api/agent/tools` | Tool definitions (JSON Schema) |
+| POST | `/api/agent/tools/{name}` | Body `{"arguments": {...}}`; run one tool |
+| POST | `/api/agent/chat` | Body `{"messages": [{"role": "user", "content": "..."}]}`; answer plus tool trace |
 | GET | `/api/rankings/rushing` | Original rushing endpoint (kept for compatibility; now uses the fixed leaderboard math) |
+
+## AI assistant and agent tools
+
+The same 12 tools are exposed three ways: `search_players`, `get_player_profile`,
+`get_player_game_log`, `compare_players`, `get_fantasy_rankings`,
+`list_leaderboard_metrics`, `get_leaderboard`, `evaluate_trade`, `get_buy_low_candidates`,
+`get_sell_high_candidates`, `get_expert_rankings`, and `get_trending_players`.
+Arguments are validated against each tool's JSON Schema, and players can be passed by name
+(typo-tolerant; ambiguous names like "Mike Williams" return the candidates) or by id.
+If a tool fails unexpectedly, the error is logged on the server and the model only sees a
+generic message.
+
+1. **REST:** `GET /api/agent/tools` lists them, `POST /api/agent/tools/{name}` runs one.
+2. **Built-in chat:** `POST /api/agent/chat` runs a multi-round tool-calling loop on Groq
+   (set `GROQ_API_KEY`). Try it from the command line:
+   `python -m testing.groq_test "Is trading Bijan Robinson for Ja'Marr Chase fair?"`
+3. **MCP server** for Claude Desktop, Claude Code, or any MCP client:
+   ```bash
+   pip install -r requirements-mcp.txt
+   python mcp_server.py               # stdio transport
+   ```
+   Claude Desktop config (`claude_desktop_config.json`):
+   ```json
+   {
+     "mcpServers": {
+       "fantasy-football": {
+         "command": "C:\\path\\to\\Fantasy-Football-App\\backend\\venv\\Scripts\\python.exe",
+         "args": ["mcp_server.py"],
+         "cwd": "C:\\path\\to\\Fantasy-Football-App\\backend"
+       }
+     }
+   }
+   ```
+   Claude Code: `claude mcp add fantasy-football -- <venv python> <path>/backend/mcp_server.py`
+
+Snap counts come from Pro Football Reference, whose terms restrict using its content to
+prompt AI models, so they're withheld from tool results unless `AGENT_SHARE_PFR_DATA=true`.
 
 ## Integrations
 
@@ -194,6 +236,9 @@ Settings come from environment variables or `backend/.env` (never commit it; see
 | `YAHOO_CLIENT_ID` / `YAHOO_CLIENT_SECRET` | — | Yahoo OAuth app credentials |
 | `YAHOO_REDIRECT_URI` | `oob` | Must match the Yahoo app setting |
 | `TOKEN_ENCRYPTION_KEY` | — | Fernet key used to encrypt OAuth tokens at rest |
+| `GROQ_API_KEY` | — | Enables the AI chat |
+| `GROQ_MODEL` | `openai/gpt-oss-20b` | Groq model for the chat |
+| `AGENT_SHARE_PFR_DATA` | `false` | Include PFR-sourced snap counts in AI tool results |
 
 ## Data sources
 
@@ -213,7 +258,7 @@ python -m pytest --cov=. --cov-report=term-missing # with coverage
 
 GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs the suite on every pull request.
 Tests never touch `database/fantasy.db` or read `backend/.env`. All HTTP calls to
-Sleeper, FantasyPros, Yahoo are mocked.
+Sleeper, FantasyPros, Yahoo, and Groq are mocked.
 
 ## Project structure
 
@@ -221,9 +266,11 @@ Sleeper, FantasyPros, Yahoo are mocked.
 backend/
   config.py                 settings from env / .env
   main.py                   FastAPI app (uvicorn main:app)
-  api/                      thin routers: data, market, integrations, legacy
-  services/                 tested business logic (scoring, projections, valuation, leaderboards, players, trade, insights)
+  api/                      thin routers: data, market, integrations, agent, legacy
+  services/                 tested business logic (scoring, projections, valuation, leaderboards, players, trade, insights, agent)
   integrations/             sleeper, fantasypros, yahoo, token encryption
+  tools/                    agent tool registry and definitions
+  mcp_server.py             MCP server over the same tools
   database/                 models, migrations helpers, data loader
   alembic/                  schema migrations
   tests/                    pytest suite
