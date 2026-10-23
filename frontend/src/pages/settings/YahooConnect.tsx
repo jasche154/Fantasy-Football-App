@@ -49,13 +49,13 @@ function CodeStep({ onConnected }: { onConnected: () => void }) {
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    const code = extractYahooCode(input);
-    if (!code) {
+    if (!extractYahooCode(input)) {
       setValidation(CODE_NOT_FOUND_MESSAGE);
       return;
     }
     setValidation(null);
-    const result = await exchange.run(code);
+    // Send exactly what was pasted: the backend also needs the URL's `state` security check.
+    const result = await exchange.run(input.trim());
     if (result?.connected) onConnected();
   };
 

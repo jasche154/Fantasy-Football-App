@@ -21,7 +21,7 @@ function yahooRoutes(): { routes: MockRoute[]; isConnected: () => boolean } {
       method: 'POST',
       path: '/api/integrations/yahoo/exchange',
       reply: ({ body }) => {
-        if ((body as { code: string }).code !== 'abc123') return json({ detail: 'Invalid code' }, 400);
+        if (!(body as { code: string }).code.includes('code=abc123')) return json({ detail: 'Invalid code' }, 400);
         connected = true;
         return json({ connected: true });
       },
@@ -63,7 +63,10 @@ describe('SettingsPage integrations', () => {
     await user.clear(field);
     await user.type(field, 'https://localhost/callback?code=abc123&state=xyz');
     await user.click(screen.getByRole('button', { name: 'Connect' }));
-    expect(api.callsTo('/api/integrations/yahoo/exchange', 'POST')[0].body).toEqual({ code: 'abc123' });
+    // The whole URL goes to the backend so it can verify the `state` security check.
+    expect(api.callsTo('/api/integrations/yahoo/exchange', 'POST')[0].body).toEqual({
+      code: 'https://localhost/callback?code=abc123&state=xyz',
+    });
 
     const league = await screen.findByText('Dynasty Degens');
     const row = league.closest('li') as HTMLElement;

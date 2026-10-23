@@ -42,6 +42,7 @@ export function getYahooAuthUrl(signal?: AbortSignal): Promise<{ url: string }> 
   return apiRequest('/api/integrations/yahoo/auth-url', { signal });
 }
 
+/** `code` is the full redirected URL (preferred: it carries the `state` check) or a bare code. */
 export function exchangeYahooCode(code: string, signal?: AbortSignal): Promise<{ connected: true }> {
   return apiRequest('/api/integrations/yahoo/exchange', {
     method: 'POST',
