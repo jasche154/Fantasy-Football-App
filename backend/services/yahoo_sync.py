@@ -4,8 +4,6 @@ The app is single-user for now, so the connection belongs to one local user row.
 are matched to local players through players.yahoo_player_id (from the nflverse crosswalk).
 """
 import json
-import secrets
-import threading
 import time
 from datetime import datetime, timezone
 
@@ -16,16 +14,13 @@ from sqlalchemy.orm import Session
 from config import Settings
 from database.models import League, PlatformConnection, Player, Roster, Team, User
 from integrations import yahoo
-from integrations.token_crypto import decrypt, encrypt, require_valid_key
+from integrations.token_crypto import decrypt, encrypt, require_valid_key, sign_state, state_is_valid
 
 PLATFORM = "yahoo"
 LOCAL_USER_EMAIL = "local-user@localhost"
 OUT_OF_BAND = "oob"
 STATE_TTL_SECONDS = 15 * 60
-MAX_PENDING_STATES = 10
-
-_pending_states: dict[str, float] = {}
-_state_lock = threading.Lock()
+STATE_PURPOSE = "yahoo-oauth-state"
 
 
 class YahooNotConfigured(RuntimeError):
@@ -41,31 +36,23 @@ def require_config(settings: Settings) -> None:
 
 def start_authorization(settings: Settings) -> str:
     require_config(settings)
-    state = secrets.token_urlsafe(16)
-    with _state_lock:
-        now = time.time()
-        for stale in [s for s, t in _pending_states.items() if now - t > STATE_TTL_SECONDS]:
-            del _pending_states[stale]
-        while len(_pending_states) >= MAX_PENDING_STATES:
-            _pending_states.pop(next(iter(_pending_states)))     # drop the oldest link
-        _pending_states[state] = now
+    state = sign_state(STATE_PURPOSE, settings.token_encryption_key)
     return yahoo.authorization_url(settings.yahoo_client_id, settings.yahoo_redirect_uri, state)
 
 
-def check_state(state: str | None, redirect_uri: str) -> None:
-    """The pasted redirect URL must carry a state this server issued.
+def check_state(state: str | None, settings: Settings) -> None:
+    """The pasted redirect URL must carry a state this app signed in the last 15 minutes.
 
     Only the out-of-band flow, where Yahoo shows a bare code, can skip it.
     """
     if state is None:
-        if redirect_uri == OUT_OF_BAND:
+        if settings.yahoo_redirect_uri == OUT_OF_BAND:
             return
         raise yahoo.YahooAuthError("Paste the whole redirected URL (it includes a security check), "
                                    "not just the code.")
-    with _state_lock:
-        issued = _pending_states.pop(state, None)
-    if issued is None or time.time() - issued > STATE_TTL_SECONDS:
-        raise yahoo.YahooAuthError("This authorization link is stale; click Connect Yahoo again.")
+    if not state_is_valid(state, STATE_PURPOSE, settings.token_encryption_key, STATE_TTL_SECONDS):
+        raise yahoo.YahooAuthError("This authorization link is expired or wasn't created by this app; "
+                                   "click Connect Yahoo again.")
 
 
 def local_user(session: Session) -> User:
@@ -104,7 +91,7 @@ def load_token(connection: PlatformConnection, settings: Settings) -> yahoo.Yaho
 
 def connect(session: Session, settings: Settings, http: httpx.Client, code: str, state: str | None) -> None:
     require_config(settings)
-    check_state(state, settings.yahoo_redirect_uri)
+    check_state(state, settings)
     token = yahoo.exchange_code(http, settings.yahoo_client_id, settings.yahoo_client_secret,
                                 settings.yahoo_redirect_uri, code)
     save_token(session, settings, token)

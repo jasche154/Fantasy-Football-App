@@ -47,6 +47,18 @@ def authorization_url(client_id: str, redirect_uri: str, state: str) -> str:
     return f"{AUTH_URL}?{urlencode(params)}"
 
 
+def _yahoo_reason(response: httpx.Response) -> str:
+    """Yahoo's error code and description ("invalid_grant: ..."); never includes secrets."""
+    try:
+        payload = response.json()
+    except ValueError:
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    parts = [str(payload[k]) for k in ("error", "error_description") if payload.get(k)]
+    return f": {' - '.join(parts)[:200]}" if parts else ""
+
+
 def _token_request(http: httpx.Client, client_id: str, client_secret: str, form: dict) -> YahooToken:
     credentials = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
     try:
@@ -55,8 +67,9 @@ def _token_request(http: httpx.Client, client_id: str, client_secret: str, form:
     except httpx.HTTPError as exc:
         raise YahooError(f"Yahoo token request failed: {exc}") from exc
     if response.status_code >= 400:
-        raise YahooAuthError(f"Yahoo rejected the token request (HTTP {response.status_code}). "
-                             "The code may be expired or already used; start the connection again.")
+        raise YahooAuthError(f"Yahoo rejected the sign-in (HTTP {response.status_code}{_yahoo_reason(response)}). "
+                             "Check that YAHOO_CLIENT_ID, YAHOO_CLIENT_SECRET and YAHOO_REDIRECT_URI match your "
+                             "Yahoo app exactly, then click Connect Yahoo again (each code works once).")
     payload = response.json()
     return YahooToken(access_token=payload["access_token"], refresh_token=payload.get("refresh_token"),
                       expires_at=time.time() + int(payload.get("expires_in", 3600)))

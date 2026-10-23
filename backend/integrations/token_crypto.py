@@ -24,6 +24,19 @@ def require_valid_key(key: str | None) -> None:
     _fernet(key)
 
 
+def sign_state(purpose: str, key: str | None) -> str:
+    """An OAuth `state` value only this app can produce. Fernet tokens carry their creation
+    time, so it can expire without the server remembering anything (restarts are harmless)."""
+    return _fernet(key).encrypt(purpose.encode()).decode()
+
+
+def state_is_valid(state: str, purpose: str, key: str | None, max_age_seconds: int) -> bool:
+    try:
+        return _fernet(key).decrypt(state.encode(), ttl=max_age_seconds) == purpose.encode()
+    except InvalidToken:
+        return False
+
+
 def encrypt(value: str | None, key: str | None) -> str | None:
     return None if value is None else _fernet(key).encrypt(value.encode()).decode()
 
