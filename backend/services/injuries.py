@@ -97,8 +97,8 @@ class Boost:
 class InjuryContext:
     availability: Mapping[int, Availability]
     boosts: Mapping[int, tuple[Boost, ...]] = field(default_factory=dict)
-    # Teammates returning from injury: player_id -> names that took work from him while out.
-    returning: Mapping[int, tuple[str, ...]] = field(default_factory=dict)
+    # Teammates returning from injury: player_id -> who is back and the work he takes back.
+    returning: Mapping[int, tuple["Returning", ...]] = field(default_factory=dict)
 
     def of(self, player_id: int) -> Availability:
         return self.availability.get(player_id, HEALTHY_AVAILABILITY)
@@ -294,20 +294,34 @@ def vacated_boosts(seasons: Iterable[PlayerSeason], rates: Mapping[int, float],
     return {pid: tuple(sorted(b, key=lambda x: -x.full_points)) for pid, b in boosts.items()}
 
 
+@dataclass(frozen=True)
+class Returning:
+    """A teammate coming back, and the work he is expected to take back from this player."""
+
+    name: str
+    expected_loss: float        # expected points per game this player gives back (0 if unmeasured)
+    games_without: int
+
+
 def returning_competition(seasons: Iterable[PlayerSeason], availability: Mapping[int, Availability],
-                          current_week: int, schedule: Schedule) -> dict[int, tuple[str, ...]]:
+                          current_week: int, schedule: Schedule) -> dict[int, tuple[Returning, ...]]:
     """Players whose teammate is back after missing recent games (their bump may fade).
 
-    Returns {beneficiary_id: (returning teammate names)} for same-position teammates. Only
-    players with an injury report or live status this week count as "back" (released players
-    without a status are skipped).
+    Returns {beneficiary_id: (Returning, ...)} for same-position teammates.
+    - Only players with an injury report or live status this week count as "back" (released
+      players without a status are skipped).
+    - Quarterbacks: a returning QB only matters if he was the starter. A backup returning
+      (e.g. Drew Lock behind Sam Darnold) never flags the incumbent, who keeps the job unless
+      he plays his way out of it.
+    - The expected loss is the fill-in's measured gain without the returning player (same
+      team, 2+ games), weighted by the returner's chance to play.
     """
     seasons = list(seasons)
     by_team: dict[str, list[PlayerSeason]] = defaultdict(list)
     for p in seasons:
         if p.team:
             by_team[p.team].append(p)
-    out: dict[int, list[str]] = defaultdict(list)
+    out: dict[int, list[Returning]] = defaultdict(list)
     for team, roster in by_team.items():
         recent = team_weeks(schedule, team, current_week)[-2:]
         for star in roster:
@@ -318,9 +332,15 @@ def returning_competition(seasons: Iterable[PlayerSeason], availability: Mapping
             if status is None or status.play_prob < 0.5:
                 continue                                     # no report (released?) or still out
             for mate in roster:
-                if mate.player_id != star.player_id and mate.position == star.position:
-                    out[mate.player_id].append(star.name)
-    return {pid: tuple(names) for pid, names in out.items()}
+                if mate.player_id == star.player_id or mate.position != star.position:
+                    continue
+                if star.position == "QB" and len(played) < len(team_games(mate, team, schedule)):
+                    continue                                 # a backup QB returning doesn't threaten the starter
+                measured = with_without(mate, star, team, schedule, current_week)
+                gain = max(measured[0], 0.0) if measured and measured[1] >= MIN_WITHOUT_GAMES else 0.0
+                out[mate.player_id].append(Returning(star.name, round(gain * status.play_prob, 2),
+                                                     measured[1] if measured else 0))
+    return {pid: tuple(items) for pid, items in out.items()}
 
 
 def build_context(session: Session, seasons: Iterable[PlayerSeason], rates: Mapping[int, float],

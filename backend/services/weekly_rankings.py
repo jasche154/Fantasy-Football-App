@@ -229,7 +229,8 @@ def blend(candidates: Mapping[int, _Candidate], valuation: Valuation, week: int,
             continue                                   # ruled out
         steps = explain(candidate.name, candidate.position, rates.get(candidate.player_id),
                         valuation.priors.get(candidate.player_id), matchup, sources, WEIGHTS, SOURCE_LABELS,
-                        combined, tilt, adjusted, context.boosts.get(candidate.player_id, ()))
+                        combined, tilt, adjusted, context.boosts.get(candidate.player_id, ()),
+                        context.returning.get(candidate.player_id, ()))
         players.append(WeeklyPlayer(
             player_id=candidate.player_id, name=candidate.name, position=candidate.position,
             team=candidate.team, matchup=matchup, projection=adjusted.projection, sources=sources,

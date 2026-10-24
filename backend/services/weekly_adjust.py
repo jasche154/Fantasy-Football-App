@@ -57,7 +57,11 @@ def adjust(position: str, blended: float, tilt: float, matchup: Matchup, model_s
         share = model_share if teammate_prob < PRICED_IN else 1.0
         contributions.append((boost, boost.expected_points * matchup.multiplier * share, share))
     boost_total = sum(c for _, c, _ in contributions)
-    if_active = base + boost_total
+    # A starter coming back takes work from his fill-in. Experts and lines already price that
+    # in, but the model's recency-weighted rate was built while the starter was out.
+    give_back = sum(r.expected_loss for r in context.returning.get(player_id, ())) * matchup.multiplier * model_share
+    boost_total -= give_back
+    if_active = max(0.0, base + boost_total)
     scenarios = tuple(
         Scenario(b.from_name, b.from_status, round(b.full_points * matchup.multiplier * share - c, 2),
                  round((if_active - c + b.full_points * matchup.multiplier * share) * availability.play_prob, 2))
@@ -74,7 +78,8 @@ def adjust(position: str, blended: float, tilt: float, matchup: Matchup, model_s
 
 def explain(name: str, position: str, rate: float | None, prior: float | None, matchup: Matchup,
             sources: Mapping[str, object], weights: Mapping[str, float], labels: Mapping[str, str],
-            blended: float, tilt: float, adjusted: Adjusted, boosts: tuple[Boost, ...]) -> tuple[Step, ...]:
+            blended: float, tilt: float, adjusted: Adjusted, boosts: tuple[Boost, ...],
+            returning: tuple = ()) -> tuple[Step, ...]:
     """Plain-English steps from inputs to the final projection."""
     steps = []
     if rate is not None:
@@ -100,6 +105,12 @@ def explain(name: str, position: str, rate: float | None, prior: float | None, m
     steps.append(Step("Source blend", f"{blended:.1f}", "; ".join(parts) + "."))
     steps.append(Step("Schedule tilt", f"x{tilt:.3f}",
                       "An extra lean on opponent-adjusted schedule strength, on top of what sources already price in."))
+    for back in returning:
+        if back.expected_loss > 0:
+            steps.append(Step(f"{back.name} returning", f"-{back.expected_loss:.1f} pts (model)",
+                              f"In {back.games_without} games without {back.name} this season he gained "
+                              f"{back.expected_loss:.1f} expected pts/game; with {back.name} back, the model "
+                              "takes that back out of its share of the blend."))
     for boost in boosts:
         steps.append(Step(f"If {boost.from_name} sits", f"+{boost.full_points:.1f} pts",
                           f"{boost.from_name}: {boost.from_status}. His vacated work is estimated by {boost.method}; "

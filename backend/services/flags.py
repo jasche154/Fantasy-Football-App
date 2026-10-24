@@ -6,7 +6,9 @@
 | Role growth | breakout | Expected points or snap share rising over the last 3 games |
 | Touchdown luck | regression | TDs 2+ above expected (sell) or below (buy) |
 | Efficiency outlier | regression | Scoring 3+ pts/game above or below what usage predicts |
-| Competition returning | regression | A teammate who missed the last two games is back; his fill-in's role may shrink |
+| Snap share climbing | breakout | Snap share rising 3+ points a game over the last 4 games (route share proxy) |
+| Efficient part-timer | breakout | Under 70% of snaps but producing at a pace that's elite on a full-time role |
+| Competition returning | regression | A starter who missed the last two games is back; his fill-in's measured gain fades (QB backups returning are ignored) |
 | Injury risk | risk | The player himself has a designation (chance to play under 90%) |
 """
 from dataclasses import dataclass
@@ -32,6 +34,46 @@ class Flag:
     detail: str
 
 
+SNAP_SLOPE = 3.0             # snap-share points gained per game over the last 4 games
+FULL_TIME_SNAPS = 85.0
+PART_TIME_SNAPS = 70.0
+PER_SNAP_BAR = {"RB": 16.0, "WR": 15.0, "TE": 11.0}   # pts/game a full-time role would produce
+
+
+def _snap_growth(player: PlayerSeason) -> list[Flag]:
+    """Snap share rising game over game (route share isn't public in-season; snaps are the proxy)."""
+    snaps = [g.snap_pct for g in player.games[-4:] if g.snap_pct is not None]
+    if len(snaps) < 3:
+        return []
+    n = len(snaps)
+    mean_x, mean_y = (n - 1) / 2, sum(snaps) / n
+    slope = sum((i - mean_x) * (s - mean_y) for i, s in enumerate(snaps)) / sum((i - mean_x) ** 2 for i in range(n))
+    if slope < SNAP_SLOPE or snaps[-1] < 40:
+        return []
+    path = " -> ".join(f"{s:.0f}%" for s in snaps)
+    return [Flag("snap_growth", "breakout", "up", "Snap share climbing",
+                 f"Snap share over his last {n} games: {path} (+{slope:.1f} points a game). Usage tends to "
+                 "follow snaps, before the points show up.")]
+
+
+def _efficient_part_timer(player: PlayerSeason) -> list[Flag]:
+    """Productive per snap on a part-time role: a breakout candidate if the role grows."""
+    bar = PER_SNAP_BAR.get(player.position or "")
+    games = [g for g in player.games if g.snap_pct]
+    if not bar or len(games) < 3:
+        return []
+    snap_avg = sum(g.snap_pct for g in games) / len(games)
+    if snap_avg >= PART_TIME_SNAPS:
+        return []
+    per_game = sum(g.fantasy_points for g in games) / len(games)
+    full_time = per_game * FULL_TIME_SNAPS / snap_avg
+    if full_time < bar:
+        return []
+    return [Flag("efficient_part_timer", "breakout", "up", "Efficient part-timer",
+                 f"{per_game:.1f} pts/game on {snap_avg:.0f}% of snaps; at a full-time role ({FULL_TIME_SNAPS:.0f}%) "
+                 f"that pace is about {full_time:.1f}. A breakout if his role grows.")]
+
+
 def player_flags(player: PlayerSeason, context: InjuryContext) -> tuple[Flag, ...]:
     flags: list[Flag] = []
     for boost in context.boosts.get(player.player_id, ()):
@@ -39,9 +81,15 @@ def player_flags(player: PlayerSeason, context: InjuryContext) -> tuple[Flag, ..
             flags.append(Flag("opportunity", "breakout", "up", f"+{boost.full_points:.1f} if {boost.from_name} sits",
                               f"{boost.from_name} is {boost.from_status}. If he sits, {player.name} inherits about "
                               f"{boost.full_points:.1f} expected pts ({boost.method})."))
-    for name in context.returning.get(player.player_id, ()):
-        flags.append(Flag("competition_returning", "regression", "down", f"{name} returning",
-                          f"{name} missed the last two games and is expected back; {player.name}'s expanded role may shrink."))
+    for back in context.returning.get(player.player_id, ()):
+        impact = (f" In {back.games_without} games without him, {player.name} gained about "
+                  f"{back.expected_loss:.1f} expected pts/game; expect much of that to go back."
+                  if back.expected_loss > 0 else "")
+        flags.append(Flag("competition_returning", "regression", "down", f"{back.name} returning",
+                          f"{back.name} missed the last two games and is expected back, so {player.name}'s "
+                          f"expanded role may shrink.{impact}"))
+    flags.extend(_snap_growth(player))
+    flags.extend(_efficient_part_timer(player))
     signals = compute_signals(player)
     if signals is not None:
         usage, snaps = signals.usage_trend or 0.0, signals.snap_trend or 0.0
