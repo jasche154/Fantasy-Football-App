@@ -197,7 +197,7 @@ def _matchup():
 def test_adjust_applies_availability_boosts_scenarios_and_range(monkeypatch):
     import services.weekly_adjust as wa
 
-    monkeypatch.setattr(wa, "projection_ranges", lambda: {"RB": {"floor": 0.3, "ceiling": 2.0}})
+    monkeypatch.setattr(wa, "range_for", lambda position, if_active: {"floor": 0.3, "ceiling": 2.0})
     boost = Boost(2, 1, "Starter", "Questionable", full_points=8.0, expected_points=4.0, method="x")
     out_boost = Boost(2, 3, "Other", "Out", full_points=4.0, expected_points=4.0, method="x")
     context = InjuryContext(availability={1: Availability(1, 0.5, "Questionable", "LP", None, "sleeper"),
@@ -391,3 +391,13 @@ def test_backtest_runs_on_a_seeded_season(session, seeded):
     # Teams come from the games before each week, not from today's roster.
     moved = data.current[0]
     assert backtest.truncate(moved, 4, data.schedule).team == "AAA"
+
+
+def test_range_for_picks_the_projection_tier(monkeypatch):
+    import services.weekly_model as wm
+
+    monkeypatch.setattr(wm, "projection_ranges", lambda: {"WR": {"floor": 0.2, "ceiling": 1.8, "tiers": [
+        {"min": 0.0, "max": 16.0, "floor": 0.22, "ceiling": 1.9}, {"min": 16.0, "max": 999.0, "floor": 0.4, "ceiling": 1.5}]}})
+    assert wm.range_for("WR", 22.0)["floor"] == 0.4          # a star keeps a real floor
+    assert wm.range_for("WR", 9.0)["floor"] == 0.22
+    assert wm.range_for("TE", 9.0) is None
