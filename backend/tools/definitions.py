@@ -164,16 +164,6 @@ def _explain(session: Session, player: str, week: int | None = None, **league: A
     return {"week": rankings.week, **serialize.explanation(item)}
 
 
-PLAYOFF_WEEKS = (15, 17)
-
-
-def _playoff_factor(valuation, value) -> float:
-    """Average opponent-adjusted defense factor in the fantasy playoffs (>1 = easier)."""
-    first, last = PLAYOFF_WEEKS
-    opponents = valuation.schedule.remaining_opponents(value.team, first - 1, last)
-    return round(valuation.defense.schedule_factor(opponents, value.position), 3)
-
-
 def _waivers(session: Session, position: str | None = None, max_rostered: float = 50, limit: int = 10,
              **league: Any) -> dict:
     """Compact rows: the full waiver payload is too large for the model's token budget."""
@@ -201,7 +191,7 @@ def _find_trades(session: Session, my_players: list[str], want_position: str | N
         {"give": [p.name for p in o.give], "get": f"{o.get.name} ({o.get.position}, {o.get.team})",
          "get_ros_ppg": o.get.ros_ppg, "verdict": o.evaluation.verdict,
          "your_gain_pct": round(o.evaluation.percent_difference * 100, 1),
-         "get_playoff_schedule": _playoff_factor(valuation, o.get)}
+         "get_playoff_schedule": o.get.playoff_factor}
         for o in offers]}
 
 

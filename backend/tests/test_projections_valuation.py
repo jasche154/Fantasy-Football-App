@@ -144,3 +144,13 @@ def test_expected_points_tolerate_a_missing_week():
     # FPOE compares the same three games: (10 + 30 + 40) / 3 - 26.67
     assert one_missing.fpoe_per_game == pytest.approx(0.0, abs=0.01)
     assert season_of([10, 20, 30, 40], [12, None, None, 40]).expected_ppg is None   # under 75% coverage
+
+
+def test_playoff_weeks_and_factor_flow_through_valuation():
+    from services.valuation import playoff_weeks
+
+    assert playoff_weeks(17) == (15, 17) and playoff_weeks(16) == (14, 16)
+    current = [season_of([20] * 4, [20] * 4, "RB", 1), season_of([10] * 4, [10] * 4, "RB", 2)]
+    values, _ = value_players(current, [], LeagueSettings(), remaining=10, playoff_factors={1: 1.12})
+    by_id = {v.player_id: v for v in values}
+    assert by_id[1].playoff_factor == 1.12 and by_id[2].playoff_factor == 1.0

@@ -46,6 +46,7 @@ class PlayerValue:
     pos_rank: str = ""
     base_ros_ppg: float = 0.0          # before the schedule adjustment
     schedule_factor: float = 1.0       # >1 = easier remaining schedule
+    playoff_factor: float = 1.0        # >1 = easier fantasy-playoff schedule (the last PLAYOFF_LENGTH weeks)
     model_ros_ppg: float = 0.0         # the model alone (with schedule), before the consensus blend
     expert_ros_rank: float | None = None
     expert_ros_ppg: float | None = None
@@ -91,7 +92,8 @@ def _rank(values: list[PlayerValue]) -> tuple[PlayerValue, ...]:
 def value_players(current: Sequence[PlayerSeason], previous: Sequence[PlayerSeason],
                   league: LeagueSettings, remaining: int,
                   schedule_factors: Mapping[int, float] | None = None,
-                  consensus: Mapping[int, "RosInputs"] | None = None) -> tuple[tuple[PlayerValue, ...], dict[str, float]]:
+                  consensus: Mapping[int, "RosInputs"] | None = None,
+                  playoff_factors: Mapping[int, float] | None = None) -> tuple[tuple[PlayerValue, ...], dict[str, float]]:
     """Pure valuation step, separated from data loading so it can be tested directly."""
     rates = {p.player_id: current_rate(p) for p in current}
     first_pass = replacement_levels(((p.position, rates[p.player_id]) for p in current), league)
@@ -114,6 +116,7 @@ def value_players(current: Sequence[PlayerSeason], previous: Sequence[PlayerSeas
             ros_ppg=projected[p.player_id], vorp_per_game=vorp,
             trade_value=round(vorp * remaining, 1), base_ros_ppg=base[p.player_id],
             schedule_factor=round(factors[p.player_id], 3), model_ros_ppg=model[p.player_id],
+            playoff_factor=round((playoff_factors or {}).get(p.player_id, 1.0), 3),
             **_consensus_fields(consensus.get(p.player_id)),
         ))
     return _rank(values), replacement
@@ -127,6 +130,14 @@ def _consensus_fields(inputs: "RosInputs | None") -> dict:
             "availability": round(inputs.availability, 3)}
 
 
+PLAYOFF_LENGTH = 3      # most leagues: weeks 15-17
+
+
+def playoff_weeks(end_week: int) -> tuple[int, int]:
+    """The fantasy playoffs: the last PLAYOFF_LENGTH weeks of the fantasy season."""
+    return end_week - PLAYOFF_LENGTH + 1, end_week
+
+
 def _compute(session: Session, league: LeagueSettings, season: int) -> Valuation:
     scoring = league.scoring_settings()
     current = load_player_seasons(session, season, scoring)
@@ -138,11 +149,15 @@ def _compute(session: Session, league: LeagueSettings, season: int) -> Valuation
     defense = defense_strength(current, schedule)
     factors = {p.player_id: defense.schedule_factor(
         schedule.remaining_opponents(p.team, through or 0, end_week), p.position) for p in current}
+    playoffs = playoff_weeks(end_week)
+    playoff = {p.player_id: defense.schedule_factor(
+        schedule.remaining_opponents(p.team, max(playoffs[0] - 1, through or 0), playoffs[1]), p.position)
+        for p in current}
     model_values, _ = value_players(current, previous, league, remaining, factors)
     consensus = ros_inputs(session, season, league.scoring, scoring,
                            {v.player_id: v.model_ros_ppg for v in model_values},
                            {v.player_id: v.position or "" for v in model_values}, remaining)
-    values, replacement = value_players(current, previous, league, remaining, factors, consensus)
+    values, replacement = value_players(current, previous, league, remaining, factors, consensus, playoff)
     return Valuation(season=season, through_week=through, weeks_remaining=remaining, league=league,
                      replacement=MappingProxyType(replacement), values=values,
                      seasons=tuple(current), by_id=MappingProxyType({v.player_id: v for v in values}),

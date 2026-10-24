@@ -52,6 +52,8 @@ export interface RankedPlayer {
   ecr: number | null;
   /** Remaining-schedule strength applied to ros_ppg (>1 = easier). */
   schedule_factor: number;
+  /** Fantasy-playoff (weeks 15-17) schedule strength, opponent-adjusted (>1 = easier). Not in ros_ppg. */
+  playoff_factor: number;
   /** Inputs to the blended ros_ppg. */
   ros_sources?: {
     model: number;

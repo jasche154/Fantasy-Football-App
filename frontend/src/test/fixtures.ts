@@ -49,6 +49,7 @@ export function ranked(rank: number, who: PlayerSummary, overrides: Partial<Rank
     trade_value: 100 - rank * 10,
     ecr: rank,
     schedule_factor: 1,
+    playoff_factor: 1,
     ...overrides,
   };
 }

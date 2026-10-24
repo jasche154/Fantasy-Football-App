@@ -29,6 +29,7 @@ def test_rankings_filters_and_ecr(client, seeded):
     assert body["season"] == CURRENT and body["weeks_remaining"] == 11 and len(body["results"]) == 5
     assert all(r["player"]["position"] == "WR" for r in body["results"])
     assert [r["rank"] for r in body["results"]] == [1, 2, 3, 4, 5]
+    assert all(r["playoff_factor"] > 0 for r in body["results"])
     everyone = client.get("/api/rankings", params={"limit": 500}).json()["results"]
     chase = next(r for r in everyone if r["player"]["id"] == seeded["chase"])
     assert chase["ecr"] == 3.4

@@ -28,6 +28,7 @@ export const RANKING_COLUMNS: readonly ColumnDef[] = [
   { key: 'expected_ppg', label: 'xPPG', tag: 'Expected', align: 'end', title: 'Expected fantasy points per game from opportunity (nflverse)' },
   { key: 'ros_ppg', label: 'ROS PPG', tag: 'Projection (blend)', align: 'end', title: 'Rest-of-season points per game: 45% model, 35% Yahoo ROS experts, 20% this week\'s ESPN/props, adjusted for injuries' },
   { key: 'schedule_factor', label: 'Sched', tag: 'Projection (model)', align: 'end', title: 'Remaining schedule vs average, opponent-adjusted (+ = easier); already included in ROS PPG' },
+  { key: 'playoff_factor', label: 'Playoff SOS', tag: 'Wk 15-17', align: 'end', title: 'Fantasy-playoff schedule (weeks 15-17) vs average, opponent-adjusted (+ = easier); not part of ROS PPG' },
   { key: 'trade_value', label: 'Value', tag: 'Projection (model)', align: 'end', title: 'Rest-of-season points above replacement, our model' },
   { key: 'ecr', label: 'ECR', tag: 'Expert', align: 'end', title: 'FantasyPros expert consensus rank' },
 ];
@@ -59,6 +60,7 @@ function RankingRow({ row }: { row: RankedPlayer }) {
         )}
       </td>
       <td className={`num sos-text sos-text--${factorTone(row.schedule_factor)}`}>{factorLabel(row.schedule_factor)}</td>
+      <td className={`num sos-text sos-text--${factorTone(row.playoff_factor)}`}>{factorLabel(row.playoff_factor)}</td>
       <td className="num">
         <span className="value-pill">{formatNumber(row.trade_value, 0)}</span>
       </td>
