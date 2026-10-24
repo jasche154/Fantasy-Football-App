@@ -6,8 +6,8 @@
 | Role growth | breakout | Expected points or snap share rising over the last 3 games |
 | Touchdown luck | regression | TDs 2+ above expected (sell) or below (buy) |
 | Efficiency outlier | regression | Scoring 3+ pts/game above or below what usage predicts |
-| Snap share climbing | breakout | Snap share rising 3+ points a game over the last 4 games (route share proxy) |
-| Efficient part-timer | breakout | Under 70% of snaps but producing at a pace that's elite on a full-time role |
+| Snap share climbing | breakout | Under 18 pts/game (TE 13) recently; last 3 games' snap share 10+ points above his earlier games, latest 50%+ (route share proxy) |
+| Efficient part-timer | breakout | Not yet a fantasy starter; a part-time role (RB <55%, WR <70%, TE <65% of snaps) producing at a pace that's a starter's on a full-time role |
 | Competition returning | regression | A starter who missed the last two games is back; his fill-in's measured gain fades (QB backups returning are ignored) |
 | Injury risk | risk | The player himself has a designation (chance to play under 90%) |
 """
@@ -34,44 +34,56 @@ class Flag:
     detail: str
 
 
-SNAP_SLOPE = 3.0             # snap-share points gained per game over the last 4 games
-FULL_TIME_SNAPS = 85.0
-PART_TIME_SNAPS = 70.0
-PER_SNAP_BAR = {"RB": 16.0, "WR": 15.0, "TE": 11.0}   # pts/game a full-time role would produce
+SNAP_RISE = 10.0             # last-3-game snap share over his earlier games, in points
+RECENT_GAMES = 3
+MIN_LATEST_SNAPS = 50.0
+# Breakout flags are for players who haven't broken out: recent points per game below these.
+BREAKOUT_CEILING = {"QB": 16.0, "RB": 13.0, "WR": 13.0, "TE": 9.0}
+# A growing role still matters for a player already producing; only skip the elite.
+SNAP_GROWTH_CEILING = {"RB": 18.0, "WR": 18.0, "TE": 13.0}
+# A full-time role differs by position (RBs share far more than WRs).
+FULL_TIME_SNAPS = {"RB": 70.0, "WR": 85.0, "TE": 80.0}
+PART_TIME_SNAPS = {"RB": 55.0, "WR": 70.0, "TE": 65.0}
+PER_SNAP_BAR = {"RB": 15.0, "WR": 15.0, "TE": 11.0}   # pts/game a full-time role would produce
+
+
+def _not_broken_out(player: PlayerSeason, ceilings: dict[str, float] = BREAKOUT_CEILING) -> bool:
+    recent = player.games[-4:]
+    ceiling = ceilings.get(player.position or "")
+    return bool(recent and ceiling) and sum(g.fantasy_points for g in recent) / len(recent) < ceiling
 
 
 def _snap_growth(player: PlayerSeason) -> list[Flag]:
-    """Snap share rising game over game (route share isn't public in-season; snaps are the proxy)."""
-    snaps = [g.snap_pct for g in player.games[-4:] if g.snap_pct is not None]
-    if len(snaps) < 3:
+    """Snap share up over his last 3 games vs. earlier (route share isn't public in-season; snaps are the proxy)."""
+    snaps = [g.snap_pct for g in player.games if g.snap_pct is not None]
+    if player.position not in FULL_TIME_SNAPS or len(snaps) < RECENT_GAMES + 2 or not _not_broken_out(player, SNAP_GROWTH_CEILING):
         return []
-    n = len(snaps)
-    mean_x, mean_y = (n - 1) / 2, sum(snaps) / n
-    slope = sum((i - mean_x) * (s - mean_y) for i, s in enumerate(snaps)) / sum((i - mean_x) ** 2 for i in range(n))
-    if slope < SNAP_SLOPE or snaps[-1] < 40:
+    recent, earlier = snaps[-RECENT_GAMES:], snaps[:-RECENT_GAMES]
+    rise = sum(recent) / len(recent) - sum(earlier) / len(earlier)
+    if rise < SNAP_RISE or snaps[-1] < MIN_LATEST_SNAPS:
         return []
-    path = " -> ".join(f"{s:.0f}%" for s in snaps)
+    path = " -> ".join(f"{s:.0f}%" for s in snaps[-6:])
     return [Flag("snap_growth", "breakout", "up", "Snap share climbing",
-                 f"Snap share over his last {n} games: {path} (+{slope:.1f} points a game). Usage tends to "
-                 "follow snaps, before the points show up.")]
+                 f"Snap share by game: {path}; his last {RECENT_GAMES} games average {rise:.0f} points above "
+                 "his earlier ones. Usage tends to follow snaps, before the points show up.")]
 
 
 def _efficient_part_timer(player: PlayerSeason) -> list[Flag]:
     """Productive per snap on a part-time role: a breakout candidate if the role grows."""
-    bar = PER_SNAP_BAR.get(player.position or "")
+    position = player.position or ""
     games = [g for g in player.games if g.snap_pct]
-    if not bar or len(games) < 3:
+    if position not in PER_SNAP_BAR or len(games) < 3 or not _not_broken_out(player):
         return []
     snap_avg = sum(g.snap_pct for g in games) / len(games)
-    if snap_avg >= PART_TIME_SNAPS:
+    if snap_avg >= PART_TIME_SNAPS[position]:
         return []
     per_game = sum(g.fantasy_points for g in games) / len(games)
-    full_time = per_game * FULL_TIME_SNAPS / snap_avg
-    if full_time < bar:
+    full_time = per_game * FULL_TIME_SNAPS[position] / snap_avg
+    if full_time < PER_SNAP_BAR[position]:
         return []
     return [Flag("efficient_part_timer", "breakout", "up", "Efficient part-timer",
-                 f"{per_game:.1f} pts/game on {snap_avg:.0f}% of snaps; at a full-time role ({FULL_TIME_SNAPS:.0f}%) "
-                 f"that pace is about {full_time:.1f}. A breakout if his role grows.")]
+                 f"{per_game:.1f} pts/game on {snap_avg:.0f}% of snaps; at a full-time {position} role "
+                 f"({FULL_TIME_SNAPS[position]:.0f}%) that pace is about {full_time:.1f}. A breakout if his role grows.")]
 
 
 def player_flags(player: PlayerSeason, context: InjuryContext) -> tuple[Flag, ...]:
