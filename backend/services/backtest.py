@@ -55,6 +55,7 @@ class Target:
     projected: float
     if_active: float = 0.0
     played: bool = True
+    snap_pct: float | None = None       # 0-100, that game
 
 
 def truncate(player: PlayerSeason, week: int, schedule: Schedule) -> PlayerSeason:
@@ -104,7 +105,8 @@ def project_week(session: Session, data: SeasonData, week: int, settings: Weekly
             cache[key] = build_context(session, before, rates, season, week, schedule, use_live=False,
                                        exclude_rate_season=season)
         context = cache[key]
-    played = {(p.player_id): next((g.fantasy_points for g in p.games if g.week == week), None) for p in current}
+    games_this_week = {p.player_id: next((g for g in p.games if g.week == week), None) for p in current}
+    played = {pid: (g.fantasy_points if g else None) for pid, g in games_this_week.items()}
     targets = []
     for player in eligible:
         rate = rates[player.player_id]
@@ -124,8 +126,9 @@ def project_week(session: Session, data: SeasonData, week: int, settings: Weekly
             if_active += sum(b.expected_points for b in context.boosts.get(player.player_id, ())) * multiplier
             projected = if_active * context.of(player.player_id).play_prob
         actual = played.get(player.player_id)
+        game_line = games_this_week.get(player.player_id)
         targets.append(Target(week, player.player_id, player.position or "", actual or 0.0, projected,
-                              if_active, actual is not None))
+                              if_active, actual is not None, game_line.snap_pct if game_line else None))
     return targets
 
 
@@ -152,16 +155,38 @@ def run(session: Session, data: SeasonData, settings: WeeklyModelSettings) -> li
     return targets
 
 
-def ranges(targets: list[Target]) -> dict[str, dict[str, float]]:
-    """Floor/ceiling multipliers: 10th/90th percentile of actual / if-active projection, in games played."""
-    out = {}
+# Projection tiers (if-active points): stars have tighter relative floors than fringe players.
+TIERS = ((0.0, 8.0), (8.0, 12.0), (12.0, 16.0), (16.0, 999.0))
+FULL_ROLE_SNAPS = 50.0          # games below this snap share are usually injury exits or benchings
+MIN_TIER_GAMES = 40
+
+
+def _quantiles(ratios: list[float]) -> dict[str, float]:
+    q10, q50, q90 = np.percentile(ratios, [10, 50, 90])
+    return {"floor": round(float(q10), 3), "median": round(float(q50), 3), "ceiling": round(float(q90), 3),
+            "bust_rate": round(mean(1.0 if r < 0.5 else 0.0 for r in ratios), 3), "n": len(ratios)}
+
+
+def ranges(targets: list[Target]) -> dict[str, dict]:
+    """Floor/ceiling multipliers by position and projection tier.
+
+    The 10th/90th percentile of actual / if-active projection, over games the player played
+    in a real role (snap share >= FULL_ROLE_SNAPS, or unknown). The floor answers
+    "if he plays his normal role"; an in-game injury is a separate risk.
+    """
+    out: dict[str, dict] = {}
     for position in ("QB", "RB", "WR", "TE"):
-        ratios = [t.actual / t.if_active for t in targets if t.position == position and t.if_active > 0 and t.played]
-        if len(ratios) >= 50:
-            q10, q50, q90 = np.percentile(ratios, [10, 50, 90])
-            bust = mean(1.0 if r < 0.5 else 0.0 for r in ratios)      # among games played
-            out[position] = {"floor": round(float(q10), 3), "median": round(float(q50), 3),
-                             "ceiling": round(float(q90), 3), "bust_rate": round(bust, 3), "n": len(ratios)}
+        games = [t for t in targets if t.position == position and t.if_active > 0 and t.played
+                 and (t.snap_pct is None or t.snap_pct >= FULL_ROLE_SNAPS)]
+        if len(games) < 50:
+            continue
+        overall = _quantiles([t.actual / t.if_active for t in games])
+        tiers = []
+        for low, high in TIERS:
+            ratios = [t.actual / t.if_active for t in games if low <= t.if_active < high]
+            if len(ratios) >= MIN_TIER_GAMES:
+                tiers.append({"min": low, "max": high, **_quantiles(ratios)})
+        out[position] = {**overall, "tiers": tiers}
     return out
 
 

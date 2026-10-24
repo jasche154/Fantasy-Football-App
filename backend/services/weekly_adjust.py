@@ -15,7 +15,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from services.injuries import Availability, Boost, InjuryContext
-from services.weekly_model import Matchup, projection_ranges
+from services.weekly_model import Matchup, projection_ranges, range_for
 
 PRICED_IN = 0.1            # teammates below this chance to play are already priced in by outside sources
 MAY_SIT = 0.9              # below this, the floor is 0
@@ -62,7 +62,7 @@ def adjust(position: str, blended: float, tilt: float, matchup: Matchup, model_s
         Scenario(b.from_name, b.from_status, round(b.full_points * matchup.multiplier * share - c, 2),
                  round((if_active - c + b.full_points * matchup.multiplier * share) * availability.play_prob, 2))
         for b, c, share in contributions if b.full_points * matchup.multiplier * share - c >= 0.5)
-    ranges = projection_ranges().get(position)
+    ranges = range_for(position, if_active)
     floor = ceiling = None
     if ranges:
         floor = 0.0 if availability.play_prob < MAY_SIT else round(if_active * ranges["floor"], 1)

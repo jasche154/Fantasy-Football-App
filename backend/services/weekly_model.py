@@ -69,6 +69,17 @@ def weekly_rate(player: PlayerSeason, prior_ppg: float | None, half_life: float 
     return round(shrink * rate + (1 - shrink) * prior_ppg, 2)
 
 
+def range_for(position: str, if_active: float) -> dict[str, float] | None:
+    """The floor/ceiling multipliers for this position and projection tier (falls back to the position)."""
+    ranges = projection_ranges().get(position)
+    if not ranges:
+        return None
+    for tier in ranges.get("tiers", ()):
+        if tier["min"] <= if_active < tier["max"]:
+            return tier
+    return ranges
+
+
 @lru_cache(maxsize=1)
 def projection_ranges() -> dict[str, dict[str, float]]:
     """Floor/ceiling multipliers by position, measured by the backtest."""
