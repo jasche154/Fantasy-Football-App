@@ -1,7 +1,8 @@
-import { useId } from 'react';
-import type { MetricFormat } from '../../api/types';
+import { useId, useState, type KeyboardEvent } from 'react';
+import type { MetricFormat, PlayerSummary } from '../../api/types';
 import { extent, linearScale, median, niceTicks } from '../../lib/chartScale';
 import { formatMetric } from '../../lib/format';
+import { HoverTag } from './HoverTag';
 
 export interface ScatterDatum {
   id: number;
@@ -9,6 +10,8 @@ export interface ScatterDatum {
   x: number;
   y: number;
   isHighlighted?: boolean;
+  /** Who the point is, for the click-through card. */
+  player?: PlayerSummary;
 }
 
 interface ScatterChartProps {
@@ -21,6 +24,9 @@ interface ScatterChartProps {
   yFormat: MetricFormat;
   /** How many points (furthest up and to the right) get a name label besides highlighted ones. */
   labelCount?: number;
+  /** Clicking (or Enter on) a point calls this; the selected point stays outlined. */
+  onSelect?: (id: number) => void;
+  selectedId?: number | null;
 }
 
 const WIDTH = 720;
@@ -71,8 +77,10 @@ export function placeLabels(candidates: readonly { id: number; x: number; y: num
 }
 
 /** Two-metric scatter with median guide lines splitting it into quadrants. */
-export function ScatterChart({ title, description, points, xLabel, yLabel, xFormat, yFormat, labelCount = 8 }: ScatterChartProps) {
+export function ScatterChart({ title, description, points, xLabel, yLabel, xFormat, yFormat, labelCount = 8,
+  onSelect, selectedId = null }: ScatterChartProps) {
   const id = useId();
+  const [hoveredId, setHoveredId] = useState<number | null>(null);
   const xTicks = niceTicks(...extent(points.map((p) => p.x)));
   const yTicks = niceTicks(...extent(points.map((p) => p.y)));
   const x = linearScale([xTicks[0], xTicks[xTicks.length - 1]], [PAD.left, WIDTH - PAD.right]);
@@ -87,7 +95,7 @@ export function ScatterChart({ title, description, points, xLabel, yLabel, xForm
   const medianY = y(median(points.map((p) => p.y)));
 
   return (
-    <svg className="auto-chart" viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role="img" aria-labelledby={`${id}-t ${id}-d`}>
+    <svg className="auto-chart" viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role={onSelect ? 'group' : 'img'} aria-labelledby={`${id}-t ${id}-d`}>
       <title id={`${id}-t`}>{title}</title>
       <desc id={`${id}-d`}>{description}</desc>
       <g className="auto-chart__grid">
@@ -105,17 +113,39 @@ export function ScatterChart({ title, description, points, xLabel, yLabel, xForm
       <line className="auto-chart__median" x1={PAD.left} x2={WIDTH - PAD.right} y1={medianY} y2={medianY} />
       <text className="auto-chart__axis" x={(PAD.left + WIDTH - PAD.right) / 2} y={HEIGHT - 6} textAnchor="middle">{xLabel}</text>
       <text className="auto-chart__axis" transform={`translate(16 ${(PAD.top + HEIGHT - PAD.bottom) / 2}) rotate(-90)`} textAnchor="middle">{yLabel}</text>
-      {points.map((point) => (
-        <g key={point.id} className={point.isHighlighted ? 'auto-chart__point is-highlighted' : 'auto-chart__point'}>
-          <circle cx={x(point.x)} cy={y(point.y)} r={point.isHighlighted ? 6 : 4.5}>
-            <title>{`${point.label}: ${xLabel} ${formatMetric(point.x, xFormat)}, ${yLabel} ${formatMetric(point.y, yFormat)}`}</title>
+      {points.map((point) => {
+        const summary = `${point.label}: ${xLabel} ${formatMetric(point.x, xFormat)}, ${yLabel} ${formatMetric(point.y, yFormat)}`;
+        const classes = ['auto-chart__point', point.isHighlighted && 'is-highlighted', point.id === selectedId && 'is-selected']
+          .filter(Boolean).join(' ');
+        const select = () => onSelect?.(point.id);
+        const onKey = (event: KeyboardEvent) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            select();
+          }
+        };
+        return (
+        <g key={point.id} className={classes}
+          onMouseEnter={() => setHoveredId(point.id)} onMouseLeave={() => setHoveredId(null)}
+          onFocus={() => setHoveredId(point.id)} onBlur={() => setHoveredId(null)}
+          {...(onSelect ? { role: 'button', tabIndex: 0, 'aria-label': summary, 'aria-pressed': point.id === selectedId,
+            onClick: select, onKeyDown: onKey } : {})}>
+          <circle className="auto-chart__hit" cx={x(point.x)} cy={y(point.y)} r={10} />
+          <circle cx={x(point.x)} cy={y(point.y)} r={point.isHighlighted || point.id === selectedId ? 6 : 4.5}>
+            <title>{summary}</title>
           </circle>
           {labels.has(point.id) && (
             <text className="auto-chart__point-label" x={labels.get(point.id)?.x} y={labels.get(point.id)?.y}
               dy="0.32em" textAnchor={labels.get(point.id)?.anchor}>{point.label}</text>
           )}
         </g>
-      ))}
+        );
+      })}
+      {[hoveredId, selectedId].filter((pid, index, all): pid is number => pid !== null && all.indexOf(pid) === index)
+        .map((pid) => byId.get(pid))
+        .map((point) => point && (
+          <HoverTag key={point.id} x={x(point.x)} y={y(point.y)} text={point.label} width={WIDTH} top={PAD.top} />
+        ))}
     </svg>
   );
 }

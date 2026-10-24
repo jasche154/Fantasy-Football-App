@@ -186,6 +186,13 @@
 .auto-chart__point circle { fill: var(--color-text-subtle); fill-opacity: 0.45; stroke: var(--color-surface-1); stroke-width: 1; }
 .auto-chart__point:hover circle { fill: var(--color-accent); fill-opacity: 1; }
 .auto-chart__point.is-highlighted circle { fill: var(--color-accent); fill-opacity: 1; }
+.auto-chart__point[role='button'] { cursor: pointer; outline: none; }
+.auto-chart .auto-chart__point circle.auto-chart__hit { fill: transparent; stroke: none; }
+.auto-chart__point:focus-visible circle:not(.auto-chart__hit),
+.auto-chart__point.is-selected circle:not(.auto-chart__hit) { fill: var(--color-accent); fill-opacity: 1; stroke: var(--color-text); stroke-width: 2; }
+.auto-chart__dot-hit { fill: transparent; cursor: default; }
+.auto-chart__hover rect { fill: var(--color-text); opacity: 0.92; }
+.auto-chart__hover text { fill: var(--color-surface-1); font-size: 12px; font-weight: 650; }
 .auto-chart__point-label { fill: var(--color-text); font-size: 11.5px; font-weight: 650; paint-order: stroke; stroke: var(--color-surface-1); stroke-width: 3px; }
 
 .series-legend {
@@ -205,3 +212,14 @@
   background: var(--series);
   vertical-align: middle;
 }
+
+/* Scatter point details (Chart Studio) */
+.chart-card__hint { margin: var(--space-2, 8px) 0 0; color: var(--color-text-subtle); font-size: 0.85rem; }
+.point-card { margin-top: var(--space-3, 12px); padding: 12px 14px; border: 1px solid var(--color-border); border-radius: 10px;
+  background: var(--color-surface-2, var(--color-surface-1)); display: grid; gap: 8px; }
+.point-card__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.point-card__metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px 16px; margin: 0; }
+.point-card__metric dt { color: var(--color-text-subtle); font-size: 0.8rem; }
+.point-card__metric dd { margin: 2px 0 0; display: flex; align-items: baseline; gap: 8px; }
+.point-card__rank { color: var(--color-text-subtle); font-size: 0.8rem; }
+.point-card__note { margin: 0; font-size: 0.85rem; }

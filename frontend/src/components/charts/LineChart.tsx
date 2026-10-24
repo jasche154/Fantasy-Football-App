@@ -1,6 +1,7 @@
-import { useId } from 'react';
+import { useId, useState } from 'react';
 import { extent, linearScale, niceTicks, seriesClass } from '../../lib/chartScale';
 import { formatNumber } from '../../lib/format';
+import { HoverTag } from './HoverTag';
 
 export interface LinePoint {
   x: number;
@@ -36,6 +37,7 @@ export function linePath(points: readonly LinePoint[], x: (v: number) => number,
 /** Multi-series line chart (e.g. weekly fantasy points for up to five players). */
 export function LineChart({ title, description, series, xLabel, yLabel, digits = 1 }: LineChartProps) {
   const id = useId();
+  const [hovered, setHovered] = useState<{ x: number; y: number; text: string } | null>(null);
   const allPoints = series.flatMap((s) => s.points);
   const [xMin, xMax] = extent(allPoints.map((p) => p.x));
   const [yMinRaw, yMaxRaw] = extent(allPoints.map((p) => p.y));
@@ -67,13 +69,19 @@ export function LineChart({ title, description, series, xLabel, yLabel, digits =
           <g key={item.name} className={`auto-chart__series ${seriesClass(index)}`}>
             <path className="auto-chart__line" d={path} />
             {item.points.map((p) => (
-              <circle key={p.x} className="auto-chart__dot" cx={x(p.x)} cy={y(p.y)} r={4}>
-                <title>{`${item.name}, ${xLabel.toLowerCase()} ${p.x}${p.label ? ` ${p.label}` : ''}: ${formatNumber(p.y, digits)}`}</title>
-              </circle>
+              <g key={p.x} onMouseEnter={() => setHovered({ x: x(p.x), y: y(p.y),
+                text: `${item.name} · ${xLabel} ${p.x}: ${formatNumber(p.y, digits)}` })}
+                onMouseLeave={() => setHovered(null)}>
+                <circle className="auto-chart__dot-hit" cx={x(p.x)} cy={y(p.y)} r={9} />
+                <circle className="auto-chart__dot" cx={x(p.x)} cy={y(p.y)} r={4}>
+                  <title>{`${item.name}, ${xLabel.toLowerCase()} ${p.x}${p.label ? ` ${p.label}` : ''}: ${formatNumber(p.y, digits)}`}</title>
+                </circle>
+              </g>
             ))}
           </g>
         );
       })}
+      {hovered && <HoverTag x={hovered.x} y={hovered.y} text={hovered.text} width={WIDTH} top={PAD.top} />}
     </svg>
   );
 }
