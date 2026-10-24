@@ -23,6 +23,8 @@ export interface IntegrationsStatus {
 export interface Meta {
   current_season: number;
   latest_week: number | null;
+  /** The week Week X rankings default to (first week with games left). */
+  current_week: number | null;
   seasons: number[];
   positions: Position[];
   scoring_presets: Scoring[];

@@ -28,6 +28,7 @@ describe('App routing and shell', () => {
     expect(within(nav).getByRole('link', { name: /Dashboard/ })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('link', { name: /League settings/ })).toHaveTextContent('12-team · PPR');
     expect(await screen.findByText('No buy-low candidates right now.')).toBeInTheDocument();
+    expect(await within(nav).findByRole('link', { name: /Week 8 Rankings/ })).toBeInTheDocument();
   });
 
   it('switches pages on hash changes and moves focus to the new heading', async () => {

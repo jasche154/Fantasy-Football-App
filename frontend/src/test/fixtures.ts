@@ -27,6 +27,7 @@ export function meta(overrides: Partial<Meta> = {}): Meta {
   return {
     current_season: 2025,
     latest_week: 7,
+    current_week: 8,
     seasons: [2023, 2024, 2025],
     positions: ['QB', 'RB', 'WR', 'TE'],
     scoring_presets: ['ppr', 'half', 'std'],

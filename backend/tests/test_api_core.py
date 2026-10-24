@@ -5,6 +5,7 @@ def test_health_and_meta(client):
     assert client.get("/api/health").json() == {"status": "ok"}
     meta = client.get("/api/meta").json()
     assert meta["current_season"] == CURRENT and meta["latest_week"] == 6
+    assert meta["current_week"] == 7                      # no schedule seeded: the week after the latest stats
     assert meta["seasons"] == [2025, 2026] and meta["positions"] == ["QB", "RB", "WR", "TE"]
     assert meta["scoring_presets"] == ["ppr", "half", "std"]
 

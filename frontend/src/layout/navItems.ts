@@ -25,6 +25,11 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { route: 'settings', path: paths.settings, label: 'Settings', shortLabel: 'Settings', icon: 'settings', isPrimary: false },
 ];
 
+/** The nav label, with the real week number in place of the X once it's known. */
+export function navLabel(item: NavItem, currentWeek: number | null | undefined): string {
+  return item.route === 'weekly' && currentWeek ? `Week ${currentWeek} Rankings` : item.label;
+}
+
 /** Player pages highlight Rankings, since that's where players are browsed from. */
 export function activeNavRoute(route: Route): Route['name'] {
   return route.name === 'player' ? 'rankings' : route.name;
