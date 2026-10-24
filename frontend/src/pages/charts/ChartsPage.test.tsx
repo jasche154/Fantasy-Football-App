@@ -51,7 +51,19 @@ describe('ChartsPage', () => {
 
     const scatter = await screen.findByRole('region', { name: /Target share vs\. PPR points/ });
     expect(within(scatter).getByText('Auto chart · scatter')).toBeInTheDocument();
-    expect(await within(scatter).findByRole('img', { name: /Target share vs\. PPR points/ })).toBeInTheDocument();
+    expect(await within(scatter).findByRole('group', { name: /Target share vs\. PPR points/ })).toBeInTheDocument();
+
+    const chasePoint = within(scatter).getByRole('button', { name: /^Ja'Marr Chase: Target share/ });
+    await user.hover(chasePoint);
+    expect(chasePoint.closest('svg')?.querySelector('.auto-chart__hover text')).toHaveTextContent("Ja'Marr Chase");
+    await user.click(chasePoint);
+    const card = within(scatter).getByRole('complementary', { name: "Ja'Marr Chase details" });
+    expect(within(card).getByRole('link', { name: "Ja'Marr Chase" })).toBeInTheDocument();
+    expect(within(card).getAllByText(/#1 of \d+ plotted/)).toHaveLength(2);
+    expect(within(card).getByText(/Above the median in both/)).toBeInTheDocument();
+    expect(chasePoint).toHaveAttribute('aria-pressed', 'true');
+    await user.click(within(card).getByRole('button', { name: 'Close player details' }));
+    expect(within(scatter).queryByRole('complementary')).not.toBeInTheDocument();
     const boards = api.callsTo('/api/leaderboards').map((c) => c.url.searchParams);
     expect(boards.map((p) => [p.get('metric'), p.get('position'), p.get('limit')])).toEqual([
       ['target_share', 'WR', '200'], ['ppr_points_per_game', 'WR', '200']]);
@@ -102,8 +114,8 @@ describe('chart helpers', () => {
   it('joins scatter metrics, labels the best points, and avoids label collisions', () => {
     const joined = joinScatter(board('target_share').results, board('ppr_points_per_game').results.slice(0, 2), new Set([BIJAN.id]));
     expect(joined).toEqual([
-      { id: CHASE.id, label: CHASE.name, x: 15, y: 30, isHighlighted: false },
-      { id: BIJAN.id, label: BIJAN.name, x: 10, y: 20, isHighlighted: true },
+      { id: CHASE.id, label: CHASE.name, x: 15, y: 30, isHighlighted: false, player: CHASE },
+      { id: BIJAN.id, label: BIJAN.name, x: 10, y: 20, isHighlighted: true, player: BIJAN },
     ]);
     expect([...pointsToLabel(joined, 1)]).toEqual([CHASE.id, BIJAN.id]);
     const placed = placeLabels([

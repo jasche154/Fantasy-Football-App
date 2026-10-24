@@ -445,3 +445,43 @@ class ExternalApiCall(Base):
     source: Mapped[str]
     called_at: Mapped[datetime] = mapped_column(default=utc_now)
     ok: Mapped[bool]
+
+
+class RankingsSnapshot(Base):
+    """A computed week of rankings, saved so a restart doesn't redo the slow first build.
+
+    Keyed by league settings, week and a hash of every input (source snapshots, live status,
+    reports, stat loads, and the model code itself); any change makes a new key. The payload
+    is a pickle written and read only by this app's local database (it is never committed).
+    """
+
+    __tablename__ = "rankings_snapshots"
+
+    cache_key: Mapped[str] = mapped_column(primary_key=True)
+    season: Mapped[int]
+    week: Mapped[int]
+    payload: Mapped[bytes]
+    computed_at: Mapped[datetime] = mapped_column(default=utc_now)
+
+
+class ProjectionHistory(Base):
+    """The last pre-kickoff projection for a player-week, per scoring format.
+
+    Kept so projections can be scored against what happened (python -m services.projection_eval)
+    and source weights learned from the results.
+    """
+
+    __tablename__ = "projection_history"
+
+    season: Mapped[int] = mapped_column(primary_key=True)
+    week: Mapped[int] = mapped_column(primary_key=True)
+    scoring: Mapped[str] = mapped_column(primary_key=True)
+    player_id: Mapped[int] = mapped_column(ForeignKey("players.id"), primary_key=True)
+    position: Mapped[str]
+    projection: Mapped[float]
+    if_active: Mapped[float]
+    play_prob: Mapped[float]
+    floor: Mapped[float | None]
+    ceiling: Mapped[float | None]
+    sources: Mapped[str]                       # JSON {source: points}
+    computed_at: Mapped[datetime] = mapped_column(default=utc_now)

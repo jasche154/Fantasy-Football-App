@@ -111,6 +111,25 @@ describe('WeeklyPage', () => {
     expect(within(notes).queryByText(/Yahoo/)).not.toBeInTheDocument();      // fresh sources stay quiet
   });
 
+  it('sorts by any projection column, keeping players a source skips at the bottom', async () => {
+    mockFetch(routes());
+    const user = userEvent.setup();
+    renderWithProviders(<WeeklyPage />);
+    const table = await screen.findByRole('table');
+    const names = () => within(table).getAllByRole('row').slice(1).map((row) => within(row).getAllByRole('link')[0].textContent);
+    expect(names()).toEqual([CHASE.name, BIJAN.name]);
+
+    await user.click(within(table).getByRole('button', { name: /^Proj/ }));
+    expect(names()).toEqual([CHASE.name, BIJAN.name]);                    // highest first
+    await user.click(within(table).getByRole('button', { name: /^Proj/ }));
+    expect(names()).toEqual([BIJAN.name, CHASE.name]);
+    expect(within(table).getByRole('columnheader', { name: /^Proj/ })).toHaveAttribute('aria-sort', 'ascending');
+
+    await user.click(within(table).getByRole('button', { name: /Props/ }));
+    await user.click(within(table).getByRole('button', { name: /Props/ }));     // ascending: Bijan has no props line
+    expect(names()).toEqual([CHASE.name, BIJAN.name]);
+  });
+
   it('changes week and position, and refreshes sources on demand', async () => {
     const user = userEvent.setup();
     const api = mockFetch(routes());

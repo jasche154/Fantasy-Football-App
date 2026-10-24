@@ -23,7 +23,9 @@ only *explains* numbers that came back from a tool call. Every output is labeled
   snap counts, cross-platform player IDs, and FantasyPros weekly ECR, loaded into SQLite by one command
 - **Week X rankings:** projected points for the current (or any) week, blended from Vegas
   player props (highest weight), Yahoo's Josh Norris & Hayden Winks, Yahoo's 40+ expert
-  consensus, ESPN, and a matchup model, with each source's number side by side
+  consensus, ESPN, and a matchup model, with each source's number side by side. Click any
+  column to sort by it. The nav shows the real week (e.g. "Week 8 Rankings"). The first build
+  of a week is saved to the local database, so later loads (even after a restart) are instant
 - **Injury-aware projections:**
   - Sleeper's live injury tags and the official practice reports become a learned chance to
     play.
@@ -32,15 +34,21 @@ only *explains* numbers that came back from a tool call. Every output is labeled
   - Backtests on 2025 and 2024 show the injury layer cuts weekly error by about 10%.
 - **Explanations on request:** a **Why?** button on every projection lists each step from
   recent production to the final number.
-- **Floor/ceiling ranges** measured from 2025 outcomes, plus **breakout and regression flags**
-  that react to injury news.
+- **Floor/ceiling ranges** measured from 2025 outcomes by position and projection tier, in games
+  played in a normal role, plus **breakout and regression flags**:
+  - growing snap share (the free stand-in for route share) and efficient part-timers;
+  - starters returning from injury, with how much their fill-in stands to lose.
+- **Projection history:** every pre-kickoff projection is stored locally with each source's
+  number, and `python -m services.projection_eval` scores them against what happened
 - **Start/Sit comparer, Waiver Wire assistant** (with FAAB bids), and **Trade finder**
 - **Adjusted strength of schedule:** fantasy points each defense allows by position,
   corrected for the offenses it faced; drives weekly matchups and rest-of-season values
 - **Rankings:** rest-of-season rankings for your league's scoring (PPR, half, standard,
-  TE premium, superflex) with actual, expected, and projected points side by side
+  TE premium, superflex) with actual, expected, and projected points side by side, plus
+  rest-of-season and **playoff (weeks 15–17) strength of schedule**
 - **Chart Studio:** charts built automatically from your selection (two metrics → scatter split at
-  the medians, one → ranked bars, players → week-by-week trend), five one-click presets, SVG download
+  the medians, one → ranked bars, players → week-by-week trend), five one-click presets, SVG download.
+  Hover a point for the player's name; click a scatter point for a card with both values, ranks and quadrant
 - **Advanced-stat leaderboards:** 26 whitelisted metrics (RYOE, separation, YAC over
   expected, CPOE, time to throw, target share, EPA per play, and more), volume-weighted the right way
 - **Player pages:** season summary, weekly game log, NGS advanced stats, projection
@@ -130,12 +138,12 @@ Open <http://localhost:5173>. The UI talks to `http://localhost:8000` by default
 | Page | What you can do |
 |---|---|
 | **Dashboard** | Top buy-low and sell-high players with the reason behind each, Sleeper's most-added players, data freshness |
-| **Week X Rankings** | This week's projections by position; pick any week. Each row shows the matchup grade (opponent-adjusted, #1 = easiest), the Vegas implied team total, the blended projection, and every source's number (props, Josh & Hayden, Yahoo, ESPN, model). **Schedule strength** switches to defenses ranked by adjusted points allowed and each team's upcoming opponents. **Refresh sources** re-pulls Yahoo and ESPN (Vegas props follow their credit budget) |
-| **Rankings** | Rest-of-season rankings by position; sort by actual, expected, or projected points, schedule strength, trade value, or ECR |
+| **Week X Rankings** | This week's projections by position; pick any week. Each row shows the matchup grade (opponent-adjusted, #1 = easiest), the Vegas implied team total, the blended projection, and every source's number (props, Josh & Hayden, Yahoo, ESPN, model). Click a column header (Proj, Team total, or any source) to sort by it. **Schedule strength** switches to defenses ranked by adjusted points allowed and each team's upcoming opponents. **Refresh sources** re-pulls Yahoo and ESPN (Vegas props follow their credit budget) |
+| **Rankings** | Rest-of-season rankings by position; sort by actual, expected, or projected points, schedule strength, **Playoff SOS** (weeks 15–17), trade value, or ECR |
 | **Week X → Start / Sit** | Add up to four players. Each shows its projection, floor–ceiling range, injury status, "if <teammate> sits" scenarios, flags, and a **Why?** breakdown. A tiebreaker (most points / safe / upside) decides close calls |
 | **Waiver Wire** | Players rostered in under 10–75% of ESPN leagues, ranked by rest-of-season value, this week's projection, next three matchups, and injury-driven opportunity, with a suggested FAAB bid |
 | **Trade Calculator → Trade finder** | Put the players you'd move in "You give", pick a position you want, and get fair or slight-edge 1-for-1 and 2-for-1 offers; **Load in calculator** opens one |
-| **Chart Studio** | Click a quick chart (Volume pays, Separators, RYOE leaders, Downfield QBs, Opportunity score) or pick one or two season metrics and a position; the chart type is chosen for you. Add players to highlight them, or add players with no metric for a weekly trend of any stat. **Download SVG** saves the chart |
+| **Chart Studio** | Click a quick chart (Volume pays, Separators, RYOE leaders, Downfield QBs, Opportunity score) or pick one or two season metrics and a position; the chart type is chosen for you. Add players to highlight them, or add players with no metric for a weekly trend of any stat. Hover any point to see whose it is; click a scatter point for that player's values, ranks among the plotted players, and quadrant. **Download SVG** saves the chart |
 | **Advanced Stats** | Pick a category and metric, season, and minimum volume, then rank every qualified player |
 | **Trade Calculator** | Search players into "You give" / "You get". See each side's value, the verdict meter, and suggestions that even it out; the URL is shareable |
 | **Buy / Sell** | Full buy-low and sell-high lists with every reason, filtered by position |
@@ -250,9 +258,14 @@ The grid search (`--ablation` for the table above) chose these settings:
   already price the defense. It's kept at 0.5, at a cost of about 0.02 MAE, because schedule
   strength was requested as a factor.
 
-The run also writes `services/projection_ranges.json`: the 10th/90th percentile of actual ÷
-projected points by position. That's where the floor/ceiling ranges come from (RBs, for
-example, land between 0.28× and 1.97× their projection 80% of the time).
+The run also writes `services/projection_ranges.json`, the source of the floor/ceiling ranges:
+the 10th/90th percentile of actual ÷ projected points.
+- It's split by position and projection tier (under 8, 8–12, 12–16, 16+ points), since stars
+  have steadier floors than fringe players.
+- It only counts games with 50%+ of snaps, so the floor answers "if he plays his normal role".
+  Early injury exits are a separate risk.
+- Example: a WR projected for 16+ has a floor of about 0.40× his projection (a 20-point
+  projection floors near 8, not 2).
 
 ### Breakout and regression flags
 
@@ -260,9 +273,11 @@ example, land between 0.28× and 1.97× their projection 80% of the time).
 |---|---|
 | Opportunity spike | A teammate may sit and this player would inherit 3+ pts of his work |
 | Role growing | Expected points or snap share rising over the last 3 games |
+| Snap share climbing | Last 3 games' snap share 10+ points above his earlier games, latest 50%+. Skips players already scoring 18+ (TE 13+). Snaps stand in for route share, which isn't free in-season |
+| Efficient part-timer | Not yet a fantasy starter, on a part-time role (RB under 55%, WR under 70%, TE under 65% of snaps), but scoring at a starter's pace per snap |
 | TDs due / TD-heavy | Touchdowns 2+ below or above what his looks predict |
 | Under/over-producing usage | Scoring 3+ pts/game away from what usage predicts |
-| Competition returning | A teammate who missed the last two games is back, so a fill-in's role may shrink |
+| Competition returning | A starter who missed the last two games is back. The fill-in's measured gain without him (2+ games) × his chance to play is shown and taken out of the model's share of the projection. A backup QB returning never flags the starter |
 | Injury risk | His own chance to play is under 90% |
 
 ### Week X rankings
@@ -287,6 +302,16 @@ Each player's week projection is a weighted blend of every source that covers th
 - Players on bye are skipped. When outside sources have published the week, players none
   of them cover are left out too (usually injured or inactive).
 - Weights and the tilt are constants in `backend/services/weekly_rankings.py`.
+
+**Saved locally.** Two tables in the local SQLite database (never committed) store the results:
+- **`rankings_snapshots`:** the computed week, keyed by league settings, week, every data input
+  and a hash of the model code. A change to any of them recomputes; otherwise a load (even
+  after a restart) takes about 0.1 s instead of several seconds.
+- **`projection_history`:** each player's last projection before kickoff, with every source's
+  points. Once that week's stats are loaded, `python -m services.projection_eval --season 2026`
+  reports the blend's and each source's error and suggests inverse-error source weights. The
+  suggestion is the starting point for learning the weights from results; it's never applied
+  automatically.
 
 On Week 7 of 2026 (before props were configured), the blend agreed closely with Hayden's
 own ranks (rank correlation 0.93 for the top 24 RBs, 0.97 for the top 36 WRs) while still

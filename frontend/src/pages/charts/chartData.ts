@@ -52,7 +52,7 @@ export function joinScatter(xs: readonly LeaderboardRow[], ys: readonly Leaderbo
   return xs.flatMap((row) => {
     const y = yById.get(row.player.id);
     return y === undefined ? [] : [{ id: row.player.id, label: row.player.name, x: row.value, y,
-      isHighlighted: highlightIds.has(row.player.id) }];
+      isHighlighted: highlightIds.has(row.player.id), player: row.player }];
   });
 }
 

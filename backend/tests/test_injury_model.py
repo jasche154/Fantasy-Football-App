@@ -174,7 +174,10 @@ def test_returning_competition_flags_fill_ins():
     seasons[0] = season(1, "Breece Starter", "RB", [line(w, 18, xp=18) for w in (1, 2, 3)])   # missed 4-6
     back = {1: Availability(1, 1.0, None, "FP", "Quad", "report")}
     returning = injuries.returning_competition(seasons, back, 7, aaa_schedule())
-    assert returning[2] == ("Breece Starter",) and 4 not in returning
+    (back_starter,) = returning[2]
+    assert back_starter.name == "Breece Starter" and 4 not in returning
+    assert back_starter.expected_loss == pytest.approx(6.0) and back_starter.games_without == 3  # 12 -> 6 xp gain
+    assert returning[3][0].expected_loss == 0.0                                  # no gain without him
     out = {1: Availability(1, 0.0, "Out", "DNP", "Quad", "report")}
     assert injuries.returning_competition(seasons, out, 7, aaa_schedule()) == {}
     assert injuries.returning_competition(seasons, {}, 7, aaa_schedule()) == {}      # no report: maybe released
@@ -197,7 +200,7 @@ def _matchup():
 def test_adjust_applies_availability_boosts_scenarios_and_range(monkeypatch):
     import services.weekly_adjust as wa
 
-    monkeypatch.setattr(wa, "projection_ranges", lambda: {"RB": {"floor": 0.3, "ceiling": 2.0}})
+    monkeypatch.setattr(wa, "range_for", lambda position, if_active: {"floor": 0.3, "ceiling": 2.0})
     boost = Boost(2, 1, "Starter", "Questionable", full_points=8.0, expected_points=4.0, method="x")
     out_boost = Boost(2, 3, "Other", "Out", full_points=4.0, expected_points=4.0, method="x")
     context = InjuryContext(availability={1: Availability(1, 0.5, "Questionable", "LP", None, "sleeper"),
@@ -222,11 +225,44 @@ def test_flags_cover_opportunity_returning_role_td_and_injury():
     context = InjuryContext(
         availability={2: Availability(2, 0.8, "Questionable", "LP", "Knee", "report")},
         boosts={2: (Boost(2, 1, "Starter", "Questionable", 7.5, 2.0, "with/without (3 games)"),)},
-        returning={2: ("Old Starter",)})
+        returning={2: (injuries.Returning("Old Starter", 3.0, 2),)})
     keys = {f.key: f for f in player_flags(player, context)}
     assert set(keys) >= {"opportunity", "competition_returning", "role_growth", "td_luck", "efficiency", "injury"}
     assert keys["opportunity"].label == "+7.5 if Starter sits" and keys["opportunity"].kind == "breakout"
     assert keys["td_luck"].direction == "down" and keys["injury"].label == "80% to play"
+    assert "3.0 expected pts/game" in keys["competition_returning"].detail
+
+
+def test_backup_qb_returning_does_not_flag_the_starter():
+    starter = season(1, "Sam Starter", "QB", [line(w, 20, xp=20) for w in range(1, 7)])
+    backup = season(2, "Drew Backup", "QB", [line(w, 12, xp=12) for w in (1, 2)])         # missed 3-6
+    back = {2: Availability(2, 1.0, None, "FP", "Hip", "report")}
+    assert injuries.returning_competition([starter, backup], back, 7, aaa_schedule()) == {}
+    fill_in = season(3, "Fill In", "QB", [line(w, 14, xp=14) for w in (5, 6)])
+    real_starter = season(4, "Real Starter", "QB", [line(w, 22, xp=22) for w in (1, 2, 3, 4)])
+    back = {4: Availability(4, 1.0, None, "FP", "Hand", "report")}
+    flagged = injuries.returning_competition([fill_in, real_starter], back, 7, aaa_schedule())
+    assert flagged[3][0].name == "Real Starter"
+
+
+def test_returning_starter_takes_back_the_models_share(monkeypatch):
+    import services.weekly_adjust as wa
+
+    monkeypatch.setattr(wa, "range_for", lambda position, if_active: None)
+    context = InjuryContext(availability={}, returning={2: (injuries.Returning("Starter", 8.0, 3),)})
+    result = adjust("RB", blended=10.0, tilt=1.0, matchup=_matchup(), model_share=0.25, player_id=2, context=context)
+    assert result.projection == pytest.approx(8.0)                        # 10 - 8 x 0.25
+
+
+def test_snap_growth_and_efficient_part_timer_flags():
+    growing = season(5, "Rising Back", "RB", [line(w, 8, xp=8, snap=s) for w, s in zip(range(1, 7), (20, 25, 35, 45, 52, 61))])
+    assert "snap_growth" in {f.key for f in player_flags(growing, InjuryContext(availability={}))}
+    flat = season(6, "Flat Back", "RB", [line(w, 8, xp=8, snap=60) for w in range(1, 7)])
+    assert "snap_growth" not in {f.key for f in player_flags(flat, InjuryContext(availability={}))}
+    efficient = season(7, "Part Timer", "WR", [line(w, 9, xp=9, snap=45) for w in range(1, 6)])   # 17 pts at 85%
+    assert "efficient_part_timer" in {f.key for f in player_flags(efficient, InjuryContext(availability={}))}
+    busy = season(8, "Busy WR", "WR", [line(w, 9, xp=9, snap=90) for w in range(1, 6)])
+    assert "efficient_part_timer" not in {f.key for f in player_flags(busy, InjuryContext(availability={}))}
 
 
 # ---------- weekly integration, waivers, trade finder, API ----------
@@ -391,3 +427,13 @@ def test_backtest_runs_on_a_seeded_season(session, seeded):
     # Teams come from the games before each week, not from today's roster.
     moved = data.current[0]
     assert backtest.truncate(moved, 4, data.schedule).team == "AAA"
+
+
+def test_range_for_picks_the_projection_tier(monkeypatch):
+    import services.weekly_model as wm
+
+    monkeypatch.setattr(wm, "projection_ranges", lambda: {"WR": {"floor": 0.2, "ceiling": 1.8, "tiers": [
+        {"min": 0.0, "max": 16.0, "floor": 0.22, "ceiling": 1.9}, {"min": 16.0, "max": 999.0, "floor": 0.4, "ceiling": 1.5}]}})
+    assert wm.range_for("WR", 22.0)["floor"] == 0.4          # a star keeps a real floor
+    assert wm.range_for("WR", 9.0)["floor"] == 0.22
+    assert wm.range_for("TE", 9.0) is None

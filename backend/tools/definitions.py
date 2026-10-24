@@ -166,19 +166,33 @@ def _explain(session: Session, player: str, week: int | None = None, **league: A
 
 def _waivers(session: Session, position: str | None = None, max_rostered: float = 50, limit: int = 10,
              **league: Any) -> dict:
+    """Compact rows: the full waiver payload is too large for the model's token budget."""
     settings = _league(**league)
     valuation = build_valuation(session, settings)
     rankings = build_weekly_rankings(session, settings)
-    return {"week": rankings.week, "results": [serialize.waiver(c) for c in
-                                               waiver_candidates(rankings, valuation, position, max_rostered, limit)]}
+    return {"week": rankings.week, "results": [
+        {"player": f"{c.player.name} ({c.player.position}, {c.player.team})", "pct_rostered": c.pct_rostered,
+         "this_week": c.player.projection, "ros_value": c.ros_value, "faab_pct": c.faab_pct,
+         "why": c.reasons[1:3]}
+        for c in waiver_candidates(rankings, valuation, position, max_rostered, limit)]}
 
 
 def _find_trades(session: Session, my_players: list[str], want_position: str | None = None, **league: Any) -> dict:
+    """Compact offers with each target's playoff (weeks 15-17) schedule factor."""
     valuation = build_valuation(session, _league(**league))
-    ids = [resolve_player(session, name).id for name in my_players]
-    return {"perspective": TRADE_PERSPECTIVE,
-            "results": [serialize.trade_offer(o, valuation.weeks_remaining)
-                        for o in find_trades(valuation, ids, want_position, 8)]}
+    ids, unknown = [], []
+    for name in my_players:
+        try:
+            ids.append(resolve_player(session, name).id)
+        except (PlayerNotFound, AmbiguousPlayer):
+            unknown.append(name)                         # e.g. a rookie with no stats yet
+    offers = find_trades(valuation, ids, want_position, 6)
+    return {"perspective": TRADE_PERSPECTIVE, "skipped_players": unknown, "results": [
+        {"give": [p.name for p in o.give], "get": f"{o.get.name} ({o.get.position}, {o.get.team})",
+         "get_ros_ppg": o.get.ros_ppg, "verdict": o.evaluation.verdict,
+         "your_gain_pct": round(o.evaluation.percent_difference * 100, 1),
+         "get_playoff_schedule": o.get.playoff_factor}
+        for o in offers]}
 
 
 def _schedule_strength(session: Session, position: str = "WR", week: int | None = None, **league: Any) -> dict:
@@ -263,8 +277,9 @@ TOOLS = ToolRegistry([
                   "limit": _limit(25, 10), **LEAGUE}), _waivers),
     Tool("find_trades",
          "Find trade offers built around players the user is willing to move: fair or slight-edge 1-for-1 "
-         "and 2-for-1 deals, optionally for a wanted position.",
-         _schema({"my_players": {"type": "array", "items": PLAYER, "minItems": 1, "maxItems": 6},
+         "and 2-for-1 deals, optionally for a wanted position. Each target includes get_playoff_schedule "
+         "(weeks 15-17 defense factor, >1 = easier). Call once per wanted position.",
+         _schema({"my_players": {"type": "array", "items": PLAYER, "minItems": 1, "maxItems": 10},
                   "want_position": POSITION, **LEAGUE}, ["my_players"]), _find_trades),
     Tool("get_expert_rankings", "FantasyPros expert consensus rankings (ECR), the latest stored snapshot.",
          _schema({"position": POSITION, "limit": _limit(100, 25)}), _experts),

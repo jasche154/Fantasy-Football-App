@@ -45,6 +45,15 @@ describe('RankingsTable', () => {
     expect(header(/^PPG Actual/)).toHaveAttribute('aria-sort', 'ascending');
   });
 
+  it('shows and sorts by playoff schedule strength', async () => {
+    const user = userEvent.setup();
+    const rows = [ranked(1, BIJAN, { playoff_factor: 0.9 }), ranked(2, CHASE, { playoff_factor: 1.15 })];
+    render(<RankingsTable rows={rows} caption="All rankings" />);
+    expect(header(/^Playoff SOS Wk 15-17/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /^Playoff SOS/ }));
+    expect(playerOrder()).toEqual(["Ja'Marr Chase", 'Bijan Robinson']);              // easiest first
+  });
+
   it('keeps missing values at the bottom in both directions', async () => {
     const user = userEvent.setup();
     render(<RankingsTable rows={ROWS} caption="All rankings" />);

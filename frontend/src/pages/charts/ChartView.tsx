@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import type { MetricCategory } from '../../api/types';
 import { AsyncView } from '../../components/AsyncView';
 import { BarChart, type BarDatum } from '../../components/charts/BarChart';
@@ -11,6 +11,7 @@ import { seriesClass } from '../../lib/chartScale';
 import { useLeagueSettings } from '../../state/SettingsContext';
 import { findMetric, WEEKLY_STATS, type ChartPlan, type ChartSelection } from './autoChart';
 import { LEADERS_SHOWN, loadLeaders, loadScatter, loadTrend } from './chartData';
+import { ScatterPointCard } from './ScatterPointCard';
 
 type ChartResult =
   | { kind: 'trend'; series: LineSeries[] }
@@ -55,6 +56,7 @@ interface ChartViewProps {
 export function ChartView({ plan, selection, catalog }: ChartViewProps) {
   const { settings } = useLeagueSettings();
   const frame = useRef<HTMLDivElement>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
   const highlight = new Set(selection.players.map((p) => p.id));
   const playerKey = selection.players.map((p) => p.id).join(',');
   const [xId, yId] = selection.metrics;
@@ -117,9 +119,20 @@ export function ChartView({ plan, selection, catalog }: ChartViewProps) {
               return <BarChart title={title} bars={result.bars} format={xDef?.format ?? 'decimal'}
                 description={`Top ${LEADERS_SHOWN} ${scope} by ${xDef?.label ?? 'the metric'}.`} />;
             }
-            return <ScatterChart title={title} points={result.points} xLabel={xDef?.label ?? 'X'} yLabel={yDef?.label ?? 'Y'}
-              xFormat={xDef?.format ?? 'decimal'} yFormat={yDef?.format ?? 'decimal'}
-              description={`${result.points.length} ${scope} plotted by ${xDef?.label} and ${yDef?.label}; dashed lines mark the medians.`} />;
+            const xAxis = { label: xDef?.label ?? 'X', format: xDef?.format ?? 'decimal' };
+            const yAxis = { label: yDef?.label ?? 'Y', format: yDef?.format ?? 'decimal' };
+            const selected = result.points.find((p) => p.id === selectedId);
+            return (
+              <>
+                <ScatterChart title={title} points={result.points} xLabel={xAxis.label} yLabel={yAxis.label}
+                  xFormat={xAxis.format} yFormat={yAxis.format}
+                  onSelect={(pid) => setSelectedId((current) => (current === pid ? null : pid))} selectedId={selected?.id ?? null}
+                  description={`${result.points.length} ${scope} plotted by ${xDef?.label} and ${yDef?.label}; dashed lines mark the medians. Hover a point for the name; click it for details.`} />
+                {selected
+                  ? <ScatterPointCard point={selected} points={result.points} x={xAxis} y={yAxis} onClose={() => setSelectedId(null)} />
+                  : <p className="chart-card__hint">Hover a point to see who it is; click it for details.</p>}
+              </>
+            );
           }}
         </AsyncView>
       </div>

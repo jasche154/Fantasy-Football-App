@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from database.models import DataLoad, InjuryReport, PlayerStatus, WeeklySourceProjection
 from integrations import espn, odds_api, yahoo_experts
+from services import rankings_store
 from services.league import POSITIONS, LeagueSettings
 from services.projections import PlayerSeason
 from services.injuries import InjuryContext, build_context
@@ -229,7 +230,8 @@ def blend(candidates: Mapping[int, _Candidate], valuation: Valuation, week: int,
             continue                                   # ruled out
         steps = explain(candidate.name, candidate.position, rates.get(candidate.player_id),
                         valuation.priors.get(candidate.player_id), matchup, sources, WEIGHTS, SOURCE_LABELS,
-                        combined, tilt, adjusted, context.boosts.get(candidate.player_id, ()))
+                        combined, tilt, adjusted, context.boosts.get(candidate.player_id, ()),
+                        context.returning.get(candidate.player_id, ()))
         players.append(WeeklyPlayer(
             player_id=candidate.player_id, name=candidate.name, position=candidate.position,
             team=candidate.team, matchup=matchup, projection=adjusted.projection, sources=sources,
@@ -265,14 +267,23 @@ def _version(session: Session, season: int, week: int) -> tuple:
 
 
 def build_weekly_rankings(session: Session, league: LeagueSettings, week: int | None = None) -> WeeklyRankings:
-    """Cached per league settings, week, and data version (sources, live status, reports, loads)."""
+    """Cached per league settings, week, and data version (sources, live status, reports, loads).
+
+    Two layers: memory, then the local database (so a restart doesn't redo the slow build).
+    Every fresh build also records this week's pre-kickoff projections for later scoring.
+    """
     valuation = build_valuation(session, league)
     week = week or default_week(valuation)
     key = (league, week, _version(session, valuation.season, week))
     with _cache_lock:
         if key in _cache:
             return _cache[key]
-    rankings = _build(session, league, valuation, week)
+    stored_key = rankings_store.cache_key(*key)
+    rankings = rankings_store.load(session, stored_key)
+    if not isinstance(rankings, WeeklyRankings):
+        rankings = _build(session, league, valuation, week)
+        rankings_store.save(session, stored_key, valuation.season, week, rankings)
+        rankings_store.record_history(session, rankings)
     with _cache_lock:
         if len(_cache) >= CACHE_SIZE:
             _cache.pop(next(iter(_cache)))

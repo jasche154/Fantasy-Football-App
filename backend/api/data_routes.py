@@ -15,6 +15,7 @@ from services.leaderboards import catalog, leaderboard
 from services.league import POSITIONS, LeagueSettings
 from services.players import PlayerNotFound, player_profile, search_players
 from services.projections import available_seasons, latest_season, latest_week
+from services.schedule_strength import load_schedule
 from services.scoring import POINTS_PER_RECEPTION
 from services.valuation import NoDataError
 
@@ -27,11 +28,20 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+def _current_week(session: Session, season: int | None, latest: int | None) -> int | None:
+    """The week Week X rankings default to: the first with games left (same rule as weekly_rankings)."""
+    if not season:
+        return None
+    week = load_schedule(session, season).current_week() or (latest or 0) + 1
+    return min(max(week, 1), 18)
+
+
 @router.get("/meta")
 def meta(session: Session = Depends(get_session)) -> dict:
     season = latest_season(session)
+    week = latest_week(session, season) if season else None
     return {
-        "current_season": season, "latest_week": latest_week(session, season) if season else None,
+        "current_season": season, "latest_week": week, "current_week": _current_week(session, season, week),
         "seasons": available_seasons(session), "positions": list(POSITIONS),
         "scoring_presets": list(POINTS_PER_RECEPTION), "integrations": integration_status(session),
     }

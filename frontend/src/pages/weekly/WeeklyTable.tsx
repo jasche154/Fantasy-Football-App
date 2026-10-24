@@ -1,10 +1,12 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import type { WeeklyMatchup, WeeklyPlayer, WeeklySourceKey, WeeklySourceValue } from '../../api/types';
 import { FlagChips, StatusBadge } from '../../components/FlagChips';
 import { PlayerLink } from '../../components/PlayerLink';
+import { nextSort, SortableHeader, type SortState } from '../../components/SortableHeader';
 import { EMPTY_VALUE, formatNumber } from '../../lib/format';
 import { factorLabel, rankTone, TONE_LABELS } from '../../lib/matchup';
 import { ExplainPanel } from './ExplainPanel';
+import { DEFAULT_WEEKLY_SORT, sortWeekly, weeklyDefaultDirection, type WeeklySortKey } from './weeklySort';
 
 interface SourceColumn {
   key: WeeklySourceKey;
@@ -103,28 +105,36 @@ interface WeeklyTableProps {
 }
 
 export function WeeklyTable({ rows, caption, week }: WeeklyTableProps) {
+  const [sort, setSort] = useState<SortState<WeeklySortKey>>(DEFAULT_WEEKLY_SORT);
+  const sorted = useMemo(() => sortWeekly(rows, sort), [rows, sort]);
+  const onSort = (key: WeeklySortKey) => setSort((current) => nextSort(current, key, weeklyDefaultDirection));
   return (
     <div className="table-wrap table-wrap--tall">
       <table className="data-table weekly-table">
         <caption className="sr-only">{caption}</caption>
         <thead>
           <tr>
-            <th scope="col" className="num" title="Rank by blended projection">Rank</th>
+            <SortableHeader columnKey="rank" sort={sort} onSort={onSort} title="Rank by blended projection">Rank</SortableHeader>
             <th scope="col">Player</th>
             <th scope="col" title="Positional rank">Pos</th>
             <th scope="col" title="Opponent and opponent-adjusted matchup grade">Matchup</th>
-            <th scope="col" className="num" title="Vegas implied team points (spread + total)">Team total</th>
-            <th scope="col" className="num th--accent" title="Expected points (if active x chance to play), with the 10th-90th percentile range">Proj</th>
+            <SortableHeader columnKey="implied" sort={sort} onSort={onSort} title="Vegas implied team points (spread + total)">
+              Team total
+            </SortableHeader>
+            <SortableHeader columnKey="proj" sort={sort} onSort={onSort}
+              title="Expected points (if active x chance to play), with the 10th-90th percentile range">
+              Proj
+            </SortableHeader>
             {SOURCE_COLUMNS.map((column) => (
-              <th key={column.key} scope="col" className="num" title={column.title}>
+              <SortableHeader key={column.key} columnKey={column.key} sort={sort} onSort={onSort} title={column.title}>
                 <span className={`source-dot source--${column.key}`} aria-hidden="true" />
                 {column.label}
-              </th>
+              </SortableHeader>
             ))}
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
+          {sorted.map((row) => (
             <WeeklyRow key={row.player.id} row={row} week={week} />
           ))}
         </tbody>

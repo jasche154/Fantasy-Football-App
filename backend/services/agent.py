@@ -18,7 +18,7 @@ from tools.registry import ToolError, ToolRegistry
 log = logging.getLogger(__name__)
 
 MAX_ROUNDS = 6
-MAX_TOOL_RESULT_CHARS = 12_000
+MAX_TOOL_RESULT_CHARS = 6_000   # Groq's free tier allows ~8k tokens per minute in total
 SYSTEM_PROMPT = """You are a fantasy football analyst inside a FantasyPros-style app.
 
 Rules:
@@ -65,6 +65,26 @@ class AgentReply:
     tool_calls: tuple[ToolCallTrace, ...]
 
 
+class ToolCallRejected(RuntimeError):
+    """The provider refused the model's own tool call (e.g. arguments outside the schema)."""
+
+
+def _rate_limited(exc: Exception) -> bool:
+    body = getattr(exc, "body", None)
+    error = body.get("error", body) if isinstance(body, dict) else None
+    return (getattr(exc, "status_code", None) in (413, 429)
+            or (isinstance(error, dict) and error.get("code") == "rate_limit_exceeded"))
+
+
+def _rejected_tool_call(exc: Exception) -> str | None:
+    """Groq answers a schema-violating tool call with HTTP 400 code 'tool_use_failed'."""
+    body = getattr(exc, "body", None)
+    error = body.get("error", body) if isinstance(body, dict) else None
+    if isinstance(error, dict) and error.get("code") == "tool_use_failed":
+        return str(error.get("message") or "the tool call did not match the tool's schema")
+    return None
+
+
 class GroqClient:
     def __init__(self, api_key: str, model: str):
         from groq import Groq   # imported lazily so the app runs without the package
@@ -79,6 +99,14 @@ class GroqClient:
         try:
             message = self._client.chat.completions.create(**options).choices[0].message
         except Exception as exc:  # groq raises several API/connection error types
+            rejected = _rejected_tool_call(exc)
+            if rejected:
+                log.warning("Groq rejected a tool call: %s", rejected)
+                raise ToolCallRejected(rejected) from exc
+            if _rate_limited(exc):
+                log.warning("Groq rate limit: %s", exc)
+                raise AgentUnavailable("The AI provider's free-tier limit (about 8,000 tokens per minute) was "
+                                       "reached. Wait a minute, or ask a narrower question.") from exc
             log.exception("Groq request failed")
             raise AgentUnavailable(f"The language model request failed: {type(exc).__name__}") from exc
         return {"content": message.content, "tool_calls": [
@@ -121,7 +149,14 @@ def run_agent(session: Session, client: LLMClient, history: Sequence[Mapping[str
                             *({"role": m["role"], "content": m["content"]} for m in history)]
     schemas, trace = registry.openai_schemas(), []
     for _ in range(max_rounds):
-        response = client.complete(messages, schemas)
+        try:
+            response = client.complete(messages, schemas)
+        except ToolCallRejected as exc:
+            # Let the model fix its own arguments instead of failing the whole chat.
+            messages.append({"role": "system", "content": (
+                f"Your last tool call was rejected before it ran: {exc}. Fix the arguments so they fit "
+                "the tool's schema (for example, split a long player list across several calls) and try again.")})
+            continue
         calls = response.get("tool_calls") or []
         if not calls:
             return AgentReply(response.get("content") or "", tuple(trace))

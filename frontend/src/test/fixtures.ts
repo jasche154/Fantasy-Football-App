@@ -27,6 +27,7 @@ export function meta(overrides: Partial<Meta> = {}): Meta {
   return {
     current_season: 2025,
     latest_week: 7,
+    current_week: 8,
     seasons: [2023, 2024, 2025],
     positions: ['QB', 'RB', 'WR', 'TE'],
     scoring_presets: ['ppr', 'half', 'std'],
@@ -48,6 +49,7 @@ export function ranked(rank: number, who: PlayerSummary, overrides: Partial<Rank
     trade_value: 100 - rank * 10,
     ecr: rank,
     schedule_factor: 1,
+    playoff_factor: 1,
     ...overrides,
   };
 }

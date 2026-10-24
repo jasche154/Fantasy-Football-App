@@ -2,7 +2,8 @@ import { useCallback, useEffect, useId, useRef, useState, type RefObject } from 
 import { Icon } from '../components/Icon';
 import { buildHash } from '../router/routes';
 import type { Route } from '../router/routes';
-import { NAV_ITEMS, type NavItem } from './navItems';
+import { useMeta } from '../state/MetaContext';
+import { NAV_ITEMS, navLabel, type NavItem } from './navItems';
 
 interface NavLinkProps {
   item: NavItem;
@@ -12,6 +13,7 @@ interface NavLinkProps {
 }
 
 function NavLink({ item, isActive, className, onNavigate }: NavLinkProps) {
+  const meta = useMeta();
   return (
     <a
       href={buildHash(item.path)}
@@ -20,7 +22,7 @@ function NavLink({ item, isActive, className, onNavigate }: NavLinkProps) {
       onClick={onNavigate}
     >
       <Icon name={item.icon} />
-      <span className="nav-link__label">{item.label}</span>
+      <span className="nav-link__label">{navLabel(item, meta.data?.current_week)}</span>
       <span className="nav-link__short">{item.shortLabel}</span>
     </a>
   );
