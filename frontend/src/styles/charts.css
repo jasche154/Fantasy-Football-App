@@ -191,8 +191,47 @@
 .auto-chart__point:focus-visible circle:not(.auto-chart__hit),
 .auto-chart__point.is-selected circle:not(.auto-chart__hit) { fill: var(--color-accent); fill-opacity: 1; stroke: var(--color-text); stroke-width: 2; }
 .auto-chart__dot-hit { fill: transparent; cursor: default; }
-.auto-chart__hover rect { fill: var(--color-text); opacity: 0.92; }
-.auto-chart__hover text { fill: var(--color-surface-1); font-size: 12px; font-weight: 650; }
+.auto-chart__hover rect { fill: var(--color-surface-1); stroke: var(--color-accent); stroke-width: 1.5; }
+.auto-chart__hover text { fill: var(--color-text); font-size: 12px; font-weight: 700; }
+
+/* Hover: dim the field, ring the hovered point, guide lines to both axes */
+.auto-chart-frame { position: relative; }
+.auto-chart.has-hover .auto-chart__point:not(.is-hovered):not(.is-selected) circle:not(.auto-chart__hit) { fill-opacity: 0.18; }
+.auto-chart.has-hover .auto-chart__point-label { opacity: 0.35; }
+.auto-chart .auto-chart__point.is-hovered circle:not(.auto-chart__hit) {
+  fill: var(--color-accent); fill-opacity: 1; stroke: var(--color-surface-1); stroke-width: 2.5;
+  filter: drop-shadow(0 0 6px var(--color-accent-glow));
+}
+.auto-chart__point circle:not(.auto-chart__hit) { transition: r 120ms ease, fill-opacity 120ms ease; }
+.auto-chart__crosshair line { stroke: var(--color-accent); stroke-width: 1; stroke-dasharray: 3 4; opacity: 0.7; pointer-events: none; }
+.auto-chart__dot.is-hovered { stroke: var(--color-surface-1); stroke-width: 2.5; }
+
+.chart-tooltip {
+  position: absolute; z-index: 5; pointer-events: none; min-width: 180px; max-width: 260px;
+  padding: 10px 12px; border-radius: var(--radius-md); border: 1px solid var(--color-border-strong);
+  background: var(--color-surface-2); color: var(--color-text);
+  box-shadow: var(--shadow-pop); font-size: 0.8rem; line-height: 1.35;
+  animation: chart-tooltip-in 120ms ease-out;
+}
+.chart-tooltip--center.chart-tooltip--above { transform: translate(-50%, calc(-100% - 16px)); }
+.chart-tooltip--center.chart-tooltip--below { transform: translate(-50%, 16px); }
+.chart-tooltip--start.chart-tooltip--above { transform: translate(-14px, calc(-100% - 16px)); }
+.chart-tooltip--start.chart-tooltip--below { transform: translate(-14px, 16px); }
+.chart-tooltip--end.chart-tooltip--above { transform: translate(calc(-100% + 14px), calc(-100% - 16px)); }
+.chart-tooltip--end.chart-tooltip--below { transform: translate(calc(-100% + 14px), 16px); }
+.chart-tooltip__head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+.chart-tooltip__title { font-weight: 750; font-size: 0.9rem; }
+.chart-tooltip__meta { color: var(--color-text-subtle); font-size: 0.72rem; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; white-space: nowrap; }
+.chart-tooltip__rows { display: grid; gap: 3px; margin: 0; padding-top: 6px; border-top: 1px solid var(--color-border); }
+.chart-tooltip__row { display: flex; justify-content: space-between; gap: 12px; }
+.chart-tooltip__row dt { color: var(--color-text-muted); }
+.chart-tooltip__row dd { margin: 0; font-weight: 700; font-variant-numeric: tabular-nums; }
+.chart-tooltip__hint { margin: 6px 0 0; color: var(--color-accent); font-size: 0.72rem; font-weight: 650; }
+@keyframes chart-tooltip-in { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .chart-tooltip { animation: none; }
+  .auto-chart__point circle:not(.auto-chart__hit) { transition: none; }
+}
 .auto-chart__point-label { fill: var(--color-text); font-size: 11.5px; font-weight: 650; paint-order: stroke; stroke: var(--color-surface-1); stroke-width: 3px; }
 
 .series-legend {

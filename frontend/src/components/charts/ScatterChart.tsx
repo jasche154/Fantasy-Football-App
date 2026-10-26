@@ -2,6 +2,7 @@ import { useId, useState, type KeyboardEvent } from 'react';
 import type { MetricFormat, PlayerSummary } from '../../api/types';
 import { extent, linearScale, median, niceTicks } from '../../lib/chartScale';
 import { formatMetric } from '../../lib/format';
+import { ChartTooltip } from './ChartTooltip';
 import { HoverTag } from './HoverTag';
 
 export interface ScatterDatum {
@@ -94,8 +95,13 @@ export function ScatterChart({ title, description, points, xLabel, yLabel, xForm
   const medianX = x(median(points.map((p) => p.x)));
   const medianY = y(median(points.map((p) => p.y)));
 
+  const hovered = hoveredId === null ? undefined : byId.get(hoveredId);
+  const selected = selectedId === null ? undefined : byId.get(selectedId);
+
   return (
-    <svg className="auto-chart" viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role={onSelect ? 'group' : 'img'} aria-labelledby={`${id}-t ${id}-d`}>
+    <div className="auto-chart-frame">
+    <svg className={hovered ? 'auto-chart has-hover' : 'auto-chart'} viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
+      role={onSelect ? 'group' : 'img'} aria-labelledby={`${id}-t ${id}-d`}>
       <title id={`${id}-t`}>{title}</title>
       <desc id={`${id}-d`}>{description}</desc>
       <g className="auto-chart__grid">
@@ -113,9 +119,16 @@ export function ScatterChart({ title, description, points, xLabel, yLabel, xForm
       <line className="auto-chart__median" x1={PAD.left} x2={WIDTH - PAD.right} y1={medianY} y2={medianY} />
       <text className="auto-chart__axis" x={(PAD.left + WIDTH - PAD.right) / 2} y={HEIGHT - 6} textAnchor="middle">{xLabel}</text>
       <text className="auto-chart__axis" transform={`translate(16 ${(PAD.top + HEIGHT - PAD.bottom) / 2}) rotate(-90)`} textAnchor="middle">{yLabel}</text>
+      {hovered && (
+        <g className="auto-chart__crosshair" aria-hidden="true">
+          <line x1={x(hovered.x)} x2={x(hovered.x)} y1={y(hovered.y)} y2={HEIGHT - PAD.bottom} />
+          <line x1={PAD.left} x2={x(hovered.x)} y1={y(hovered.y)} y2={y(hovered.y)} />
+        </g>
+      )}
       {points.map((point) => {
         const summary = `${point.label}: ${xLabel} ${formatMetric(point.x, xFormat)}, ${yLabel} ${formatMetric(point.y, yFormat)}`;
-        const classes = ['auto-chart__point', point.isHighlighted && 'is-highlighted', point.id === selectedId && 'is-selected']
+        const classes = ['auto-chart__point', point.isHighlighted && 'is-highlighted', point.id === selectedId && 'is-selected',
+          point.id === hoveredId && 'is-hovered']
           .filter(Boolean).join(' ');
         const select = () => onSelect?.(point.id);
         const onKey = (event: KeyboardEvent) => {
@@ -131,8 +144,8 @@ export function ScatterChart({ title, description, points, xLabel, yLabel, xForm
           {...(onSelect ? { role: 'button', tabIndex: 0, 'aria-label': summary, 'aria-pressed': point.id === selectedId,
             onClick: select, onKeyDown: onKey } : {})}>
           <circle className="auto-chart__hit" cx={x(point.x)} cy={y(point.y)} r={10} />
-          <circle cx={x(point.x)} cy={y(point.y)} r={point.isHighlighted || point.id === selectedId ? 6 : 4.5}>
-            <title>{summary}</title>
+          <circle cx={x(point.x)} cy={y(point.y)} r={point.id === hoveredId ? 7 : point.isHighlighted || point.id === selectedId ? 6 : 4.5}>
+            {!onSelect && <title>{summary}</title>}
           </circle>
           {labels.has(point.id) && (
             <text className="auto-chart__point-label" x={labels.get(point.id)?.x} y={labels.get(point.id)?.y}
@@ -141,11 +154,16 @@ export function ScatterChart({ title, description, points, xLabel, yLabel, xForm
         </g>
         );
       })}
-      {[hoveredId, selectedId].filter((pid, index, all): pid is number => pid !== null && all.indexOf(pid) === index)
-        .map((pid) => byId.get(pid))
-        .map((point) => point && (
-          <HoverTag key={point.id} x={x(point.x)} y={y(point.y)} text={point.label} width={WIDTH} top={PAD.top} />
-        ))}
+      {selected && selected.id !== hoveredId && (
+        <HoverTag x={x(selected.x)} y={y(selected.y)} text={selected.label} width={WIDTH} top={PAD.top} />
+      )}
     </svg>
+    {hovered && (
+      <ChartTooltip x={x(hovered.x)} y={y(hovered.y)} width={WIDTH} height={HEIGHT} title={hovered.label}
+        meta={[hovered.player?.position, hovered.player?.team].filter(Boolean).join(' · ') || undefined}
+        rows={[{ label: xLabel, value: formatMetric(hovered.x, xFormat) }, { label: yLabel, value: formatMetric(hovered.y, yFormat) }]}
+        hint={onSelect ? (hovered.id === selectedId ? 'Click to close details' : 'Click for details') : undefined} />
+    )}
+    </div>
   );
 }
