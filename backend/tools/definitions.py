@@ -172,7 +172,7 @@ def _waivers(session: Session, position: str | None = None, max_rostered: float 
     rankings = build_weekly_rankings(session, settings)
     return {"week": rankings.week, "results": [
         {"player": f"{c.player.name} ({c.player.position}, {c.player.team})", "pct_rostered": c.pct_rostered,
-         "this_week": c.player.projection, "ros_value": c.ros_value, "faab_pct": c.faab_pct,
+         "this_week_proj": c.player.projection, "ros_value": c.ros_value, "faab_pct": c.faab_pct,
          "why": c.reasons[1:3]}
         for c in waiver_candidates(rankings, valuation, position, max_rostered, limit)]}
 
@@ -191,8 +191,16 @@ def _find_trades(session: Session, my_players: list[str], want_position: str | N
         {"give": [p.name for p in o.give], "get": f"{o.get.name} ({o.get.position}, {o.get.team})",
          "get_ros_ppg": o.get.ros_ppg, "verdict": o.evaluation.verdict,
          "your_gain_pct": round(o.evaluation.percent_difference * 100, 1),
-         "get_playoff_schedule": o.get.playoff_factor}
+         "get_playoff_schedule": schedule_words(o.get.playoff_factor)}
         for o in offers]}
+
+
+def schedule_words(factor: float) -> str:
+    """A schedule factor in words, so the model can't flip its direction (>1 = easier)."""
+    percent = round((factor - 1) * 100)
+    if percent == 0:
+        return "average (weeks 15-17)"
+    return f"{abs(percent)}% {'easier' if percent > 0 else 'harder'} than average (weeks 15-17)"
 
 
 def _schedule_strength(session: Session, position: str = "WR", week: int | None = None, **league: Any) -> dict:

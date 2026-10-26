@@ -45,6 +45,15 @@ describe('RankingsTable', () => {
     expect(header(/^PPG Actual/)).toHaveAttribute('aria-sort', 'ascending');
   });
 
+  it('badges rookies and players out for the season', () => {
+    const out = { model: 15, experts: null, expert_rank: null, weekly: null, availability: 0 };
+    render(<RankingsTable rows={[ranked(1, BIJAN, { is_rookie: true }), ranked(2, CHASE, { ros_sources: out })]} caption="All" />);
+    const [, bijanRow, chaseRow] = screen.getAllByRole('row');
+    expect(within(bijanRow).getByText('Rookie')).toBeInTheDocument();
+    expect(within(chaseRow).getByText('Out for season')).toBeInTheDocument();
+    expect(within(chaseRow).queryByText('Rookie')).not.toBeInTheDocument();
+  });
+
   it('shows and sorts by playoff schedule strength', async () => {
     const user = userEvent.setup();
     const rows = [ranked(1, BIJAN, { playoff_factor: 0.9 }), ranked(2, CHASE, { playoff_factor: 1.15 })];

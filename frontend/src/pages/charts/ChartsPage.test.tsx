@@ -55,7 +55,14 @@ describe('ChartsPage', () => {
 
     const chasePoint = within(scatter).getByRole('button', { name: /^Ja'Marr Chase: Target share/ });
     await user.hover(chasePoint);
-    expect(chasePoint.closest('svg')?.querySelector('.auto-chart__hover text')).toHaveTextContent("Ja'Marr Chase");
+    const tooltip = scatter.querySelector('.chart-tooltip');
+    expect(tooltip).toHaveTextContent("Ja'Marr Chase");
+    expect(tooltip).toHaveTextContent(/WR · CIN/);
+    expect(tooltip).toHaveTextContent(/Target share/);
+    expect(tooltip).toHaveTextContent('Click for details');
+    await user.unhover(chasePoint);
+    expect(scatter.querySelector('.chart-tooltip')).toBeNull();
+    await user.hover(chasePoint);
     await user.click(chasePoint);
     const card = within(scatter).getByRole('complementary', { name: "Ja'Marr Chase details" });
     expect(within(card).getByRole('link', { name: "Ja'Marr Chase" })).toBeInTheDocument();

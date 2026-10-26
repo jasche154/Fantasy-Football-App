@@ -8,8 +8,10 @@ Weights re-balance over the inputs a player has. Expert ranks become points thro
 position's model curve: ROS rank N gets the Nth best model ROS projection.
 
 Availability: a player on IR, PUP or suspended (Sleeper) is assumed to miss
-IR_WEEKS more games; one ruled Out or Doubtful this week misses one. His rest-of-season
-points per game are scaled by the share of remaining games he's expected to play.
+IR_WEEKS more games; one ruled Out or Doubtful this week misses one. A season-ending injury
+(IR with a torn ACL or Achilles, or notes saying so) misses every remaining game, so he has
+no rest-of-season value. His rest-of-season points per game are scaled by the share of
+remaining games he's expected to play.
 
 The model part is backtested (services/backtest.py). There's no stored history of
 expert ROS ranks to backtest the blend; it leans on the market because a single model is
@@ -33,7 +35,11 @@ PRIMARY_STAT = {"QB": "pass_yds", "RB": "rush_yds", "WR": "rec_yds", "TE": "rec_
 IR_STATUSES = {"IR", "PUP", "SUS", "NFI", "IR-R"}
 IR_WEEKS = 4
 SHORT_OUT = {"OUT", "DOUBTFUL"}
+SEASON_ENDING = ("ACL", "ACHILLES", "SEASON")       # in the IR body part / notes
 CONSENSUS, JOSH_AND_HAYDEN = "consensus", ("1408", "7666")
+ROS_LOOKBACK_WEEKS = 2
+# Yahoo publishes formats at different times; positional ranks barely differ between them.
+SCORING_FALLBACK = {"ppr": ("ppr", "half", "std"), "half": ("half", "ppr", "std"), "std": ("std", "half", "ppr")}
 
 
 @dataclass(frozen=True)
@@ -64,19 +70,26 @@ def _rank_points(curve: Sequence[float], rank: float) -> float:
 
 
 def expert_ranks(session: Session, season: int, scoring: str) -> dict[int, float]:
-    """{player_id: ROS positional rank}: average of consensus and Josh & Hayden where present."""
+    """{player_id: ROS positional rank}: average of consensus and Josh & Hayden where present.
+
+    Each player uses his most recent week within ROS_LOOKBACK_WEEKS: Yahoo publishes a new
+    week's ranks gradually, and a half-published week mustn't erase everyone else's rank.
+    """
     week = _latest_week(session, season, ROS_SOURCE)
     if week is None:
         return {}
-    rows = session.execute(select(WeeklySourceProjection.player_id, WeeklySourceProjection.expert,
+    rows = session.execute(select(WeeklySourceProjection.player_id, WeeklySourceProjection.week,
+                                  WeeklySourceProjection.scoring, WeeklySourceProjection.expert,
                                   WeeklySourceProjection.rank).where(
-        WeeklySourceProjection.season == season, WeeklySourceProjection.week == week,
-        WeeklySourceProjection.source == ROS_SOURCE, WeeklySourceProjection.scoring == scoring,
-        WeeklySourceProjection.player_id.is_not(None))).all()
-    by_player: dict[int, dict[str, float]] = defaultdict(dict)
-    for player_id, expert, rank in rows:
-        if rank is not None:
-            by_player[player_id][expert] = rank
+        WeeklySourceProjection.season == season, WeeklySourceProjection.week > week - ROS_LOOKBACK_WEEKS,
+        WeeklySourceProjection.source == ROS_SOURCE, WeeklySourceProjection.player_id.is_not(None))).all()
+    # Newest week first; within a week, the league's scoring, then the nearest other format.
+    preference = SCORING_FALLBACK.get(scoring, (scoring,))
+    by_key: dict[int, dict[tuple[int, int], dict[str, float]]] = defaultdict(lambda: defaultdict(dict))
+    for player_id, row_week, row_scoring, expert, rank in rows:
+        if rank is not None and row_scoring in preference:
+            by_key[player_id][(row_week, -preference.index(row_scoring))][expert] = rank
+    by_player = {pid: keyed[max(keyed)] for pid, keyed in by_key.items()}
     ranks = {}
     for player_id, experts in by_player.items():
         josh_hayden = [experts[e] for e in JOSH_AND_HAYDEN if e in experts]
@@ -111,15 +124,26 @@ def weekly_points(session: Session, season: int, position_of: Mapping[int, str],
     return {pid: sum(v) / len(v) for pid, v in points.items()}
 
 
-def availability(session: Session, remaining_weeks: int) -> dict[int, float]:
-    """{player_id: share of remaining games expected to play} from live status."""
+def season_ending(tag: str, body_part: str | None) -> bool:
+    return tag in IR_STATUSES and any(word in (body_part or "").upper() for word in SEASON_ENDING)
+
+
+def status_shares(session: Session, remaining_weeks: int) -> dict[int, float]:
+    """{player_id: share of remaining games expected to play} for every player with a live status."""
     out = {}
     for status in session.scalars(select(PlayerStatus).where(PlayerStatus.injury_status.is_not(None))):
         tag = (status.injury_status or "").upper()
+        if season_ending(tag, status.injury_body_part):
+            out[status.player_id] = 0.0
+            continue
         missed = IR_WEEKS if tag in IR_STATUSES else 1 if tag in SHORT_OUT else 0
-        if missed:
-            out[status.player_id] = max(0.0, (remaining_weeks - missed) / max(remaining_weeks, 1))
+        out[status.player_id] = max(0.0, (remaining_weeks - missed) / max(remaining_weeks, 1))
     return out
+
+
+def availability(session: Session, remaining_weeks: int) -> dict[int, float]:
+    """{player_id: share of remaining games expected to play}, for players expected to miss some."""
+    return {pid: share for pid, share in status_shares(session, remaining_weeks).items() if share < 1}
 
 
 def ros_inputs(session: Session, season: int, scoring_key: str, scoring: ScoringSettings,

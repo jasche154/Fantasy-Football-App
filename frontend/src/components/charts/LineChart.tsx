@@ -1,7 +1,7 @@
 import { useId, useState } from 'react';
 import { extent, linearScale, niceTicks, seriesClass } from '../../lib/chartScale';
 import { formatNumber } from '../../lib/format';
-import { HoverTag } from './HoverTag';
+import { ChartTooltip } from './ChartTooltip';
 
 export interface LinePoint {
   x: number;
@@ -37,7 +37,7 @@ export function linePath(points: readonly LinePoint[], x: (v: number) => number,
 /** Multi-series line chart (e.g. weekly fantasy points for up to five players). */
 export function LineChart({ title, description, series, xLabel, yLabel, digits = 1 }: LineChartProps) {
   const id = useId();
-  const [hovered, setHovered] = useState<{ x: number; y: number; text: string } | null>(null);
+  const [hovered, setHovered] = useState<{ series: number; point: LinePoint } | null>(null);
   const allPoints = series.flatMap((s) => s.points);
   const [xMin, xMax] = extent(allPoints.map((p) => p.x));
   const [yMinRaw, yMaxRaw] = extent(allPoints.map((p) => p.y));
@@ -46,7 +46,9 @@ export function LineChart({ title, description, series, xLabel, yLabel, digits =
   const y = linearScale([yTicks[0], yTicks[yTicks.length - 1]], [HEIGHT - PAD.bottom, PAD.top]);
   const xTicks = Array.from({ length: xMax - xMin + 1 }, (_, index) => xMin + index);
 
+  const hoveredSeries = hovered ? series[hovered.series] : undefined;
   return (
+    <div className="auto-chart-frame">
     <svg className="auto-chart" viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role="img" aria-labelledby={`${id}-t ${id}-d`}>
       <title id={`${id}-t`}>{title}</title>
       <desc id={`${id}-d`}>{description}</desc>
@@ -69,11 +71,10 @@ export function LineChart({ title, description, series, xLabel, yLabel, digits =
           <g key={item.name} className={`auto-chart__series ${seriesClass(index)}`}>
             <path className="auto-chart__line" d={path} />
             {item.points.map((p) => (
-              <g key={p.x} onMouseEnter={() => setHovered({ x: x(p.x), y: y(p.y),
-                text: `${item.name} · ${xLabel} ${p.x}: ${formatNumber(p.y, digits)}` })}
-                onMouseLeave={() => setHovered(null)}>
+              <g key={p.x} onMouseEnter={() => setHovered({ series: index, point: p })} onMouseLeave={() => setHovered(null)}>
                 <circle className="auto-chart__dot-hit" cx={x(p.x)} cy={y(p.y)} r={9} />
-                <circle className="auto-chart__dot" cx={x(p.x)} cy={y(p.y)} r={4}>
+                <circle className={hovered?.series === index && hovered.point === p ? 'auto-chart__dot is-hovered' : 'auto-chart__dot'}
+                  cx={x(p.x)} cy={y(p.y)} r={hovered?.series === index && hovered.point === p ? 6 : 4}>
                   <title>{`${item.name}, ${xLabel.toLowerCase()} ${p.x}${p.label ? ` ${p.label}` : ''}: ${formatNumber(p.y, digits)}`}</title>
                 </circle>
               </g>
@@ -81,7 +82,12 @@ export function LineChart({ title, description, series, xLabel, yLabel, digits =
           </g>
         );
       })}
-      {hovered && <HoverTag x={hovered.x} y={hovered.y} text={hovered.text} width={WIDTH} top={PAD.top} />}
     </svg>
+    {hovered && hoveredSeries && (
+      <ChartTooltip x={x(hovered.point.x)} y={y(hovered.point.y)} width={WIDTH} height={HEIGHT} title={hoveredSeries.name}
+        meta={`${xLabel} ${hovered.point.x}${hovered.point.label ? ` · ${hovered.point.label}` : ''}`}
+        rows={[{ label: yLabel, value: formatNumber(hovered.point.y, digits) }]} />
+    )}
+    </div>
   );
 }

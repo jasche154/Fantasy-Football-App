@@ -142,8 +142,8 @@ Open <http://localhost:5173>. The UI talks to `http://localhost:8000` by default
 | **Rankings** | Rest-of-season rankings by position; sort by actual, expected, or projected points, schedule strength, **Playoff SOS** (weeks 15–17), trade value, or ECR |
 | **Week X → Start / Sit** | Add up to four players. Each shows its projection, floor–ceiling range, injury status, "if <teammate> sits" scenarios, flags, and a **Why?** breakdown. A tiebreaker (most points / safe / upside) decides close calls |
 | **Waiver Wire** | Players rostered in under 10–75% of ESPN leagues, ranked by rest-of-season value, this week's projection, next three matchups, and injury-driven opportunity, with a suggested FAAB bid |
-| **Trade Calculator → Trade finder** | Put the players you'd move in "You give", pick a position you want, and get fair or slight-edge 1-for-1 and 2-for-1 offers; **Load in calculator** opens one |
-| **Chart Studio** | Click a quick chart (Volume pays, Separators, RYOE leaders, Downfield QBs, Opportunity score) or pick one or two season metrics and a position; the chart type is chosen for you. Add players to highlight them, or add players with no metric for a weekly trend of any stat. Hover any point to see whose it is; click a scatter point for that player's values, ranks among the plotted players, and quadrant. **Download SVG** saves the chart |
+| **Trade Calculator → Trade finder** | Put the players you'd move in "You give", pick a position you want, and get 1-for-1 and 2-for-1 offers that are fair by this app's values *and* by market value (expert consensus, how the other manager will judge it), closest to fair first; **Load in calculator** opens one |
+| **Chart Studio** | Click a quick chart (Volume pays, Separators, RYOE leaders, Downfield QBs, Opportunity score) or pick one or two season metrics and a position; the chart type is chosen for you. Add players to highlight them, or add players with no metric for a weekly trend of any stat. Hover any point for a card with the player, team and both values (guide lines run to each axis); click a scatter point for that player's values, ranks among the plotted players, and quadrant. **Download SVG** saves the chart |
 | **Advanced Stats** | Pick a category and metric, season, and minimum volume, then rank every qualified player |
 | **Trade Calculator** | Search players into "You give" / "You get". See each side's value, the verdict meter, and suggestions that even it out; the URL is shareable |
 | **Buy / Sell** | Full buy-low and sell-high lists with every reason, filtered by position |
@@ -175,7 +175,15 @@ For each QB/RB/WR/TE this season:
 1. `rate = 0.6 × actual PPG + 0.4 × expected PPG` (usage is stickier than production)
 2. `base = w × rate + (1 − w) × prior`, where `w = games / (games + 4)`. The prior is
    last season's PPG if the player had at least 4 games, otherwise the position's
-   replacement level.
+   replacement level. Two adjustments follow:
+   - **Returning starters:** a fill-in's season rate was inflated by the games he played
+     while a starter was out. When that starter is due back, the model takes off his measured
+     gain (with/without, 2+ games) × the share of his games played without the starter × the
+     share of remaining games the starter should play. Example: Woody Marks's model rate
+     drops from 9.1 to 8.4 with David Montgomery due back. A starter out for the year
+     leaves the job to the fill-in.
+   - **Rookies** (no games last season) get +3%. Over 2023–25, rookie RB/WR/TEs kept 95%
+     of their first-half scoring in the second half, against 92% for veterans (54 vs 389 players).
 3. `model = base × remaining-schedule factor`: the average adjusted defense factor (below)
    of the opponents left on the player's schedule. The Rankings page shows it as **Sched**.
 4. **Consensus blend:**
@@ -183,7 +191,11 @@ For each QB/RB/WR/TE this season:
    re-weighted when an input is missing.
    - Expert ROS ranks (Yahoo's 40+ expert consensus and Josh & Hayden) become points:
      ROS rank N gets the Nth best model projection at the position.
-   - Players on IR, PUP or suspended lose 4 games; Out or Doubtful lose 1.
+   - Players on IR, PUP or suspended lose 4 games; Out or Doubtful lose 1. **IR with a torn
+     ACL or Achilles is season-ending: no rest-of-season value** (De'Von Achane drops to 0).
+   - Yahoo publishes each week's ranks gradually. Each player uses his newest rank from the
+     last two weeks, in your scoring format or the nearest one, so a half-published week
+     doesn't erase everyone else's expert input.
    - Hover a ROS PPG value to see its inputs.
    - Example: Jonathan Taylor (standard) goes from model 17.9 to 15.6 (RB7) because the experts
      rank him around RB10 and ESPN projects 12.7 this week.
@@ -396,6 +408,12 @@ Arguments are validated against each tool's JSON Schema, and players can be pass
 If a tool fails unexpectedly, the error is logged on the server and the model only sees a
 generic message.
 
+**Grounding:** before a chat answer is shown, every player name in it is checked against
+the player database. If it names players that no tool returned and you didn't mention
+(stale knowledge such as last year's rosters), the model gets one round to remove them or
+look them up. Tool fields say what they are (`this_week_proj`, playoff schedule as "6%
+harder than average") so the model can't mislabel a projection as an actual score.
+
 1. **REST:** `GET /api/agent/tools` lists them, `POST /api/agent/tools/{name}` runs one.
 2. **Built-in chat:** `POST /api/agent/chat` runs a multi-round tool-calling loop on Groq
    (set `GROQ_API_KEY`). Try it from the command line:
@@ -491,7 +509,7 @@ Settings come from environment variables or `backend/.env` (never commit it; see
 | `WEEKLY_SOURCES` | `["sleeper_status","yahoo_experts","espn","vegas_props"]` | JSON list of outside weekly sources to fetch |
 | `WEEKLY_AUTO_REFRESH` | `true` | Let `/api/rankings/weekly` refresh the current week's stale sources before answering (never for cross-site requests) |
 | `GROQ_API_KEY` | — | Enables the AI chat |
-| `GROQ_MODEL` | `openai/gpt-oss-20b` | Groq model for the chat |
+| `GROQ_MODEL` | `openai/gpt-oss-120b` | Groq model for the chat (free tier). `openai/gpt-oss-20b` is faster but invents players far more often |
 | `AGENT_SHARE_PFR_DATA` | `false` | Include PFR-sourced snap counts in AI tool results |
 
 ## Data sources

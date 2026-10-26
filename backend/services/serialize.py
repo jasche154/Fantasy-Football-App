@@ -25,6 +25,8 @@ def ranked_player(value: PlayerValue, ecr: Mapping[int, float] | None = None) ->
         "ros_ppg": value.ros_ppg, "vorp_per_game": value.vorp_per_game,
         "trade_value": value.trade_value, "ecr": (ecr or {}).get(value.player_id),
         "schedule_factor": value.schedule_factor, "playoff_factor": value.playoff_factor,
+        "is_rookie": value.is_rookie,
+        "returning_starter": value.returning_starter, "returning_loss": value.returning_loss,
         "ros_sources": {"model": value.model_ros_ppg, "experts": value.expert_ros_ppg,
                         "expert_rank": value.expert_ros_rank, "weekly": value.weekly_ppg,
                         "availability": value.availability},

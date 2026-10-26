@@ -437,3 +437,34 @@ def test_range_for_picks_the_projection_tier(monkeypatch):
     assert wm.range_for("WR", 22.0)["floor"] == 0.4          # a star keeps a real floor
     assert wm.range_for("WR", 9.0)["floor"] == 0.22
     assert wm.range_for("TE", 9.0) is None
+
+
+def test_returning_starter_trims_the_fill_ins_rest_of_season_rate():
+    seasons = _backfield()
+    seasons[0] = season(1, "Breece Starter", "RB", [line(w, 18, xp=18) for w in (1, 2, 3)])   # missed 4-6
+    losses = injuries.ros_role_losses(seasons, 7, aaa_schedule(), {1: 0.8})
+    name, loss = losses[2]                    # backup: +6 xp/game in 3 of his 6 games, starter plays 80%
+    assert name == "Breece Starter" and loss == pytest.approx(6.0 * 3 / 6 * 0.8)
+    assert injuries.ros_role_losses(seasons, 7, aaa_schedule(), {1: 0.0}) == {}     # out for the year: role stays
+    assert injuries.ros_role_losses(seasons, 7, aaa_schedule(), {}) == {}           # no status: released?
+
+
+def test_trade_finder_keeps_offers_fair_by_market_value(session, seeded):
+    from dataclasses import replace as dc_replace
+
+    from services import trade_finder
+
+    _seed_week(session)
+    valuation = build_valuation(session, LeagueSettings())
+    player = valuation.values[0]
+    assert trade_finder.market_value(dc_replace(player, expert_ros_ppg=None), valuation).trade_value == player.trade_value
+    rated = trade_finder.market_value(dc_replace(player, expert_ros_ppg=30.0, availability=0.5), valuation)
+    assert rated.ros_ppg == 15.0
+
+    mine = valuation.by_id[valuation.values[3].player_id]
+    offers = trade_finder.find_trades(valuation, [mine.player_id])
+    assert offers
+    for offer in offers:
+        edge = trade_finder._market_percent(offer.give, offer.get, valuation)
+        assert trade_finder.MIN_MARKET_EDGE <= edge <= trade_finder.MAX_MARKET_EDGE
+        assert offer.evaluation.percent_difference <= trade_finder.MAX_PERCENT_GAIN
