@@ -20,7 +20,8 @@ class Settings(BaseSettings):
     allowed_hosts: list[str] = ["localhost", "127.0.0.1"]
 
     groq_api_key: str | None = None
-    groq_model: str = "openai/gpt-oss-20b"
+    # The 120b model hallucinates far fewer players than 20b, on the same free tier.
+    groq_model: str = "openai/gpt-oss-120b"
     # Snap counts reach nflverse from Pro Football Reference, whose terms restrict using
     # their content to prompt AI models. Keep them out of tool results unless opted in.
     agent_share_pfr_data: bool = False

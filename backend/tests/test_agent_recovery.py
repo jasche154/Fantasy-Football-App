@@ -48,3 +48,41 @@ def test_find_trades_tool_is_compact_and_skips_unknown_names(session, seeded):
     assert result["skipped_players"] == ["Nobody At All"]
     assert result["results"] and set(result["results"][0]) == {
         "give", "get", "get_ros_ppg", "verdict", "your_gain_pct", "get_playoff_schedule"}
+
+
+class InventingClient:
+    """First answer names a player no tool returned; the revision drops him."""
+
+    def __init__(self):
+        self.calls = []
+
+    def complete(self, messages, tools):
+        self.calls.append([m["content"] for m in messages if m["role"] == "system"])
+        if len(self.calls) == 1:
+            return {"content": "Pick up Mike Williams and Ja'Marr Chase.", "tool_calls": []}
+        return {"content": "Pick up Ja'Marr Chase.", "tool_calls": []}
+
+
+def test_answers_naming_players_no_tool_returned_get_one_revision(session):
+    client = InventingClient()
+    reply = agent.run_agent(session, client, [{"role": "user", "content": "Is Ja'Marr Chase a good add?"}])
+    assert reply.reply == "Pick up Ja'Marr Chase."
+    assert any("Mike Williams" in text and "no tool returned" in text for text in client.calls[1])
+    assert len(client.calls) == 2
+
+
+def test_ungrounded_players_checks_user_and_tool_messages_only():
+    messages = [{"role": "user", "content": "trade Josh Allen?"}, {"role": "tool", "content": '{"get": "Joe Burrow"}'},
+                {"role": "assistant", "content": "Tee Higgins"}]
+    names = {"Josh Allen", "Joe Burrow", "Tee Higgins", "Jalen Reagor"}
+    answer = "Josh Allen for Joe Burrow, then add Tee Higgins or Jalen Reagor."
+    assert agent.ungrounded_players(answer, messages, names) == ["Jalen Reagor", "Tee Higgins"]
+
+
+def test_replies_are_plain_text_and_schedules_read_in_words():
+    from tools.definitions import schedule_words
+
+    assert agent.plain_text("## Trades\n- **Give** Bryce Young") == "Trades\n- Give Bryce Young"
+    assert schedule_words(0.94) == "6% harder than average (weeks 15-17)"
+    assert schedule_words(1.052) == "5% easier than average (weeks 15-17)"
+    assert schedule_words(1.001) == "average (weeks 15-17)"
