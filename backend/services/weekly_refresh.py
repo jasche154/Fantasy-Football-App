@@ -203,6 +203,8 @@ def main(argv: list[str] | None = None) -> None:
     from services.weekly_rankings import default_week
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+    # httpx logs every request URL at INFO, and The Odds API takes its key as a query parameter.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--week", type=int, help="week to refresh (default: the current week)")
     parser.add_argument("--force", action="store_true", help="re-fetch Yahoo and ESPN even if fresh")
