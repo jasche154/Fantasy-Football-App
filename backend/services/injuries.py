@@ -316,21 +316,34 @@ def returning_competition(seasons: Iterable[PlayerSeason], availability: Mapping
     - The expected loss is the fill-in's measured gain without the returning player (same
       team, 2+ games), weighted by the returner's chance to play.
     """
-    seasons = list(seasons)
+    out: dict[int, list[Returning]] = defaultdict(list)
+    for mate, star, gain, games in fill_in_gains(seasons, current_week, schedule):
+        status = availability.get(star.player_id)
+        if status is None or status.play_prob < 0.5:
+            continue                                         # no report (released?) or still out
+        out[mate.player_id].append(Returning(star.name, round(gain * status.play_prob, 2), games))
+    return {pid: tuple(items) for pid, items in out.items()}
+
+
+def fill_in_gains(seasons: Iterable[PlayerSeason], current_week: int,
+                  schedule: Schedule) -> list[tuple[PlayerSeason, PlayerSeason, float, int]]:
+    """(fill-in, absent starter, measured gain per game, games without) for starters out lately.
+
+    A starter is a same-position teammate scoring 8+ per game who missed the team's last two
+    games. The gain is the fill-in's expected points without him minus with him (0 when it
+    can't be measured from 2+ games). A backup QB never counts as the starter.
+    """
     by_team: dict[str, list[PlayerSeason]] = defaultdict(list)
     for p in seasons:
         if p.team:
             by_team[p.team].append(p)
-    out: dict[int, list[Returning]] = defaultdict(list)
+    pairs = []
     for team, roster in by_team.items():
         recent = team_weeks(schedule, team, current_week)[-2:]
         for star in roster:
             played = set(team_games(star, team, schedule))
             if len(recent) < 2 or any(w in played for w in recent) or star.ppg < 8 or not played:
                 continue                                     # needs a good player who missed the last two games
-            status = availability.get(star.player_id)
-            if status is None or status.play_prob < 0.5:
-                continue                                     # no report (released?) or still out
             for mate in roster:
                 if mate.player_id == star.player_id or mate.position != star.position:
                     continue
@@ -338,9 +351,30 @@ def returning_competition(seasons: Iterable[PlayerSeason], availability: Mapping
                     continue                                 # a backup QB returning doesn't threaten the starter
                 measured = with_without(mate, star, team, schedule, current_week)
                 gain = max(measured[0], 0.0) if measured and measured[1] >= MIN_WITHOUT_GAMES else 0.0
-                out[mate.player_id].append(Returning(star.name, round(gain * status.play_prob, 2),
-                                                     measured[1] if measured else 0))
-    return {pid: tuple(items) for pid, items in out.items()}
+                pairs.append((mate, star, gain, measured[1] if measured else 0))
+    return pairs
+
+
+def ros_role_losses(seasons: Iterable[PlayerSeason], current_week: int, schedule: Schedule,
+                    starter_share: Mapping[int, float]) -> dict[int, tuple[str, float]]:
+    """{fill-in id: (starter name, ppg to take off his rest-of-season rate)}.
+
+    A fill-in's recent games were played without the starter, so his recency-weighted rate
+    inflates his season rate once the starter is back. The loss is his measured gain, times
+    the share of his games played without the starter (that's how much of his rate it
+    inflated), times the share of remaining games the starter is expected to play
+    (starter_share: players with a live injury status; 0 when out for the season, so the
+    fill-in keeps the job).
+    """
+    out: dict[int, tuple[str, float]] = {}
+    for mate, star, gain, games_without in fill_in_gains(seasons, current_week, schedule):
+        share = starter_share.get(star.player_id)
+        if share is None or gain <= 0 or share <= 0:
+            continue                                         # no status (released?), no gain, or done for the year
+        loss = round(gain * games_without / max(mate.games_played, 1) * share, 2)
+        if loss > out.get(mate.player_id, ("", 0.0))[1]:
+            out[mate.player_id] = (star.name, loss)
+    return out
 
 
 def build_context(session: Session, seasons: Iterable[PlayerSeason], rates: Mapping[int, float],

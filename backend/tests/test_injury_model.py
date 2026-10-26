@@ -437,3 +437,13 @@ def test_range_for_picks_the_projection_tier(monkeypatch):
     assert wm.range_for("WR", 22.0)["floor"] == 0.4          # a star keeps a real floor
     assert wm.range_for("WR", 9.0)["floor"] == 0.22
     assert wm.range_for("TE", 9.0) is None
+
+
+def test_returning_starter_trims_the_fill_ins_rest_of_season_rate():
+    seasons = _backfield()
+    seasons[0] = season(1, "Breece Starter", "RB", [line(w, 18, xp=18) for w in (1, 2, 3)])   # missed 4-6
+    losses = injuries.ros_role_losses(seasons, 7, aaa_schedule(), {1: 0.8})
+    name, loss = losses[2]                    # backup: +6 xp/game in 3 of his 6 games, starter plays 80%
+    assert name == "Breece Starter" and loss == pytest.approx(6.0 * 3 / 6 * 0.8)
+    assert injuries.ros_role_losses(seasons, 7, aaa_schedule(), {1: 0.0}) == {}     # out for the year: role stays
+    assert injuries.ros_role_losses(seasons, 7, aaa_schedule(), {}) == {}           # no status: released?

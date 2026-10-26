@@ -154,3 +154,23 @@ def test_playoff_weeks_and_factor_flow_through_valuation():
     values, _ = value_players(current, [], LeagueSettings(), remaining=10, playoff_factors={1: 1.12})
     by_id = {v.player_id: v for v in values}
     assert by_id[1].playoff_factor == 1.12 and by_id[2].playoff_factor == 1.0
+
+
+def test_rookies_get_a_small_growth_premium_and_fill_ins_lose_a_returning_starters_share(monkeypatch):
+    import services.valuation as valuation
+
+    vet, rookie = season_of([12] * 4, [12] * 4, "RB", 1), season_of([12] * 4, [12] * 4, "RB", 2)
+    last_year = [season_of([10] * 10, [10] * 10, "RB", 1)]
+    values, _ = value_players([vet, rookie], last_year, LeagueSettings(), remaining=10,
+                              role_losses={1: ("Starter", 2.0)})
+    by_id = {v.player_id: v for v in values}
+    assert by_id[2].is_rookie and not by_id[1].is_rookie
+    plain, _ = value_players([vet, rookie], last_year, LeagueSettings(), remaining=10)
+    plain_by_id = {v.player_id: v for v in plain}
+    assert by_id[1].base_ros_ppg == pytest.approx(plain_by_id[1].base_ros_ppg - 2.0, abs=0.02)
+    assert by_id[1].returning_starter == "Starter" and by_id[1].returning_loss == 2.0
+
+    monkeypatch.setattr(valuation, "ROOKIE_GROWTH", 1.0)
+    flat, _ = value_players([vet, rookie], last_year, LeagueSettings(), remaining=10)
+    flat_rookie = next(v for v in flat if v.player_id == 2)
+    assert plain_by_id[2].base_ros_ppg == pytest.approx(flat_rookie.base_ros_ppg * 1.03, abs=0.02)

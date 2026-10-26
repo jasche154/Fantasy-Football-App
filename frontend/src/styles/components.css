@@ -597,6 +597,11 @@
   background: var(--color-warn-soft);
 }
 
+.status-badge--out {
+  color: var(--color-neg);
+  background: var(--color-neg-soft);
+}
+
 .signal-badge--sell {
   color: var(--color-neg);
   background: var(--color-neg-soft);

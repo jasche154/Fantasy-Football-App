@@ -54,6 +54,11 @@ export interface RankedPlayer {
   schedule_factor: number;
   /** Fantasy-playoff (weeks 15-17) schedule strength, opponent-adjusted (>1 = easier). Not in ros_ppg. */
   playoff_factor: number;
+  /** No games last season: the model adds a small growth premium. */
+  is_rookie?: boolean;
+  /** A starter whose return takes work back from this fill-in, and the ppg taken off the model. */
+  returning_starter?: string | null;
+  returning_loss?: number;
   /** Inputs to the blended ros_ppg. */
   ros_sources?: {
     model: number;

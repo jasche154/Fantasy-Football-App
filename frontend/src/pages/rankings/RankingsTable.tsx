@@ -39,7 +39,12 @@ function rosTitle(row: RankedPlayer): string {
   const parts = [`model ${formatNumber(s.model)}`];
   if (s.experts !== null) parts.push(`Yahoo ROS experts ${formatNumber(s.experts)} (rank ${formatNumber(s.expert_rank, 1)})`);
   if (s.weekly !== null) parts.push(`this week ${formatNumber(s.weekly)}`);
-  if (s.availability < 1) parts.push(`expected to play ${Math.round(s.availability * 100)}% of remaining games`);
+  if (s.availability === 0) parts.push('out for the season');
+  else if (s.availability < 1) parts.push(`expected to play ${Math.round(s.availability * 100)}% of remaining games`);
+  if (row.is_rookie) parts.push('rookie growth +3% on the model');
+  if (row.returning_starter && row.returning_loss) {
+    parts.push(`model trimmed ${formatNumber(row.returning_loss)} ppg for ${row.returning_starter}'s return`);
+  }
   return `Blend of ${parts.join(', ')}`;
 }
 
@@ -49,6 +54,8 @@ function RankingRow({ row }: { row: RankedPlayer }) {
       <td className="num td--rank">{row.rank}</td>
       <td className="td--player">
         <PlayerLink player={row.player} />
+        {row.is_rookie && <span className="status-badge" title="No games last season">Rookie</span>}
+        {row.ros_sources?.availability === 0 && <span className="status-badge status-badge--out">Out for season</span>}
       </td>
       <td className="td--pos">{row.pos_rank}</td>
       <td className="num">{formatInteger(row.games)}</td>

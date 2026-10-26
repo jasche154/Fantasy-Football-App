@@ -22,7 +22,8 @@ from services.projections import (
     MIN_PRIOR_GAMES, PlayerSeason, current_rate, latest_season, latest_week,
     load_player_seasons, project_ros_ppg,
 )
-from services.ros_consensus import RosInputs, ros_inputs
+from services.injuries import ros_role_losses
+from services.ros_consensus import RosInputs, ros_inputs, status_shares
 from services.ros_consensus import data_version as ros_data_version
 from services.schedule_strength import NEUTRAL, DefenseStrength, Schedule, defense_strength, load_schedule
 
@@ -47,6 +48,9 @@ class PlayerValue:
     base_ros_ppg: float = 0.0          # before the schedule adjustment
     schedule_factor: float = 1.0       # >1 = easier remaining schedule
     playoff_factor: float = 1.0        # >1 = easier fantasy-playoff schedule (the last PLAYOFF_LENGTH weeks)
+    is_rookie: bool = False                # no games last season (rookie, or back from a lost year)
+    returning_starter: str | None = None   # a starter whose return shrinks this fill-in's role
+    returning_loss: float = 0.0            # ppg taken off the model rate for that
     model_ros_ppg: float = 0.0         # the model alone (with schedule), before the consensus blend
     expert_ros_rank: float | None = None
     expert_ros_ppg: float | None = None
@@ -93,7 +97,9 @@ def value_players(current: Sequence[PlayerSeason], previous: Sequence[PlayerSeas
                   league: LeagueSettings, remaining: int,
                   schedule_factors: Mapping[int, float] | None = None,
                   consensus: Mapping[int, "RosInputs"] | None = None,
-                  playoff_factors: Mapping[int, float] | None = None) -> tuple[tuple[PlayerValue, ...], dict[str, float]]:
+                  playoff_factors: Mapping[int, float] | None = None,
+                  role_losses: Mapping[int, tuple[str, float]] | None = None,
+                  ) -> tuple[tuple[PlayerValue, ...], dict[str, float]]:
     """Pure valuation step, separated from data loading so it can be tested directly."""
     rates = {p.player_id: current_rate(p) for p in current}
     first_pass = replacement_levels(((p.position, rates[p.player_id]) for p in current), league)
@@ -101,6 +107,10 @@ def value_players(current: Sequence[PlayerSeason], previous: Sequence[PlayerSeas
     base = {p.player_id: project_ros_ppg(rates[p.player_id], p.games_played,
                                          priors.get(p.player_id, first_pass.get(p.position, 0.0)))
             for p in current}
+    losses = role_losses or {}
+    rookies = {p.player_id for p in current} - {p.player_id for p in previous}
+    base = {pid: round(max(0.0, ppg - losses.get(pid, ("", 0.0))[1]) * (ROOKIE_GROWTH if pid in rookies else 1.0), 2)
+            for pid, ppg in base.items()}
     factors = {pid: (schedule_factors or {}).get(pid, 1.0) ** ROS_SCHEDULE_WEIGHT for pid in base}
     model = {pid: round(base[pid] * factors[pid], 2) for pid in base}
     consensus = consensus or {}
@@ -117,6 +127,9 @@ def value_players(current: Sequence[PlayerSeason], previous: Sequence[PlayerSeas
             trade_value=round(vorp * remaining, 1), base_ros_ppg=base[p.player_id],
             schedule_factor=round(factors[p.player_id], 3), model_ros_ppg=model[p.player_id],
             playoff_factor=round((playoff_factors or {}).get(p.player_id, 1.0), 3),
+            is_rookie=p.player_id in rookies,
+            returning_starter=losses.get(p.player_id, (None, 0.0))[0],
+            returning_loss=losses.get(p.player_id, ("", 0.0))[1],
             **_consensus_fields(consensus.get(p.player_id)),
         ))
     return _rank(values), replacement
@@ -131,6 +144,10 @@ def _consensus_fields(inputs: "RosInputs | None") -> dict:
 
 
 PLAYOFF_LENGTH = 3      # most leagues: weeks 15-17
+# Rookies keep more of their first-half scoring in the second half: 2023-25 RB/WR/TE with 4+
+# games in each half, median second/first-half ratio 0.952 for rookies (n=54) vs 0.922 for
+# veterans (n=389), about 3% better. Applied to the model's rest-of-season rate.
+ROOKIE_GROWTH = 1.03
 
 
 def playoff_weeks(end_week: int) -> tuple[int, int]:
@@ -153,11 +170,12 @@ def _compute(session: Session, league: LeagueSettings, season: int) -> Valuation
     playoff = {p.player_id: defense.schedule_factor(
         schedule.remaining_opponents(p.team, max(playoffs[0] - 1, through or 0), playoffs[1]), p.position)
         for p in current}
-    model_values, _ = value_players(current, previous, league, remaining, factors)
+    losses = ros_role_losses(current, (through or 0) + 1, schedule, status_shares(session, remaining))
+    model_values, _ = value_players(current, previous, league, remaining, factors, role_losses=losses)
     consensus = ros_inputs(session, season, league.scoring, scoring,
                            {v.player_id: v.model_ros_ppg for v in model_values},
                            {v.player_id: v.position or "" for v in model_values}, remaining)
-    values, replacement = value_players(current, previous, league, remaining, factors, consensus, playoff)
+    values, replacement = value_players(current, previous, league, remaining, factors, consensus, playoff, losses)
     return Valuation(season=season, through_week=through, weeks_remaining=remaining, league=league,
                      replacement=MappingProxyType(replacement), values=values,
                      seasons=tuple(current), by_id=MappingProxyType({v.player_id: v for v in values}),
