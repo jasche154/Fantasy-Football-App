@@ -58,6 +58,23 @@ function SourceCell({ value, position }: { value: WeeklySourceValue | undefined;
   );
 }
 
+/** Points scored, colored against the projection: beat it by 20%+ (green) or missed by 20%+ (red). */
+function ActualCell({ row }: { row: WeeklyPlayer }) {
+  const actual = row.actual ?? null;
+  if (actual === null) {
+    const sat = row.matchup.game_final;
+    return <td className="num num--muted" title={sat ? 'Did not play' : 'Game not played yet'}>{sat ? 'DNP' : EMPTY_VALUE}</td>;
+  }
+  const ratio = row.projection > 0 ? actual / row.projection : 1;
+  const tone = ratio >= 1.2 ? 'pos' : ratio <= 0.8 ? 'neg' : 'flat';
+  const diff = actual - row.projection;
+  return (
+    <td className={`num actual actual--${tone}`} title={`${diff >= 0 ? '+' : ''}${formatNumber(diff)} vs projection`}>
+      {formatNumber(actual)}
+    </td>
+  );
+}
+
 function WeeklyRow({ row, week }: { row: WeeklyPlayer; week: number }) {
   const position = row.player.position;
   const [showWhy, setShowWhy] = useState(false);
@@ -85,13 +102,14 @@ function WeeklyRow({ row, week }: { row: WeeklyPlayer; week: number }) {
           <span className="source-rank" title="10th to 90th percentile outcome">{formatNumber(row.floor)}–{formatNumber(row.ceiling)}</span>
         )}
       </td>
+      <ActualCell row={row} />
       {SOURCE_COLUMNS.map((column) => (
         <SourceCell key={column.key} value={row.sources[column.key]} position={position} />
       ))}
     </tr>
     {showWhy && (
       <tr className="explain-row">
-        <td colSpan={6 + SOURCE_COLUMNS.length}><ExplainPanel playerId={row.player.id} week={week} /></td>
+        <td colSpan={7 + SOURCE_COLUMNS.length}><ExplainPanel playerId={row.player.id} week={week} /></td>
       </tr>
     )}
     </Fragment>
@@ -124,6 +142,10 @@ export function WeeklyTable({ rows, caption, week }: WeeklyTableProps) {
             <SortableHeader columnKey="proj" sort={sort} onSort={onSort}
               title="Expected points (if active x chance to play), with the 10th-90th percentile range">
               Proj
+            </SortableHeader>
+            <SortableHeader columnKey="actual" sort={sort} onSort={onSort}
+              title="Points scored this week in your scoring, once the game is final (green: beat the projection by 20%+, red: missed by 20%+)">
+              Actual
             </SortableHeader>
             {SOURCE_COLUMNS.map((column) => (
               <SortableHeader key={column.key} columnKey={column.key} sort={sort} onSort={onSort} title={column.title}>

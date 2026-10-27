@@ -1,7 +1,7 @@
 import type { WeeklyPlayer, WeeklySourceKey } from '../../api/types';
 import type { SortDirection, SortState } from '../../components/SortableHeader';
 
-export type WeeklySortKey = 'rank' | 'implied' | 'proj' | WeeklySourceKey;
+export type WeeklySortKey = 'rank' | 'implied' | 'proj' | 'actual' | WeeklySourceKey;
 
 export const DEFAULT_WEEKLY_SORT: SortState<WeeklySortKey> = { key: 'rank', direction: 'asc' };
 
@@ -14,6 +14,7 @@ function valueFor(row: WeeklyPlayer, key: WeeklySortKey): number | null {
   if (key === 'rank') return row.rank;
   if (key === 'implied') return row.matchup.implied_total;
   if (key === 'proj') return row.projection;
+  if (key === 'actual') return row.actual ?? null;
   return row.sources[key]?.points ?? null;
 }
 

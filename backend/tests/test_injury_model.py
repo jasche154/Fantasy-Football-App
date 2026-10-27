@@ -468,3 +468,19 @@ def test_trade_finder_keeps_offers_fair_by_market_value(session, seeded):
         edge = trade_finder._market_percent(offer.give, offer.get, valuation)
         assert trade_finder.MIN_MARKET_EDGE <= edge <= trade_finder.MAX_MARKET_EDGE
         assert offer.evaluation.percent_difference <= trade_finder.MAX_PERCENT_GAIN
+
+
+def test_past_week_rankings_carry_actual_points(session, seeded, client):
+    ids = _seed_week(session)
+    rankings = build_weekly_rankings(session, LeagueSettings(), week=6)
+    played = {p.player_id: p for p in rankings.players}
+    seasons = {s.player_id: s for s in build_valuation(session, LeagueSettings()).seasons}
+    with_games = [p for p in played.values() if any(g.week == 6 for g in seasons[p.player_id].games)]
+    assert with_games
+    for player in with_games:
+        game = next(g for g in seasons[player.player_id].games if g.week == 6)
+        assert player.actual == round(game.fantasy_points, 2)
+    current = build_weekly_rankings(session, LeagueSettings())
+    assert all(p.actual is None for p in current.players)                  # week 7 not played yet
+    body = client.get("/api/rankings/weekly", params={"week": 6, "refresh": "false"}).json()
+    assert "actual" in body["results"][0] and body["weights_learned_through"] is None

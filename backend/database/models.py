@@ -485,3 +485,20 @@ class ProjectionHistory(Base):
     ceiling: Mapped[float | None]
     sources: Mapped[str]                       # JSON {source: points}
     computed_at: Mapped[datetime] = mapped_column(default=utc_now)
+
+
+class LearnedWeights(Base):
+    """Week X source weights after learning from one completed week (services/weight_learning.py)."""
+
+    __tablename__ = "learned_weights"
+    __table_args__ = (Index("ux_learned_weights_season_week", "season", "week", unique=True),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    season: Mapped[int]
+    week: Mapped[int]                          # the completed week this update learned from
+    rows: Mapped[int]                          # scored player-weeks behind it
+    weights: Mapped[str]                       # JSON {source: weight}, used by the rankings
+    optimal: Mapped[str]                       # JSON: that week's best-fit weights (for reference)
+    mae_before: Mapped[float]
+    mae_after: Mapped[float]
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)

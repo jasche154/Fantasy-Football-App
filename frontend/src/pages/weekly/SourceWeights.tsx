@@ -12,13 +12,21 @@ const REFRESH_LABELS: Readonly<Record<string, string>> = {
 
 interface SourceWeightsProps {
   weights: readonly WeeklySourceWeight[];
+  learnedThrough?: number | null;
 }
 
 /** One stacked bar showing how much each source counts, with coverage underneath. */
-export function SourceWeights({ weights }: SourceWeightsProps) {
+export function SourceWeights({ weights, learnedThrough = null }: SourceWeightsProps) {
   return (
     <figure className="source-weights">
-      <figcaption className="source-weights__caption">How this week’s projection is blended</figcaption>
+      <figcaption className="source-weights__caption">
+        How this week’s projection is blended
+        {learnedThrough !== null && (
+          <span className="source-weights__learned" title="Each completed week nudges the weights a little toward the sources that predicted actual points best">
+            {' '}· adjusted by results through week {learnedThrough}
+          </span>
+        )}
+      </figcaption>
       <div className="source-weights__bar" aria-hidden="true">
         {weights.map((source) => (
           <span

@@ -138,7 +138,7 @@ Open <http://localhost:5173>. The UI talks to `http://localhost:8000` by default
 | Page | What you can do |
 |---|---|
 | **Dashboard** | Top buy-low and sell-high players with the reason behind each, Sleeper's most-added players, data freshness |
-| **Week X Rankings** | This week's projections by position; pick any week. Each row shows the matchup grade (opponent-adjusted, #1 = easiest), the Vegas implied team total, the blended projection, and every source's number (props, Josh & Hayden, Yahoo, ESPN, model). Click a column header (Proj, Team total, or any source) to sort by it. **Schedule strength** switches to defenses ranked by adjusted points allowed and each team's upcoming opponents. **Refresh sources** re-pulls Yahoo and ESPN (Vegas props follow their credit budget) |
+| **Week X Rankings** | This week's projections by position; pick any week. Each row shows the matchup grade (opponent-adjusted, #1 = easiest), the Vegas implied team total, the blended projection, and every source's number (props, Josh & Hayden, Yahoo, ESPN, model). For finished games, **Actual** shows what each player scored (green beat the projection by 20%+, red missed by 20%+, DNP sat). Click a column header (Proj, Actual, Team total, or any source) to sort by it. **Schedule strength** switches to defenses ranked by adjusted points allowed and each team's upcoming opponents. **Refresh sources** re-pulls Yahoo and ESPN (Vegas props follow their credit budget) |
 | **Rankings** | Rest-of-season rankings by position; sort by actual, expected, or projected points, schedule strength, **Playoff SOS** (weeks 15–17), trade value, or ECR |
 | **Week X → Start / Sit** | Add up to four players. Each shows its projection, floor–ceiling range, injury status, "if <teammate> sits" scenarios, flags, and a **Why?** breakdown. A tiebreaker (most points / safe / upside) decides close calls |
 | **Waiver Wire** | Players rostered in under 10–75% of ESPN leagues, ranked by rest-of-season value, this week's projection, next three matchups, and injury-driven opportunity, with a suggested FAAB bid |
@@ -293,9 +293,11 @@ the 10th/90th percentile of actual ÷ projected points.
 | Injury risk | His own chance to play is under 90% |
 
 ### Week X rankings
-Each player's week projection is a weighted blend of every source that covers them:
+Each player's week projection is a weighted blend of every source that covers them. These
+are the starting weights; each completed week adjusts them a little (see **Learning the
+weights** below). After week 7 they're 33 / 28 / 18 / 12 / 9.
 
-| Source | Weight | How it becomes points |
+| Source | Starting weight | How it becomes points |
 |---|---|---|
 | Vegas player props | 35% | Yardage lines and over/under prices → expected yards; receptions, pass TDs, INTs → Poisson means; anytime-TD price → expected TDs. Scored with your league settings. Missing markets (e.g. an RB's receiving line) are filled from the model |
 | Josh Norris & Hayden Winks (Yahoo) | 30% | Their average positional rank for the week, converted to points (below) |
@@ -313,7 +315,8 @@ Each player's week projection is a weighted blend of every source that covers th
   schedule strength, on top of the model using it at full strength.
 - Players on bye are skipped. When outside sources have published the week, players none
   of them cover are left out too (usually injured or inactive).
-- Weights and the tilt are constants in `backend/services/weekly_rankings.py`.
+- The starting weights are in `backend/services/weight_learning.py` (`DEFAULT_WEIGHTS`); the
+  tilt is in `backend/services/weekly_rankings.py`.
 
 **Saved locally.** Two tables in the local SQLite database (never committed) store the results:
 - **`rankings_snapshots`:** the computed week, keyed by league settings, week, every data input
@@ -321,9 +324,35 @@ Each player's week projection is a weighted blend of every source that covers th
   after a restart) takes about 0.1 s instead of several seconds.
 - **`projection_history`:** each player's last projection before kickoff, with every source's
   points. Once that week's stats are loaded, `python -m services.projection_eval --season 2026`
-  reports the blend's and each source's error and suggests inverse-error source weights. The
-  suggestion is the starting point for learning the weights from results; it's never applied
-  automatically.
+  reports the blend's and each source's error.
+
+**Actual points.** Once a player's game is final, the Week X table shows what he scored, in
+your scoring, next to the projection. It's green if he beat the projection by 20%+, red if he
+missed it by 20%+, and "DNP" if his team played without him. Past weeks keep the weights they
+were projected with, so you see the projection as it stood, not one built with hindsight.
+
+**Learning the weights** (`services/weight_learning.py`). Each completed week with
+pre-kickoff projections updates the weights once:
+1. **Best fit:** take everyone who played and find the weights that would have predicted
+   their actual points best that week. The blend is re-balanced over each player's sources,
+   as in the rankings.
+2. **Small step:** move the current weights only part of the way there. The step is
+   `rows / (rows + 3000)` of the gap, so the starting weights count like about eight weeks of
+   evidence. No source moves more than 3 points in a week, and none drops below 5%.
+
+One week's best fit is usually extreme (week 7's put 69% on the model and 0% on props). The
+small step keeps one odd week from flipping the blend: a source has to beat the others week
+after week to gain real weight.
+
+- **Week 7 (265 player-weeks):**
+  - Yahoo consensus (4.23 average error) and the model (4.31) beat ESPN (4.57), props (5.12)
+    and Josh & Hayden (5.56).
+  - Weights moved props 35→33%, Josh & Hayden 30→28%, model 15→18%, Yahoo 10→12% and
+    ESPN 10→9%. The blend's error that week went from 4.204 to 4.196.
+- **Running it:** `python -m database.populate_stats` runs the update after each load.
+  `python -m services.weight_learning --season 2026 --dry-run` shows what it would change.
+- **Storage:** each update is a row in the local `learned_weights` table. Delete the rows to
+  go back to the starting weights.
 
 On Week 7 of 2026 (before props were configured), the blend agreed closely with Hayden's
 own ranks (rank correlation 0.93 for the top 24 RBs, 0.97 for the top 36 WRs) while still

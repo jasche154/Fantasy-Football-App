@@ -647,3 +647,9 @@
 .legend strong {
   color: var(--color-text);
 }
+
+/* Week X: actual points against the projection */
+.actual { font-weight: 700; font-variant-numeric: tabular-nums; }
+.actual--pos { color: var(--color-pos); }
+.actual--neg { color: var(--color-neg); }
+.source-weights__learned { color: var(--color-text-subtle); font-weight: 500; }

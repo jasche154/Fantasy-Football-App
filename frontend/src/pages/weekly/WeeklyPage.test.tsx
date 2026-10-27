@@ -111,6 +111,25 @@ describe('WeeklyPage', () => {
     expect(within(notes).queryByText(/Yahoo/)).not.toBeInTheDocument();      // fresh sources stay quiet
   });
 
+  it('shows actual points, DNP for a final game without a line, and the learned-weights note', async () => {
+    const results = [weeklyPlayer(1, { actual: 25.1 }), { ...weekly(7).results[1], actual: null }];
+    mockFetch([
+      META_ROUTE,
+      { path: '/api/rankings/weekly', reply: json(weekly(7, { results, weights_learned_through: 7 })) },
+      { path: '/api/schedule-strength', reply: json(STRENGTH) },
+    ]);
+    const user = userEvent.setup();
+    renderWithProviders(<WeeklyPage />);
+    const table = await screen.findByRole('table');
+    const [, chaseRow, bijanRow] = within(table).getAllByRole('row');
+    expect(within(chaseRow).getByText('25.1')).toHaveClass('actual--pos');        // beat 18.4 by 20%+
+    expect(within(bijanRow).getByText('DNP')).toBeInTheDocument();                  // his game is final
+    expect(screen.getByText(/adjusted by results through week 7/)).toBeInTheDocument();
+
+    await user.click(within(table).getByRole('button', { name: /^Actual/ }));
+    expect(within(table).getByRole('columnheader', { name: /^Actual/ })).toHaveAttribute('aria-sort', 'descending');
+  });
+
   it('sorts by any projection column, keeping players a source skips at the bottom', async () => {
     mockFetch(routes());
     const user = userEvent.setup();

@@ -8,7 +8,7 @@ from services.trade import TradeEvaluation, TradeSide
 from config import get_settings
 from services.valuation import PlayerValue, Valuation
 from services.weekly_model import Matchup
-from services.weekly_rankings import SOURCE_LABELS, WEIGHTS, WeeklyPlayer, WeeklyRankings, FINAL_SOS_TILT
+from services.weekly_rankings import SOURCE_LABELS, WeeklyPlayer, WeeklyRankings, FINAL_SOS_TILT
 
 NEXT_WEEKS = 4
 
@@ -104,6 +104,7 @@ def weekly_player(player: WeeklyPlayer, flags: Sequence = ()) -> dict:
         "matchup": matchup(player.matchup),
         "sources": {key: {"points": round(v.points, 2), "rank": v.rank} for key, v in player.sources.items()},
         "expert_ranks": dict(player.expert_ranks),
+        "actual": player.actual,
         "flags": [flag(f) for f in flags],
     }
 
@@ -122,7 +123,8 @@ def weekly_rankings(rankings: WeeklyRankings, position: str | None, limit: int,
     return {
         "season": rankings.season, "week": rankings.week, "scoring": rankings.scoring,
         "weights": [{"key": k, "label": SOURCE_LABELS[k], "weight": w, "players": rankings.source_counts.get(k, 0)}
-                    for k, w in WEIGHTS.items()],
+                    for k, w in rankings.weights.items()],
+        "weights_learned_through": rankings.weights_learned_through,
         "sos_tilt": FINAL_SOS_TILT, "refresh": statuses,
         "results": [{**weekly_player(p, flags.get(p.player_id, ())), "rank": i} if position
                     else weekly_player(p, flags.get(p.player_id, ())) for i, p in enumerate(players, start=1)],

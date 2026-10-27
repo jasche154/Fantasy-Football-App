@@ -379,6 +379,8 @@ export interface WeeklyPlayer {
   matchup: WeeklyMatchup;
   sources: Partial<Record<WeeklySourceKey, WeeklySourceValue>>;
   expert_ranks: Record<string, number>;
+  /** Points scored that week in your scoring, once his game is final; null before (or if he sat). */
+  actual?: number | null;
   flags: PlayerFlag[];
 }
 
@@ -437,6 +439,8 @@ export interface WeeklyRankingsResponse {
   week: number;
   scoring: Scoring;
   weights: WeeklySourceWeight[];
+  /** The last completed week the weights were nudged by (null = the starting weights). */
+  weights_learned_through?: number | null;
   sos_tilt: number;
   /** null when the backend skipped refreshing outside sources. */
   refresh: Record<string, SourceRefreshStatus> | null;
