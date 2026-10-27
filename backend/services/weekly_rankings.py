@@ -278,7 +278,7 @@ def _version(session: Session, season: int, week: int) -> tuple:
             session.scalar(select(func.count(InjuryReport.id)).where(
                 InjuryReport.season == season, InjuryReport.week == week)),
             session.scalar(select(func.max(DataLoad.id))),
-            (effective_weights(session)[1] or SimpleNamespace(id=None)).id)
+            (effective_weights(session, season, week)[1] or SimpleNamespace(id=None)).id)
 
 
 def build_weekly_rankings(session: Session, league: LeagueSettings, week: int | None = None) -> WeeklyRankings:
@@ -316,7 +316,7 @@ def _build(session: Session, league: LeagueSettings, valuation: Valuation, week:
     # Sleeper tags and today's depth chart describe now, so they only apply to the current week.
     context = build_context(session, valuation.seasons, rates, valuation.season, week, valuation.schedule,
                             use_live=week == default_week(valuation))
-    weights, learned = effective_weights(session)
+    weights, learned = effective_weights(session, valuation.season, week)
     players = blend(candidates, valuation, week, league, require_outside_source=has_outside_sources,
                     context=context, rates=rates, weights=weights)
     counts = {key: sum(1 for p in players if key in p.sources) for key in weights}

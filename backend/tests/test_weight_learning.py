@@ -74,3 +74,12 @@ def test_dry_run_saves_nothing_and_defaults_apply_without_history(session, seede
 def test_too_few_rows_are_not_learned_from(session, seeded):
     _seed_history(session, seeded, week=9, players=20)
     assert wl.learn(session, 2026) == []
+
+
+def test_past_weeks_use_only_weights_learned_before_them(session, seeded):
+    _seed_history(session, seeded, week=9)
+    wl.learn(session, 2026)
+    assert wl.effective_weights(session, 2026, 9) == (dict(DEFAULT_WEIGHTS), None)     # week 9 itself: no hindsight
+    weights, row = wl.effective_weights(session, 2026, 10)
+    assert row.week == 9 and weights != DEFAULT_WEIGHTS
+    assert wl.effective_weights(session, 2027, 1)[1].week == 9                         # carries into next season

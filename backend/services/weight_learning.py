@@ -128,11 +128,20 @@ def _ensure_table(session: Session) -> None:
     Base.metadata.create_all(session.get_bind(), tables=[LearnedWeights.__table__])
 
 
-def effective_weights(session: Session) -> tuple[dict[str, float], LearnedWeights | None]:
-    """The newest learned weights, or the defaults when nothing has been learned (or can't be read)."""
+def effective_weights(session: Session, season: int | None = None,
+                      before_week: int | None = None) -> tuple[dict[str, float], LearnedWeights | None]:
+    """The newest learned weights, or the defaults when nothing has been learned (or can't be read).
+
+    With season and before_week, only updates learned from earlier weeks count, so a past
+    week is shown as it was projected rather than with hindsight.
+    """
     try:
         _ensure_table(session)
-        latest = session.scalar(select(LearnedWeights).order_by(LearnedWeights.id.desc()).limit(1))
+        query = select(LearnedWeights)
+        if season is not None and before_week is not None:
+            query = query.where((LearnedWeights.season < season)
+                                | ((LearnedWeights.season == season) & (LearnedWeights.week < before_week)))
+        latest = session.scalar(query.order_by(LearnedWeights.season.desc(), LearnedWeights.week.desc()).limit(1))
     except SQLAlchemyError:
         log.warning("Could not read learned weights; using the defaults", exc_info=True)
         session.rollback()
