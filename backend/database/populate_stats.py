@@ -356,7 +356,20 @@ def main(argv: list[str] | None = None) -> None:
         load_depth_charts(session, max(seasons), index)
         load_expert_rankings(session, index)
         record_load(session, seasons)
+        learn_source_weights(session, max(seasons))
     log.info("Done.")
+
+
+def learn_source_weights(session: Session, season: int) -> None:
+    """Nudge the Week X source weights with any newly completed week (best-effort)."""
+    from services.weight_learning import describe, learn
+
+    try:
+        for update in learn(session, season):
+            log.info("Source weights updated. %s", describe(update))
+    except Exception:   # learning must never fail a data load
+        log.exception("Could not update the Week X source weights")
+        session.rollback()
 
 
 if __name__ == "__main__":

@@ -142,7 +142,7 @@ export function WeeklyPage() {
             {(data) => (
               <>
                 <div className="weekly-sources">
-                  <SourceWeights weights={data.weights} />
+                  <SourceWeights weights={data.weights} learnedThrough={data.weights_learned_through ?? null} />
                   <RefreshButton week={data.week} onRefreshed={rankings.reload} />
                 </div>
                 <RefreshNotes statuses={data.refresh} />
