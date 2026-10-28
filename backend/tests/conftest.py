@@ -7,6 +7,7 @@ import os
 os.environ["FANTASY_ENV_FILE"] = ""
 os.environ["DATABASE_URL"] = "sqlite://"
 os.environ["WEEKLY_AUTO_REFRESH"] = "false"     # never reach Yahoo/ESPN/The Odds API from tests
+os.environ["AUTO_UPDATE"] = "false"             # no background data loads from tests
 
 import pytest
 from fastapi.testclient import TestClient

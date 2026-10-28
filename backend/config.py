@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     odds_api_key: str | None = None
     # Let the Week X rankings endpoint refresh stale Yahoo/ESPN/props snapshots itself.
     weekly_auto_refresh: bool = True
+    # While the API runs, load each finished week's stats (which updates the learned source
+    # weights) and save the next week's pre-game projections. See services/auto_update.py.
+    auto_update: bool = True
     # Outside sources to fetch. Yahoo's and ESPN's endpoints are unofficial (see
     # docs/DATA_SOURCES.md); drop either here to stop contacting it.
     weekly_sources: list[str] = ["sleeper_status", "yahoo_experts", "espn", "vegas_props"]

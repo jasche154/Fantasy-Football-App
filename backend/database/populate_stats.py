@@ -341,9 +341,14 @@ def main(argv: list[str] | None = None) -> None:
     logging.getLogger("httpx").setLevel(logging.WARNING)      # request URLs can carry API keys
     logging.getLogger("alembic").setLevel(logging.WARNING)   # keep the output to load progress
     args = parse_args(argv)
+    load_data(args.seasons, args.all)
+
+
+def load_data(seasons: list[int] | None = None, reload_all: bool = False) -> None:
+    """Upgrade the schema, load the seasons (default: missing ones plus the current one), learn weights."""
     log.info("Schema: %s", ensure_schema(engine))
     with Session(engine) as session:
-        seasons = args.seasons or seasons_to_load(session, nfl.get_current_season(), args.all)
+        seasons = seasons or seasons_to_load(session, nfl.get_current_season(), reload_all)
         log.info("Loading seasons: %s", seasons)
         index = PlayerIndex(session)
         for feed in FEEDS:
