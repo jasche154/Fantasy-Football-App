@@ -81,7 +81,15 @@ python -m database.create_tables      # creates a new database, or upgrades an e
 python -m database.populate_stats     # downloads 2021 through the current season (~1 minute)
 ```
 
-Re-run `python -m database.populate_stats` weekly during the season. It reloads the current
+**While the API is running, this happens on its own every week** (`services/auto_update.py`,
+checked every 6 hours):
+- A day after a week's last game, it loads that week's stats, which also updates the learned
+  source weights.
+- While the current week still has games left, it refreshes the outside sources and saves
+  everyone's pre-game projection.
+
+Set `AUTO_UPDATE=false` in `.env` to turn it off. You can still re-run
+`python -m database.populate_stats` by hand any time; it reloads the current
 season and fills in any missing ones. Other options:
 
 ```bash
@@ -349,7 +357,10 @@ after week to gain real weight.
     and Josh & Hayden (5.56).
   - Weights moved props 35→33%, Josh & Hayden 30→28%, model 15→18%, Yahoo 10→12% and
     ESPN 10→9%. The blend's error that week went from 4.204 to 4.196.
-- **Running it:** `python -m database.populate_stats` runs the update after each load.
+- **Running it:** it updates on its own every week while the API runs: the background
+  check loads the finished week and the load runs the update. The check also saves the next
+  week's pre-game projections, so the learner has data even in weeks you never open Week X.
+  `python -m database.populate_stats` does the same by hand.
   `python -m services.weight_learning --season 2026 --dry-run` shows what it would change.
 - **Storage:** each update is a row in the local `learned_weights` table. Delete the rows to
   go back to the starting weights.
@@ -537,6 +548,7 @@ Settings come from environment variables or `backend/.env` (never commit it; see
 | `ODDS_API_KEY` | — | Enables Vegas player props in Week X rankings |
 | `WEEKLY_SOURCES` | `["sleeper_status","yahoo_experts","espn","vegas_props"]` | JSON list of outside weekly sources to fetch |
 | `WEEKLY_AUTO_REFRESH` | `true` | Let `/api/rankings/weekly` refresh the current week's stale sources before answering (never for cross-site requests) |
+| `AUTO_UPDATE` | `true` | While the API runs, load each finished week's stats (updating the learned weights) and save the current week's pre-game projections, checked every 6 hours |
 | `GROQ_API_KEY` | — | Enables the AI chat |
 | `GROQ_MODEL` | `openai/gpt-oss-120b` | Groq model for the chat (free tier). `openai/gpt-oss-20b` is faster but invents players far more often |
 | `AGENT_SHARE_PFR_DATA` | `false` | Include PFR-sourced snap counts in AI tool results |

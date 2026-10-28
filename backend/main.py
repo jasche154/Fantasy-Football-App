@@ -11,6 +11,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from api import agent_routes, data_routes, integration_routes, legacy_routes, market_routes, weekly_routes
 from config import get_settings
 from database.db import SessionLocal
+from services import auto_update
 from services.league import LeagueSettings
 from services.valuation import build_valuation
 
@@ -30,6 +31,8 @@ def _warm_cache() -> None:
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     threading.Thread(target=_warm_cache, daemon=True).start()
+    if get_settings().auto_update:
+        auto_update.start(SessionLocal)       # weekly stats, weight learning, pre-game snapshots
     yield
 
 
