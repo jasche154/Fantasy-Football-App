@@ -484,3 +484,22 @@ def test_past_week_rankings_carry_actual_points(session, seeded, client):
     assert all(p.actual is None for p in current.players)                  # week 7 not played yet
     body = client.get("/api/rankings/weekly", params={"week": 6, "refresh": "false"}).json()
     assert "actual" in body["results"][0] and body["weights_learned_through"] is None
+
+
+def test_backup_qbs_only_play_when_the_qbs_ahead_of_them_sit():
+    depth = {"SEA": [1, 2, 3], "BAL": [4, 5]}
+    availability = {2: Availability(2, 0.9, "Questionable", "LP", "Elbow", "sleeper"),
+                    4: Availability(4, 0.8, "Questionable", "FP", "Ankle", "sleeper")}
+    out = injuries.backup_qb_availability(depth, availability)
+    assert 1 not in out and 4 not in out                                   # starters keep their own odds
+    assert out[2].play_prob == pytest.approx(injuries.BACKUP_FLOOR * 0.9)  # healthy QB1: QB2 ~0
+    assert out[3].play_prob == pytest.approx(0.0)                          # QB3 behind two healthy QBs
+    assert out[5].play_prob == pytest.approx(0.2) and out[5].status == "Backup QB (QB2)"
+
+
+def test_backup_qb_rest_of_season_share_is_what_the_starter_misses(session, seeded, monkeypatch):
+    from services import ros_consensus
+
+    monkeypatch.setattr("services.injuries.qb_depth", lambda s: {"AAA": [1, 2], "BBB": [3, 4]})
+    shares = ros_consensus.backup_qb_shares(session, {3: 0.6})
+    assert shares[2] == ros_consensus.BACKUP_ROS_FLOOR and shares[4] == pytest.approx(0.4)

@@ -17,6 +17,8 @@ const MATCHUP: MatchupResponse = {
   strategies: { expected: { projected: 111, win_probability: 0.545 }, upside: { projected: 110, win_probability: 0.53 },
     safe: { projected: 109, win_probability: 0.523 } },
   recommended: 'expected', changes: { start: ['Jahmyr Gibbs'], sit: ['Blake Corum'] }, simulations: 20000,
+  updated: { mode: 'expected', starters: [{ ...starter('Jahmyr Gibbs', 19.7), slot: 'FLEX' }], projected: 114, win_probability: 0.579 },
+  bench: [{ ...starter('Blake Corum', 9.1), slot: 'W/R/T' }, { ...starter('Kyle Monangai', 3.5), slot: 'BN' }],
 };
 
 describe('MatchupPage', () => {
@@ -31,6 +33,12 @@ describe('MatchupPage', () => {
     expect(strategy).toHaveTextContent('start Jahmyr Gibbs; sit Blake Corum');
     expect(screen.getByRole('region', { name: 'My Squad (you)' })).toHaveTextContent('Blake Corum');
     expect(screen.getByRole('region', { name: 'Rival' })).toHaveTextContent('Rival Back');
+    const updated = screen.getByRole('region', { name: /^Updated lineup/ });
+    expect(updated).toHaveTextContent('Updated lineup (Most points) · wins 58% 114.0');
+    expect(updated).toHaveTextContent('Jahmyr Gibbs');
+    const bench = screen.getByRole('region', { name: 'Bench' });
+    expect(bench).toHaveTextContent('Blake Corum');
+    expect(bench).toHaveTextContent('Kyle Monangai');
   });
 
   it('explains how to connect when no league is imported', async () => {

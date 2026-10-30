@@ -23,6 +23,7 @@ import type {
   LeagueWaiversResponse,
   MyLeaguesResponse,
   MyTeamResponse,
+  PlayoffsResponse,
   KdstResponse,
   MatchupResponse,
   ModelAccuracyResponse,
@@ -260,4 +261,8 @@ export function getMatchup(leagueId: number, signal?: AbortSignal): Promise<Matc
 
 export function getModelAccuracy(scoring: string, signal?: AbortSignal): Promise<ModelAccuracyResponse> {
   return apiRequest('/api/model/accuracy', { query: { scoring }, signal });
+}
+
+export function getPlayoffs(leagueId: number, signal?: AbortSignal): Promise<PlayoffsResponse> {
+  return apiRequest(`/api/my-team/${leagueId}/playoffs`, { signal });
 }

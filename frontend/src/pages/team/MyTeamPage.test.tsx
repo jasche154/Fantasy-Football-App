@@ -57,6 +57,30 @@ describe('MyTeamPage', () => {
     expect(within(list).getByText('Fills their WR need')).toBeInTheDocument();
   });
 
+  it('shows the playoff weeks, byes and the best lineup each week', async () => {
+    const cell = (week: number, opponent: string | null, projection: number) =>
+      ({ week, opponent, bye: opponent === null, factor: opponent ? 1.1 : null, projection });
+    mockFetch([META_ROUTE, { path: '/api/my-team/leagues', reply: json({ leagues: [LEAGUE] }) },
+      { path: '/api/my-team/1', reply: json(TEAM) },
+      { path: '/api/my-team/1/playoffs', reply: json({ league: 'Family League', team: 'My Squad', weeks: [16, 17, 18],
+        source: 'league', weakest_week: 18,
+        players: [{ player: BIJAN, slot: 'RB', ros_ppg: 18, weeks: [cell(16, 'NYG', 20.1), cell(17, null, 0), cell(18, 'CHI', 17)],
+          playoff_total: 37.1 }],
+        lineups: { 16: { projected: 95, starters: [1], empty_slots: [] }, 17: { projected: 80, starters: [], empty_slots: ['RB'] },
+          18: { projected: 78, starters: [1], empty_slots: [] } } }) }]);
+    const user = userEvent.setup();
+    renderWithProviders(<MyTeamPage />);
+    await screen.findByRole('region', { name: 'Lineup advice' });
+    await user.click(screen.getByRole('button', { name: 'Playoffs' }));
+    const outlook = await screen.findByRole('region', { name: 'Playoff outlook' });
+    expect(outlook).toHaveTextContent("Playoff weeks 16, 17, 18 (your league's schedule)");
+    const row = within(outlook).getByRole('link', { name: 'Bijan Robinson' }).closest('tr') as HTMLElement;
+    expect(row).toHaveTextContent('20.1vs NYG');
+    expect(row).toHaveTextContent('BYE');
+    expect(outlook).toHaveTextContent('empty: RB');
+    expect(outlook).toHaveTextContent('Your weakest playoff week is week 18');
+  });
+
   it('explains how to import a league when none is connected', async () => {
     mockFetch([META_ROUTE, { path: '/api/my-team/leagues', reply: json({ leagues: [] }) }]);
     renderWithProviders(<MyTeamPage />);

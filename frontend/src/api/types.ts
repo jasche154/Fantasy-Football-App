@@ -612,6 +612,10 @@ export interface MatchupResponse {
   recommended: string;
   changes: { start: string[]; sit: string[] };
   simulations: number;
+  /** The lineup after the recommended changes, and its projection / win chance. */
+  updated?: { mode: string; starters: MatchupStarter[]; projected: number; win_probability: number };
+  /** Everyone not in the updated lineup, best projection first (slot = where they sit in Yahoo now). */
+  bench?: MatchupStarter[];
 }
 
 export interface HeldOutResult {
@@ -630,4 +634,22 @@ export interface ModelAccuracyResponse {
   };
   backtest: { seasons: number[]; held_out: Record<string, HeldOutResult> } | null;
   weight_history: { season: number; week: number; rows: number; weights: Record<string, number> }[];
+}
+
+export interface PlayoffCell {
+  week: number;
+  opponent: string | null;
+  bye: boolean;
+  factor: number | null;
+  projection: number;
+}
+
+export interface PlayoffsResponse {
+  league: string;
+  team: string | null;
+  weeks: number[];
+  source: 'league' | 'default';
+  players: { player: PlayerSummary; slot: string; ros_ppg: number; weeks: PlayoffCell[]; playoff_total: number }[];
+  lineups: Record<string, { projected: number; starters: number[]; empty_slots: string[] }>;
+  weakest_week: number | null;
 }

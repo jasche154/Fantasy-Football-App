@@ -377,12 +377,52 @@ def ros_role_losses(seasons: Iterable[PlayerSeason], current_week: int, schedule
     return out
 
 
+BACKUP_FLOOR = 0.02            # a healthy starter can still get hurt mid-game
+
+
+def qb_depth(session: Session) -> dict[str, list[int]]:
+    """{team: [QB ids by depth]} from Sleeper's live depth chart, falling back to nflverse's."""
+    order: dict[str, list[tuple[int, int]]] = defaultdict(list)
+    for s in session.scalars(select(PlayerStatus).where(PlayerStatus.depth_position == "QB")):
+        if s.team and s.depth_order is not None:
+            order[s.team].append((s.depth_order, s.player_id))
+    if not order:
+        for d in session.scalars(select(DepthChartEntry).where(DepthChartEntry.position == "QB")):
+            order[d.team].append((d.depth, d.player_id))
+    return {team: [pid for _, pid in sorted(rows)] for team, rows in order.items()}
+
+
+def backup_qb_availability(depth: Mapping[str, list[int]],
+                           availability: Mapping[int, Availability]) -> dict[int, Availability]:
+    """A backup QB plays only if the QBs ahead of him don't: his chance = P(every QB ahead sits).
+
+    Example: Sam Darnold healthy as QB1 -> Drew Lock ~0, however well Lock played in Darnold's
+    absence. Lamar Jackson 77% to play -> Tyler Huntley's chance is about 23%.
+    """
+    out: dict[int, Availability] = {}
+    for team, qbs in depth.items():
+        ahead_sits = 1.0
+        for rank, pid in enumerate(qbs):
+            own = availability.get(pid)
+            own_prob = own.play_prob if own else 1.0
+            if rank > 0:
+                chance = ahead_sits * own_prob
+                if rank == 1:
+                    chance = max(chance, BACKUP_FLOOR * own_prob)   # QB2 also mops up mid-game injuries
+                out[pid] = Availability(pid, round(min(own_prob, chance), 3), f"Backup QB (QB{rank + 1})",
+                                        own.practice if own else None, own.injury if own else None, "depth chart")
+            ahead_sits *= 1.0 - own_prob
+    return out
+
+
 def build_context(session: Session, seasons: Iterable[PlayerSeason], rates: Mapping[int, float],
                   season: int, week: int, schedule: Schedule, use_live: bool = True,
                   exclude_rate_season: int | None = None) -> InjuryContext:
     """use_live adds Sleeper tags and today's depth chart: only for the current week."""
     seasons = list(seasons)
     availability = load_availability(session, season, week, use_live, exclude_rate_season)
+    if use_live:
+        availability = {**availability, **backup_qb_availability(qb_depth(session), availability)}
     depth = _depth(session) if use_live else {}
     return InjuryContext(availability=availability,
                          boosts=vacated_boosts(seasons, rates, availability, depth, schedule, week),

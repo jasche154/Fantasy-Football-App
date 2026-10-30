@@ -15,12 +15,14 @@ import { filterToPosition, type PositionFilterValue } from '../../lib/positions'
 import { paths, buildHash } from '../../router/routes';
 import { useMyLeague } from '../../state/useMyLeague';
 import { WaiverRow } from '../waivers/WaiversPage';
+import { PlayoffsView } from './PlayoffsView';
 
-type View = 'lineup' | 'waivers' | 'trades';
+type View = 'lineup' | 'waivers' | 'trades' | 'playoffs';
 const VIEWS: readonly { value: View; label: string }[] = [
   { value: 'lineup', label: 'Lineup' },
   { value: 'waivers', label: 'Waivers' },
   { value: 'trades', label: 'Trades' },
+  { value: 'playoffs', label: 'Playoffs' },
 ];
 const SCORING_LABELS: Record<string, string> = { ppr: 'PPR', half: 'Half PPR', std: 'Standard' };
 
@@ -232,7 +234,8 @@ export function MyTeamPage() {
               isEmpty={(d) => !d || d.roster.length === 0} empty={<EmptyState title="Roster not imported yet." />}>
               {(data) => data && <LineupView data={data} />}
             </AsyncView>
-          ) : view === 'waivers' ? <WaiversView league={league} /> : <TradesView league={league} />
+          ) : view === 'waivers' ? <WaiversView league={league} /> : view === 'playoffs' ? <PlayoffsView league={league} />
+            : <TradesView league={league} />
         )}
       </AsyncView>
       {league && <p className="hint attribution">Fantasy data provided by Yahoo Fantasy.</p>}
