@@ -56,7 +56,11 @@ only *explains* numbers that came back from a tool call. Every output is labeled
 - **Buy low / sell high:** finds players whose production is out of line with their usage, with plain-English reasons
 - **Matchup page:** your Yahoo opponent this week, both lineups, and your win probability from
   20,000 simulated weeks (next to Yahoo's own). It also recommends the expected, **upside** or
-  **safe** lineup, whichever wins most often against this opponent.
+  **safe** lineup, whichever wins most often against this opponent. At the bottom: the
+  recommended lineup's projection and win chance, and your bench with each player's projection.
+- **Playoff outlook:** your roster across your league's playoff weeks (read from Yahoo;
+  weeks 16–18 by default): opponent, bye, projection per week, the best lineup each week,
+  and your weakest playoff week.
 - **Kicker and defense projections** from advanced team stats: field-goal tries from the
   implied total and red-zone TD / stop rates, the kicker's accuracy by distance with
   wind and cold, and log5 sacks and takeaways with points-allowed tiers. Shown in Week X
@@ -160,8 +164,8 @@ Open <http://localhost:5173>. The UI talks to `http://localhost:8000` by default
 | Page | What you can do |
 |---|---|
 | **Dashboard** | Top buy-low and sell-high players with the reason behind each, Sleeper's most-added players, data freshness |
-| **Matchup** | This week's Yahoo opponent. Both starting lineups with projections and ranges, live points as games finish, and your win probability (with Yahoo's for comparison). **Lineup strategy** compares three versions of your lineup: most points, upside (favoring ceilings) and safe (favoring floors). Each is simulated against the opponent, and the one that wins most often is recommended, with the swaps to make |
-| **My Team** | Your imported Yahoo team (pick the league if you have several). **Lineup:** starters and bench with this week's projection, range, flags and rest-of-season value; the best lineup under your league's slots, with "Start X over Y (+points)" advice and Start/Sit tags. **Waivers:** players on no roster in your league. **Trades:** fair offers with each real team, built from their roster, teams that need what you'd send first. **Sync from Yahoo** re-imports now (the app also re-syncs every 6 hours) |
+| **Matchup** | This week's Yahoo opponent. Both starting lineups with projections and ranges, live points as games finish, and your win probability (with Yahoo's for comparison). **Lineup strategy** compares three versions of your lineup: most points, upside (favoring ceilings) and safe (favoring floors). Each is simulated against the opponent, and the one that wins most often is recommended, with the swaps to make. **Updated lineup** at the bottom shows that lineup's projected total and win chance, then your **bench** with each player's projection |
+| **My Team** | Your imported Yahoo team (pick the league if you have several). **Lineup:** starters and bench with this week's projection, range, flags and rest-of-season value; the best lineup under your league's slots, with "Start X over Y (+points)" advice and Start/Sit tags. **Waivers:** players on no roster in your league. **Trades:** fair offers with each real team, built from their roster, teams that need what you'd send first. **Playoffs:** each player's projection for every playoff week (your league's weeks from Yahoo, else 16–18), byes marked, the best lineup per week, and your weakest week. **Sync from Yahoo** re-imports now (the app also re-syncs every 6 hours) |
 | **Week X Rankings** | This week's projections by position; pick any week. Each row shows the matchup grade (opponent-adjusted, #1 = easiest), the Vegas implied team total, the blended projection, and every source's number (props, Josh & Hayden, Yahoo, ESPN, model). For finished games, **Actual** shows what each player scored (green beat the projection by 20%+, red missed by 20%+, DNP sat). Click a column header (Proj, Actual, Team total, or any source) to sort by it. **Schedule strength** switches to defenses ranked by adjusted points allowed and each team's upcoming opponents. **Refresh sources** re-pulls Yahoo and ESPN (Vegas props follow their credit budget) |
 | **Rankings** | Rest-of-season rankings by position; sort by actual, expected, or projected points, schedule strength, **Playoff SOS** (weeks 15–17), trade value, or ECR |
 | **Week X → Start / Sit** | Add up to four players. Each shows its projection, floor–ceiling range, injury status, "if <teammate> sits" scenarios, flags, and a **Why?** breakdown. A tiebreaker (most points / safe / upside) decides close calls |
@@ -266,6 +270,12 @@ produce an extreme matchup.
   Each "If <teammate> sits" scenario shows the full upside.
 - **Avoiding double counting.** If a teammate is already ruled Out, experts and Vegas have
   priced it in, so only the model's share of the boost is added.
+- **Backup quarterbacks.** A backup QB only plays when everyone ahead of him on the depth
+  chart (Sleeper's, else nflverse's) sits. His chance to play is the chance they all sit,
+  with a 2% floor for QB2 (in-game injuries), and his rest-of-season share is one minus the
+  starter's, floored at 3%. Example: Drew Lock scored well while Sam Darnold was out, but
+  with Darnold healthy he projects **0.2** this week (12.5 if he started) and 0.45 per game
+  rest of season.
 
 ### Backtest and tuning
 `python -m services.backtest --season 2025` replays a past season week by week, using only
@@ -332,6 +342,11 @@ the 10th/90th percentile of actual ÷ projected points.
 
 Most of the gain is calibration (getting the level right). The matchup and weather terms add
 a little to ranking; Vegas totals already price in most of what they know.
+
+**Overfitting check.** Each season is scored by a fit on earlier seasons only. The held-out
+gain (−0.19 to −0.21 RMSE) matches the in-sample gain (7.74 → 7.53 on 2021–24), and the
+results barely move between ridge 0 and 2000, so the few adjustment terms are not memorizing
+noise. The production ridge (20) stays. Learned source weights move in small capped steps.
 
 ### Kicker and defense projections
 `python -m services.kdst_model --fit` refits these. Both use team profiles (rates shrunk
@@ -512,7 +527,8 @@ League parameters accepted by every valuation endpoint: `scoring=ppr|half|std`,
 | GET | `/api/my-team/{league_id}` | Your roster with projections and the best-lineup advice |
 | GET | `/api/my-team/{league_id}/waivers?position=` | Waiver targets on no roster in that league |
 | GET | `/api/my-team/{league_id}/trades?want_position=` | Trade offers with each real team, by their needs |
-| GET | `/api/my-team/{league_id}/matchup` | This week's opponent, both lineups, win probability, expected/upside/safe lineups |
+| GET | `/api/my-team/{league_id}/matchup` | This week's opponent, both lineups, win probability, expected/upside/safe lineups, the updated lineup and the bench |
+| GET | `/api/my-team/{league_id}/playoffs` | Each player's playoff weeks (opponent, bye, projection) and the best lineup per week |
 | GET | `/api/rankings/weekly/kdst?position=K\|DST&week=` | Kicker or defense projections with their inputs |
 | GET | `/api/model/accuracy?scoring=` | Live accuracy, floor/ceiling coverage, held-out backtest, learned weights |
 | POST | `/api/my-team/{league_id}/sync` | Re-import that league from Yahoo now |
@@ -641,7 +657,7 @@ Settings come from environment variables or `backend/.env` (never commit it; see
 |---|---|---|
 | `DATABASE_URL` | `sqlite:///backend/database/fantasy.db` | Any SQLAlchemy URL |
 | `CORS_ORIGINS` | `["http://localhost:5173","http://127.0.0.1:5173"]` | JSON list of allowed web origins |
-| `FANTASY_END_WEEK` | `17` | Last fantasy week (drives weeks remaining) |
+| `FANTASY_END_WEEK` | `18` | Last fantasy week, the final (drives weeks remaining; playoffs default to 16–18) |
 | `ALLOWED_HOSTS` | `["localhost","127.0.0.1"]` | Host headers the API accepts (blocks DNS rebinding) |
 | `FANTASYPROS_API_KEY` | — | Enables FantasyPros ROS rankings |
 | `YAHOO_CLIENT_ID` / `YAHOO_CLIENT_SECRET` | — | Yahoo OAuth app credentials |
