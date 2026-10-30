@@ -18,6 +18,11 @@ import type {
   FlagsResponse,
   ProjectionExplanation,
   WaiversResponse,
+  LeagueSyncResult,
+  LeagueTradesResponse,
+  LeagueWaiversResponse,
+  MyLeaguesResponse,
+  MyTeamResponse,
 } from './types';
 
 export function getHealth(signal?: AbortSignal): Promise<{ status: string }> {
@@ -216,4 +221,28 @@ export function getWaivers(
     query: { position: options.position, max_rostered: options.maxRostered, limit: options.limit, ...settingsToParams(settings) },
     signal,
   });
+}
+
+export function getMyLeagues(signal?: AbortSignal): Promise<MyLeaguesResponse> {
+  return apiRequest('/api/my-team/leagues', { signal });
+}
+
+export function getMyTeam(leagueId: number, signal?: AbortSignal): Promise<MyTeamResponse> {
+  return apiRequest(`/api/my-team/${leagueId}`, { signal });
+}
+
+export function getLeagueWaivers(
+  leagueId: number,
+  options: { position?: Position; limit?: number } = {},
+  signal?: AbortSignal,
+): Promise<LeagueWaiversResponse> {
+  return apiRequest(`/api/my-team/${leagueId}/waivers`, { query: { position: options.position, limit: options.limit }, signal });
+}
+
+export function getLeagueTrades(leagueId: number, wantPosition?: Position, signal?: AbortSignal): Promise<LeagueTradesResponse> {
+  return apiRequest(`/api/my-team/${leagueId}/trades`, { query: { want_position: wantPosition }, signal });
+}
+
+export function syncMyLeague(leagueId: number): Promise<LeagueSyncResult> {
+  return apiRequest(`/api/my-team/${leagueId}/sync`, { method: 'POST' });
 }

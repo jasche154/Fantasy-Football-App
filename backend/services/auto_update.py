@@ -5,7 +5,9 @@ Every CHECK_HOURS (first check shortly after startup) a background thread:
    ago (nflverse posts box scores overnight) and that week isn't loaded yet. This is the
    same load as `python -m database.populate_stats`, which also runs the weekly
    source-weight update (services/weight_learning.py).
-2. **Saves the pre-game snapshot** for the current week while it has games left: refreshes
+2. **Re-imports your Yahoo leagues** (rosters, lineups, rules) when Yahoo is connected,
+   so My Team, league waivers and league trades follow adds, drops and trades.
+3. **Saves the pre-game snapshot** for the current week while it has games left: refreshes
    the outside sources (same caches and Odds API credit budget as opening the Week X page),
    then builds the default league's rankings, which records each player's pre-kickoff
    projection in projection_history. That's what the next weight update learns from, so
@@ -35,6 +37,7 @@ _started = threading.Event()
 @dataclass
 class UpdateResult:
     loaded_week: int | None = None           # stats loaded for this finished week
+    synced_leagues: int = 0                  # Yahoo leagues re-imported
     snapshot_week: int | None = None         # pre-game projections saved for this week
     notes: list[str] = field(default_factory=list)
 
@@ -52,7 +55,8 @@ def finished_week_to_load(schedule: Schedule, latest_loaded: int | None, today: 
 
 def run_once(session_factory: Callable[[], Session], today: date | None = None,
              load_stats: Callable[[list[int]], None] | None = None,
-             refresh: Callable[[Session, int, int], object] | None = None) -> UpdateResult:
+             refresh: Callable[[Session, int, int], object] | None = None,
+             sync_leagues: Callable[[Session], int] | None = None) -> UpdateResult:
     """One check. The loaders are injectable so tests don't touch the network."""
     from config import get_settings
     from database.populate_stats import load_data
@@ -77,6 +81,8 @@ def run_once(session_factory: Callable[[], Session], today: date | None = None,
         load_stats([season])                   # also nudges the source weights (weight_learning)
         result.loaded_week = due
     with session_factory() as session:
+        result.synced_leagues = (sync_leagues or sync_yahoo_leagues)(session)
+    with session_factory() as session:
         league = LeagueSettings()
         week = default_week(build_valuation(session, league))
         games = [g for g in load_schedule(session, season).games if g.week == week]
@@ -88,6 +94,28 @@ def run_once(session_factory: Callable[[], Session], today: date | None = None,
     return result
 
 
+def sync_yahoo_leagues(session: Session) -> int:
+    """Re-import every league that has the user's team (best-effort; returns how many synced)."""
+    import httpx
+
+    from config import get_settings
+    from services import yahoo_sync
+    from services.my_team import my_leagues
+
+    if yahoo_sync.get_connection(session) is None:
+        return 0
+    synced = 0
+    with httpx.Client(timeout=15.0) as http:
+        for league, _ in my_leagues(session):
+            try:
+                yahoo_sync.import_league(session, get_settings(), http, league.platform_league_id)
+                synced += 1
+            except Exception:          # Yahoo down or the token revoked: keep the last import
+                log.warning("Could not re-import Yahoo league %s", league.name, exc_info=True)
+                session.rollback()
+    return synced
+
+
 def _loop(session_factory: Callable[[], Session]) -> None:
     wait = FIRST_CHECK_SECONDS
     while True:
@@ -95,9 +123,9 @@ def _loop(session_factory: Callable[[], Session]) -> None:
             return
         try:
             result = run_once(session_factory)
-            if result.loaded_week or result.snapshot_week:
-                log.info("Auto-update: loaded week %s stats, saved week %s projections",
-                         result.loaded_week, result.snapshot_week)
+            if result.loaded_week or result.snapshot_week or result.synced_leagues:
+                log.info("Auto-update: loaded week %s stats, synced %s Yahoo leagues, saved week %s projections",
+                         result.loaded_week, result.synced_leagues, result.snapshot_week)
         except Exception:      # never let a bad check kill the thread; try again next time
             log.exception("Auto-update check failed")
         wait = CHECK_HOURS * 3600

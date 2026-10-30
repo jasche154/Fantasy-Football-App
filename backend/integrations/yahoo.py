@@ -65,7 +65,7 @@ def _token_request(http: httpx.Client, client_id: str, client_secret: str, form:
         response = http.post(TOKEN_URL, data=form, headers={
             "Authorization": f"Basic {credentials}", "Content-Type": "application/x-www-form-urlencoded"})
     except httpx.HTTPError as exc:
-        raise YahooError(f"Yahoo token request failed: {exc}") from exc
+        raise YahooError(f"Yahoo token request failed ({type(exc).__name__}).") from exc
     if response.status_code >= 400:
         raise YahooAuthError(f"Yahoo rejected the sign-in (HTTP {response.status_code}{_yahoo_reason(response)}). "
                              "Check that YAHOO_CLIENT_ID, YAHOO_CLIENT_SECRET and YAHOO_REDIRECT_URI match your "
@@ -107,7 +107,7 @@ def api_get(http: httpx.Client, token: YahooToken, path: str) -> dict:
         response = http.get(f"{API_BASE}/{path.lstrip('/')}", params={"format": "json"},
                             headers={"Authorization": f"Bearer {token.access_token}"})
     except httpx.HTTPError as exc:
-        raise YahooError(f"Yahoo API request failed: {exc}") from exc
+        raise YahooError(f"Yahoo API request failed ({type(exc).__name__}).") from exc
     if response.status_code == 401:
         raise YahooAuthError("Yahoo access token was rejected.")
     if response.status_code == 403:
@@ -201,8 +201,52 @@ def parse_roster(content: dict) -> list[dict]:
             "yahoo_player_id": str(meta.get("player_id")) if meta.get("player_id") else None,
             "name": name.get("full") if isinstance(name, dict) else name,
             "position": meta.get("display_position"), "slot": slot.get("position"),
+            "team": meta.get("editorial_team_abbr"),
         })
     return players
+
+
+RECEPTION_STAT_ID = 11
+# Yahoo roster slots -> this app's starter keys (K and DEF aren't modeled).
+SLOT_MAP = {"QB": "QB", "RB": "RB", "WR": "WR", "TE": "TE", "W/R/T": "FLEX", "W/R": "FLEX", "W/T": "FLEX",
+            "R/T": "FLEX"}
+SUPERFLEX_SLOTS = {"Q/W/R/T", "SUPERFLEX", "OP"}
+
+
+def _number(value: object, kind: type) -> int | float:
+    """Yahoo sends numbers as strings; anything unreadable or negative counts as 0."""
+    try:
+        number = kind(value)
+    except (TypeError, ValueError):
+        return kind(0)
+    return number if number >= 0 else kind(0)
+
+
+def parse_settings(content: dict) -> dict:
+    """Scoring preset, starter slots and bench size from /league/{league_key}/settings."""
+    league = content.get("league") or []
+    settings = merge(merge(league[1:]).get("settings")) if len(league) > 1 else {}
+    starters: dict[str, int] = {}
+    bench, superflex = 0, False
+    for item in (settings.get("roster_positions") or []):
+        slot = (item or {}).get("roster_position") or {} if isinstance(item, dict) else {}
+        position, count = slot.get("position"), _number(slot.get("count"), int)
+        if position == "BN":
+            bench += count
+        elif position in SUPERFLEX_SLOTS:
+            superflex = True
+        elif position in SLOT_MAP:
+            key = SLOT_MAP[position]
+            starters[key] = starters.get(key, 0) + count
+    reception = 0.0
+    modifiers = settings.get("stat_modifiers")
+    for item in ((modifiers if isinstance(modifiers, dict) else {}).get("stats") or []):
+        stat = (item or {}).get("stat") or {} if isinstance(item, dict) else {}
+        if _number(stat.get("stat_id"), int) == RECEPTION_STAT_ID:
+            reception = _number(stat.get("value"), float)
+    scoring = "ppr" if reception >= 0.75 else "half" if reception >= 0.25 else "std"
+    return {"scoring": scoring, "reception_points": reception, "starters": starters, "bench": bench,
+            "superflex": superflex}
 
 
 def league_team_keys(teams: Iterable[dict]) -> list[str]:

@@ -1,5 +1,6 @@
 const ICON_PATHS = {
   home: 'M3 11.5 12 4l9 7.5M5.5 10v10h5v-6h3v6h5V10',
+  team: 'M12 3 4 6v6c0 4.4 3.4 8.2 8 9 4.6-.8 8-4.6 8-9V6l-8-3Z',
   rankings: 'M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01',
   calendar: 'M4 6h16v14H4zM4 10h16M8 3v4M16 3v4',
   chart: 'M4 20h16M7 16v-5M12 16V6M17 16v-8',

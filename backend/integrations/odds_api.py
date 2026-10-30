@@ -74,7 +74,7 @@ class OddsApiClient:
         try:
             response = self._http.get(f"{BASE_URL}{path}", params={"apiKey": self._api_key, **(params or {})})
         except httpx.HTTPError as exc:
-            raise SourceError(f"The Odds API request failed: {exc}") from exc
+            raise SourceError(f"The Odds API request failed ({type(exc).__name__}).") from exc
         if response.status_code == 401:
             raise SourceError("The Odds API rejected the key (check ODDS_API_KEY).")
         if response.status_code == 429:

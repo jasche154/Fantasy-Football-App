@@ -10,7 +10,7 @@ Candidates are rostered in at most `max_rostered`% of ESPN leagues. Each is scor
 The FAAB bid scales with the score relative to the best candidate this week, capped at
 40% of budget (a league-winning add), with a 1% floor for speculative stashes.
 """
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 
 from config import get_settings
@@ -47,12 +47,18 @@ def _schedule_factor(valuation: Valuation, team: str | None, position: str, week
 
 
 def waiver_candidates(rankings: WeeklyRankings, valuation: Valuation, position: str | None = None,
-                      max_rostered: float = DEFAULT_MAX_ROSTERED, limit: int = 25) -> list[WaiverCandidate]:
+                      max_rostered: float = DEFAULT_MAX_ROSTERED, limit: int = 25,
+                      rostered_ids: Collection[int] | None = None) -> list[WaiverCandidate]:
+    """Waiver targets. With rostered_ids (one real league's rosters), anyone not on them is
+    available whatever his ESPN roster rate; otherwise the ESPN rate decides."""
     seasons = {p.player_id: p for p in valuation.seasons}
     replacement = valuation.replacement
     rows = []
     for player in rankings.players:
-        if player.pct_rostered is None or player.pct_rostered > max_rostered:
+        if rostered_ids is not None:
+            if player.player_id in rostered_ids:
+                continue
+        elif player.pct_rostered is None or player.pct_rostered > max_rostered:
             continue
         if position and player.position != position:
             continue
@@ -66,7 +72,8 @@ def waiver_candidates(rankings: WeeklyRankings, valuation: Valuation, position: 
         score = ros + WEEK_WEIGHT * week_value + SCHEDULE_SCALE * (schedule - 1) + flag_points
         if score <= 0:
             continue
-        reasons = [f"Rostered in {player.pct_rostered:.0f}% of ESPN leagues."]
+        reasons = ["Available in your league." if rostered_ids is not None else
+                   f"Rostered in {player.pct_rostered:.0f}% of ESPN leagues."]
         if week_value > 0:
             reasons.append(f"Projects {player.projection:.1f} this week, {week_value:.1f} above a typical "
                            f"{player.position} replacement.")
@@ -76,7 +83,7 @@ def waiver_candidates(rankings: WeeklyRankings, valuation: Valuation, position: 
             reasons.append(f"Next {SCHEDULE_WEEKS} matchups are {abs(schedule - 1) * 100:.0f}% "
                            f"{'easier' if schedule > 1 else 'tougher'} than average.")
         reasons.extend(f.detail for f in flags)
-        rows.append(WaiverCandidate(player, player.pct_rostered, round(ros, 1), round(week_value, 1),
+        rows.append(WaiverCandidate(player, player.pct_rostered or 0.0, round(ros, 1), round(week_value, 1),
                                     schedule, flags, round(score, 1), 0, tuple(reasons)))
     rows.sort(key=lambda c: -c.score)
     top = rows[0].score if rows else 1.0

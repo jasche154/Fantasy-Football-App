@@ -109,6 +109,13 @@ class PlayerMatcher:
         candidates = [c for c in candidates if c.team in wanted] or candidates
         return candidates[0].player_id if len(candidates) == 1 else None
 
+    def strict_match(self, name: str, team: str | None, position: str | None) -> int | None:
+        """The one player with exactly this name, position and team; None if not exactly one."""
+        wanted_team = normalize_team(team)
+        exact = [c for c in self.by_name.get(normalize_name(name), [])
+                 if c.position == position and wanted_team is not None and c.team == wanted_team]
+        return exact[0].player_id if len(exact) == 1 else None
+
 
 def source_row(season: int, week: int, source: str, *, player_id: int | None, name: str,
                position: str | None, team: str | None, opponent: str | None = None,
