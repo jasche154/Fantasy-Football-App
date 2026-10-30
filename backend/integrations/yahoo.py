@@ -201,6 +201,7 @@ def parse_roster(content: dict) -> list[dict]:
             "yahoo_player_id": str(meta.get("player_id")) if meta.get("player_id") else None,
             "name": name.get("full") if isinstance(name, dict) else name,
             "position": meta.get("display_position"), "slot": slot.get("position"),
+            "team": meta.get("editorial_team_abbr"),
         })
     return players
 

@@ -14,6 +14,8 @@ from sqlalchemy.orm import Session
 from config import Settings
 from database.models import League, PlatformConnection, Player, Roster, Team, User
 from integrations import yahoo
+from integrations.weekly_sources import PlayerMatcher
+from services.league import POSITIONS
 from integrations.token_crypto import decrypt, encrypt, require_valid_key, sign_state, state_is_valid
 
 PLATFORM = "yahoo"
@@ -146,20 +148,38 @@ def import_league(session: Session, settings: Settings, http: httpx.Client, leag
     week = meta.get("current_week") or 1
     league = _upsert_league(session, get_connection(session), meta,
                             {"scoring_type": meta.get("scoring_type"), "num_teams": meta.get("num_teams")})
-    yahoo_ids = dict(session.execute(select(Player.yahoo_player_id, Player.id)
-                                     .where(Player.yahoo_player_id.is_not(None))).all())
+    matcher = PlayerMatcher(session)
     teams = yahoo.parse_teams(yahoo.api_get(http, token, f"league/{league_key}/teams"))
-    spots, unmatched = 0, []
+    spots, unmatched, untracked = 0, [], []
     for team_meta in teams:
         team = _upsert_team(session, league, team_meta)
         roster = yahoo.parse_roster(yahoo.api_get(http, token, f"team/{team_meta['team_key']}/roster;week={week}"))
         session.execute(delete(Roster).where(Roster.team_id == team.id, Roster.week == week))
         for entry in roster:
-            player_id = yahoo_ids.get(entry["yahoo_player_id"])
+            name = entry["name"] or entry["yahoo_player_id"] or "unknown"
+            position = entry.get("position")
+            if position not in POSITIONS:
+                untracked.append(name)                     # team defenses and kickers aren't modeled
+                continue
+            player_id = _match_roster_player(session, matcher, entry)
             if player_id is None:
-                unmatched.append(entry["name"] or entry["yahoo_player_id"] or "unknown")
+                unmatched.append(name)
                 continue
             session.add(Roster(team_id=team.id, player_id=player_id, week=week, roster_slot=entry["slot"] or "BN"))
             spots += 1
     session.commit()
-    return {"league_id": league.id, "teams": len(teams), "roster_spots": spots, "unmatched_players": unmatched}
+    return {"league_id": league.id, "teams": len(teams), "roster_spots": spots, "unmatched_players": unmatched,
+            "untracked_players": untracked}
+
+
+def _match_roster_player(session: Session, matcher: PlayerMatcher, entry: dict) -> int | None:
+    """Yahoo id first; otherwise a unique name (+ position, team) match, remembered for next time."""
+    yahoo_id = entry.get("yahoo_player_id")
+    player_id = matcher.match(entry.get("name") or "", team=entry.get("team"), position=entry.get("position"),
+                              yahoo_id=yahoo_id)
+    if player_id is not None and yahoo_id and yahoo_id not in matcher.by_yahoo:
+        player = session.get(Player, player_id)
+        if player is not None and not player.yahoo_player_id:
+            player.yahoo_player_id = yahoo_id              # the crosswalk lacks recent rookies
+            matcher.by_yahoo[yahoo_id] = player_id
+    return player_id

@@ -7,7 +7,7 @@ import pytest
 from cryptography.fernet import Fernet
 
 from config import Settings
-from database.models import ExpertRanking, League, Roster, Team
+from database.models import ExpertRanking, League, Player, Roster, Team
 from integrations import fantasypros, sleeper, token_crypto, yahoo
 from services import yahoo_sync
 
@@ -295,7 +295,7 @@ def test_yahoo_json_parsers():
                      {"team_key": "461.l.1.t.2", "name": "Theirs", "owner": "Rival",
                       "is_owned_by_current_login": False}]
     roster = yahoo.parse_roster(roster_json(["555"])["fantasy_content"])
-    assert roster == [{"yahoo_player_id": "555", "name": "Yahoo 555", "position": "WR", "slot": "WR"}]
+    assert roster == [{"yahoo_player_id": "555", "name": "Yahoo 555", "position": "WR", "slot": "WR", "team": None}]
     assert yahoo.collection(None, "x") == [] and yahoo.merge({"a": 1}) == {"a": 1}
     assert yahoo.league_team_keys(teams) == ["461.l.1.t.1", "461.l.1.t.2"]
 
@@ -432,3 +432,24 @@ def test_yahoo_endpoints_without_configuration(client):
     assert client.get("/api/integrations/yahoo/auth-url").status_code == 503
     assert client.post("/api/integrations/yahoo/exchange", json={"code": "abc"}).status_code == 503
     assert client.get("/api/integrations/yahoo/leagues").status_code == 401
+
+
+def _roster_entry(pid, name, position, team):
+    return {"player": [[{"player_id": pid}, {"name": {"full": name}}, {"display_position": position},
+                        {"editorial_team_abbr": team}],
+                       {"selected_position": [{"coverage_type": "week"}, {"position": "BN"}]}]}
+
+
+def test_import_matches_unknown_yahoo_ids_by_name_and_skips_defenses(session, seeded):
+    roster = {"fantasy_content": {"team": [[{"team_key": "t"}], {"roster": {"0": {"players": {
+        "0": _roster_entry("7001", "Buy Low Guy", "WR", "BUY"),        # no yahoo id in the crosswalk yet
+        "1": _roster_entry("100026", "Steelers", "DEF", "Pit"),
+        "2": _roster_entry("7002", "Nobody Known", "RB", "XXX"),
+        "count": 3}}}}]}}
+    settings = yahoo_settings()
+    http, _ = yahoo_api({"team/461.l.1.t.1/roster;week=7": roster})
+    yahoo_sync.connect(session, settings, http, "CODE", issue_state(settings))
+    result = yahoo_sync.import_league(session, settings, http, "461.l.1")
+    assert result["roster_spots"] == 1
+    assert result["untracked_players"] == ["Steelers"] and result["unmatched_players"] == ["Nobody Known"]
+    assert session.get(Player, seeded["buy"]).yahoo_player_id == "7001"      # remembered for next import
