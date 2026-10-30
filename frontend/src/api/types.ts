@@ -612,6 +612,10 @@ export interface MatchupResponse {
   recommended: string;
   changes: { start: string[]; sit: string[] };
   simulations: number;
+  /** The lineup after the recommended changes, and its projection / win chance. */
+  updated?: { mode: string; starters: MatchupStarter[]; projected: number; win_probability: number };
+  /** Everyone not in the updated lineup, best projection first (slot = where they sit in Yahoo now). */
+  bench?: MatchupStarter[];
 }
 
 export interface HeldOutResult {

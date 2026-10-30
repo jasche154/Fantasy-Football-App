@@ -139,17 +139,23 @@ def build_matchup(session: Session, settings: Settings, http: httpx.Client, refe
     rec_ids = {pid for ids in options[recommended]["lineup"].values() for pid in ids}
     names = {pid: p.name for pid, p in weekly.items()}
 
+    def row(slot: str, pid: int) -> dict:
+        p = weekly.get(pid)
+        return {"slot": slot, "player_id": pid, "name": names.get(pid) or mt.player_name(session, pid),
+                "position": p.position if p else None, "team": p.team if p else None,
+                "opponent": p.matchup.opponent if p else None,
+                "projection": p.projection if p else 0.0, "floor": p.floor if p else None,
+                "ceiling": p.ceiling if p else None, "actual": p.actual if p else None,
+                "status": p.status if p else "no game / out"}
+
     def players(side: Side) -> list[dict]:
-        rows = []
-        for slot, pid in side.starters:
-            p = weekly.get(pid)
-            rows.append({"slot": slot, "player_id": pid, "name": names.get(pid) or mt.player_name(session, pid),
-                         "position": p.position if p else None, "team": p.team if p else None,
-                         "opponent": p.matchup.opponent if p else None,
-                         "projection": p.projection if p else 0.0, "floor": p.floor if p else None,
-                         "ceiling": p.ceiling if p else None, "actual": p.actual if p else None,
-                         "status": p.status if p else "no game / out"})
-        return rows
+        return [row(slot, pid) for slot, pid in side.starters]
+
+    recommended_rows = [row(slot, pid) for slot in mt.SLOT_ORDER
+                        for pid in options[recommended]["lineup"].get(slot, [])]
+    slot_of = {s.player_id: s.slot for s in team.spots}
+    bench_rows = sorted((row(slot_of[pid], pid) for pid in slot_of if pid not in rec_ids),
+                        key=lambda r: -r["projection"])
 
     return {
         "league": {"id": league.id, "name": league.name}, "week": week,
@@ -166,4 +172,8 @@ def build_matchup(session: Session, settings: Settings, http: httpx.Client, refe
         "changes": {"start": [names.get(pid) for pid in rec_ids - current_ids],
                     "sit": [names.get(pid) or mt.player_name(session, pid) for pid in current_ids - rec_ids]},
         "simulations": SIMULATIONS,
+        # The lineup after the recommended changes, its updated projection, and everyone left on the bench.
+        "updated": {"mode": recommended, "starters": recommended_rows, "projected": options[recommended]["projected"],
+                    "win_probability": options[recommended]["win_probability"]},
+        "bench": bench_rows,
     }

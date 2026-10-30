@@ -149,5 +149,11 @@ def test_matchup_simulates_both_lineups_and_picks_the_best_strategy(session, lea
     assert body["strategies"][body["recommended"]]["win_probability"] == max(
         s["win_probability"] for s in body["strategies"].values())
     assert "RB Player 01" in body["changes"]["start"]                       # the benched stud starts
+    updated = body["updated"]
+    assert updated["mode"] == body["recommended"] and any(r["name"] == "RB Player 01" for r in updated["starters"])
+    assert updated["projected"] == pytest.approx(sum(r["projection"] for r in updated["starters"]), abs=0.2)
+    on_bench = {r["player_id"] for r in body["bench"]}
+    assert ids["RB Player 05"] in on_bench and not on_bench & {r["player_id"] for r in updated["starters"]}
+    assert [r["projection"] for r in body["bench"]] == sorted((r["projection"] for r in body["bench"]), reverse=True)
     monkeypatch.setattr(mu.yahoo, "api_get", lambda http, token, path: {"league": []})
     assert client.get(f"/api/my-team/{row.id}/matchup").status_code == 404   # no matchup (bye)

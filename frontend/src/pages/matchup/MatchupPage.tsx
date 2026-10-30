@@ -13,12 +13,14 @@ import { useMyLeague } from '../../state/useMyLeague';
 const MODE_LABELS: Record<string, string> = { expected: 'Most points', upside: 'Upside', safe: 'Safe' };
 const pct = (v: number | null | undefined) => (v == null ? '—' : `${Math.round(v * 100)}%`);
 
-function Lineup({ title, rows, total }: { title: string; rows: readonly MatchupStarter[]; total: number }) {
+function Lineup({ title, rows, total, slotLabel = 'Slot' }: {
+  title: string; rows: readonly MatchupStarter[]; total?: number; slotLabel?: string;
+}) {
   return (
     <section className="matchup-side" aria-label={title}>
-      <h2 className="section-title">{title} <span className="matchup-side__total">{formatNumber(total)}</span></h2>
+      <h2 className="section-title">{title} {total !== undefined && <span className="matchup-side__total">{formatNumber(total)}</span>}</h2>
       <table className="data-table">
-        <thead><tr><th scope="col">Slot</th><th scope="col">Player</th><th scope="col" className="num">Proj</th><th scope="col" className="num">Range</th><th scope="col" className="num">Actual</th></tr></thead>
+        <thead><tr><th scope="col">{slotLabel}</th><th scope="col">Player</th><th scope="col" className="num">Proj</th><th scope="col" className="num">Range</th><th scope="col" className="num">Actual</th></tr></thead>
         <tbody>
           {rows.map((r) => (
             <tr key={`${r.slot}-${r.player_id}`}>
@@ -83,6 +85,13 @@ export function MatchupPage() {
                   <Lineup title={`${d.me.team} (you)`} rows={d.me.starters} total={d.me.projected} />
                   <Lineup title={d.opponent.team} rows={d.opponent.starters} total={d.opponent.projected} />
                 </div>
+                {d.updated && (
+                  <div className="matchup-updated">
+                    <Lineup title={`Updated lineup (${MODE_LABELS[d.updated.mode] ?? d.updated.mode}) · wins ${pct(d.updated.win_probability)}`}
+                      rows={d.updated.starters} total={d.updated.projected} />
+                    {d.bench && d.bench.length > 0 && <Lineup title="Bench" rows={d.bench} slotLabel="Now" />}
+                  </div>
+                )}
                 <p className="hint attribution">Fantasy data provided by Yahoo Fantasy.</p>
               </>
             )}
