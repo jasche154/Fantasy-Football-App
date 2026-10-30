@@ -112,16 +112,36 @@ describe('MyTeamPage', () => {
     expect(within(table).getByText('My Squad').closest('tr')).toHaveTextContent('53%');
   });
 
-  it('lists the latest news for the roster under the lineup', async () => {
+  it('highlights players with unread news and opens their notes in a panel', async () => {
+    localStorage.removeItem('gridiron.newsSeen');
+    const recent = new Date(Date.now() - 2 * 3600 * 1000).toISOString();
+    const old = new Date(Date.now() - 10 * 24 * 3600 * 1000).toISOString();
+    const item = { title: 'Bijan limited Wednesday', summary: 'Ankle.', analysis: 'Worth watching Friday.',
+      source: 'RotoWire', url: 'https://example.com/n', published: recent };
     mockFetch([META_ROUTE, { path: '/api/my-team/leagues', reply: json({ leagues: [LEAGUE] }) },
       { path: '/api/my-team/1', reply: json(TEAM) },
-      { path: '/api/my-team/1/news', reply: json({ items: [{ title: 'Bijan limited Wednesday', summary: 'Ankle.', analysis: null,
-        source: 'RotoWire', url: 'https://example.com/n', published: '2026-10-29T18:00:00+00:00',
-        player: { id: BIJAN.id, name: BIJAN.name } }] }) }]);
+      { path: '/api/my-team/1/news', reply: json({
+        items: [{ ...item, player: { id: BIJAN.id, name: BIJAN.name } }],
+        latest: { [BIJAN.id]: recent, [CHASE.id]: old } }) },
+      { path: `/api/players/${BIJAN.id}/news`, reply: json({ items: [item] }) }]);
+    const user = userEvent.setup();
     renderWithProviders(<MyTeamPage />);
-    const news = await screen.findByRole('region', { name: 'Roster news' });
-    expect(await within(news).findByText('Bijan limited Wednesday')).toBeInTheDocument();
-    expect(within(news).getByRole('link', { name: 'Full note' })).toHaveAttribute('rel', 'noopener noreferrer');
+
+    const fresh = await screen.findByRole('button', { name: `New news for ${BIJAN.name}` });
+    expect(fresh).toHaveClass('news-btn--new');
+    expect(screen.getByRole('button', { name: `News for ${CHASE.name}` })).toHaveClass('news-btn--seen');
+    const feed = screen.getByRole('region', { name: 'Roster news' });
+    expect(within(feed).getByText('New')).toBeInTheDocument();
+
+    await user.click(fresh);
+    const panel = await screen.findByRole('dialog', { name: `${BIJAN.name} news` });
+    expect(await within(panel).findByText('Worth watching Friday.')).toBeInTheDocument();
+    expect(within(panel).getByRole('link', { name: 'Full note' })).toHaveAttribute('rel', 'noopener noreferrer');
+
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: `News for ${BIJAN.name}` })).toHaveClass('news-btn--seen');
+    expect(JSON.parse(localStorage.getItem('gridiron.newsSeen') ?? '{}')[String(BIJAN.id)]).toBe(recent);
   });
 
   it('explains how to import a league when none is connected', async () => {
