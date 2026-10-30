@@ -7,6 +7,7 @@ import { describeSettings } from '../../state/leagueSettings';
 import { useMeta } from '../../state/MetaContext';
 import { useLeagueSettings } from '../../state/SettingsContext';
 import { InsightCard } from './InsightCard';
+import { ThisWeekCard } from './ThisWeekCard';
 import { TrendingCard } from './TrendingCard';
 
 export function freshnessLabel(meta: Meta): string {
@@ -72,6 +73,7 @@ export function DashboardPage() {
         }
       />
       <QuickLinks />
+      <ThisWeekCard />
       <div className="dashboard-grid">
         <InsightCard kind="buy-low" />
         <InsightCard kind="sell-high" />

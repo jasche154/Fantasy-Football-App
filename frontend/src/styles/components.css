@@ -738,3 +738,17 @@
 .lineup-alerts { margin: 0 0 12px; padding: 10px 14px; border-radius: 8px; border-left: 3px solid var(--color-warn, #d9a521);
   background: var(--color-warn-soft, rgba(217, 165, 33, 0.12)); }
 .lineup-alerts ul { margin: 0; padding-left: 18px; }
+
+.waiver__advice { margin: 4px 0; }
+.waiver__action { margin-left: auto; padding: 1px 8px; border-radius: 999px; font-size: 0.8rem; font-weight: 700;
+  background: var(--color-surface-2, rgba(127, 127, 127, 0.15)); }
+.waiver__action--bid, .waiver__action--claim, .waiver__action--add { color: #fff; background: var(--color-accent, #e8622c); }
+.streaming-path { margin: 4px 0 8px; }
+.heat--high { background: color-mix(in srgb, var(--color-success, #2e9d5b) 22%, transparent); }
+.heat--mid { background: color-mix(in srgb, var(--color-success, #2e9d5b) 10%, transparent); }
+.main-nav__heading { padding: 14px 12px 4px; font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--color-text-muted); list-style: none; }
+@media (max-width: 760px) { .main-nav__heading { display: none; } }
+
+.checklist { margin: 0; padding-left: 18px; display: grid; gap: 6px; }
+.checklist__warn { color: var(--color-warn-text, inherit); }

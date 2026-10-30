@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { getLeagueOverview, getLeagueTrades, getLeagueWaivers, getMyTeam, getRosterNews, syncMyLeague } from '../../api/data';
 import type {
-  LeagueTradesResponse, ManagerTendencies, MyLeague, MyTeamResponse, MyTeamRosterRow, NewsResponse, PlayerSummary, Position,
+  LeagueTradesResponse, LeagueWaiversResponse, ManagerTendencies, MyLeague, MyTeamResponse, MyTeamRosterRow, NewsResponse, PlayerSummary, Position,
 } from '../../api/types';
 import { AsyncView } from '../../components/AsyncView';
 import { PageHeader } from '../../components/Card';
@@ -22,12 +22,14 @@ import { NewsButton, NewsPanel } from '../../components/PlayerNews';
 import { loadSeen, markSeen, newsState, type SeenNews } from '../../lib/newsSeen';
 import { LeagueView, TendencyNote } from './LeagueView';
 import { PlayoffsView } from './PlayoffsView';
+import { StreamingView } from './StreamingView';
 
-type View = 'lineup' | 'waivers' | 'trades' | 'playoffs' | 'league';
+type View = 'lineup' | 'waivers' | 'trades' | 'streaming' | 'playoffs' | 'league';
 const VIEWS: readonly { value: View; label: string }[] = [
   { value: 'lineup', label: 'Lineup' },
   { value: 'waivers', label: 'Waivers' },
   { value: 'trades', label: 'Trades' },
+  { value: 'streaming', label: 'Streaming' },
   { value: 'playoffs', label: 'Playoffs' },
   { value: 'league', label: 'League' },
 ];
@@ -197,6 +199,27 @@ function RosterNews({ news, seen, onPlayer }: RosterNewsProps) {
   );
 }
 
+function deadlineText(date: string | null | undefined): string | null {
+  if (!date) return null;
+  const days = Math.ceil((new Date(`${date}T23:59:59`).getTime() - Date.now()) / 86_400_000);
+  return days < 0 ? 'The trade deadline has passed.' : `Trade deadline ${date} (${days} day${days === 1 ? '' : 's'} left).`;
+}
+
+function WaiverSummary({ data }: { data: LeagueWaiversResponse }) {
+  const kind = data.league_type;
+  const text = kind === 'faab'
+    ? `FAAB league: ${data.my_balance != null ? `$${data.my_balance} left` : 'balance unknown'}${data.faab_budget ? ` of $${data.faab_budget}` : ''}. Bids follow your league's winning bids (estimates until there are 8).`
+    : kind === 'priority'
+      ? `Waiver priority league: you're ${data.my_priority ? `#${data.my_priority}` : 'unranked'}. Spend a top-3 priority only on a real difference-maker.`
+      : kind === 'free_agency' ? 'Free agency: add players right away.' : null;
+  return (
+    <p className="hint">
+      Ranked by how many points each pickup adds to your best lineup over the rest of the season ({data.weeks_left ?? '?'} weeks,
+      playoff weeks weighted by your playoff odds), after dropping your least useful player. {text}
+    </p>
+  );
+}
+
 function WaiversView({ league }: { league: MyLeague }) {
   const [filter, setFilter] = useState<PositionFilterValue>('ALL');
   const position = filterToPosition(filter);
@@ -208,9 +231,12 @@ function WaiversView({ league }: { league: MyLeague }) {
         isEmpty={(d) => d.results.length === 0}
         empty={<EmptyState title="No free agents worth adding right now." />}>
         {(data) => (
+          <>
+          <WaiverSummary data={data} />
           <ol className="waiver-list" aria-label={`Free agents in ${data.league}`}>
             {data.results.map((row) => <WaiverRow key={row.player.id} row={row} />)}
           </ol>
+          </>
         )}
       </AsyncView>
     </>
@@ -231,6 +257,7 @@ function TradeTeam({ team, habits }: { team: LeagueTradesResponse['teams'][numbe
           <li key={`${offer.give.map((p) => p.id).join('-')}-${offer.get.id}`}>
             Give {offer.give.map((p) => p.name).join(' + ')} for <strong>{offer.get.name}</strong> ({offer.get.position})
             {' '}· {offer.evaluation.verdict.replace('_', ' ')}
+            {offer.your_gain != null && <> · you +{formatNumber(offer.your_gain)}, them {offer.their_gain! >= 0 ? '+' : ''}{formatNumber(offer.their_gain ?? 0)} lineup pts</>}
             {offer.fills_their_need.length > 0 && <>{' '}<span className="status-badge status-badge--ok">Fills their {offer.fills_their_need.join('/')} need</span></>}
             {' '}<a href={buildHash(paths.trade, { give: offer.give.map((p) => p.id).join(','), get: String(offer.get.id) })}>Open in calculator</a>
           </li>
@@ -255,7 +282,10 @@ function TradesView({ league }: { league: MyLeague }) {
         empty={<EmptyState title="No fair trades found.">Try another position.</EmptyState>}>
         {(data) => (
           <>
-            <p className="hint">Offers are fair by this app's values and by expert consensus. Teams that need what you'd send come first.</p>
+            <p className="hint">
+              Each offer improves your starting lineup (your gain) without costing theirs too much (their gain), and is fair by
+              this app's values and expert consensus. {deadlineText(data.trade_end_date)}
+            </p>
             <ol className="league-trades" aria-label={`Trade ideas in ${data.league}`}>
               {data.teams.map((team) => <TradeTeam key={team.team ?? ''} team={team} habits={habitsByTeam.get(team.team ?? '')} />)}
             </ol>
@@ -311,7 +341,8 @@ export function MyTeamPage() {
               {(data) => data && <LineupView data={data} />}
             </AsyncView>
           ) : view === 'waivers' ? <WaiversView league={league} /> : view === 'playoffs' ? <PlayoffsView league={league} />
-            : view === 'league' ? <LeagueView league={league} /> : <TradesView league={league} />
+            : view === 'league' ? <LeagueView league={league} /> : view === 'streaming' ? <StreamingView league={league} />
+            : <TradesView league={league} />
         )}
       </AsyncView>
       {league && <p className="hint attribution">Fantasy data provided by Yahoo Fantasy.</p>}

@@ -556,23 +556,46 @@ export interface MyTeamResponse {
   lineup: { current_total: number; best_total: number; changes: LineupChange[] };
 }
 
+export interface WaiverAdvice {
+  action: 'bid' | 'pass' | 'claim' | 'wait' | 'add';
+  note: string;
+  bid?: number;
+  market?: number;
+  worth?: number;
+  estimate?: boolean;
+}
+
+export interface LeagueWaiverCandidate extends WaiverCandidate {
+  /** Points this pickup adds to your best lineup over the rest of the season (after the drop). */
+  lineup_gain?: number;
+  drop?: PlayerSummary | null;
+  advice?: WaiverAdvice;
+}
+
 export interface LeagueWaiversResponse {
   league: string;
   season: number;
   week: number;
-  results: WaiverCandidate[];
+  league_type?: 'faab' | 'priority' | 'free_agency';
+  weeks_left?: number;
+  my_priority?: number | null;
+  my_balance?: number | null;
+  faab_budget?: number | null;
+  trade_end_date?: string | null;
+  results: LeagueWaiverCandidate[];
 }
 
 export interface LeagueTeamOffers {
   team: string | null;
   owner: string | null;
   needs: Position[];
-  offers: (TradeOffer & { fills_their_need: Position[] })[];
+  offers: (TradeOffer & { fills_their_need: Position[]; your_gain?: number; their_gain?: number })[];
 }
 
 export interface LeagueTradesResponse {
   league: string;
   perspective: string;
+  trade_end_date?: string | null;
   teams: LeagueTeamOffers[];
 }
 
@@ -782,4 +805,24 @@ export interface CompareSummary {
 export interface CompareResponse {
   seasons: number[];
   players: { player: PlayerSummary; games: CompareGame[]; summary: CompareSummary[] }[];
+}
+
+export interface StreamingCell {
+  opponent?: string | null;
+  projection: number;
+  early?: boolean;
+  bye?: boolean;
+}
+
+export interface StreamingGrid {
+  rows: { player: PlayerSummary; name: string; mine: boolean; by_week: Record<string, StreamingCell>; total: number;
+    rush_ppg?: number }[];
+  path: string[];
+}
+
+export interface StreamingResponse {
+  league: string;
+  weeks: number[];
+  grids: Record<string, StreamingGrid>;
+  note: string;
 }

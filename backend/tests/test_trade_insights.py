@@ -13,20 +13,20 @@ def value(pid: int, trade_value: float, position: str = "WR") -> PlayerValue:
                        expected_ppg=15.0, ros_ppg=15.0, vorp_per_game=trade_value / 10, trade_value=trade_value)
 
 
-def test_depth_weights_step_down_with_floor():
-    assert [depth_weight(i) for i in range(7)] == [1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.5]
+def test_depth_weights_step_down_steeply():
+    assert [depth_weight(i) for i in range(6)] == [1.0, 0.7, 0.5, 0.4, 0.4, 0.4]
 
 
 def test_package_sorts_by_value_before_discounting():
     side = package([value(1, 50), value(2, 100)])
     assert [p.value.player_id for p in side.players] == [2, 1]
-    assert (side.raw_total, side.adjusted_total) == (150, 145)
+    assert (side.raw_total, side.adjusted_total) == (150, 135)
 
 
 def test_two_mid_players_do_not_equal_one_stud():
     result = evaluate_trade([value(1, 100)], [value(2, 50), value(3, 50)], [], 10)
-    assert result.get.raw_total == 100 and result.get.adjusted_total == 95
-    assert result.verdict == "fair" and result.difference == -5
+    assert result.get.raw_total == 100 and result.get.adjusted_total == 85
+    assert result.verdict == "slight_loss" and result.difference == -15
 
 
 @pytest.mark.parametrize("percent, verdict", [

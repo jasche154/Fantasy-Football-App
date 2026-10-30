@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { getLeagueWaivers, getWaivers } from '../../api/data';
-import type { WaiverCandidate } from '../../api/types';
+import type { LeagueWaiverCandidate, WaiverCandidate } from '../../api/types';
 import { AsyncView } from '../../components/AsyncView';
 import { PageHeader } from '../../components/Card';
 import { FlagChips, StatusBadge } from '../../components/FlagChips';
@@ -18,17 +18,34 @@ import { useMyLeague } from '../../state/useMyLeague';
 
 const ROSTERED_OPTIONS = [10, 25, 50, 75].map((v) => ({ value: v, label: `Under ${v}% rostered` }));
 
-export function WaiverRow({ row }: { row: WaiverCandidate }) {
+const ACTION_LABELS: Record<string, string> = { bid: 'Bid', pass: 'Pass', claim: 'Claim', wait: 'Wait', add: 'Add' };
+
+export function WaiverRow({ row }: { row: WaiverCandidate | LeagueWaiverCandidate }) {
+  const league = 'advice' in row && row.advice ? row : null;
   return (
     <li className="waiver">
       <div className="waiver__head">
         <PlayerLink player={row.player} />
         <StatusBadge status={row.status} playProb={row.play_prob} />
         <span className="waiver__rostered">{formatNumber(row.pct_rostered, 0)}% rostered</span>
-        <span className="waiver__bid" title="Suggested share of your FAAB budget">
-          {row.faab_label} · bid {row.faab_pct}%
-        </span>
+        {league?.advice ? (
+          <span className={`waiver__action waiver__action--${league.advice.action}`}>
+            {ACTION_LABELS[league.advice.action] ?? league.advice.action}
+            {league.advice.bid != null && ` $${league.advice.bid}`}
+          </span>
+        ) : (
+          <span className="waiver__bid" title="Suggested share of your FAAB budget">
+            {row.faab_label} · bid {row.faab_pct}%
+          </span>
+        )}
       </div>
+      {league?.advice && (
+        <p className="waiver__advice">
+          <strong>+{formatNumber(league.lineup_gain ?? 0)} lineup points</strong> rest of season
+          {league.drop && <> · drop <PlayerLink player={league.drop} /></>}
+          {' · '}{league.advice.note}
+        </p>
+      )}
       <p className="waiver__numbers">
         This week {formatNumber(row.projection)} ({formatNumber(row.floor)}–{formatNumber(row.ceiling)}) · ROS value{' '}
         {formatNumber(row.ros_value, 0)} · next 3 weeks {row.schedule_factor >= 1 ? '+' : ''}

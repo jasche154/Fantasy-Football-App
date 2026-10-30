@@ -87,22 +87,40 @@ def my_team(league_id: int, session: Session = Depends(get_session)) -> dict:
 @router.get("/{league_id}/waivers")
 def waivers(league_id: int, position: Position | None = None, limit: int = Query(25, ge=1, le=100),
             session: Session = Depends(get_session)) -> dict:
+    """Free agents in your league scored by how much they add to your lineup (with the player to drop),
+    and what to do for your league's waiver type: a FAAB bid, a priority claim or wait, or add now."""
+    from services.league_moves import waiver_plan
+
     _league_or_404(session, league_id)
-    league, rankings, candidates = mt.league_waivers(session, league_id, position, limit)
-    return {"league": league.name, "season": rankings.season, "week": rankings.week,
-            "results": [serialize.waiver(c) for c in candidates]}
+    try:
+        plan = waiver_plan(session, league_id, position, limit)
+    except NoDataError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    return {"league": plan["league"].name, "season": plan["rankings"].season, "week": plan["rankings"].week,
+            "league_type": plan["league_type"], "weeks_left": plan["weeks_left"],
+            "my_priority": plan["my_priority"], "my_balance": plan["my_balance"], "faab_budget": plan["faab_budget"],
+            "trade_end_date": plan["trade_end_date"],
+            "results": [{**serialize.waiver(c), "lineup_gain": gain,
+                         "drop": serialize.player_ref(drop) if drop else None, "advice": advice.as_dict()}
+                        for gain, c, drop, advice in plan["rows"]]}
 
 
 @router.get("/{league_id}/trades")
 def trades(league_id: int, want_position: Position | None = None, session: Session = Depends(get_session)) -> dict:
     _league_or_404(session, league_id)
     league, by_team = mt.league_trades(session, league_id, want_position)
+    from services.league_moves import score_trades
+
     weeks = build_valuation(session, mt.league_settings(league)).weeks_remaining
+    rules = mt.league_rules(league)
     return {"league": league.name, "perspective": "give = from your roster, get = from their roster",
+            "trade_end_date": rules.get("trade_end_date"),
+            "note": "your_gain / their_gain: points each starting lineup gains over the rest of the season",
             "teams": [{"team": r.team.name, "owner": r.team.owner_display_name, "needs": list(r.needs),
-                       "offers": [{**serialize.trade_offer(o, weeks),
+                       "offers": [{**serialize.trade_offer(o, weeks), "your_gain": mine, "their_gain": theirs,
                                    "fills_their_need": [p.position for p in o.give if p.position in r.needs]}
-                                  for o in r.offers]} for r in by_team]}
+                                  for o, mine, theirs in offers]}
+                      for r, offers in score_trades(session, league_id, by_team)]}
 
 
 @router.post("/{league_id}/sync")
@@ -164,3 +182,15 @@ def roster_news(league_id: int, limit: int = Query(15, ge=1, le=40), session: Se
     items = sorted((i for news in by_player.values() for i in news), key=lambda i: i["published"] or "", reverse=True)
     return {"items": items[:limit], "source": "Sleeper",
             "latest": {str(pid): news[0]["published"] for pid, news in by_player.items() if news[0]["published"]}}
+
+
+@router.get("/{league_id}/streaming")
+def streaming(league_id: int, session: Session = Depends(get_session)) -> dict:
+    """Defense (and one-QB-league quarterback) streaming grid for the next three weeks, with a suggested path."""
+    from services.streaming import streaming_grid
+
+    _league_or_404(session, league_id)
+    try:
+        return streaming_grid(session, league_id)
+    except NoDataError as exc:
+        raise HTTPException(503, str(exc)) from exc

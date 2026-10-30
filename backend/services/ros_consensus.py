@@ -168,7 +168,9 @@ def availability(session: Session, remaining_weeks: int) -> dict[int, float]:
 
 def ros_inputs(session: Session, season: int, scoring_key: str, scoring: ScoringSettings,
                model_ppg: Mapping[int, float], positions: Mapping[int, str],
-               remaining_weeks: int) -> dict[int, RosInputs]:
+               remaining_weeks: int, matchup: Mapping[int, float] | None = None) -> dict[int, RosInputs]:
+    """matchup: this week's matchup factor per player; the weekly piece is divided by it, so one
+    easy or hard matchup doesn't move rest-of-season value (only the player's role does)."""
     ranks = expert_ranks(session, season, scoring_key)
     weekly = weekly_points(session, season, positions, scoring)
     avail = availability(session, remaining_weeks)
@@ -182,7 +184,8 @@ def ros_inputs(session: Session, season: int, scoring_key: str, scoring: Scoring
         rank = ranks.get(pid)
         curve = curves[positions.get(pid, "")]
         out[pid] = RosInputs(model=ppg, experts=round(_rank_points(curve, rank), 2) if rank and curve else None,
-                             expert_rank=rank, weekly=weekly.get(pid), availability=avail.get(pid, 1.0))
+                             expert_rank=rank, availability=avail.get(pid, 1.0),
+                             weekly=weekly[pid] / (matchup or {}).get(pid, 1.0) if pid in weekly else None)
     return out
 
 

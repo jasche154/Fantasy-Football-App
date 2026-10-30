@@ -132,9 +132,11 @@ def league_settings(league: League) -> LeagueSettings:
         raw_starters = dict(DEFAULT_STARTERS)
     starters = {str(k): _int(v, 0, 0, MAX_SLOTS) for k, v in raw_starters.items()}
     scoring = rules.get("scoring") if rules.get("scoring") in SCORING_PRESETS else "ppr"
+    weeks = rules.get("playoff_weeks")
+    playoff = tuple(w for w in weeks if isinstance(w, int) and 1 <= w <= 18) if isinstance(weeks, list) else ()
     return LeagueSettings(scoring=scoring, teams=_int(rules.get("num_teams"), 12, 2, 32),
                           superflex=rules.get("superflex") is True, bench=_int(rules.get("bench"), 6, 0, 30),
-                          starters=MappingProxyType(starters))
+                          starters=MappingProxyType(starters), playoff_weeks=playoff or None)
 
 
 def my_leagues(session: Session) -> list[tuple[League, Team]]:

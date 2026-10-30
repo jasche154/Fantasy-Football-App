@@ -27,6 +27,7 @@ import type {
   LeagueOverview,
   NewsResponse,
   CompareResponse,
+  StreamingResponse,
   KdstResponse,
   MatchupResponse,
   ModelAccuracyResponse,
@@ -292,4 +293,8 @@ export function getComparison(
     query: { ids: ids.join(','), seasons: seasons.join(','), ...settingsToParams(settings) },
     signal,
   });
+}
+
+export function getStreaming(leagueId: number, signal?: AbortSignal): Promise<StreamingResponse> {
+  return apiRequest(`/api/my-team/${leagueId}/streaming`, { signal });
 }
