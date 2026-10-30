@@ -379,6 +379,38 @@ def ros_role_losses(seasons: Iterable[PlayerSeason], current_week: int, schedule
 
 BACKUP_FLOOR = 0.02            # a healthy starter can still get hurt mid-game
 
+# Untagged players still sit sometimes: the chance by position and last week's offensive snap
+# share (upper bounds 10/25/50/75/100%), measured 2021-2026. Applied when it's 10% or more.
+SNAP_EDGES = (10.0, 25.0, 50.0, 75.0, 101.0)
+SIT_RISK = {"RB": (0.24, 0.11, 0.05, 0.018, 0.017), "WR": (0.20, 0.12, 0.07, 0.04, 0.018),
+            "TE": (0.21, 0.10, 0.04, 0.023, 0.023), "QB": (0.64, 0.74, 0.48, 0.32, 0.05)}
+INACTIVE_LAST_WEEK_PLAYS = 0.34
+MIN_SIT_RISK = 0.10
+
+
+def usage_availability(seasons: Iterable[PlayerSeason], availability: Mapping[int, Availability],
+                       week: int, schedule: Schedule) -> dict[int, Availability]:
+    """Untagged players who barely played, or sat, in their team's last game."""
+    out = {}
+    for player in seasons:
+        if player.player_id in availability or not player.team or player.position not in SIT_RISK or not player.games:
+            continue
+        played = team_weeks(schedule, player.team, week)
+        if not played:
+            continue
+        last = next((g for g in player.games if g.week == played[-1]), None)
+        if last is None:
+            out[player.player_id] = Availability(player.player_id, INACTIVE_LAST_WEEK_PLAYS, "Check inactives",
+                                                 None, "inactive last week", "usage")
+            continue
+        if last.snap_pct is None:
+            continue
+        risk = SIT_RISK[player.position][next(i for i, edge in enumerate(SNAP_EDGES) if last.snap_pct < edge)]
+        if risk >= MIN_SIT_RISK:
+            out[player.player_id] = Availability(player.player_id, round(1 - risk, 3), "Low snaps", None,
+                                                 f"{last.snap_pct:.0f}% of snaps last week", "usage")
+    return out
+
 
 def qb_depth(session: Session) -> dict[str, list[int]]:
     """{team: [QB ids by depth]} from Sleeper's live depth chart, falling back to nflverse's."""
@@ -421,6 +453,7 @@ def build_context(session: Session, seasons: Iterable[PlayerSeason], rates: Mapp
     """use_live adds Sleeper tags and today's depth chart: only for the current week."""
     seasons = list(seasons)
     availability = load_availability(session, season, week, use_live, exclude_rate_season)
+    availability = {**usage_availability(seasons, availability, week, schedule), **availability}
     if use_live:
         availability = {**availability, **backup_qb_availability(qb_depth(session), availability)}
     depth = _depth(session) if use_live else {}

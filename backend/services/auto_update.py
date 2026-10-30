@@ -8,6 +8,7 @@ Every CHECK_HOURS (first check shortly after startup) a background thread:
 2. **Re-imports your Yahoo leagues** (rosters, lineups, rules) when Yahoo is connected,
    so My Team, league waivers and league trades follow adds, drops and trades.
 3. **Backs up the database** once a day (services/backup.py).
+Every PROPS_TICK_MINUTES it also buys Vegas props for games kicking off within two hours.
 4. **Saves the pre-game snapshot** for the current week while it has games left: refreshes
    the outside sources (same caches and Odds API credit budget as opening the Week X page),
    then builds the default league's rankings, which records each player's pre-kickoff
@@ -30,6 +31,7 @@ from services.schedule_strength import Schedule
 log = logging.getLogger(__name__)
 
 CHECK_HOURS = 6
+PROPS_TICK_MINUTES = 15     # game days: props are bought within 2 hours of each kickoff
 FIRST_CHECK_SECONDS = 90       # let startup finish (and the value cache warm) first
 STATS_LAG_DAYS = 1
 _started = threading.Event()
@@ -143,16 +145,51 @@ def check(session_factory: Callable[[], Session]) -> dict:
     return status
 
 
+def props_due_soon(schedule: Schedule, now) -> int | None:
+    """The week of any unplayed game kicking off within the props window, else None."""
+    from datetime import timedelta
+
+    from integrations.odds_api import PROPS_WINDOW_HOURS
+
+    for game in schedule.games:
+        kickoff = game.kickoff
+        if not game.is_final and kickoff and now < kickoff <= now + timedelta(hours=PROPS_WINDOW_HOURS):
+            return game.week
+    return None
+
+
+def props_tick(session_factory: Callable[[], Session]) -> dict | None:
+    """Game days: buy props for games that just entered the window before kickoff."""
+    from datetime import datetime, timezone
+
+    from services.projections import latest_season
+    from services.schedule_strength import load_schedule
+    from services.weekly_refresh import refresh_props_only
+
+    with session_factory() as session:
+        season = latest_season(session)
+        week = props_due_soon(load_schedule(session, season), datetime.now(timezone.utc)) if season else None
+        return refresh_props_only(session, season, week) if week else None
+
+
 def _loop(session_factory: Callable[[], Session]) -> None:
-    wait = FIRST_CHECK_SECONDS
+    import time
+
+    wait, next_check = FIRST_CHECK_SECONDS, time.monotonic() + FIRST_CHECK_SECONDS
     while True:
-        if _stop.wait(wait):
+        if _stop.wait(min(wait, PROPS_TICK_MINUTES * 60)):
             return
+        try:
+            props_tick(session_factory)
+        except Exception:          # a props failure must not stop the stats/Yahoo checks
+            log.exception("Game-day props check failed")
+        if time.monotonic() < next_check:
+            continue
         try:
             check(session_factory)
         except Exception:          # status bookkeeping or the backup failed; keep the thread alive
             log.exception("Auto-update bookkeeping failed")
-        wait = CHECK_HOURS * 3600
+        wait, next_check = CHECK_HOURS * 3600, time.monotonic() + CHECK_HOURS * 3600
 
 
 _stop = threading.Event()

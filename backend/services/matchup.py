@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 from config import Settings
 from integrations import yahoo
 from services import my_team as mt
-from services import matchup_sim
+from services import game_locks, matchup_sim
 from services.build_locks import key_lock
 from services import yahoo_sync
 from services.weekly_rankings import WeeklyPlayer
@@ -133,11 +133,13 @@ def _build_matchup(session: Session, settings: Settings, http: httpx.Client, ref
 
     their_lineup = lineup([pid for _, pid in theirs.starters])
     current = lineup([pid for _, pid in mine.starters])
-    available = {s.player_id for s in team.spots if s.slot not in ("IR", "IR+", "NA")}
+    starting = {s.player_id for s in team.spots if s.starting}
+    available = {s.player_id for s in team.spots if s.slot not in ("IR", "IR+", "NA")} - (team.locked - starting)
     my_players = [weekly[s.player_id] for s in team.spots if s.player_id in weekly]
     options = {}
     for mode in MODES:
-        slots = mt.best_lineup(my_players, team.settings, available, key=_score(mode))
+        slots = mt.best_lineup(my_players, team.settings, available,
+                               key=game_locks.lock_key(team.locked & starting, _score(mode)))
         ids = [pid for slot_ids in slots.values() for pid in slot_ids]
         options[mode] = {"lineup": slots, "projected": round(sum(weekly[pid].projection for pid in ids), 1),
                          "win_probability": round(win_probability(lineup(ids), their_lineup), 3)}

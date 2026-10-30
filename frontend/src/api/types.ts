@@ -341,7 +341,7 @@ export interface YahooImportResult {
 
 /* ---------- Week X rankings & schedule strength ---------- */
 
-export type WeeklySourceKey = 'vegas_props' | 'josh_hayden' | 'model' | 'yahoo_consensus' | 'espn';
+export type WeeklySourceKey = 'vegas_props' | 'josh_hayden' | 'model' | 'yahoo_consensus' | 'espn' | 'experts';
 
 export interface WeeklySourceWeight {
   key: WeeklySourceKey;
@@ -531,6 +531,9 @@ export interface MyTeamRosterRow {
   ros_ppg: number | null;
   trade_value: number | null;
   pos_rank: string | null;
+  /** His game has kicked off: he can't be moved. */
+  locked?: boolean;
+  kickoff?: string | null;
 }
 
 export interface LineupChange {
@@ -548,6 +551,8 @@ export interface MyTeamResponse {
   league: MyLeague;
   week: number;
   roster: MyTeamRosterRow[];
+  /** Risky starters: inactives timing and whether a backup plays later. */
+  alerts?: string[];
   lineup: { current_total: number; best_total: number; changes: LineupChange[] };
 }
 

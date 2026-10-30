@@ -22,7 +22,7 @@ export function SourceWeights({ weights, learnedThrough = null }: SourceWeightsP
       <figcaption className="source-weights__caption">
         How this week’s projection is blended
         {learnedThrough !== null && (
-          <span className="source-weights__learned" title="Each completed week nudges the weights a little toward the sources that predicted actual points best">
+          <span className="source-weights__learned" title="Refit after each completed week on every week so far, shrunk toward the starting weights">
             {' '}· adjusted by results through week {learnedThrough}
           </span>
         )}

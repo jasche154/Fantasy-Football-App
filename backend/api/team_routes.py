@@ -64,11 +64,14 @@ def my_team(league_id: int, session: Session = Depends(get_session)) -> dict:
             "week": serialize.weekly_player(weekly, flags.get(spot.player_id, ())) if weekly else None,
             "ros_ppg": value.ros_ppg if value else None, "trade_value": value.trade_value if value else None,
             "pos_rank": value.pos_rank if value else None,
+            "locked": spot.player_id in team.locked,
+            "kickoff": team.kickoff[spot.player_id].isoformat() if spot.player_id in team.kickoff else None,
         })
     starting_ids = [s.player_id for s in team.spots if s.starting]
     return {
         "league": _league_summary(team.league, team.team), "week": team.rankings.week,
         "roster": roster,
+        "alerts": team.alerts,
         "lineup": {
             "current_total": mt.lineup_total(starting_ids, by_id),
             "best_total": mt.lineup_total([pid for ids in team.best.values() for pid in ids], by_id),

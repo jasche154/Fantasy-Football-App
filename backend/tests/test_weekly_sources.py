@@ -120,7 +120,7 @@ def odds_handler(calls: list, events: list[dict], remaining: str = "400"):
     return handler
 
 
-def _event(event_id, home, away, hours_from_now=24):
+def _event(event_id, home, away, hours_from_now=1):
     kickoff = (datetime.now(timezone.utc) + timedelta(hours=hours_from_now)).isoformat().replace("+00:00", "Z")
     return {"id": event_id, "home_team": home, "away_team": away, "commence_time": kickoff}
 

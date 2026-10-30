@@ -40,6 +40,19 @@ describe('MyTeamPage', () => {
     expect(within(screen.getByRole('table', { name: 'Bench and injured reserve' })).getByText('Start')).toBeInTheDocument();
   });
 
+  it('shows game-day warnings, locked players and how close each lineup call is', async () => {
+    const team = { ...TEAM, alerts: ['Bijan Robinson (Questionable, 70% to play) kicks off Sun 4:25 PM ET'],
+      roster: [{ ...TEAM.roster[0], locked: true }, TEAM.roster[1]],
+      lineup: { ...TEAM.lineup, changes: [{ ...TEAM.lineup.changes[0], gain: 1.2, confidence: 'toss_up' as const }] } };
+    mockFetch([META_ROUTE, { path: '/api/my-team/leagues', reply: json({ leagues: [LEAGUE] }) },
+      { path: '/api/my-team/1', reply: json(team) }, { path: '/api/my-team/1/news', reply: json({ items: [] }) }]);
+    renderWithProviders(<MyTeamPage />);
+    const warnings = await screen.findByRole('region', { name: 'Game-day warnings' });
+    expect(warnings).toHaveTextContent('kicks off Sun 4:25 PM ET');
+    expect(within(screen.getByRole('table', { name: 'Starters' })).getByText('Locked')).toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'Lineup advice' })).getByText('Toss-up')).toBeInTheDocument();
+  });
+
   it('lists league trades by team with their needs', async () => {
     const offer = { give: [CHASE], get: BIJAN, get_ros_ppg: 18, fills_their_need: ['WR'],
       evaluation: { verdict: 'fair' } };

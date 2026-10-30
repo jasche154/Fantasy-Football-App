@@ -1,23 +1,26 @@
-"""Learn the Week X source weights from how each source actually did, conservatively.
+"""Learn the Week X source weights from how each source actually did, pooled and shrunk.
 
 Run from backend/ (populate_stats also runs it after each load):
     python -m services.weight_learning --season 2026            # learn from new completed weeks
     python -m services.weight_learning --season 2026 --dry-run  # show what it would change
 
-For each completed week that has pre-kickoff projections in projection_history (and hasn't
-been learned from yet), in order:
-1. Take every player who played, with each source's points and his actual points.
-2. Fit the weights whose blend (re-balanced over the sources a player has, as the rankings
-   do) would have had the smallest squared error that week ("optimal").
-3. Move the current weights only part of the way there:
-       step = trust × (optimal − current), trust = rows / (rows + PRIOR_ROWS)
-   then cap each source's move at MAX_STEP, keep every weight at least MIN_WEIGHT, and
-   re-normalize. One week of ~350 players moves each weight by at most a point or two;
-   a source has to beat the others week after week to gain real weight.
+Sources are blended in four groups: Vegas props, the experts (Josh & Hayden and Yahoo's
+consensus, averaged as points: they are correlated Yahoo opinions), ESPN and the app's model.
 
-The defaults in weekly_rankings.WEIGHTS are the starting point (the prior). Each week's
-update is stored in learned_weights (local database), and the newest one is what the
-rankings use. Delete those rows to go back to the defaults.
+After each completed week, the weights are refit on every week so far (rolling origin: a
+week's weights only ever use earlier weeks):
+1. Rows: pre-kickoff projections of fantasy-relevant players (the top 36 at each position
+   that week, top 24 at QB) who played, with each group's points and the actual points.
+   A group missing from a row is filled with the mean of the groups present, matching how
+   the rankings re-balance over the sources a player has.
+2. Fit: least squares shrunk toward the prior (DEFAULT_WEIGHTS) as if the prior were backed
+   by PSEUDO_ROWS rows. The sources are 0.9+ correlated, so an unshrunk fit swings wildly.
+3. Limits: no negative weights, props at least PROPS_FLOOR (their value is late news, which
+   the history can't show yet), every other group at least MIN_WEIGHT, then normalize.
+With fewer than MIN_POOLED_ROWS rows the prior is used unchanged.
+
+Each week's result is stored in learned_weights (local database); the newest one before a
+week is what that week's rankings use. Delete those rows to go back to the defaults.
 """
 import sys
 from pathlib import Path
@@ -28,7 +31,7 @@ if __package__ in (None, ""):
 import argparse  # noqa: E402
 import json
 import logging
-from collections import Counter
+from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from statistics import mean
@@ -44,24 +47,24 @@ from services.schedule_strength import load_schedule
 
 log = logging.getLogger(__name__)
 
-DEFAULT_WEIGHTS = {"vegas_props": 0.35, "josh_hayden": 0.30, "model": 0.15, "yahoo_consensus": 0.10, "espn": 0.10}
-PRIOR_ROWS = 3000          # player-weeks of evidence the default weights are worth (~8 weeks)
-MAX_STEP = 0.03            # the most any one weight moves in a week
-MIN_WEIGHT = 0.05          # no source is ever dropped entirely
-MIN_ROWS = 100             # fewer scored player-weeks than this: too noisy to learn from
-MIN_POSITION_ROWS = 30     # per position, for its own step
-MIN_SOURCE_ROWS = 30       # a source on fewer rows that week keeps its weight (e.g. no props backfilled)
-BY_POSITION = "_by_position"
+DEFAULT_WEIGHTS = {"vegas_props": 0.30, "experts": 0.35, "espn": 0.15, "model": 0.20}
+# Displayed sources that blend as one group (each converted to points first, then averaged).
+SOURCE_GROUPS = {"josh_hayden": "experts", "yahoo_consensus": "experts"}
+PSEUDO_ROWS = 1500         # how many player-weeks of evidence the prior counts as
+MIN_POOLED_ROWS = 300      # fewer rows than this: keep the prior
+PROPS_FLOOR = 0.15
+MIN_WEIGHT = 0.05
+RELEVANT_RANKS = {"QB": 24, "RB": 36, "WR": 36, "TE": 36}
 POSITIONS = ("QB", "RB", "WR", "TE")
 SCORING_PREFERENCE = ("ppr", "half", "std")    # one row per player-week, in this order
-FIT_STEPS, FIT_RATE = 3000, 0.5
 
 
 @dataclass(frozen=True)
 class Sample:
-    sources: Mapping[str, float]
+    sources: Mapping[str, float]          # by group
     actual: float
     position: str = ""
+    week: int = 0
 
 
 @dataclass(frozen=True)
@@ -76,9 +79,35 @@ class Update:
     mae_after: float
 
 
+def group_of(source: str) -> str:
+    return SOURCE_GROUPS.get(source, source)
+
+
+def grouped(points: Mapping[str, float]) -> dict[str, float]:
+    """Per-source points -> per-group points (the experts averaged)."""
+    groups: dict[str, list[float]] = defaultdict(list)
+    for source, value in points.items():
+        group = group_of(source)
+        if group in DEFAULT_WEIGHTS:
+            groups[group].append(value)
+    return {group: sum(values) / len(values) for group, values in groups.items()}
+
+
+def source_shares(sources: Sequence[str], weights: Mapping[str, float]) -> dict[str, float]:
+    """Each displayed source's share of a player's blend (a group's weight split among its sources)."""
+    groups: dict[str, list[str]] = defaultdict(list)
+    for source in sources:
+        if group_of(source) in weights:
+            groups[group_of(source)].append(source)
+    total = sum(weights[g] for g in groups) or 1.0
+    return {s: weights[g] / total / len(members) for g, members in groups.items() for s in members}
+
+
 def blend(weights: Mapping[str, float], sources: Mapping[str, float]) -> float | None:
-    total = sum(weights.get(k, 0.0) for k in sources)
-    return sum(weights.get(k, 0.0) * v for k, v in sources.items()) / total if total else None
+    """Weighted mean over the groups present (sources may be per-source or per-group)."""
+    values = grouped(sources)
+    total = sum(weights.get(k, 0.0) for k in values)
+    return sum(weights.get(k, 0.0) * v for k, v in values.items()) / total if total else None
 
 
 def mae(weights: Mapping[str, float], samples: Sequence[Sample]) -> float:
@@ -86,63 +115,38 @@ def mae(weights: Mapping[str, float], samples: Sequence[Sample]) -> float:
     return round(mean(errors), 3) if errors else 0.0
 
 
-def fit_weights(samples: Sequence[Sample], keys: Sequence[str]) -> dict[str, float]:
-    """Weights on the simplex minimizing squared error of the re-balanced blend (exponentiated gradient)."""
-    index = {k: i for i, k in enumerate(keys)}
-    x = np.zeros((len(samples), len(keys)))
-    mask = np.zeros_like(x)
-    for row, sample in enumerate(samples):
-        for key, value in sample.sources.items():
-            if key in index:
-                x[row, index[key]] = value
-                mask[row, index[key]] = 1.0
-    y = np.array([s.actual for s in samples])
-    w = np.full(len(keys), 1.0 / len(keys))
-    for _ in range(FIT_STEPS):
-        total = mask @ w
-        pred = (x * w).sum(axis=1) / total
-        residual = (pred - y) / max(len(y), 1)
-        # d pred / d w_k = mask_k (x_k - pred) / total
-        grad = ((residual / total)[:, None] * mask * (x - pred[:, None])).sum(axis=0)
-        w = w * np.exp(-FIT_RATE * grad / (np.abs(grad).max() + 1e-12))
-        w = w / w.sum()
-    return {k: round(float(w[index[k]]), 4) for k in keys}
-
-
-def week_optimal(samples: Sequence[Sample], current: Mapping[str, float]) -> dict[str, float]:
-    """Best-fit weights over the sources the week's rows have; the others keep their current weight.
-
-    A source missing that week (no props for a backfilled week, an expert who didn't rank it)
-    says nothing about how good it is, so it neither gains nor loses weight.
-    """
-    counts = Counter(k for s in samples for k in s.sources)
-    present = [k for k in current if counts[k] >= MIN_SOURCE_ROWS]
-    if not present:
-        return dict(current)
-    fitted = fit_weights(samples, present)
-    mass = sum(current[k] for k in present)
-    return {k: round(fitted[k] * mass, 4) if k in present else current[k] for k in current}
-
-
-def conservative_step(current: Mapping[str, float], optimal: Mapping[str, float], rows: int) -> dict[str, float]:
-    trust = rows / (rows + PRIOR_ROWS)
-    moved = {k: current[k] + max(-MAX_STEP, min(MAX_STEP, trust * (optimal.get(k, current[k]) - current[k])))
-             for k in current}
-    return _normalize_with_floor(moved)
-
-
-def _normalize_with_floor(weights: Mapping[str, float]) -> dict[str, float]:
-    """Scale to sum to 1 with every weight at least MIN_WEIGHT (floored ones stay at the floor)."""
-    floored: set[str] = set()
+def constrain(weights: Mapping[str, float]) -> dict[str, float]:
+    """Non-negative, props >= PROPS_FLOOR, others >= MIN_WEIGHT, summing to 1."""
+    floors = {k: PROPS_FLOOR if k == "vegas_props" else MIN_WEIGHT for k in weights}
+    fixed: dict[str, float] = {}
     while True:
-        free = {k: max(v, 0.0) for k, v in weights.items() if k not in floored}
-        room = 1.0 - MIN_WEIGHT * len(floored)
+        free = {k: max(v, 0.0) for k, v in weights.items() if k not in fixed}
+        room = 1.0 - sum(fixed.values())
         total = sum(free.values()) or 1.0
         scaled = {k: v / total * room for k, v in free.items()}
-        low = {k for k, v in scaled.items() if v < MIN_WEIGHT}
+        low = {k for k, v in scaled.items() if v < floors[k]}
         if not low:
-            return {**{k: MIN_WEIGHT for k in floored}, **{k: round(v, 4) for k, v in scaled.items()}}
-        floored |= low
+            return {**{k: round(v, 4) for k, v in fixed.items()}, **{k: round(v, 4) for k, v in scaled.items()}}
+        fixed.update({k: floors[k] for k in low})
+
+
+def fit_pooled(samples: Sequence[Sample], prior: Mapping[str, float] = DEFAULT_WEIGHTS,
+               pseudo_rows: float = PSEUDO_ROWS) -> dict[str, float]:
+    """Ridge least squares toward the prior on all rows (missing groups filled with the row mean)."""
+    keys = list(prior)
+    if len(samples) < MIN_POOLED_ROWS:
+        return dict(prior)
+    x = np.zeros((len(samples), len(keys)))
+    for row, sample in enumerate(samples):
+        present = [sample.sources[k] for k in keys if k in sample.sources]
+        fill = sum(present) / len(present) if present else 0.0
+        x[row] = [sample.sources.get(k, fill) for k in keys]
+    y = np.array([s.actual for s in samples])
+    p = np.array([prior[k] for k in keys])
+    strength = pseudo_rows * float(np.mean(np.sum(x * x, axis=1)) / len(keys))
+    w = np.linalg.solve(x.T @ x + strength * np.eye(len(keys)), x.T @ y + strength * p)
+    w = w / w.sum() if w.sum() > 0 else p
+    return constrain(dict(zip(keys, w.tolist())))
 
 
 def _ensure_table(session: Session) -> None:
@@ -170,33 +174,38 @@ def effective_weights(session: Session, season: int | None = None,
     if latest is None:
         return dict(DEFAULT_WEIGHTS), None
     learned = json.loads(latest.weights)
-    return {k: learned.get(k, v) for k, v in DEFAULT_WEIGHTS.items()}, latest
+    if not set(DEFAULT_WEIGHTS) <= set(learned):
+        return dict(DEFAULT_WEIGHTS), None          # learned under the old five-source blend
+    return {k: learned[k] for k in DEFAULT_WEIGHTS}, latest
 
 
 def position_weights(session: Session, season: int | None = None,
                      before_week: int | None = None) -> dict[str, dict[str, float]]:
-    """{position: weights} learned so far (each starts from the global weights); {} before any learning."""
-    global_weights, latest = effective_weights(session, season, before_week)
-    if latest is None:
-        return {}
-    by_position = json.loads(latest.weights).get(BY_POSITION) or {}
-    return {pos: {k: w.get(k, global_weights[k]) for k in DEFAULT_WEIGHTS} for pos, w in by_position.items()}
+    """Per-position weights: none any more (one pooled fit is steadier); kept for callers."""
+    return {}
 
 
-def samples_for_week(session: Session, season: int, week: int) -> list[Sample]:
-    """Pre-kickoff source points and actual points for every player who played that week."""
+def samples_for_week(session: Session, season: int, week: int, relevant_only: bool = True) -> list[Sample]:
+    """Pre-kickoff group points and actual points for every player who played that week."""
     rows = session.scalars(select(ProjectionHistory).where(
         ProjectionHistory.season == season, ProjectionHistory.week == week)).all()
     chosen: dict[int, ProjectionHistory] = {}
     for row in sorted(rows, key=lambda r: SCORING_PREFERENCE.index(r.scoring) if r.scoring in SCORING_PREFERENCE else 9):
         chosen.setdefault(row.player_id, row)
+    if relevant_only:
+        by_position: dict[str, list[ProjectionHistory]] = defaultdict(list)
+        for row in chosen.values():
+            by_position[row.position].append(row)
+        keep = {r.player_id for pos, group in by_position.items()
+                for r in sorted(group, key=lambda r: -r.if_active)[:RELEVANT_RANKS.get(pos, 36)]}
+        chosen = {pid: row for pid, row in chosen.items() if pid in keep}
     actuals = {scoring: actual_points(session, season, scoring) for scoring in {r.scoring for r in chosen.values()}}
     samples = []
     for row in chosen.values():
         actual = actuals[row.scoring].get((row.player_id, week))
-        sources = {k: v for k, v in json.loads(row.sources).items() if k in DEFAULT_WEIGHTS}
+        sources = grouped(json.loads(row.sources))
         if actual is not None and sources:
-            samples.append(Sample(sources, actual, row.position))
+            samples.append(Sample(sources, actual, row.position, week))
     return samples
 
 
@@ -206,46 +215,39 @@ def _week_complete(session: Session, season: int, week: int) -> bool:
 
 
 def learn(session: Session, season: int, apply: bool = True, through_week: int | None = None) -> list[Update]:
-    """Update the weights from every completed, not-yet-learned week with enough history (up to through_week)."""
+    """Refit the weights after every completed, not-yet-learned week (up to through_week)."""
     _ensure_table(session)
     learned = set(session.scalars(select(LearnedWeights.week).where(LearnedWeights.season == season)))
     weeks = sorted(set(session.scalars(select(ProjectionHistory.week).where(ProjectionHistory.season == season))))
-    current, _ = effective_weights(session)
-    by_position = position_weights(session)
+    pooled: list[Sample] = []
+    current, _ = effective_weights(session, season, min(weeks) if weeks else None)
     updates = []
     for week in weeks:
-        if week in learned or (through_week is not None and week > through_week) or not _week_complete(session, season, week):
+        if (through_week is not None and week > through_week) or not _week_complete(session, season, week):
             continue
         samples = samples_for_week(session, season, week)
-        if len(samples) < MIN_ROWS:
-            log.info("Week %s: %s scored player-weeks, too few to learn from", week, len(samples))
+        pooled += samples
+        if week in learned:
+            current, _ = effective_weights(session, season, week + 1)
             continue
-        optimal = week_optimal(samples, current)
-        after = conservative_step(current, optimal, len(samples))
-        positions_after = {}
-        for pos in POSITIONS:
-            own = [s for s in samples if s.position == pos]
-            # Each position follows the global step, then takes its own (smaller) step on its own games.
-            start = conservative_step(by_position.get(pos, current), after, PRIOR_ROWS) if pos in by_position else after
-            positions_after[pos] = (conservative_step(start, week_optimal(own, start), len(own))
-                                    if len(own) >= MIN_POSITION_ROWS else start)
-        update = Update(season, week, len(samples), dict(current), optimal, after,
+        after = fit_pooled(pooled)
+        update = Update(season, week, len(pooled), dict(current), after, after,
                         mae(current, samples), mae(after, samples))
         updates.append(update)
         if apply:
-            session.add(LearnedWeights(season=season, week=week, rows=len(samples),
-                                       weights=json.dumps({**after, BY_POSITION: positions_after}),
-                                       optimal=json.dumps(optimal), mae_before=update.mae_before,
+            session.add(LearnedWeights(season=season, week=week, rows=len(pooled), weights=json.dumps(after),
+                                       optimal=json.dumps(after), mae_before=update.mae_before,
                                        mae_after=update.mae_after))
             session.commit()
-        current, by_position = after, positions_after
+        current = after
     return updates
 
 
 def describe(update: Update) -> str:
-    lines = [f"Week {update.week}: {update.rows} player-weeks, blend MAE {update.mae_before} -> {update.mae_after}"]
+    lines = [f"Week {update.week}: {update.rows} pooled player-weeks, that week's MAE {update.mae_before} "
+             f"-> {update.mae_after}"]
     for key in DEFAULT_WEIGHTS:
-        lines.append(f"  {key:16} {update.before[key]:.3f} -> {update.after[key]:.3f}   (best fit this week {update.optimal[key]:.3f})")
+        lines.append(f"  {key:12} {update.before[key]:.3f} -> {update.after[key]:.3f}")
     return "\n".join(lines)
 
 

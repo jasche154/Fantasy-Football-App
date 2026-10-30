@@ -16,6 +16,7 @@ from dataclasses import dataclass
 
 from services.injuries import Availability, Boost, InjuryContext
 from services import score_ranges
+from services.weight_learning import source_shares
 from services.weekly_model import Matchup, projection_ranges, range_for
 
 PRICED_IN = 0.1            # teammates below this chance to play are already priced in by outside sources
@@ -102,13 +103,13 @@ def explain(name: str, position: str, rate: float | None, prior: float | None, m
                       f"the offenses it faced{rank_text}. "
                       + (f"Vegas implies {matchup.implied_total:.1f} team points vs a {matchup.team_ppg:.1f} average."
                          if matchup.implied_total and matchup.team_ppg else "No Vegas line yet.")))
-    total_weight = sum(weights[k] for k in sources) or 1.0
+    shares = source_shares(list(sources), weights)
     parts = []
     for key, value in sources.items():
         points = getattr(value, "points", 0.0)
         rank = getattr(value, "rank", None)
         rank_text = f" (rank {position}{rank:g})" if rank is not None else ""
-        parts.append(f"{labels[key]} {points:.1f}{rank_text} x {weights[key] / total_weight:.0%}")
+        parts.append(f"{labels[key]} {points:.1f}{rank_text} x {shares.get(key, 0.0):.0%}")
     steps.append(Step("Source blend", f"{blended:.1f}", "; ".join(parts) + "."))
     steps.append(Step("Schedule tilt", f"x{tilt:.3f}",
                       "An extra lean on opponent-adjusted schedule strength, on top of what sources already price in."))

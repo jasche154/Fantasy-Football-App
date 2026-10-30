@@ -81,6 +81,7 @@ function RosterTable({ rows, caption, news }: { rows: readonly MyTeamRosterRow[]
                   <NewsButton player={row.player} onOpen={news.open}
                     state={newsState(news.latest[String(row.player.id)], news.seen, row.player.id)} />
                   {week && <StatusBadge status={week.status} playProb={week.play_prob} />}
+                  {row.locked && <span className="status-badge" title="His game has started: he can't be moved">Locked</span>}
                   {shouldStart && <span className="status-badge status-badge--ok">Start</span>}
                   {shouldSit && <span className="status-badge status-badge--out">Sit</span>}
                   {week && <FlagChips flags={week.flags} />}
@@ -121,6 +122,11 @@ function LineupView({ data }: { data: MyTeamResponse }) {
   const marks: NewsMarks = { latest, seen, open };
   return (
     <>
+      {(data.alerts ?? []).length > 0 && (
+        <section className="lineup-alerts" aria-label="Game-day warnings">
+          <ul>{(data.alerts ?? []).map((alert) => <li key={alert}>{alert}</li>)}</ul>
+        </section>
+      )}
       <section className="lineup-advice" aria-label="Lineup advice">
         {lineup.changes.length === 0 ? (
           <p className="lineup-advice__ok">Your lineup is already the best one this week ({formatNumber(lineup.current_total)} projected).</p>

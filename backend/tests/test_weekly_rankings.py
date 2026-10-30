@@ -218,7 +218,7 @@ def test_weekly_rankings_endpoint(week_client):
     body = week_client.get("/api/rankings/weekly", params={"position": "WR", "limit": 5}).json()
     assert (body["season"], body["week"], body["scoring"], body["refresh"]) == (SEASON, WEEK, "ppr", None)
     assert [w["key"] for w in body["weights"]] == list(WEIGHTS)
-    assert body["weights"][0] == {"key": "vegas_props", "label": "Vegas player props", "weight": 0.35, "players": 1}
+    assert body["weights"][0] == {"key": "vegas_props", "label": "Vegas player props", "weight": 0.3, "players": 1}
     assert [r["rank"] for r in body["results"]] == [1, 2]   # only WRs some outside source covers
     first = body["results"][0]
     assert {"projection", "matchup", "sources", "expert_ranks", "pos_rank"} <= set(first)
