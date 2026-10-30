@@ -45,7 +45,7 @@ only *explains* numbers that came back from a tool call. Every output is labeled
   corrected for the offenses it faced; drives weekly matchups and rest-of-season values
 - **Rankings:** rest-of-season rankings for your league's scoring (PPR, half, standard,
   TE premium, superflex) with actual, expected, and projected points side by side, plus
-  rest-of-season and **playoff (weeks 15–17) strength of schedule**
+  rest-of-season and **playoff-weeks strength of schedule** (your league's playoff weeks)
 - **Chart Studio:** charts built automatically from your selection (two metrics → scatter split at
   the medians, one → ranked bars, players → week-by-week trend), five one-click presets, SVG download.
   Hover a point for the player's name; click a scatter point for a card with both values, ranks and quadrant
@@ -174,7 +174,7 @@ Open <http://localhost:5173>. The UI talks to `http://localhost:8000` by default
 | **Matchup** | This week's Yahoo opponent. Both starting lineups with projections and ranges, live points as games finish, and your win probability (with Yahoo's for comparison). **Lineup strategy** compares three versions of your lineup: most points, upside (favoring ceilings) and safe (favoring floors). Each is simulated against the opponent, and the one that wins most often is recommended, with the swaps to make. **Updated lineup** at the bottom shows that lineup's projected total and win chance, then your **bench** with each player's projection |
 | **My Team** | Your imported Yahoo team (pick the league if you have several). **Lineup:** starters and bench with this week's projection, range, flags and rest-of-season value; the best lineup under your league's slots, with "Start X over Y (+points)" advice and Start/Sit tags. **Waivers:** players on no roster in your league. **Trades:** fair offers with each real team, built from their roster, teams that need what you'd send first. **Playoffs:** each player's projection for every playoff week (your league's weeks from Yahoo, else 16–18), byes marked, the best lineup per week, your weakest week, and the **Playoff planner**: free agents and players on other teams who beat your weakest starter at each position by 3+ playoff points. **League:** power rankings by lineup strength, record, points for, remaining opponents, simulated playoff odds and projected wins, and each manager's tendencies (also shown next to each team's trade offers). **Player news** works like Yahoo's: a news icon next to each player with news, highlighted (with a dot) when there's news from the last 48 hours you haven't opened. Click it for a side panel with his latest notes (headline, summary, analysis, source link); opening it marks the news read (remembered in this browser). The **News feed** below the lineup lists the newest notes across your roster, new ones tagged, and clicking a name opens his panel. **Sync from Yahoo** re-imports now (the app also re-syncs every 6 hours) |
 | **Week X Rankings** | This week's projections by position; pick any week. Each row shows the matchup grade (opponent-adjusted, #1 = easiest), the Vegas implied team total, the blended projection, and every source's number (props, Josh & Hayden, Yahoo, ESPN, model). For finished games, **Actual** shows what each player scored (green beat the projection by 20%+, red missed by 20%+, DNP sat). Click a column header (Proj, Actual, Team total, or any source) to sort by it. **Schedule strength** switches to defenses ranked by adjusted points allowed and each team's upcoming opponents. **Refresh sources** re-pulls Yahoo and ESPN (Vegas props follow their credit budget) |
-| **Rankings** | Rest-of-season rankings by position; sort by actual, expected, or projected points, schedule strength, **Playoff SOS** (weeks 15–17), trade value, or ECR |
+| **Rankings** | Rest-of-season rankings by position; sort by actual, expected, or projected points, schedule strength, **Playoff SOS** (your league's playoff weeks, else the last three), trade value, or ECR |
 | **Week X → Start / Sit** | Add up to four players. Each shows its projection, floor–ceiling range, injury status, "if <teammate> sits" scenarios, flags, and a **Why?** breakdown. A tiebreaker (most points / safe / upside) decides close calls |
 | **Waiver Wire** | Players rostered in under 10–75% of ESPN leagues, ranked by rest-of-season value, this week's projection, next three matchups, and injury-driven opportunity, with a suggested FAAB bid |
 | **Trade Calculator → Trade finder** | Put the players you'd move in "You give", pick a position you want, and get 1-for-1 and 2-for-1 offers that are fair by this app's values *and* by market value (expert consensus, how the other manager will judge it), closest to fair first; **Load in calculator** opens one |
@@ -365,12 +365,92 @@ and the scoreboard for every remaining regular-season week), cached for an hour:
   its whole roster (not IR), with every player projected against that week's opponent. A player
   on bye is out, and for each one the team gets that week's best free agent at his position (a
   rough waiver pickup), so byes cost only the gap to the waiver wire.
-- **Playoff odds:** each remaining game is simulated 10,000 times, every team scoring
-  Normal(that week's best-ball projection, 25 points). Wins and points for are added to the
-  real standings; the top `playoff_teams` (Yahoo's setting) by wins, then points for, make it.
+- **Playoff odds:** the rest of the regular season is simulated 10,000 times. Each simulated
+  season gives every team one strength offset (sd 9 points: rest-of-season estimates miss by
+  about that much, and the miss lasts all season), and every starter can get hurt each week
+  (QB 8.8%, WR 5.4%, RB/TE 4.3%; once out, he stays out the next week 60% of the time; IR
+  players miss 4 weeks), his spot going to the best free agent. Each game a team scores
+  Normal(that week's projection + offset − injuries, 21 points). Wins and points for are added
+  to the real standings; the top `playoff_teams` (Yahoo's setting) make it.
 - **Tendencies:** "Active trader" (2+ trades), "Waiver regular" (1.5× the league's median
   moves), "Quiet" (2 moves or fewer, no trades), plus the positions each manager has traded for
   and picked up.
+
+### Floors, ceilings and the matchup simulation
+
+**Ranges** (`services/score_ranges.py`). A player's floor and ceiling are the 10th and 90th
+percentiles of how players with his projection actually scored, if he plays:
+- Fit on every active game of 2021-2025 (low-snap games and zeros included, so busts count),
+  as quantiles of actual ÷ projection by position and projection tier (under 4, 4-8, 8-12,
+  12-16, 16+ points), scaled 5% toward the median because the blend misses less than the
+  model alone.
+- **Shape:** running backs and pass catchers who score mostly on touchdowns (last four games)
+  get a lower floor; deep targets (high aDOT) a higher ceiling and a lower floor.
+- On 2026 (data the fit never saw), 7% of players finished below their floor and 12% above
+  their ceiling, against a 10% target. The old ranges, fit only on full-role games, had 31%
+  below the floor.
+
+**Matchup simulation** (`services/matchup_sim.py`). Each starter's score is drawn 20,000 times
+from his own skewed range, plus a separate draw for whether he plays (so injury risk is counted
+once). Players in the same game move together, with correlations measured from 2021-2025 box
+scores (a Gaussian copula):
+
+| Same team | | Opponents | |
+|---|---|---|---|
+| QB–WR | +0.32 | QB–QB | +0.17 |
+| QB–TE | +0.29 | DST vs the QB it faces | −0.375 |
+| K–DST | +0.27 | DST vs that team's K | −0.31 |
+| QB–RB | +0.08 | DST vs that team's RB | −0.19 |
+
+So stacking your QB with his receivers widens your range (good as an underdog), and starting a
+defense against your own quarterback costs you when he plays well. Win chances show to the
+nearest 5%.
+
+**How close a call is.** Start/sit picks by projection gap were right 51% of the time under 1
+point, 56% at 1-2, 58% at 2-3 and 75% over 5 (2021-26). Lineup changes under 1.5 points are
+labelled **Toss-up**, 1.5-3 **Lean**. Upside or safe is recommended over the most-points lineup
+only when it wins at least 3 points more often; smaller edges show as **Marginal**.
+
+### Game day: locks, warnings, chance to play
+- **Locks** (`services/game_locks.py`): once a player's game kicks off, his points are fixed and
+  he can't be moved; advice only reshuffles unlocked players. The latest-kicking FLEX-eligible
+  starter goes in FLEX, which keeps a late swap open.
+- **Warnings:** a starter under 90% to play gets a note with his kickoff, when inactives come
+  out (about 90 minutes before), and whether a bench player at his position plays later.
+- **Untagged players still sit sometimes** (`services/injuries.py`): by last week's snap share,
+  e.g. a running back under 10% sits 24% of the time; a player who was inactive last week plays
+  only 34% of the time ("Check inactives"). Measured 2021-26.
+
+### Your league: waivers, trades, streaming
+**Lineup gain** (`services/lineup_gain.py`). Moves are scored by how many points they add to
+your best lineup over the rest of the season: each week's best QB/RB/WR/TE lineup before and
+after, weighted 0.95 per week ahead in the regular season and by your playoff odds in the
+playoff weeks. Each player's week is his healthy rate × that opponent (0 on a bye); Out players
+come back with a 60%-a-week chance of staying out, IR players miss 4 weeks, and healthy weeks
+carry the weekly injury risk (QB 8.8%, WR 5.4%, RB/TE 4.3%).
+
+**Waivers** (`services/waiver_advice.py`, My Team → Waivers). Every free agent is scored by
+lineup gain after dropping your least useful player (never your starter's handcuff unless the
+add is worth twice as much). What to do depends on the league:
+
+| League type | Advice |
+|---|---|
+| FAAB | A bid: the league's typical winning bid for the k-th most wanted player (from Yahoo's transactions), scaled by rivals' balances and how many of them need the position, capped by what he's worth to you, the richest interested rival + $1, and half your balance. Before 8 winning bids exist it's a labelled estimate (rank 1 15% of the budget, 2 8%, 3 5%, 4-6 3%, else 1%; ×1.3 early, ×0.6 late) |
+| Rolling priority | Spend a top-3 priority only on a difference-maker (8+ points and the most wanted, a handcuff to your injured starter, or a starter for 3+ of the next 4 weeks); otherwise wait. Teams ahead of you that need the position are named |
+| Free agency | Add now, best gain first |
+
+Gains under 1 point are marked marginal.
+
+**Trades** (My Team → Trades). Offers with each real team are kept only if they add to your
+lineup and cost theirs at most half a point per remaining week; each shows both gains and the
+trade deadline. The standalone calculator discounts extra players more steeply (1, 0.7, 0.5,
+0.4) since depth is worth little.
+
+**Streaming** (My Team → Streaming): your defense (and quarterback, in one-QB leagues) and the
+best ten free agents over the next three weeks, with a plan that only switches for 2+ points.
+
+**This week** (Dashboard): lineup changes and toss-ups, game-day warnings, the best pickup and
+the next lock.
 
 ### Kicker and defense projections
 `python -m services.kdst_model --fit` refits these. Both use team profiles (rates shrunk
@@ -417,30 +497,29 @@ score kickers and defenses with each league's own rules, imported from Yahoo.
 | Injury risk | His own chance to play is under 90% |
 
 ### Week X rankings
-Each player's week projection is a weighted blend of every source that covers them. These
-are the starting weights; each completed week adjusts them a little (see **Learning the
-weights** below). After week 7 they're 33 / 28 / 18 / 12 / 9.
+Each player's week projection is a weighted blend of four source groups. These are the
+starting weights; they're refit after every completed week (see **Learning the weights**).
 
 | Source | Starting weight | How it becomes points |
 |---|---|---|
-| Vegas player props | 35% | Yardage lines and over/under prices → expected yards; receptions, pass TDs, INTs → Poisson means; anytime-TD price → expected TDs. Scored with your league settings. Missing markets (e.g. an RB's receiving line) are filled from the model |
-| Josh Norris & Hayden Winks (Yahoo) | 30% | Their average positional rank for the week, converted to points (below) |
-| Matchup model | 15% | `base × defense factor × (Vegas implied team total ÷ team's scoring average)^0.5`, keeping the shape of the player's stat line |
-| Yahoo expert consensus | 10% | Consensus of Yahoo's 40+ rankers, converted to points |
-| ESPN | 10% | ESPN's projected stat line, scored with your league settings |
+| Vegas player props | 30% (never under 15%) | Yardage lines and over/under prices → expected yards; receptions, pass TDs, INTs → Poisson means; anytime-TD price → expected TDs. Scored with your league settings. Missing markets (e.g. an RB's receiving line) are filled from the model |
+| Experts (Yahoo) | 35% | Yahoo's 40+ ranker consensus and Josh Norris & Hayden Winks, each rank converted to points, then averaged. They're correlated Yahoo opinions, so they blend as one source (both still show) |
+| Matchup model | 20% | `base × defense factor × (Vegas implied team total ÷ team's scoring average)^0.5`, keeping the shape of the player's stat line |
+| ESPN | 15% | ESPN's projected stat line, scored with your league settings |
 
 - Weights re-balance over the sources a player has (a backup with no props line is
-  blended from the rest). Josh Norris doesn't publish every week; when he hasn't, Hayden's
-  rank is used alone.
+  blended from the rest).
 - **Ranks to points:** rank N at a position gets the Nth best numeric projection (props,
-  ESPN, and model blended) at that position, so "RB3" means RB3-level points.
+  ESPN, and model blended) at that position, so "RB3" means RB3-level points. Each expert's
+  rank is converted first and the points averaged (averaging ranks first would understate a
+  player two experts disagree on).
 - **Extra schedule tilt:** the blended projection is multiplied by `defense factor^0.25`.
-  Props and experts already price in the matchup; this deliberately leans further on
-  schedule strength, on top of the model using it at full strength.
 - Players on bye are skipped. When outside sources have published the week, players none
   of them cover are left out too (usually injured or inactive).
-- The starting weights are in `backend/services/weight_learning.py` (`DEFAULT_WEIGHTS`); the
-  tilt is in `backend/services/weekly_rankings.py`.
+- **Props timing:** each game's props are bought once, within 2 hours of kickoff, after
+  Sunday-morning injury news (the background check looks every 15 minutes on game days).
+  When the month's Odds API credits can't cover every game left, only games with one of
+  your rostered players are bought, plus every one-game Thursday and Monday slate.
 
 **Saved locally.** Two tables in the local SQLite database (never committed) store the results:
 - **`rankings_snapshots`:** the computed week, keyed by league settings, week, every data input
@@ -455,21 +534,20 @@ your scoring, next to the projection. It's green if he beat the projection by 20
 missed it by 20%+, and "DNP" if his team played without him. Past weeks keep the weights they
 were projected with, so you see the projection as it stood, not one built with hindsight.
 
-**Learning the weights** (`services/weight_learning.py`). Each completed week with
-pre-kickoff projections updates the weights once:
-1. **Best fit:** take everyone who played and find the weights that would have predicted
-   their actual points best that week. The blend is re-balanced over each player's sources,
-   as in the rankings.
-2. **Small step:** move the current weights only part of the way there. The step is
-   `rows / (rows + 3000)` of the gap, so the starting weights count like about eight weeks of
-   evidence. No source moves more than 3 points in a week, and none drops below 5%.
+**Learning the weights** (`services/weight_learning.py`). After each completed week the
+weights are refit on every week so far (a week's weights only ever use earlier weeks):
+1. **Rows:** fantasy-relevant players only (the top 36 projected at each position that week,
+   top 24 at QB) who played, with each source group's points and the actual points.
+2. **Fit:** least squares shrunk toward the starting weights as if those were backed by 1,500
+   player-weeks. The sources are 0.9+ correlated, so an unshrunk fit swings wildly week to
+   week (the old per-week fit put 0% on the model one week and 69% the next).
+3. **Limits:** props never below 15% (their value is late news the history can't show yet),
+   every other group at least 5%. Under 300 rows, the starting weights stand.
 
-One week's best fit is usually extreme (week 7's put 69% on the model and 0% on props). The
-small step keeps one odd week from flipping the blend: a source has to beat the others week
-after week to gain real weight.
-
-A source missing from a week (no props for a backfilled week, no Josh & Hayden ranks) is
-left out of that week's fit and keeps its weight: missing data says nothing about accuracy.
+Through week 7 of 2026 the weights barely move from the start (props 30, experts 35, ESPN 15,
+model 20): the sources are close enough that seven weeks can't separate them yet, which is
+the honest answer. Yahoo's consensus alone is about as accurate as the blend, so the Accuracy
+view shows them side by side.
 
 **Backfilled weeks** (`services/history_backfill.py`). Weeks 1–6 of 2026 were rebuilt
 after the fact, without hindsight:
@@ -496,9 +574,7 @@ Average error per player-week (rows in parentheses):
 | 6 | — | — | 4.71 | 4.10 | 4.31 | 4.08 |
 | 7 (live) | 5.12 | 5.56 | 4.31 | 4.23 | 4.57 | 4.20 |
 
-Through week 7 the weights are props 33%, Josh & Hayden 30%, Yahoo consensus 14%, model 13%
-and ESPN 10%. Yahoo consensus gained the most; the model lost a little early (it has few
-games to go on) and won some back in week 7. Run it again with
+Yahoo consensus had the lowest error of any single source in most weeks. Run the backfill again with
 `python -m services.history_backfill --season 2026 --weeks 1-6` (`--no-fetch` to rebuild
 from the sources already stored).
 - **Running it:** it updates on its own every week while the API runs: the background
@@ -506,10 +582,6 @@ from the sources already stored).
   week's pre-game projections, so the learner has data even in weeks you never open Week X.
   `python -m database.populate_stats` does the same by hand.
   `python -m services.weight_learning --season 2026 --dry-run` shows what it would change.
-- **Per position:** each position (QB/RB/WR/TE) also takes its own step from its own players
-  that week, with the same caps, starting from the global weights; a position with fewer than
-  30 scored players that week just follows the global step. So props can end up counting for
-  more at QB and the experts more at WR if that's what the results show.
 - **Storage:** each update is a row in the local `learned_weights` table. Delete the rows to
   go back to the starting weights.
 
@@ -581,6 +653,7 @@ League parameters accepted by every valuation endpoint: `scoring=ppr|half|std`,
 | GET | `/api/my-team/{league_id}/trades?want_position=` | Trade offers with each real team, by their needs |
 | GET | `/api/my-team/{league_id}/matchup` | This week's opponent, both lineups, win probability, expected/upside/safe lineups, the updated lineup and the bench |
 | GET | `/api/my-team/{league_id}/playoffs` | Each player's playoff weeks (opponent, bye, projection), the best lineup per week, and planner fixes |
+| GET | `/api/my-team/{league_id}/streaming` | DEF (and one-QB-league QB) streaming grid for 3 weeks with a suggested path |
 | GET | `/api/my-team/{league_id}/league` | Power rankings, simulated playoff odds and manager tendencies (live from Yahoo, cached 1 h) |
 | GET | `/api/my-team/{league_id}/news?limit=` | Newest news across your roster, plus `latest` (each player's newest item time) |
 | GET | `/api/players/{id}/news` | One player's latest news (Sleeper) |
@@ -690,9 +763,10 @@ either one, remove it from `WEEKLY_SOURCES`.
 
 **The Odds API:** sign up at <https://the-odds-api.com> for a free key and add it to
 `backend/.env` as `ODDS_API_KEY`. Listing games is free; each game's props cost 7 credits
-(7 markets × 1 region). To fit the free plan, **each game's props are bought once, in the
-72 hours before kickoff** (about 16 × 7 = 112 credits a week), so props show up two to three
-days before each game. Every purchase is logged in the database, so restarts don't
+(7 markets × 1 region). **Each game's props are bought once, within 2 hours of kickoff**
+(after Sunday-morning injury news; about 16 × 7 = 112 credits a week). When the month's credits
+can't cover every game left, only games with your rostered players are bought, plus every
+one-game Thursday and Monday slate. Every purchase is logged in the database, so restarts don't
 re-buy anything; each game is stored as soon as it's bought, so a failure partway through
 keeps what was paid for. Refreshes stop while fewer than 17 credits remain and back off
 30 minutes after a failed call. Re-buying lines that moved is only possible on purpose:
@@ -772,6 +846,13 @@ what it has, how to access it, license terms, update schedule, and which ones to
 - **Job status.** The auto-update records each check (what it loaded, synced and saved, or the
   error type) in the `app_state` table; props purchases record the credits left. Errors are
   stored by type only, since messages can contain URLs with API keys.
+- **Cross-site and remote requests.** Browsers label requests another site makes, so any
+  `/api` request marked cross-site is refused, GETs included (several call Yahoo or run
+  simulations). Without `API_TOKEN`, only this machine may call the API.
+- **Signed snapshots.** Cached rankings are pickled, so each is signed with a key kept in
+  `backend/.snapshot_key` (git-ignored); a snapshot that doesn't verify is ignored.
+- **Assistant memory** only keeps facts that restate the user's own words, so text in a news
+  headline or team name can't plant a lasting instruction.
 - **No leaked keys.** The Odds API needs its key in the URL; a test makes failed requests and
   checks that neither the error messages nor the logs contain it.
 - **One app player per Yahoo player.** A unique index on `players.yahoo_player_id` (migration

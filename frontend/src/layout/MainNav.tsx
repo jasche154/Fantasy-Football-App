@@ -106,7 +106,7 @@ export function MainNav({ active }: { active: Route['name'] }) {
         {NAV_ITEMS.map((item, index) => (
           <Fragment key={item.route}>
             {item.group === 'research' && NAV_ITEMS[index - 1]?.group !== 'research' && (
-              <li className="main-nav__heading" aria-hidden="true">Research</li>
+              <li className="main-nav__heading" role="presentation"><span className="sr-only">Section: </span>Research</li>
             )}
             <li className={item.isPrimary ? 'main-nav__item' : 'main-nav__item main-nav__item--secondary'}>
               <NavLink item={item} isActive={item.route === active} className="nav-link nav-link--tab" />

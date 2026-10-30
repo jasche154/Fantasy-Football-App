@@ -1,28 +1,25 @@
 import { useCallback, useState } from 'react';
-import { getLeagueOverview, getLeagueTrades, getLeagueWaivers, getMyTeam, getRosterNews, syncMyLeague } from '../../api/data';
-import type {
-  LeagueTradesResponse, LeagueWaiversResponse, ManagerTendencies, MyLeague, MyTeamResponse, MyTeamRosterRow, NewsResponse, PlayerSummary, Position,
-} from '../../api/types';
+import { getMyTeam, getRosterNews, syncMyLeague } from '../../api/data';
+import type { MyTeamResponse, MyTeamRosterRow, NewsResponse, PlayerSummary } from '../../api/types';
 import { AsyncView } from '../../components/AsyncView';
 import { PageHeader } from '../../components/Card';
 import { FlagChips, StatusBadge } from '../../components/FlagChips';
+import { NewsList } from '../../components/NewsList';
 import { PlayerLink } from '../../components/PlayerLink';
-import { PositionFilter } from '../../components/PositionFilter';
+import { NewsButton, NewsPanel } from '../../components/PlayerNews';
 import { SelectField } from '../../components/SelectField';
 import { EmptyState, TableSkeleton } from '../../components/StatusViews';
 import { useAsync, type AsyncResult } from '../../hooks/useAsync';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { EMPTY_VALUE, formatNumber } from '../../lib/format';
-import { filterToPosition, type PositionFilterValue } from '../../lib/positions';
-import { paths, buildHash } from '../../router/routes';
-import { useMyLeague } from '../../state/useMyLeague';
-import { WaiverRow } from '../waivers/WaiversPage';
-import { NewsList } from '../../components/NewsList';
-import { NewsButton, NewsPanel } from '../../components/PlayerNews';
 import { loadSeen, markSeen, newsState, type SeenNews } from '../../lib/newsSeen';
-import { LeagueView, TendencyNote } from './LeagueView';
+import { buildHash, paths } from '../../router/routes';
+import { useMyLeague } from '../../state/useMyLeague';
+import { LeagueView } from './LeagueView';
 import { PlayoffsView } from './PlayoffsView';
 import { StreamingView } from './StreamingView';
+import { TradesView } from './TradesView';
+import { WaiversView } from './WaiversView';
 
 type View = 'lineup' | 'waivers' | 'trades' | 'streaming' | 'playoffs' | 'league';
 const VIEWS: readonly { value: View; label: string }[] = [
@@ -196,103 +193,6 @@ function RosterNews({ news, seen, onPlayer }: RosterNewsProps) {
         )}
       </AsyncView>
     </section>
-  );
-}
-
-function deadlineText(date: string | null | undefined): string | null {
-  if (!date) return null;
-  const days = Math.ceil((new Date(`${date}T23:59:59`).getTime() - Date.now()) / 86_400_000);
-  return days < 0 ? 'The trade deadline has passed.' : `Trade deadline ${date} (${days} day${days === 1 ? '' : 's'} left).`;
-}
-
-function WaiverSummary({ data }: { data: LeagueWaiversResponse }) {
-  const kind = data.league_type;
-  const text = kind === 'faab'
-    ? `FAAB league: ${data.my_balance != null ? `$${data.my_balance} left` : 'balance unknown'}${data.faab_budget ? ` of $${data.faab_budget}` : ''}. Bids follow your league's winning bids (estimates until there are 8).`
-    : kind === 'priority'
-      ? `Waiver priority league: you're ${data.my_priority ? `#${data.my_priority}` : 'unranked'}. Spend a top-3 priority only on a real difference-maker.`
-      : kind === 'free_agency' ? 'Free agency: add players right away.' : null;
-  return (
-    <p className="hint">
-      Ranked by how many points each pickup adds to your best lineup over the rest of the season ({data.weeks_left ?? '?'} weeks,
-      playoff weeks weighted by your playoff odds), after dropping your least useful player. {text}
-    </p>
-  );
-}
-
-function WaiversView({ league }: { league: MyLeague }) {
-  const [filter, setFilter] = useState<PositionFilterValue>('ALL');
-  const position = filterToPosition(filter);
-  const waivers = useAsync((signal) => getLeagueWaivers(league.id, { position, limit: 20 }, signal), [league.id, position]);
-  return (
-    <>
-      <div className="weekly-controls"><PositionFilter value={filter} onChange={setFilter} /></div>
-      <AsyncView state={waivers} loading={<TableSkeleton rows={6} columns={3} label="Finding free agents…" />}
-        isEmpty={(d) => d.results.length === 0}
-        empty={<EmptyState title="No free agents worth adding right now." />}>
-        {(data) => (
-          <>
-          <WaiverSummary data={data} />
-          <ol className="waiver-list" aria-label={`Free agents in ${data.league}`}>
-            {data.results.map((row) => <WaiverRow key={row.player.id} row={row} />)}
-          </ol>
-          </>
-        )}
-      </AsyncView>
-    </>
-  );
-}
-
-function TradeTeam({ team, habits }: { team: LeagueTradesResponse['teams'][number]; habits?: ManagerTendencies | null }) {
-  return (
-    <li className="league-trade">
-      <div className="league-trade__head">
-        <strong>{team.team}</strong>
-        {team.owner && <span className="league-trade__owner">{team.owner}</span>}
-        {team.needs.length > 0 && <span className="league-trade__needs">Needs {team.needs.join(', ')}</span>}
-        {habits && <TendencyNote habits={habits} />}
-      </div>
-      <ul className="league-trade__offers">
-        {team.offers.map((offer) => (
-          <li key={`${offer.give.map((p) => p.id).join('-')}-${offer.get.id}`}>
-            Give {offer.give.map((p) => p.name).join(' + ')} for <strong>{offer.get.name}</strong> ({offer.get.position})
-            {' '}· {offer.evaluation.verdict.replace('_', ' ')}
-            {offer.your_gain != null && <> · you +{formatNumber(offer.your_gain)}, them {offer.their_gain! >= 0 ? '+' : ''}{formatNumber(offer.their_gain ?? 0)} lineup pts</>}
-            {offer.fills_their_need.length > 0 && <>{' '}<span className="status-badge status-badge--ok">Fills their {offer.fills_their_need.join('/')} need</span></>}
-            {' '}<a href={buildHash(paths.trade, { give: offer.give.map((p) => p.id).join(','), get: String(offer.get.id) })}>Open in calculator</a>
-          </li>
-        ))}
-      </ul>
-    </li>
-  );
-}
-
-function TradesView({ league }: { league: MyLeague }) {
-  const [filter, setFilter] = useState<PositionFilterValue>('ALL');
-  const position = filterToPosition(filter) as Position | undefined;
-  const trades = useAsync((signal) => getLeagueTrades(league.id, position, signal), [league.id, position]);
-  // Best-effort: tendencies come from Yahoo; without them the offers still show.
-  const overview = useAsync((signal) => getLeagueOverview(league.id, signal).catch(() => null), [league.id]);
-  const habitsByTeam = new Map((overview.data?.teams ?? []).map((t) => [t.team, t.tendencies]));
-  return (
-    <>
-      <div className="weekly-controls"><PositionFilter value={filter} onChange={setFilter} /></div>
-      <AsyncView state={trades} loading={<TableSkeleton rows={6} columns={3} label="Looking at every roster…" />}
-        isEmpty={(d) => d.teams.length === 0}
-        empty={<EmptyState title="No fair trades found.">Try another position.</EmptyState>}>
-        {(data) => (
-          <>
-            <p className="hint">
-              Each offer improves your starting lineup (your gain) without costing theirs too much (their gain), and is fair by
-              this app's values and expert consensus. {deadlineText(data.trade_end_date)}
-            </p>
-            <ol className="league-trades" aria-label={`Trade ideas in ${data.league}`}>
-              {data.teams.map((team) => <TradeTeam key={team.team ?? ''} team={team} habits={habitsByTeam.get(team.team ?? '')} />)}
-            </ol>
-          </>
-        )}
-      </AsyncView>
-    </>
   );
 }
 

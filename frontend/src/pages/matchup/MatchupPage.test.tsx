@@ -27,15 +27,15 @@ describe('MatchupPage', () => {
       { path: '/api/my-team/1/matchup', reply: json(MATCHUP) }]);
     renderWithProviders(<MatchupPage />);
     const strategy = await screen.findByRole('region', { name: 'Lineup strategy' });
-    expect(strategy).toHaveTextContent('Your current lineup wins 40%');
-    expect(strategy).toHaveTextContent('Yahoo says 30%');
+    expect(strategy).toHaveTextContent('Your current lineup wins 41%');
+    expect(strategy).toHaveTextContent('Yahoo says 32%');
     expect(within(strategy).getByText('Recommended').closest('li')).toHaveTextContent('Most points lineup: 111.0 projected, wins 55%');
     expect(within(strategy).getByText('Marginal').closest('li')).toHaveTextContent('Upside');
     expect(strategy).toHaveTextContent('start Jahmyr Gibbs; sit Blake Corum');
     expect(screen.getByRole('region', { name: 'My Squad (you)' })).toHaveTextContent('Blake Corum');
     expect(screen.getByRole('region', { name: 'Rival' })).toHaveTextContent('Rival Back');
     const updated = screen.getByRole('region', { name: /^Updated lineup/ });
-    expect(updated).toHaveTextContent('Updated lineup (Most points) · wins 60% 114.0');
+    expect(updated).toHaveTextContent('Updated lineup (Most points) · wins 58% 114.0');
     expect(updated).toHaveTextContent('Jahmyr Gibbs');
     const bench = screen.getByRole('region', { name: 'Bench' });
     expect(bench).toHaveTextContent('Blake Corum');

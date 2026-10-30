@@ -26,7 +26,10 @@ function Grid({ position, grid, weeks }: { position: string; grid: StreamingGrid
           <thead>
             <tr>
               <th scope="col">Player</th>
-              {weeks.map((w, i) => <th key={w} scope="col" className="num">Week {w}{i > 0 && <span className="source-rank">early</span>}</th>)}
+              {weeks.map((w) => {
+                const early = grid.rows.some((r) => r.by_week[String(w)]?.early);
+                return <th key={w} scope="col" className="num">Week {w}{early && <span className="source-rank">early</span>}</th>;
+              })}
               {position === 'QB' && <th scope="col" className="num" title="Rushing fantasy points per game this season">Rush/g</th>}
               <th scope="col" className="num">Total</th>
             </tr>
