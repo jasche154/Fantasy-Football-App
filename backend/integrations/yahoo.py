@@ -209,7 +209,7 @@ def parse_roster(content: dict) -> list[dict]:
 RECEPTION_STAT_ID = 11
 # Yahoo roster slots -> this app's starter keys (K and DEF aren't modeled).
 SLOT_MAP = {"QB": "QB", "RB": "RB", "WR": "WR", "TE": "TE", "W/R/T": "FLEX", "W/R": "FLEX", "W/T": "FLEX",
-            "R/T": "FLEX"}
+            "R/T": "FLEX", "K": "K", "DEF": "DST"}
 SUPERFLEX_SLOTS = {"Q/W/R/T", "SUPERFLEX", "OP"}
 
 
@@ -240,13 +240,54 @@ def parse_settings(content: dict) -> dict:
             starters[key] = starters.get(key, 0) + count
     reception = 0.0
     modifiers = settings.get("stat_modifiers")
+    from services.kdst_model import DEFAULT_DST, DEFAULT_K, YAHOO_DST, YAHOO_K
+
+    k_scoring, dst_scoring = dict(DEFAULT_K), dict(DEFAULT_DST)
     for item in ((modifiers if isinstance(modifiers, dict) else {}).get("stats") or []):
         stat = (item or {}).get("stat") or {} if isinstance(item, dict) else {}
-        if _number(stat.get("stat_id"), int) == RECEPTION_STAT_ID:
+        stat_id = _number(stat.get("stat_id"), int)
+        if stat_id == RECEPTION_STAT_ID:
             reception = _number(stat.get("value"), float)
+        elif stat_id in YAHOO_K or stat_id in YAHOO_DST:
+            try:
+                value = float(stat.get("value"))
+            except (TypeError, ValueError):
+                continue
+            if -20 <= value <= 20:                       # anything outside this is corrupt data
+                (k_scoring if stat_id in YAHOO_K else dst_scoring)[(YAHOO_K | YAHOO_DST)[stat_id]] = value
     scoring = "ppr" if reception >= 0.75 else "half" if reception >= 0.25 else "std"
     return {"scoring": scoring, "reception_points": reception, "starters": starters, "bench": bench,
-            "superflex": superflex}
+            "superflex": superflex, "k_scoring": k_scoring, "dst_scoring": dst_scoring}
+
+
+def _float(value: object) -> float | None:
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
+def parse_scoreboard(content: dict) -> list[dict]:
+    """Matchups from /league/{key}/scoreboard: each team's key, name, points, projection, win probability."""
+    league = content.get("league") or []
+    board = merge(league[1:]).get("scoreboard") if len(league) > 1 else None
+    if not isinstance(board, dict):
+        return []
+    matchups = (board.get("0") or {}).get("matchups")
+    out = []
+    for matchup in collection(matchups, "matchup"):
+        teams = []
+        for team in collection((matchup.get("0") or {}).get("teams") if isinstance(matchup, dict) else None, "team"):
+            meta, stats = merge(team[0] if team and isinstance(team[0], list) else team), {}
+            if isinstance(team, list) and len(team) > 1 and isinstance(team[1], dict):
+                stats = team[1]
+            teams.append({"team_key": meta.get("team_key"), "name": meta.get("name"),
+                          "points": _float((stats.get("team_points") or {}).get("total")),
+                          "projected": _float((stats.get("team_projected_points") or {}).get("total")),
+                          "win_probability": _float(stats.get("win_probability"))})
+        if teams:
+            out.append({"status": matchup.get("status") if isinstance(matchup, dict) else None, "teams": teams})
+    return out
 
 
 def league_team_keys(teams: Iterable[dict]) -> list[str]:

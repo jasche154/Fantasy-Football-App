@@ -1,4 +1,6 @@
 """Week X rankings and opponent-adjusted strength of schedule."""
+from typing import Literal
+
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
@@ -7,7 +9,7 @@ from config import get_settings
 from database.db import get_session
 from fastapi import HTTPException
 
-from services import serialize
+from services import kdst_rankings, serialize
 from services.flags import player_flags
 from services.league import LeagueSettings
 from services.valuation import Valuation
@@ -128,3 +130,11 @@ def schedule_strength(position: Position = "WR", week: int | None = Week,
                       session: Session = Depends(get_session)) -> dict:
     valuation = valuation_or_503(session, league)
     return serialize.schedule_strength(valuation, position, week or default_week(valuation))
+
+
+@router.get("/rankings/weekly/kdst")
+def weekly_kdst(position: Literal["K", "DST"] = "K", week: int | None = Week,
+                session: Session = Depends(get_session)) -> dict:
+    """Kicker or team-defense projections for the week (Yahoo default scoring)."""
+    valuation = valuation_or_503(session, LeagueSettings())
+    return kdst_rankings.serialize(session, valuation.season, week or default_week(valuation), position)

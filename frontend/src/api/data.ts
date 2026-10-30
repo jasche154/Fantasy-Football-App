@@ -23,6 +23,9 @@ import type {
   LeagueWaiversResponse,
   MyLeaguesResponse,
   MyTeamResponse,
+  KdstResponse,
+  MatchupResponse,
+  ModelAccuracyResponse,
 } from './types';
 
 export function getHealth(signal?: AbortSignal): Promise<{ status: string }> {
@@ -245,4 +248,16 @@ export function getLeagueTrades(leagueId: number, wantPosition?: Position, signa
 
 export function syncMyLeague(leagueId: number): Promise<LeagueSyncResult> {
   return apiRequest(`/api/my-team/${leagueId}/sync`, { method: 'POST' });
+}
+
+export function getKdst(position: 'K' | 'DST', week?: number, signal?: AbortSignal): Promise<KdstResponse> {
+  return apiRequest('/api/rankings/weekly/kdst', { query: { position, week }, signal });
+}
+
+export function getMatchup(leagueId: number, signal?: AbortSignal): Promise<MatchupResponse> {
+  return apiRequest(`/api/my-team/${leagueId}/matchup`, { signal });
+}
+
+export function getModelAccuracy(scoring: string, signal?: AbortSignal): Promise<ModelAccuracyResponse> {
+  return apiRequest('/api/model/accuracy', { query: { scoring }, signal });
 }

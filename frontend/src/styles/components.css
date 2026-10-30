@@ -672,3 +672,12 @@
 .league-trade__owner { color: var(--color-text-subtle); font-size: 0.85rem; }
 .league-trade__needs { color: var(--color-warn); font-size: 0.8rem; font-weight: 650; }
 .league-trade__offers { margin: 0; padding-left: var(--space-4); display: grid; gap: var(--space-2); }
+
+/* Matchup, kickers / defenses, accuracy */
+.matchup-headline { font-size: 1.1rem; margin: 0 0 var(--space-3); }
+.matchup-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: var(--space-4); }
+.matchup-side__total { color: var(--color-text-subtle); font-weight: 650; margin-left: var(--space-2); }
+.strategy-list { list-style: none; margin: var(--space-2) 0; padding: 0; display: grid; gap: var(--space-1); }
+.strategy-list .is-recommended { font-weight: 650; }
+.kdst-why summary { cursor: pointer; color: var(--color-accent); font-size: 0.8rem; }
+.accuracy section + section { margin-top: var(--space-4); }

@@ -150,11 +150,32 @@ def import_league(session: Session, settings: Settings, http: httpx.Client, leag
 
 
 def modeled_position(display_position: str | None) -> str | None:
-    """'RB' -> 'RB'; Yahoo's dual eligibility 'RB,WR' -> 'RB' (the first modeled one); 'K' / 'DEF' -> None."""
-    for part in (display_position or "").split(","):
-        if part.strip() in POSITIONS:
-            return part.strip()
+    """'RB' -> 'RB'; Yahoo's dual eligibility 'RB,WR' -> 'RB' (the first modeled one); 'K' -> 'K'; 'DEF' -> 'DST'."""
+    parts = [p.strip() for p in (display_position or "").split(",")]
+    for part in parts:
+        if part in POSITIONS:
+            return part
+    if "K" in parts:
+        return "K"
+    if "DEF" in parts:
+        return "DST"
     return None
+
+
+def _match_special(session: Session, entry: dict, position: str) -> int | None:
+    """Kickers by name (+ team), defenses by team: the app's K/DST models cover them."""
+    from integrations.weekly_sources import normalize_name, normalize_team
+    from services.kdst_rankings import dst_player
+
+    team = normalize_team(entry.get("team"))
+    if position == "DST":
+        return dst_player(session, team).id if team else None
+    wanted = normalize_name(entry.get("name") or "")
+    kickers = [p for p in session.scalars(select(Player).where(Player.position == "K"))
+               if normalize_name(p.full_name or "") == wanted]
+    if len(kickers) > 1 and team:
+        kickers = [p for p in kickers if p.nfl_team == team] or kickers
+    return kickers[0].id if len(kickers) == 1 else None
 
 
 def _import_league(session: Session, settings: Settings, http: httpx.Client, league_key: str) -> dict:
@@ -181,7 +202,8 @@ def _import_league(session: Session, settings: Settings, http: httpx.Client, lea
             if position is None:
                 untracked.append(name)                     # team defenses and kickers aren't modeled
                 continue
-            player_id = _match_roster_player(session, matcher, {**entry, "position": position})
+            player_id = (_match_special(session, entry, position) if position in ("K", "DST")
+                         else _match_roster_player(session, matcher, {**entry, "position": position}))
             if player_id is None:
                 unmatched.append(name)
                 continue
