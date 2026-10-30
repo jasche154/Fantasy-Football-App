@@ -141,9 +141,29 @@ def status_shares(session: Session, remaining_weeks: int) -> dict[int, float]:
     return out
 
 
+BACKUP_ROS_FLOOR = 0.03       # a backup QB still starts a game or two over a season, on average
+
+
+def backup_qb_shares(session: Session, shares: Mapping[int, float]) -> dict[int, float]:
+    """Share of remaining games a backup QB starts: the share his starter misses (nearly 0 when healthy)."""
+    from services.injuries import qb_depth
+
+    out = {}
+    for qbs in qb_depth(session).values():
+        for backup in qbs[1:]:
+            out[backup] = round(max(BACKUP_ROS_FLOOR, 1.0 - shares.get(qbs[0], 1.0)), 3)
+    return out
+
+
 def availability(session: Session, remaining_weeks: int) -> dict[int, float]:
-    """{player_id: share of remaining games expected to play}, for players expected to miss some."""
-    return {pid: share for pid, share in status_shares(session, remaining_weeks).items() if share < 1}
+    """{player_id: share of remaining games expected to play}, for players expected to miss some.
+
+    Backup QBs count as missing every game their starter plays.
+    """
+    shares = status_shares(session, remaining_weeks)
+    for pid, backup in backup_qb_shares(session, shares).items():
+        shares[pid] = min(shares.get(pid, 1.0), backup)
+    return {pid: share for pid, share in shares.items() if share < 1}
 
 
 def ros_inputs(session: Session, season: int, scoring_key: str, scoring: ScoringSettings,
