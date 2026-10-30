@@ -444,11 +444,39 @@ One week's best fit is usually extreme (week 7's put 69% on the model and 0% on 
 small step keeps one odd week from flipping the blend: a source has to beat the others week
 after week to gain real weight.
 
-- **Week 7 (265 player-weeks):**
-  - Yahoo consensus (4.23 average error) and the model (4.31) beat ESPN (4.57), props (5.12)
-    and Josh & Hayden (5.56).
-  - Weights moved props 35→33%, Josh & Hayden 30→28%, model 15→18%, Yahoo 10→12% and
-    ESPN 10→9%. The blend's error that week went from 4.204 to 4.196.
+A source missing from a week (no props for a backfilled week, no Josh & Hayden ranks) is
+left out of that week's fit and keeps its weight: missing data says nothing about accuracy.
+
+**Backfilled weeks** (`services/history_backfill.py`). Weeks 1–6 of 2026 were rebuilt
+after the fact, without hindsight:
+- Yahoo's weekly ranks and ESPN's projections are re-pulled; Yahoo and ESPN still publish
+  them for past weeks. Vegas props aren't backfilled, since historical odds cost credits.
+- The model only sees games before each week (stats truncated, defenses and EPA profiles
+  rebuilt from earlier games), injuries come from that week's official report, and the
+  blend uses only weights learned from earlier weeks.
+- The weights are then re-learned week by week, in order. Rows saved live before kickoff
+  are never replaced.
+
+Yahoo's past data has Hayden Winks' ranks for weeks 1–2 only, and Josh Norris isn't in its
+2026 data at all, so the Josh & Hayden source is thin for those weeks.
+
+Average error per player-week (rows in parentheses):
+
+| Week | Props | Josh & Hayden | Model | Yahoo | ESPN | Blend |
+|---|---|---|---|---|---|---|
+| 1 | — | 5.73 (216) | — | 4.60 | 4.73 | 4.57 |
+| 2 | — | 5.54 (195) | 4.94 | 4.07 | 4.41 | 4.07 |
+| 3 | — | — | 4.83 | 4.43 | 4.86 | 4.44 |
+| 4 | — | — | 4.84 | 4.34 | 4.62 | 4.31 |
+| 5 | — | — | 5.09 | 4.49 | 4.64 | 4.52 |
+| 6 | — | — | 4.71 | 4.10 | 4.31 | 4.08 |
+| 7 (live) | 5.12 | 5.56 | 4.31 | 4.23 | 4.57 | 4.20 |
+
+Through week 7 the weights are props 33%, Josh & Hayden 30%, Yahoo consensus 14%, model 13%
+and ESPN 10%. Yahoo consensus gained the most; the model lost a little early (it has few
+games to go on) and won some back in week 7. Run it again with
+`python -m services.history_backfill --season 2026 --weeks 1-6` (`--no-fetch` to rebuild
+from the sources already stored).
 - **Running it:** it updates on its own every week while the API runs: the background
   check loads the finished week and the load runs the update. The check also saves the next
   week's pre-game projections, so the learner has data even in weeks you never open Week X.

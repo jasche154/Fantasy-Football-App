@@ -14,6 +14,17 @@ def test_fit_puts_weight_on_the_source_that_predicted_best():
     assert fitted["model"] > 0.9 and sum(fitted.values()) == pytest.approx(1.0, abs=0.001)
 
 
+def test_a_source_missing_that_week_keeps_its_weight():
+    # No props rows this week (e.g. a backfilled week): props neither gain nor lose weight.
+    samples = [Sample({"model": a, "espn": a + (6 if i % 2 else -6)}, a) for i, a in enumerate(range(5, 45))]
+    current = dict(DEFAULT_WEIGHTS)
+    optimal = wl.week_optimal(samples, current)
+    assert optimal["vegas_props"] == current["vegas_props"] and optimal["josh_hayden"] == current["josh_hayden"]
+    assert optimal["model"] > optimal["espn"]
+    assert sum(optimal.values()) == pytest.approx(1.0, abs=0.001)
+    assert wl.week_optimal([], current) == current
+
+
 def test_blend_rebalances_over_the_sources_a_player_has():
     assert wl.blend({"model": 0.2, "espn": 0.6}, {"model": 10.0}) == 10.0
     assert wl.blend({"model": 0.25, "espn": 0.75}, {"model": 10.0, "espn": 20.0}) == 17.5
