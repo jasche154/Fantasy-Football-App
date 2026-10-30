@@ -120,6 +120,8 @@ def project_week(session: Session, data: SeasonData, week: int, settings: Weekly
         implied, team_ppg = game.implied_points(player.team), team_ppg_before(schedule, player.team, week)
         if settings.implied_weight and implied and team_ppg:
             multiplier *= min(1.25, max(0.75, implied / team_ppg)) ** settings.implied_weight
+        if settings.use_factors:
+            multiplier *= _factor(session, data, week, player.position, player.team, opponent)
         if_active = rate * multiplier
         projected = if_active
         if context is not None:
@@ -130,6 +132,27 @@ def project_week(session: Session, data: SeasonData, week: int, settings: Weekly
         targets.append(Target(week, player.player_id, player.position or "", actual or 0.0, projected,
                               if_active, actual is not None, game_line.snap_pct if game_line else None))
     return targets
+
+
+def _factor(session: Session, data: SeasonData, week: int, position: str | None, team: str | None,
+            opponent: str) -> float:
+    """Calibration / EPA matchup / weather factor, from data before the week (services/projection_factors.py)."""
+    from sqlalchemy import select
+
+    from database.models import NflGame
+    from services.game_features import conditions_for, team_profiles
+    from services.projection_factors import factor, inputs_for
+
+    cache = data.cache
+    if ("games",) not in cache:
+        games = {}
+        for g in session.scalars(select(NflGame).where(NflGame.season == data.season, NflGame.game_type == "REG")):
+            games[(g.week, g.home_team)] = games[(g.week, g.away_team)] = g
+        cache[("games",)] = games
+    if ("profiles", week) not in cache:
+        cache[("profiles", week)] = team_profiles(session, data.season, week)
+    game = cache[("games",)].get((week, team))
+    return factor(position, inputs_for(cache[("profiles", week)], opponent, conditions_for(game)))
 
 
 def score(targets: list[Target]) -> dict:
@@ -207,7 +230,8 @@ def main(argv: list[str] | None = None) -> None:
     with Session(engine) as session:
         production = WeeklyModelSettings()
         if args.ablation:
-            candidates = [production, replace(production, use_injuries=False), replace(production, half_life=None),
+            candidates = [production, replace(production, use_factors=False), replace(production, use_injuries=False),
+                          replace(production, half_life=None),
                           replace(production, implied_weight=0.0), replace(production, sos_weight=0.0),
                           WeeklyModelSettings(half_life=None, sos_weight=0.0, implied_weight=0.0, use_injuries=False)]
         else:

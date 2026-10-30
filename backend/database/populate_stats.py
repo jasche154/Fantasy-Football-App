@@ -213,7 +213,8 @@ def load_snap_counts(session: Session, seasons: Iterable[int], index: PlayerInde
         log.info("snap counts %s: %d rows (%d without a PFR id match)", season, len(rows), unmatched)
 
 
-GAME_COLUMNS = ("game_id", "season", "week", "game_type", "gameday", "home_team", "away_team",
+GAME_COLUMNS = ("game_id", "season", "week", "game_type", "gameday", "gametime", "roof", "surface", "temp", "wind",
+                "stadium_id", "home_team", "away_team",
                 "home_score", "away_score", "spread_line", "total_line")
 
 
@@ -360,9 +361,16 @@ def load_data(seasons: list[int] | None = None, reload_all: bool = False) -> Non
         load_injury_reports(session, seasons, index)
         load_depth_charts(session, max(seasons), index)
         load_expert_rankings(session, index)
+        load_advanced_stats(session, seasons, index)
         record_load(session, seasons)
         learn_source_weights(session, max(seasons))
     log.info("Done.")
+
+
+def load_advanced_stats(session: Session, seasons: Iterable[int], index: PlayerIndex) -> None:
+    from database.advanced_stats import load_advanced_stats as load
+
+    load(session, seasons, index)
 
 
 def learn_source_weights(session: Session, season: int) -> None:

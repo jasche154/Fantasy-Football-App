@@ -43,11 +43,12 @@ class WeeklyModelSettings:
     sos_weight: float = SOS_WEIGHT
     implied_weight: float = IMPLIED_TOTAL_WEIGHT
     use_injuries: bool = True
+    use_factors: bool = True        # calibration + EPA matchup + weather (services/projection_factors.py)
 
     def describe(self) -> str:
         recency = "season" if self.half_life is None else f"half-life {self.half_life:g}"
         return (f"{recency}, sos^{self.sos_weight:g}, implied^{self.implied_weight:g}, "
-                f"injuries {'on' if self.use_injuries else 'off'}")
+                f"injuries {'on' if self.use_injuries else 'off'}, factors {'on' if self.use_factors else 'off'}")
 
 
 def weekly_rate(player: PlayerSeason, prior_ppg: float | None, half_life: float | None = RECENCY_HALF_LIFE) -> float:
