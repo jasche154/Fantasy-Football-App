@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from database.models import DataLoad, GameForecast, InjuryReport, NflGame, PlayerStatus, WeeklySourceProjection
 from integrations import espn, odds_api, yahoo_experts
-from services import projection_factors, rankings_store
+from services import projection_factors, rankings_store, score_ranges
 from services.game_features import conditions_for, team_profiles
 from services.projection_factors import inputs_for
 from services.weather import forecasts
@@ -76,6 +76,7 @@ class WeeklyPlayer:
     explanation: tuple[Step, ...] = ()
     pct_rostered: float | None = None
     actual: float | None = None        # points scored that week (league scoring), once the game is final
+    quantiles: tuple[float, ...] | None = None   # points if he plays, at score_ranges.LEVELS
 
 
 @dataclass(frozen=True)
@@ -222,7 +223,8 @@ def blend(candidates: Mapping[int, _Candidate], valuation: Valuation, week: int,
           context: InjuryContext | None = None, rates: Mapping[int, float] | None = None,
           weights: Mapping[str, float] = WEIGHTS,
           factor_for: Callable[[str, str | None, str], tuple[float, str]] | None = None,
-          weights_by_position: Mapping[str, Mapping[str, float]] | None = None) -> tuple[WeeklyPlayer, ...]:
+          weights_by_position: Mapping[str, Mapping[str, float]] | None = None,
+          shapes: Mapping[int, tuple[float | None, float | None]] | None = None) -> tuple[WeeklyPlayer, ...]:
     """Pure blending step over already-loaded sources.
 
     With require_outside_source, players that no outside source projects or ranks are left
@@ -264,7 +266,7 @@ def blend(candidates: Mapping[int, _Candidate], valuation: Valuation, week: int,
         tilt = matchup.sos_factor ** FINAL_SOS_TILT
         model_share = own_weights["model"] / sum(own_weights[k] for k in sources) if "model" in sources else 0.0
         adjusted: Adjusted = adjust(candidate.position, combined, tilt, matchup, model_share,
-                                    candidate.player_id, context)
+                                    candidate.player_id, context, (shapes or {}).get(candidate.player_id, (None, None)))
         if adjusted.projection <= 0:
             continue                                   # ruled out
         steps = explain(candidate.name, candidate.position, rates.get(candidate.player_id),
@@ -282,6 +284,7 @@ def blend(candidates: Mapping[int, _Candidate], valuation: Valuation, week: int,
             status=None if adjusted.availability.play_prob >= 1 and adjusted.availability.status is None
             else adjusted.availability.label,
             floor=adjusted.floor, ceiling=adjusted.ceiling, boost_points=adjusted.boost_points,
+            quantiles=adjusted.quantiles,
             scenarios=adjusted.scenarios, explanation=steps, pct_rostered=candidate.pct_rostered,
             actual=_actual(seasons.get(candidate.player_id), week)))
     return _ranked(players)
@@ -354,7 +357,8 @@ def _build(session: Session, league: LeagueSettings, valuation: Valuation, week:
     players = blend(candidates, valuation, week, league, require_outside_source=has_outside_sources,
                     context=context, rates=rates, weights=weights,
                     factor_for=model_factors(session, valuation.season, week),
-                    weights_by_position=position_weights(session, valuation.season, week))
+                    weights_by_position=position_weights(session, valuation.season, week),
+                    shapes=score_ranges.shape_inputs(session, valuation.season, candidates, before_week=week))
     counts = {key: sum(1 for p in players if key in p.sources) for key in weights}
     return WeeklyRankings(season=valuation.season, week=week, scoring=league.scoring,
                           players=players, source_counts=counts, context=context, weights=weights,

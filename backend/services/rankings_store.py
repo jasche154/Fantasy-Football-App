@@ -36,7 +36,7 @@ SERVICES_DIR = Path(__file__).parent
 # Changing any of these changes the numbers, so it invalidates saved snapshots.
 MODEL_FILES = ("weekly_rankings.py", "weekly_adjust.py", "weekly_model.py", "injuries.py", "flags.py",
                "valuation.py", "projections.py", "ros_consensus.py", "schedule_strength.py",
-               "projection_ranges.json")
+               "projection_ranges.json", "score_ranges.py", "score_ranges.json")
 SNAPSHOT_TTL = timedelta(days=21)
 KEY_FILE = SERVICES_DIR.parent / ".snapshot_key"
 SIGNATURE_BYTES = 32
