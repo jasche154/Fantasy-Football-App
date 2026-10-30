@@ -6,8 +6,10 @@ import {
   apiRequest,
   detailToMessage,
   errorMessage,
+  getApiToken,
   isAbortError,
   resolveApiBase,
+  setApiToken,
 } from './client';
 
 describe('resolveApiBase', () => {
@@ -134,5 +136,19 @@ describe('errorMessage', () => {
   it('only recognises AbortError-named errors as aborts', () => {
     expect(isAbortError(new Error('x'))).toBe(false);
     expect(isAbortError(null)).toBe(false);
+  });
+});
+
+describe('API token', () => {
+  it('sends the saved token as a Bearer header and stops after it is forgotten', async () => {
+    const api = mockFetch([{ path: '/api/meta', reply: json({}) }]);
+    setApiToken('abc123');
+    await apiRequest('/api/meta');
+    const headers = api.fn.mock.calls[0][1]?.headers as Record<string, string>;
+    expect(headers.Authorization).toBe('Bearer abc123');
+    setApiToken(null);
+    expect(getApiToken()).toBeNull();
+    await apiRequest('/api/meta');
+    expect((api.fn.mock.calls[1][1]?.headers as Record<string, string>).Authorization).toBeUndefined();
   });
 });

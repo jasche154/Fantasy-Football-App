@@ -13,8 +13,12 @@ export interface ChatEntry {
 /** "failed" withdraws the message so the caller can restore it; "aborted" means New chat. */
 export type SendOutcome = 'ok' | 'failed' | 'aborted' | 'skipped';
 
+/** Only the latest messages go to the server; remembered facts carry what matters from earlier. */
+export const MAX_HISTORY = 20;
+
 export interface ChatController {
   entries: readonly ChatEntry[];
+  memory: readonly string[];
   isPending: boolean;
   error: Error | null;
   send: (text: string) => Promise<SendOutcome>;
@@ -32,6 +36,7 @@ function toError(caught: unknown): Error {
 
 export function useChat(): ChatController {
   const [entries, setEntries] = useState<readonly ChatEntry[]>([]);
+  const [memory, setMemory] = useState<readonly string[]>([]);
   const [isPending, setIsPending] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
@@ -55,8 +60,9 @@ export function useChat(): ChatController {
     setIsPending(true);
     setError(null);
     try {
-      const response = await sendChat(history.map(toMessage), controller.signal);
+      const response = await sendChat(history.slice(-MAX_HISTORY).map(toMessage), memory, controller.signal);
       if (controller.signal.aborted) return 'aborted';
+      if (response.memory) setMemory(response.memory);
       setEntries((current) => [...current, makeEntry('assistant', response.reply, response.tool_calls ?? [])]);
       return 'ok';
     } catch (caught) {
@@ -72,10 +78,11 @@ export function useChat(): ChatController {
   const reset = useCallback(() => {
     controllerRef.current?.abort();
     setEntries([]);
+    setMemory([]);
     setError(null);
     setIsPending(false);
   }, []);
 
   const dismissError = useCallback(() => setError(null), []);
-  return { entries, isPending, error, send, reset, dismissError };
+  return { entries, memory, isPending, error, send, reset, dismissError };
 }

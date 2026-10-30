@@ -62,6 +62,18 @@ function ExamplePrompts({ onPick, isDisabled }: { onPick: (text: string) => void
   );
 }
 
+function MemoryNote({ memory }: { memory: readonly string[] }) {
+  if (memory.length === 0) return null;
+  return (
+    <section className="chat-memory" aria-label="Keeping in mind">
+      <p className="chat-memory__label">Keeping in mind for this chat</p>
+      <ul className="chat-memory__list">
+        {memory.map((fact) => <li key={fact} className="chip">{fact}</li>)}
+      </ul>
+    </section>
+  );
+}
+
 function chatErrorMessage(error: Error): string | undefined {
   return error instanceof ApiError && error.status === 503 ? LLM_SETUP_MESSAGE : undefined;
 }
@@ -91,6 +103,7 @@ export function AskPage() {
       />
       {isLlmMissing && <p className="notice" role="note">{LLM_SETUP_MESSAGE}</p>}
       <div className="chat">
+        <MemoryNote memory={chat.memory} />
         <ChatMessages entries={chat.entries} isPending={chat.isPending} />
         {chat.entries.length === 0 && !chat.isPending && (
           <ExamplePrompts onPick={(prompt) => void handleSend(prompt)} isDisabled={chat.isPending} />

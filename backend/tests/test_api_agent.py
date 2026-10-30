@@ -53,7 +53,7 @@ def test_chat_with_fake_llm(client, monkeypatch):
     monkeypatch.setattr("api.agent_routes.GroqClient", FakeGroq)
     body = client.post("/api/agent/chat", json={"messages": [{"role": "user", "content": "buy lows?"}]}).json()
     assert body == {"reply": "Buy Low Guy.", "tool_calls": [
-        {"name": "get_buy_low_candidates", "arguments": {"limit": 1}, "ok": True}]}
+        {"name": "get_buy_low_candidates", "arguments": {"limit": 1}, "ok": True}], "memory": []}
 
 
 def test_chat_upstream_failure_is_502(client, monkeypatch):

@@ -55,6 +55,7 @@ describe('AskPage', () => {
     expect(screen.getByText('failed')).toBeInTheDocument();
     expect(api.callsTo('/api/agent/chat', 'POST')[0].body).toEqual({
       messages: [{ role: 'user', content: 'Who are the best buy-low RBs right now?' }],
+      memory: [],
     });
 
     await user.click(screen.getByRole('button', { name: 'New chat' }));
@@ -99,5 +100,26 @@ describe('summarizeArguments', () => {
     expect(summarizeArguments({ give: [1, 2], nested: { a: 1 }, none: null })).toBe('give: 1, 2, nested: {"a":1}, none: —');
     expect(summarizeArguments({ text: 'x'.repeat(200) })).toHaveLength(80);
     expect(summarizeArguments({})).toBe('');
+  });
+  it('keeps remembered facts, shows them, and sends them with the next message', async () => {
+    const user = userEvent.setup();
+    const api = mockFetch([
+      META_ROUTE,
+      { method: 'POST', path: '/api/agent/chat',
+        reply: json({ reply: 'Noted.', tool_calls: [{ name: 'remember', arguments: { fact: "I'm 5-1" }, ok: true }],
+          memory: ["I'm 5-1"] }) },
+    ]);
+    renderWithProviders(<AskPage />);
+
+    await user.type(composer(), "I'm 5-1{Enter}");
+    const note = await screen.findByRole('region', { name: 'Keeping in mind' });
+    expect(note).toHaveTextContent("I'm 5-1");
+
+    await user.type(composer(), 'Who should I start?{Enter}');
+    await screen.findAllByText('Noted.');
+    expect(api.callsTo('/api/agent/chat', 'POST')[1].body).toMatchObject({ memory: ["I'm 5-1"] });
+
+    await user.click(screen.getByRole('button', { name: 'New chat' }));
+    expect(screen.queryByRole('region', { name: 'Keeping in mind' })).not.toBeInTheDocument();
   });
 });

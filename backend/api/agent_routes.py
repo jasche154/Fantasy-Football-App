@@ -1,5 +1,5 @@
 """Agent tools (callable by any agent framework) and the built-in AI assistant."""
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -27,6 +27,8 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: list[ChatMessage] = Field(..., min_length=1, max_length=30)
+    # Facts the assistant saved with its remember tool; the browser keeps them for the chat.
+    memory: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field(default_factory=list, max_length=10)
 
 
 @router.get("/agent/tools")
@@ -59,8 +61,9 @@ def agent_chat(request: ChatRequest, session: Session = Depends(get_session)) ->
         raise HTTPException(503, "The AI assistant needs GROQ_API_KEY in backend/.env.")
     try:
         result = run_agent(session, GroqClient(settings.groq_api_key, settings.groq_model),
-                           [m.model_dump() for m in request.messages])
+                           [m.model_dump() for m in request.messages], memory=request.memory)
     except AgentUnavailable as exc:
         raise HTTPException(502, str(exc)) from exc
     return {"reply": result.reply, "tool_calls": [
-        {"name": t.name, "arguments": dict(t.arguments), "ok": t.ok} for t in result.tool_calls]}
+        {"name": t.name, "arguments": dict(t.arguments), "ok": t.ok} for t in result.tool_calls],
+        "memory": list(result.memory)}

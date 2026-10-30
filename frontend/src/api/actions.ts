@@ -1,8 +1,10 @@
 import { apiRequest } from './client';
 import type {
+  BackupResult,
   ChatMessage,
   ChatResponse,
   IntegrationsStatus,
+  SystemStatus,
   ToolDef,
   TradeRequest,
   TradeOffer,
@@ -32,8 +34,16 @@ export function callAgentTool(
   });
 }
 
-export function sendChat(messages: ChatMessage[], signal?: AbortSignal): Promise<ChatResponse> {
-  return apiRequest('/api/agent/chat', { method: 'POST', body: { messages }, signal });
+export function sendChat(messages: ChatMessage[], memory: readonly string[] = [], signal?: AbortSignal): Promise<ChatResponse> {
+  return apiRequest('/api/agent/chat', { method: 'POST', body: { messages, memory }, signal });
+}
+
+export function getSystemStatus(signal?: AbortSignal): Promise<SystemStatus> {
+  return apiRequest('/api/system/status', { signal });
+}
+
+export function backupNow(): Promise<BackupResult> {
+  return apiRequest('/api/system/backup', { method: 'POST', body: {} });
 }
 
 export function getIntegrationsStatus(signal?: AbortSignal): Promise<IntegrationsStatus> {

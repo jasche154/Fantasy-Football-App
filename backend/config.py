@@ -43,6 +43,16 @@ class Settings(BaseSettings):
     yahoo_redirect_uri: str = "oob"
     token_encryption_key: str | None = None
 
+    # Optional single-user token. When set, every /api request except /api/meta must send
+    # "Authorization: Bearer <token>" (enter it once in the web app's Settings). Leave unset
+    # for localhost-only use; host and origin checks still apply either way.
+    api_token: str | None = None
+
+    # Daily copies of the SQLite database while the API runs (services/backup.py).
+    backups: bool = True
+    backup_dir: str = str(BACKEND_DIR / "database" / "backups")
+    backup_keep: int = 7
+
     # Last week of the fantasy season (playoffs included); drives "weeks remaining".
     fantasy_end_week: int = 18          # the fantasy final; playoffs default to weeks 16-18
 

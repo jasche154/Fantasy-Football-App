@@ -7,7 +7,8 @@ Every CHECK_HOURS (first check shortly after startup) a background thread:
    source-weight update (services/weight_learning.py).
 2. **Re-imports your Yahoo leagues** (rosters, lineups, rules) when Yahoo is connected,
    so My Team, league waivers and league trades follow adds, drops and trades.
-3. **Saves the pre-game snapshot** for the current week while it has games left: refreshes
+3. **Backs up the database** once a day (services/backup.py).
+4. **Saves the pre-game snapshot** for the current week while it has games left: refreshes
    the outside sources (same caches and Odds API credit budget as opening the Week X page),
    then builds the default league's rankings, which records each player's pre-kickoff
    projection in projection_history. That's what the next weight update learns from, so
@@ -116,18 +117,41 @@ def sync_yahoo_leagues(session: Session) -> int:
     return synced
 
 
+def check(session_factory: Callable[[], Session]) -> dict:
+    """One full check (stats, Yahoo, snapshot, backup), recorded for the status page."""
+    from datetime import datetime, timezone
+
+    from services import backup, system_status
+
+    started = datetime.now(timezone.utc)
+    status: dict = {"at": started.isoformat(), "ok": True}
+    try:
+        result = run_once(session_factory)
+        status.update(loaded_week=result.loaded_week, synced_leagues=result.synced_leagues,
+                      snapshot_week=result.snapshot_week, notes=result.notes)
+        if result.loaded_week or result.snapshot_week or result.synced_leagues:
+            log.info("Auto-update: loaded week %s stats, synced %s Yahoo leagues, saved week %s projections",
+                     result.loaded_week, result.synced_leagues, result.snapshot_week)
+    except Exception as exc:      # never let a bad check kill the thread; try again next time
+        log.exception("Auto-update check failed")
+        status.update(ok=False, error=type(exc).__name__)    # the type only: messages can carry URLs
+    with session_factory() as session:
+        backup.run(session)
+        status["seconds"] = round((datetime.now(timezone.utc) - started).total_seconds(), 1)
+        status["next_check_hours"] = CHECK_HOURS
+        system_status.record(session, "auto_update", status)
+    return status
+
+
 def _loop(session_factory: Callable[[], Session]) -> None:
     wait = FIRST_CHECK_SECONDS
     while True:
         if _stop.wait(wait):
             return
         try:
-            result = run_once(session_factory)
-            if result.loaded_week or result.snapshot_week or result.synced_leagues:
-                log.info("Auto-update: loaded week %s stats, synced %s Yahoo leagues, saved week %s projections",
-                         result.loaded_week, result.synced_leagues, result.snapshot_week)
-        except Exception:      # never let a bad check kill the thread; try again next time
-            log.exception("Auto-update check failed")
+            check(session_factory)
+        except Exception:          # status bookkeeping or the backup failed; keep the thread alive
+            log.exception("Auto-update bookkeeping failed")
         wait = CHECK_HOURS * 3600
 
 

@@ -8,6 +8,7 @@ import { Skeleton } from '../../components/StatusViews';
 import { useAsync } from '../../hooks/useAsync';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { AppearanceForm, LeagueSettingsForm } from './LeagueSettingsForm';
+import { ApiTokenForm, SystemPanel } from './SystemPanel';
 import { YahooConnect } from './YahooConnect';
 
 interface IntegrationRowProps {
@@ -101,8 +102,10 @@ export function SettingsPage() {
       <div className="settings-grid">
         <LeagueSettingsForm />
         <div className="settings-grid__side">
+          <ApiTokenForm />
           <AppearanceForm />
           <IntegrationsPanel />
+          <SystemPanel />
         </div>
       </div>
     </>

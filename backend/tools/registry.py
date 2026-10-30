@@ -5,7 +5,7 @@ handler `handler(session, **arguments)`. Arguments are validated against the sch
 before the handler runs, so a model can't pass unknown keys, wrong types, or values
 outside the allowed range.
 """
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -102,8 +102,11 @@ class ToolRegistry:
     def definitions(self) -> list[dict]:
         return [t.definition() for t in self]
 
-    def openai_schemas(self) -> list[dict]:
-        return [t.openai_schema() for t in self]
+    def openai_schemas(self, names: Iterable[str] | None = None) -> list[dict]:
+        """Every tool's schema, or only the named ones (unknown names are ignored)."""
+        if names is None:
+            return [t.openai_schema() for t in self]
+        return [self._tools[n].openai_schema() for n in dict.fromkeys(names) if n in self._tools]
 
     def call(self, session: Session, name: str, arguments: Mapping[str, Any] | None) -> Any:
         tool = self.get(name)
