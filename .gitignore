@@ -9,3 +9,4 @@ frontend/node_modules/
 # Big Data Bowl downloads (500+ MB) stay local
 backend/data/
 .coverage
+backend/database/backups/

@@ -87,7 +87,7 @@ describe('action endpoints', () => {
       ['POST', '/api/trade/evaluate', { give: [1], get: [2, 3], settings: SETTINGS }],
       ['GET', '/api/agent/tools', undefined],
       ['POST', '/api/agent/tools/get_player_profile', { arguments: { player: 'Bijan Robinson' } }],
-      ['POST', '/api/agent/chat', { messages: [{ role: 'user', content: 'hi' }] }],
+      ['POST', '/api/agent/chat', { messages: [{ role: 'user', content: 'hi' }], memory: [] }],
       ['GET', '/api/integrations/status', undefined],
       ['GET', '/api/integrations/yahoo/auth-url', undefined],
       ['POST', '/api/integrations/yahoo/exchange', { code: 'abc' }],

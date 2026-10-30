@@ -48,7 +48,9 @@ class Team(Base):
     
 class Player(Base):
     __tablename__ = "players"
-    __table_args__ = (Index("ix_players_gsis_id", "gsis_id", unique=True),)
+    __table_args__ = (Index("ix_players_gsis_id", "gsis_id", unique=True),
+                      # Two Yahoo players can never map to one app player (NULLs are allowed).
+                      Index("ix_players_yahoo_player_id", "yahoo_player_id", unique=True))
     id: Mapped[int] = mapped_column(primary_key=True)
     gsis_id: Mapped[str | None]
     yahoo_player_id: Mapped[str | None]
@@ -598,3 +600,14 @@ class GameForecast(Base):
     temp: Mapped[float | None]
     wind: Mapped[float | None]
     fetched_at: Mapped[datetime] = mapped_column(default=utc_now)
+
+
+class AppState(Base):
+    """Small JSON values the app keeps between restarts: background job status, Odds API
+    credits left, the last backup (services/system_status.py)."""
+
+    __tablename__ = "app_state"
+
+    key: Mapped[str] = mapped_column(primary_key=True)
+    value: Mapped[str]                         # JSON
+    updated_at: Mapped[datetime] = mapped_column(default=utc_now)

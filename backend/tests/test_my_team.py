@@ -126,7 +126,9 @@ def test_ai_tools_use_the_imported_team(session, league):
 def test_agent_prompt_mentions_imported_leagues(session, league):
     from services.agent import league_context
 
-    assert '{"league": "Family League", "team": "My Squad"}' in league_context(session)
+    context = league_context(session)
+    assert '"league": "Family League", "team": "My Squad", "roster": "' in context
+    assert "RB Player 01" in context and "never ask them to list their roster" in context
 
 
 def test_matchup_simulates_both_lineups_and_picks_the_best_strategy(session, league, monkeypatch, client):

@@ -132,6 +132,29 @@ describe('SettingsPage league form', () => {
   });
 });
 
+describe('System panel', () => {
+  it('shows the background job, credits and backup status, and backs up on demand', async () => {
+    const user = userEvent.setup();
+    const status = {
+      auto_update: { enabled: true, at: '2026-10-30T12:00:00+00:00', ok: true, snapshot_week: 8, next_check_hours: 6 },
+      odds_credits: { remaining: 412, updated_at: '2026-10-30T11:00:00' },
+      backup: { enabled: true, keep: 7, at: '2026-10-30T12:00:00+00:00', ok: true, file: 'fantasy-1.db', size_mb: 42.8, count: 3 },
+      data: { season: 2026, latest_week: 8, last_load: null, weights_learned_through_week: 7 },
+      auth_required: false,
+    };
+    const api = mockFetch([META_ROUTE, { path: '/api/integrations/status', reply: json(integrations()) },
+      { path: '/api/system/status', reply: json(status) },
+      { method: 'POST', path: '/api/system/backup', reply: json({ at: 'x', ok: true, file: 'fantasy-2.db', size_mb: 43, count: 4 }) }]);
+    renderWithProviders(<SettingsPage />);
+    expect(await screen.findByText(/412 left/)).toBeInTheDocument();
+    expect(screen.getByText(/Saved week 8 projections/)).toBeInTheDocument();
+    expect(screen.getByText(/3 kept of 7/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Back up now' }));
+    expect(await screen.findByText(/Saved fantasy-2.db/)).toBeInTheDocument();
+    expect(api.callsTo('/api/system/backup', 'POST')).toHaveLength(1);
+  });
+});
+
 describe('importSummary', () => {
   it('reports a clean import', () => {
     expect(importSummary({ league_id: 1, teams: 1, roster_spots: 15, unmatched_players: [] })).toBe(

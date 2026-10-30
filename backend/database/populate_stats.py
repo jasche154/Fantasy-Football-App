@@ -175,9 +175,19 @@ def sync_crosswalk(session: Session, index: PlayerIndex) -> None:
     frame = frame.sort("db_season", descending=True).unique(subset="gsis_id", keep="first")
     crosswalk = {row["gsis_id"]: row for row in frame.iter_rows(named=True)}
     players = session.scalars(select(Player).where(Player.gsis_id.in_(list(crosswalk)))).all()
+    yahoo_owner = {p.yahoo_player_id: p.id for p in session.scalars(
+        select(Player).where(Player.yahoo_player_id.is_not(None)))}
     for player in players:
         ids = crosswalk[player.gsis_id]
-        player.yahoo_player_id = as_id(ids["yahoo_id"]) or player.yahoo_player_id
+        yahoo_id = as_id(ids["yahoo_id"])
+        if yahoo_id and yahoo_owner.get(yahoo_id, player.id) != player.id:
+            log.warning("crosswalk: Yahoo id %s already belongs to player %s; not reassigned", yahoo_id,
+                        yahoo_owner[yahoo_id])
+            yahoo_id = None
+        if yahoo_id:
+            yahoo_owner.pop(player.yahoo_player_id, None)
+            yahoo_owner[yahoo_id] = player.id
+        player.yahoo_player_id = yahoo_id or player.yahoo_player_id
         player.sleeper_player_id = as_id(ids["sleeper_id"]) or player.sleeper_player_id
         player.pfr_player_id = as_id(ids["pfr_id"]) or player.pfr_player_id
         player.fantasypros_id = as_id(ids["fantasypros_id"]) or player.fantasypros_id

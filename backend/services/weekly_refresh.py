@@ -114,6 +114,9 @@ def _refresh_props(session: Session, http: httpx.Client, settings: Settings, sea
     if bought == 0:
         return _status("fresh", f"Each game's props are bought once, within {odds_api.PROPS_WINDOW_HOURS} h "
                                 "of kickoff; nothing is due right now.")
+    if client.remaining is not None:
+        from services import system_status
+        system_status.record(session, "odds_credits", {"remaining": client.remaining})
     left = f" ({client.remaining} credits left this month)" if client.remaining is not None else ""
     return _status("updated", f"Bought props for {bought} games{left}.", rows=bought)
 

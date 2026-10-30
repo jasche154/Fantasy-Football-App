@@ -10,6 +10,26 @@ export function resolveApiBase(raw: string | undefined): string {
 
 export const API_BASE = resolveApiBase(import.meta.env.VITE_API_BASE);
 
+const TOKEN_KEY = 'gridiron.apiToken';
+
+/** The optional API token (backend API_TOKEN), kept in this browser only. */
+export function getApiToken(): string | null {
+  try {
+    return localStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function setApiToken(token: string | null): void {
+  try {
+    if (token) localStorage.setItem(TOKEN_KEY, token);
+    else localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    // storage blocked (private mode): the token lasts for this page only
+  }
+}
+
 /** Error raised for any failed API call. `status` is 0 when the server could not be reached. */
 export class ApiError extends Error {
   readonly status: number;
@@ -96,12 +116,14 @@ async function readBody(response: Response): Promise<ParsedBody> {
 
 function buildInit(options: RequestOptions): RequestInit {
   const hasBody = options.body !== undefined;
+  const token = getApiToken();
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (hasBody) headers['Content-Type'] = 'application/json';
+  if (token) headers.Authorization = `Bearer ${token}`;
   return {
     method: options.method ?? (hasBody ? 'POST' : 'GET'),
     signal: options.signal,
-    headers: hasBody
-      ? { Accept: 'application/json', 'Content-Type': 'application/json' }
-      : { Accept: 'application/json' },
+    headers,
     body: hasBody ? JSON.stringify(options.body) : undefined,
   };
 }

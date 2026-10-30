@@ -177,7 +177,7 @@ Open <http://localhost:5173>. The UI talks to `http://localhost:8000` by default
 | **Buy / Sell** | Full buy-low and sell-high lists with every reason, filtered by position |
 | **Player page** | Weekly chart of actual vs expected points, game log, NGS stats, projection, signals |
 | **Ask AI** | Ask questions in plain English; each answer shows which tools it used |
-| **Settings** | League scoring, size, superflex, and TE premium (used everywhere); connect Yahoo; check integrations |
+| **Settings** | League scoring, size, superflex, and TE premium (used everywhere); connect Yahoo; check integrations. **System** shows when the auto-update last ran and what it did, Odds API credits left, data freshness and the last backup, with **Back up now**. **API access** takes the token when the backend has `API_TOKEN` set |
 
 ## How the numbers work
 
@@ -559,6 +559,8 @@ League parameters accepted by every valuation endpoint: `scoring=ppr|half|std`,
 | GET | `/api/my-team/{league_id}/playoffs` | Each player's playoff weeks (opponent, bye, projection) and the best lineup per week |
 | GET | `/api/rankings/weekly/kdst?position=K\|DST&week=` | Kicker or defense projections with their inputs |
 | GET | `/api/model/accuracy?scoring=` | Live accuracy, floor/ceiling coverage, held-out backtest, learned weights |
+| GET | `/api/system/status` | Auto-update last run and result, Odds API credits left, last backup, data freshness |
+| POST | `/api/system/backup` | Back up the database now |
 | POST | `/api/my-team/{league_id}/sync` | Re-import that league from Yahoo now |
 | GET | `/api/agent/tools` | Tool definitions (JSON Schema) |
 | POST | `/api/agent/tools/{name}` | Body `{"arguments": {...}}`; run one tool |
@@ -569,15 +571,31 @@ Full TypeScript types for every response: [`docs/API.md`](docs/API.md).
 
 ## AI assistant and agent tools
 
-With a Yahoo league imported, three more tools answer from your real roster:
+With a Yahoo league imported, more tools answer from your real league:
 - `get_my_team`: your roster, projections and lineup advice;
+- `get_my_matchup`: this week's opponent, both lineups, win probability and the changes to make;
+- `get_league_rosters`: any team's roster, or every team's top players and weak positions;
+- `get_playoff_outlook`: your players across your league's playoff weeks;
 - `get_league_waivers`: players free in your league;
-- `find_league_trades`: offers with real teams.
+- `find_league_trades`: offers with real teams (optionally only for players you name).
 
-The assistant's instructions name your imported leagues, so "who should I start?" or "find
-me a WR trade" needs no player list.
+The assistant's instructions include each imported league and **your current roster**, so it
+never asks which players you have. `find_trades` with no players uses your roster.
 
-The same 17 general tools are exposed three ways: `search_players`, `get_player_profile`,
+**Intent routing** (`services/agent_routing.py`): each question gets only the tools it's likely
+to need (keywords from your last two messages, plus player tools when you name a player),
+usually 6–12 of the 23. That saves tokens on Groq's free tier and cuts wrong tool picks.
+
+**Chat memory:** when you state your record, goals or players you won't trade, the assistant
+calls `remember`. Those facts show under "Keeping in mind" and go back with every message,
+so they survive even though only the last 20 messages are sent. New chat clears them.
+
+**Evaluation set** (`services/agent_eval.py`): 26 saved questions with the tools each should
+use. The test suite checks that routing sends those tools; with `GROQ_API_KEY`,
+`python -m services.agent_eval` runs them through the real model and checks tool choice,
+grounding and that it never asks for your roster.
+
+The same general tools are exposed three ways: `search_players`, `get_player_profile`,
 `get_player_game_log`, `compare_players`, `get_fantasy_rankings`,
 `list_leaderboard_metrics`, `get_leaderboard`, `evaluate_trade`, `get_buy_low_candidates`,
 `get_sell_high_candidates`, `get_weekly_rankings`, `get_schedule_strength`, `explain_projection`,
@@ -687,6 +705,10 @@ Settings come from environment variables or `backend/.env` (never commit it; see
 | `CORS_ORIGINS` | `["http://localhost:5173","http://127.0.0.1:5173"]` | JSON list of allowed web origins |
 | `FANTASY_END_WEEK` | `18` | Last fantasy week, the final (drives weeks remaining; playoffs default to 16–18) |
 | `ALLOWED_HOSTS` | `["localhost","127.0.0.1"]` | Host headers the API accepts (blocks DNS rebinding) |
+| `API_TOKEN` | — | Optional. When set, every `/api` request except `/api/meta` needs `Authorization: Bearer <token>`; enter it once in Settings (stored in that browser) |
+| `BACKUPS` | `true` | Daily SQLite backup while the API runs |
+| `BACKUP_DIR` | `backend/database/backups` | Where backups go (git-ignored) |
+| `BACKUP_KEEP` | `7` | How many backups to keep |
 | `FANTASYPROS_API_KEY` | — | Enables FantasyPros ROS rankings |
 | `YAHOO_CLIENT_ID` / `YAHOO_CLIENT_SECRET` | — | Yahoo OAuth app credentials |
 | `YAHOO_REDIRECT_URI` | `oob` | Must match the Yahoo app setting |
@@ -705,6 +727,26 @@ All the core data is free and needs no key, via [`nflreadpy`](https://github.com
 [`docs/DATA_SOURCES.md`](docs/DATA_SOURCES.md) covers every source the app uses or could use:
 what it has, how to access it, license terms, update schedule, and which ones to avoid
 (KeepTradeCut, FantasyCalc for calculators, Sports-Reference scraping).
+
+## Safety and operations
+
+- **Optional API token.** By default the API trusts localhost (Host and Origin checks block
+  DNS rebinding and cross-site writes). If it's ever reachable from elsewhere, set `API_TOKEN`;
+  the token is compared in constant time, and a 401 still carries CORS headers so the web app
+  can ask for it. The MCP server calls the tools directly and isn't affected.
+- **Backups.** Projection history and learned weights can't be re-downloaded, so the
+  auto-update copies the database once a day with SQLite's online backup API (consistent while
+  the app runs) and keeps the newest 7. `python -m services.backup` or **Back up now** makes
+  one immediately. Restore by stopping the API and copying a backup over
+  `backend/database/fantasy.db`.
+- **Job status.** The auto-update records each check (what it loaded, synced and saved, or the
+  error type) in the `app_state` table; props purchases record the credits left. Errors are
+  stored by type only, since messages can contain URLs with API keys.
+- **No leaked keys.** The Odds API needs its key in the URL; a test makes failed requests and
+  checks that neither the error messages nor the logs contain it.
+- **One app player per Yahoo player.** A unique index on `players.yahoo_player_id` (migration
+  `e6a8c0d2f4b6`, which refuses to run if duplicates exist), and the nflverse crosswalk no
+  longer reassigns a Yahoo id that another player already holds.
 
 ## Testing
 

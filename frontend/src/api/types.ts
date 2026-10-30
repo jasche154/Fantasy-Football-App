@@ -29,6 +29,8 @@ export interface Meta {
   positions: Position[];
   scoring_presets: Scoring[];
   integrations: IntegrationsStatus;
+  /** The backend has API_TOKEN set: requests need the token from Settings. */
+  auth_required?: boolean;
 }
 
 /** League settings shared by every valuation endpoint (query params or trade body). */
@@ -298,6 +300,28 @@ export interface ToolCallTrace {
 export interface ChatResponse {
   reply: string;
   tool_calls: ToolCallTrace[];
+  /** Facts the assistant was asked to keep in mind; send them back with the next message. */
+  memory?: string[];
+}
+
+export interface SystemStatus {
+  auto_update: { enabled: boolean; at?: string; ok?: boolean; error?: string; loaded_week?: number | null;
+    synced_leagues?: number; snapshot_week?: number | null; notes?: string[]; seconds?: number;
+    next_check_hours?: number };
+  odds_credits: { remaining: number; updated_at: string } | null;
+  backup: { enabled: boolean; keep: number; at?: string; ok?: boolean; file?: string; size_mb?: number;
+    count?: number; error?: string };
+  data: { season: number | null; latest_week: number | null; last_load: string | null;
+    weights_learned_through_week: number | null };
+  auth_required: boolean;
+}
+
+export interface BackupResult {
+  at: string;
+  ok: boolean;
+  file: string;
+  size_mb: number;
+  count: number;
 }
 
 export interface YahooLeague {

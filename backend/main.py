@@ -1,4 +1,5 @@
 """FastAPI entrypoint. Run from backend/:  uvicorn main:app --reload"""
+import hmac
 import logging
 import threading
 from contextlib import asynccontextmanager
@@ -8,8 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from api import (agent_routes, data_routes, integration_routes, legacy_routes, market_routes, model_routes, team_routes,
-                 weekly_routes)
+from api import (agent_routes, data_routes, integration_routes, legacy_routes, market_routes, model_routes, system_routes,
+                 team_routes, weekly_routes)
 from config import get_settings
 from database.db import SessionLocal
 from services import auto_update
@@ -18,6 +19,7 @@ from services.valuation import build_valuation
 
 log = logging.getLogger("fantasy_app")
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+OPEN_PATHS = {"/api/meta"}           # readable without the API token (tells the app a token is needed)
 
 
 def _warm_cache() -> None:
@@ -42,14 +44,28 @@ def create_app(warm_cache: bool = True) -> FastAPI:
     app = FastAPI(title="Fantasy Football Toolkit", version="1.0.0",
                   lifespan=lifespan if warm_cache else None)
 
-    # The API is unauthenticated and meant for localhost. Rejecting other Host headers stops
+    # The API is meant for localhost (API_TOKEN adds a token check). Rejecting other Host headers stops
     # DNS-rebinding pages from becoming same-origin with it.
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
+
+    # Registered before CORS so CORS wraps it and the browser can read a 401.
+    @app.middleware("http")
+    async def require_api_token(request: Request, call_next):
+        # Off unless API_TOKEN is set. CORS preflights carry no credentials, so they pass.
+        token = settings.api_token
+        if token and request.method != "OPTIONS" and request.url.path.startswith("/api") \
+                and request.url.path not in OPEN_PATHS:
+            sent = request.headers.get("authorization", "")
+            if not hmac.compare_digest(sent.encode(), f"Bearer {token}".encode()):
+                return JSONResponse({"detail": "This API needs a token. Enter it in Settings."}, status_code=401,
+                                    headers={"WWW-Authenticate": "Bearer"})
+        return await call_next(request)
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_methods=["GET", "POST"],
-        allow_headers=["Content-Type"],
+        allow_headers=["Content-Type", "Authorization"],
     )
 
     @app.middleware("http")
@@ -62,7 +78,7 @@ def create_app(warm_cache: bool = True) -> FastAPI:
         return await call_next(request)
 
     for module in (data_routes, market_routes, weekly_routes, team_routes, model_routes, integration_routes, agent_routes,
-                   legacy_routes):
+                   system_routes, legacy_routes):
         app.include_router(module.router)
     return app
 

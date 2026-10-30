@@ -44,6 +44,7 @@ def meta(session: Session = Depends(get_session)) -> dict:
         "current_season": season, "latest_week": week, "current_week": _current_week(session, season, week),
         "seasons": available_seasons(session), "positions": list(POSITIONS),
         "scoring_presets": list(POINTS_PER_RECEPTION), "integrations": integration_status(session),
+        "auth_required": bool(get_settings().api_token),
     }
 
 
