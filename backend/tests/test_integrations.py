@@ -349,8 +349,12 @@ SETTINGS_JSON = {"fantasy_content": {"league": [{"league_key": "461.l.1"}, {"set
 
 def test_yahoo_league_settings_become_app_rules():
     rules = yahoo.parse_settings(SETTINGS_JSON["fantasy_content"])
-    assert rules == {"scoring": "half", "reception_points": 0.5, "bench": 6, "superflex": False,
-                     "starters": {"QB": 1, "RB": 2, "WR": 2, "TE": 1, "FLEX": 1}}
+    from services.kdst_model import DEFAULT_DST, DEFAULT_K
+
+    assert {k: rules[k] for k in ("scoring", "reception_points", "bench", "superflex")} == {
+        "scoring": "half", "reception_points": 0.5, "bench": 6, "superflex": False}
+    assert rules["starters"] == {"QB": 1, "RB": 2, "WR": 2, "TE": 1, "FLEX": 1, "K": 1, "DST": 1}
+    assert rules["k_scoring"] == DEFAULT_K and rules["dst_scoring"] == DEFAULT_DST    # no K/DEF modifiers sent
     no_catch_points = {"league": [{}, {"settings": [{"roster_positions": [_slot("Q/W/R/T", 1)], "stat_modifiers": {"stats": []}}]}]}
     assert yahoo.parse_settings(no_catch_points)["scoring"] == "std"
     assert yahoo.parse_settings(no_catch_points)["superflex"] is True
@@ -461,7 +465,7 @@ def _roster_entry(pid, name, position, team):
                        {"selected_position": [{"coverage_type": "week"}, {"position": "BN"}]}]}
 
 
-def test_import_matches_unknown_yahoo_ids_by_name_and_skips_defenses(session, seeded):
+def test_import_matches_unknown_yahoo_ids_by_name_and_keeps_defenses(session, seeded):
     roster = {"fantasy_content": {"team": [[{"team_key": "t"}], {"roster": {"0": {"players": {
         "0": _roster_entry("7001", "Buy Low Guy", "WR", "BUY"),        # no yahoo id in the crosswalk yet
         "1": _roster_entry("100026", "Steelers", "DEF", "Pit"),
@@ -471,6 +475,7 @@ def test_import_matches_unknown_yahoo_ids_by_name_and_skips_defenses(session, se
     http, _ = yahoo_api({"team/461.l.1.t.1/roster;week=7": roster})
     yahoo_sync.connect(session, settings, http, "CODE", issue_state(settings))
     result = yahoo_sync.import_league(session, settings, http, "461.l.1")
-    assert result["roster_spots"] == 1
-    assert result["untracked_players"] == ["Steelers"] and result["unmatched_players"] == ["Nobody Known"]
+    assert result["roster_spots"] == 2                                        # the WR and the Steelers D/ST
+    assert result["untracked_players"] == [] and result["unmatched_players"] == ["Nobody Known"]
+    assert session.query(Player).filter_by(gsis_id="DST-PIT").one().full_name == "Steelers D/ST"
     assert session.get(Player, seeded["buy"]).yahoo_player_id == "7001"      # remembered for next import

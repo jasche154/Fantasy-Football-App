@@ -224,7 +224,7 @@ def load_schedules(session: Session, seasons: Iterable[int]) -> None:
         frame = fetch_season(lambda s: nfl.load_schedules(s), "schedule", season)
         if frame is None:
             continue
-        rows = [{c: source[c] for c in GAME_COLUMNS} for source in frame.iter_rows(named=True)]
+        rows = [{c: source.get(c) for c in GAME_COLUMNS} for source in frame.iter_rows(named=True)]   # weather columns optional
         session.execute(delete(NflGame).where(NflGame.season == season))
         bulk_insert(session, NflGame, rows)
         session.commit()
