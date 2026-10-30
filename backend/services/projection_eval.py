@@ -49,6 +49,8 @@ def evaluate(rows: Iterable[ProjectionHistory], actuals: Mapping[tuple[int, int]
     blend_errors: list[float] = []
     by_source: dict[str, list[tuple[float, float]]] = defaultdict(list)   # (source error, blend error)
     by_position: dict[str, list[float]] = defaultdict(list)
+    signed: dict[str, list[float]] = defaultdict(list)        # projection minus actual
+    below, above, ranged = 0, 0, 0
     weeks: set[int] = set()
     for row in rows:
         actual = actuals.get((row.player_id, row.week))
@@ -58,6 +60,11 @@ def evaluate(rows: Iterable[ProjectionHistory], actuals: Mapping[tuple[int, int]
         blend_error = abs(row.if_active - actual)
         blend_errors.append(blend_error)
         by_position[row.position].append(blend_error)
+        signed[row.position].append(row.if_active - actual)
+        if row.floor is not None and row.ceiling is not None and row.play_prob >= 1:
+            ranged += 1
+            below += actual < row.floor
+            above += actual > row.ceiling
         for source, points in json.loads(row.sources).items():
             by_source[source].append((abs(points - actual), blend_error))
     sources = {name: {"n": len(pairs), "mae": round(mean(e for e, _ in pairs), 2),
@@ -70,6 +77,10 @@ def evaluate(rows: Iterable[ProjectionHistory], actuals: Mapping[tuple[int, int]
         "weeks": sorted(weeks), "n": len(blend_errors),
         "blend_mae": round(mean(blend_errors), 2) if blend_errors else None,
         "by_position": {p: round(mean(e), 2) for p, e in sorted(by_position.items())},
+        "bias_by_position": {p: round(mean(e), 2) for p, e in sorted(signed.items())},
+        # Floors and ceilings are the 10th/90th percentiles, so about 10% should land outside each.
+        "range": {"n": ranged, "below_floor": round(below / ranged, 3) if ranged else None,
+                  "above_ceiling": round(above / ranged, 3) if ranged else None},
         "sources": sources,
         "suggested_weights": {name: round(v / total, 3) for name, v in sorted(inverse.items())} if total else {},
     }

@@ -83,3 +83,15 @@ def test_past_weeks_use_only_weights_learned_before_them(session, seeded):
     weights, row = wl.effective_weights(session, 2026, 10)
     assert row.week == 9 and weights != DEFAULT_WEIGHTS
     assert wl.effective_weights(session, 2027, 1)[1].week == 9                         # carries into next season
+
+
+def test_each_position_takes_its_own_small_step(session, seeded):
+    _seed_history(session, seeded, week=9)
+    wl.learn(session, 2026)
+    by_position = wl.position_weights(session, 2026, 10)
+    global_weights, _ = wl.effective_weights(session, 2026, 10)
+    assert set(by_position) == set(wl.POSITIONS)
+    wr = by_position["WR"]                                   # every seeded row is a WR: it moves further
+    assert wr["model"] >= global_weights["model"] and abs(sum(wr.values()) - 1) < 0.01
+    assert by_position["QB"] == global_weights               # no QB rows: follows the global step
+    assert wl.position_weights(session, 2026, 9) == {}       # nothing learned before week 9
