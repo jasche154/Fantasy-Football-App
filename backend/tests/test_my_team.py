@@ -126,4 +126,4 @@ def test_ai_tools_use_the_imported_team(session, league):
 def test_agent_prompt_mentions_imported_leagues(session, league):
     from services.agent import league_context
 
-    assert "Family League (team: My Squad)" in league_context(session)
+    assert '{"league": "Family League", "team": "My Squad"}' in league_context(session)

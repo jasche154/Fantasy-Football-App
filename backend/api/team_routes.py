@@ -1,6 +1,7 @@
 """Your imported Yahoo teams: roster and lineup, league-aware waivers and trades."""
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from api.deps import Position
@@ -8,6 +9,7 @@ from api.integration_routes import HTTP_TIMEOUT_SECONDS, YAHOO_ERRORS, _yahoo_ht
 from api.weekly_routes import flags_for
 from config import get_settings
 from database.db import get_session
+from database.models import Player
 from services import my_team as mt
 from services import serialize, yahoo_sync
 from services.valuation import NoDataError, build_valuation
@@ -29,6 +31,11 @@ def _league_summary(league, team) -> dict:
             "starters": rules.get("starters"), "week": rules.get("week")}
 
 
+def _plain_ref(player_id: int, player: Player | None) -> dict:
+    return {"id": player_id, "name": player.full_name if player else f"Player {player_id}",
+            "position": player.position if player else None, "team": player.nfl_team if player else None}
+
+
 @router.get("/leagues")
 def leagues(session: Session = Depends(get_session)) -> dict:
     return {"leagues": [_league_summary(league, team) for league, team in mt.my_leagues(session)]}
@@ -43,6 +50,9 @@ def my_team(league_id: int, session: Session = Depends(get_session)) -> dict:
         raise HTTPException(503, str(exc)) from exc
     by_id = {p.player_id: p for p in team.rankings.players}
     flags = flags_for(team.rankings, team.valuation)
+    # Rostered players with no stats this season (a rookie yet to play) still need a name.
+    unknown = {s.player_id for s in team.spots if s.player_id not in team.valuation.by_id}
+    people = {p.id: p for p in session.scalars(select(Player).where(Player.id.in_(unknown)))} if unknown else {}
     best_ids = {pid for ids in team.best.values() for pid in ids}
     roster = []
     for spot in team.spots:
@@ -50,8 +60,7 @@ def my_team(league_id: int, session: Session = Depends(get_session)) -> dict:
         weekly = by_id.get(spot.player_id)
         roster.append({
             "slot": spot.slot, "starting": spot.starting, "in_best_lineup": spot.player_id in best_ids,
-            "player": serialize.player_ref(value) if value else {"id": spot.player_id, "name": None,
-                                                                  "position": None, "team": None},
+            "player": serialize.player_ref(value) if value else _plain_ref(spot.player_id, people.get(spot.player_id)),
             "week": serialize.weekly_player(weekly, flags.get(spot.player_id, ())) if weekly else None,
             "ros_ppg": value.ros_ppg if value else None, "trade_value": value.trade_value if value else None,
             "pos_rank": value.pos_rank if value else None,

@@ -4,6 +4,7 @@ The app is single-user for now, so the connection belongs to one local user row.
 are matched to local players through players.yahoo_player_id (from the nflverse crosswalk).
 """
 import json
+import threading
 import time
 from datetime import datetime, timezone
 
@@ -139,7 +140,24 @@ def _upsert_team(session: Session, league: League, meta: dict) -> Team:
     return team
 
 
+_import_lock = threading.Lock()
+
+
 def import_league(session: Session, settings: Settings, http: httpx.Client, league_key: str) -> dict:
+    """One import at a time: a manual sync and the background re-sync rewrite the same roster rows."""
+    with _import_lock:
+        return _import_league(session, settings, http, league_key)
+
+
+def modeled_position(display_position: str | None) -> str | None:
+    """'RB' -> 'RB'; Yahoo's dual eligibility 'RB,WR' -> 'RB' (the first modeled one); 'K' / 'DEF' -> None."""
+    for part in (display_position or "").split(","):
+        if part.strip() in POSITIONS:
+            return part.strip()
+    return None
+
+
+def _import_league(session: Session, settings: Settings, http: httpx.Client, league_key: str) -> dict:
     token = fresh_token(session, settings, http)
     leagues = {l["league_key"]: l for l in list_leagues(session, settings, http)}
     meta = leagues.get(league_key)
@@ -159,27 +177,37 @@ def import_league(session: Session, settings: Settings, http: httpx.Client, leag
         session.execute(delete(Roster).where(Roster.team_id == team.id, Roster.week == week))
         for entry in roster:
             name = entry["name"] or entry["yahoo_player_id"] or "unknown"
-            position = entry.get("position")
-            if position not in POSITIONS:
+            position = modeled_position(entry.get("position"))
+            if position is None:
                 untracked.append(name)                     # team defenses and kickers aren't modeled
                 continue
-            player_id = _match_roster_player(session, matcher, entry)
+            player_id = _match_roster_player(session, matcher, {**entry, "position": position})
             if player_id is None:
                 unmatched.append(name)
                 continue
             session.add(Roster(team_id=team.id, player_id=player_id, week=week, roster_slot=entry["slot"] or "BN"))
             spots += 1
+    # Kept so league waivers never offer a rostered player the import couldn't match.
+    league.scoring_settings = json.dumps({**json.loads(league.scoring_settings or "{}"), "unmatched": unmatched})
     session.commit()
     return {"league_id": league.id, "teams": len(teams), "roster_spots": spots, "unmatched_players": unmatched,
             "untracked_players": untracked}
 
 
 def _match_roster_player(session: Session, matcher: PlayerMatcher, entry: dict) -> int | None:
-    """Yahoo id first; otherwise a unique name (+ position, team) match, remembered for next time."""
+    """Yahoo id first; otherwise a name (+ position, team) match.
+
+    The Yahoo id is saved only on a strict match: the one player with that name, position
+    and team. A looser match (e.g. a same-named player on another team) is used for this
+    import but never saved, so a wrong guess can't stick to the wrong player for good.
+    """
     yahoo_id = entry.get("yahoo_player_id")
     player_id = matcher.match(entry.get("name") or "", team=entry.get("team"), position=entry.get("position"),
                               yahoo_id=yahoo_id)
-    if player_id is not None and yahoo_id and yahoo_id not in matcher.by_yahoo:
+    if player_id is None or not yahoo_id or yahoo_id in matcher.by_yahoo:
+        return player_id
+    strict = matcher.strict_match(entry.get("name") or "", entry.get("team"), entry.get("position"))
+    if strict == player_id:
         player = session.get(Player, player_id)
         if player is not None and not player.yahoo_player_id:
             player.yahoo_player_id = yahoo_id              # the crosswalk lacks recent rookies

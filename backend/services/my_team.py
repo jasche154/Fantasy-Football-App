@@ -22,6 +22,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from database.models import League, Roster, Team
+from integrations.weekly_sources import normalize_name
 from services.league import DEFAULT_STARTERS, LeagueSettings
 from services.trade_finder import TradeOffer, find_trades
 from services.valuation import Valuation, build_valuation
@@ -78,17 +79,38 @@ class MyTeam:
     changes: list[LineupChange] = field(default_factory=list)
 
 
+SCORING_PRESETS = ("ppr", "half", "std")
+MAX_SLOTS = 10                     # per position; anything larger is corrupt data
+
+
 def league_rules(league: League) -> dict:
-    return json.loads(league.scoring_settings or "{}")
+    """The stored rules as a dict; {} when missing or unreadable."""
+    try:
+        rules = json.loads(league.scoring_settings or "{}")
+    except ValueError:
+        return {}
+    return rules if isinstance(rules, dict) else {}
+
+
+def _int(value: object, default: int, low: int, high: int) -> int:
+    try:
+        number = int(value)  # type: ignore[call-overload]
+    except (TypeError, ValueError):
+        return default
+    return number if low <= number <= high else default
 
 
 def league_settings(league: League) -> LeagueSettings:
-    """The app's league settings from the imported Yahoo rules (defaults where missing)."""
+    """The app's league settings from the imported Yahoo rules; anything missing or odd uses the default."""
     rules = league_rules(league)
-    starters = rules.get("starters") or dict(DEFAULT_STARTERS)
-    return LeagueSettings(scoring=rules.get("scoring", "ppr"), teams=int(rules.get("num_teams") or 12),
-                          superflex=bool(rules.get("superflex")), bench=int(rules.get("bench") or 6),
-                          starters=MappingProxyType({k: int(v) for k, v in starters.items()}))
+    raw_starters = rules.get("starters")
+    if not isinstance(raw_starters, dict) or not raw_starters:
+        raw_starters = dict(DEFAULT_STARTERS)
+    starters = {str(k): _int(v, 0, 0, MAX_SLOTS) for k, v in raw_starters.items()}
+    scoring = rules.get("scoring") if rules.get("scoring") in SCORING_PRESETS else "ppr"
+    return LeagueSettings(scoring=scoring, teams=_int(rules.get("num_teams"), 12, 2, 32),
+                          superflex=rules.get("superflex") is True, bench=_int(rules.get("bench"), 6, 0, 30),
+                          starters=MappingProxyType(starters))
 
 
 def my_leagues(session: Session) -> list[tuple[League, Team]]:
@@ -208,6 +230,9 @@ def league_waivers(session: Session, reference: int | str | None, position: str 
     valuation = build_valuation(session, settings)
     rankings = build_weekly_rankings(session, settings)
     rostered = {s.player_id for spots in rosters(session, league).values() for s in spots}
+    # Rostered players the import couldn't match by id or name still aren't free agents.
+    unmatched = {normalize_name(str(n)) for n in league_rules(league).get("unmatched") or ()}
+    rostered |= {p.player_id for p in rankings.players if normalize_name(p.name) in unmatched}
     return league, rankings, waiver_candidates(rankings, valuation, position, limit=limit, rostered_ids=rostered)
 
 
