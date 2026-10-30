@@ -38,10 +38,12 @@ def test_horizon_weights_regular_weeks_by_distance_and_playoffs_by_odds():
 def test_injured_players_come_back_on_the_measured_timelines():
     proj = FlatProjector({1: SimpleNamespace(status="Out"), 2: SimpleNamespace(status="IR"), 3: SimpleNamespace(status=None)})
     out, ir, healthy = _v(1, "RB", 10), _v(2, "RB", 10), _v(3, "QB", 20)
-    assert proj.available(out, 1) == pytest.approx((1 - 0.6) * (1 - 0.043))
-    assert proj.available(out, 3) == pytest.approx((1 - 0.6 ** 3) * (1 - 0.043))
-    assert proj.available(ir, 3) == 0.0 and proj.available(ir, 4) > 0.9
-    assert proj.available(healthy, 2) == pytest.approx(1 - 0.088)
+    rb, qb = lg.healthy_share("RB"), lg.healthy_share("QB")
+    assert rb == pytest.approx(1 - 0.043 / (0.4 + 0.043)) and qb == pytest.approx(1 - 0.088 / (0.4 + 0.088))
+    assert proj.available(out, 1) == pytest.approx((1 - 0.6) * rb)
+    assert proj.available(out, 3) == pytest.approx((1 - 0.6 ** 3) * rb)
+    assert proj.available(ir, 3) == 0.0 and proj.available(ir, 4) == pytest.approx(rb)
+    assert proj.available(healthy, 2) == pytest.approx(qb)
     assert proj.healthy_rate(_v(4, "WR", 6.0, availability=0.5)) == 12.0      # a hurt player's healthy rate
 
 
@@ -49,7 +51,8 @@ def test_gain_and_the_named_drop_follow_the_best_lineup():
     roster = [_v(1, "QB", 20), _v(2, "RB", 12), _v(3, "WR", 10), _v(4, "WR", 4)]
     h, proj = lg.horizon(9, 10, [], 1.0), FlatProjector()
     upgrade = _v(9, "WR", 15)
-    assert lg.gain(roster, h, proj, SETTINGS, add=[upgrade], drop=[roster[3]]) == pytest.approx(5 * (1 + 0.95 * 0.946), 0.01)
+    assert lg.gain(roster, h, proj, SETTINGS, add=[upgrade], drop=[roster[3]]) == pytest.approx(
+        5 * (1 + 0.95 * lg.healthy_share("WR")), 0.01)
     gain, drop = lg.best_add(roster, roster, upgrade, h, proj, SETTINGS)
     assert drop.player_id == 4 and gain > 0                                      # the bench WR goes
     no_room = lg.best_add(roster, [], _v(10, "RB", 1), h, proj, SETTINGS)
@@ -131,4 +134,19 @@ def test_season_sim_spreads_odds_with_team_uncertainty_and_injuries():
 def test_playoff_rate_uses_the_healthy_rate():
     from services.playoffs import playoff_rate
 
-    assert playoff_rate(_v(1, "RB", 6.0, availability=0.5)) == pytest.approx(12.0 * (1 - 0.043))
+    assert playoff_rate(_v(1, "RB", 6.0, availability=0.5)) == pytest.approx(12.0 * lg.healthy_share("RB"))
+
+
+def test_props_budget_guard_counts_only_your_own_rosters(session, league, monkeypatch):
+    from database.models import Player
+    from services import system_status, weekly_refresh
+
+    row, ids = league
+    system_status.record(session, "odds_credits", {"remaining": 0})
+    monkeypatch.setattr(weekly_refresh.odds_api, "credits_needed", lambda session, season: 1000)
+    teams = weekly_refresh._props_budget_teams(session, 2026)
+    mine = {session.get(Player, ids[name]).nfl_team for name in ("QB Player 01", "RB Player 20", "WR Player 01")}
+    rival = session.get(Player, ids["QB Player 02"]).nfl_team
+    assert mine <= teams and (rival in mine or rival not in teams or rival in teams & mine)
+    system_status.record(session, "odds_credits", {"remaining": 5000})
+    assert weekly_refresh._props_budget_teams(session, 2026) is None              # enough credits: buy everything

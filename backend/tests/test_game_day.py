@@ -49,8 +49,10 @@ def test_warnings_name_the_inactives_time_and_whether_a_backup_plays_later():
 
 
 def test_untagged_players_with_low_snaps_or_inactive_last_week_carry_sit_risk():
-    schedule = Schedule(games=(_game(7, "T", "U", "2026-10-25", "13:00", final=True),))
-    line = lambda week, snaps: SimpleNamespace(week=week, snap_pct=snaps)  # noqa: E731
+    games = (_game(6, "T", "V", "2026-10-18", "13:00", final=True), _game(7, "T", "U", "2026-10-25", "13:00", final=True))
+    schedule = Schedule(games=games, opponents={("T", 6): "V", ("V", 6): "T", ("T", 7): "U", ("U", 7): "T"})
+    opp = {6: "V", 7: "U"}
+    line = lambda week, snaps: SimpleNamespace(week=week, snap_pct=snaps, opponent=opp[week])  # noqa: E731
     seasons = [SimpleNamespace(player_id=1, team="T", position="RB", games=(line(6, 60), line(7, 8.0))),
                SimpleNamespace(player_id=2, team="T", position="WR", games=(line(6, 70),)),          # sat week 7
                SimpleNamespace(player_id=3, team="T", position="WR", games=(line(7, 90.0),)),        # every-down

@@ -111,8 +111,9 @@ def fresh_token(session: Session, settings: Settings, http: httpx.Client) -> yah
     token that no longer works. The row is re-read inside the lock to pick up the winner's.
     """
     with _refresh_lock:
-        session.expire_all()
         connection = get_connection(session)
+        if connection is not None:
+            session.refresh(connection)            # pick up a token another thread just saved
         if connection is None or connection.access_token is None:
             raise yahoo.YahooAuthError("Yahoo isn't connected yet.")
         token = load_token(connection, settings)

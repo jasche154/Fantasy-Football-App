@@ -194,7 +194,7 @@ def _compute(session: Session, league: LeagueSettings, season: int) -> Valuation
     consensus = ros_inputs(session, season, league.scoring, scoring,
                            {v.player_id: v.model_ros_ppg for v in model_values},
                            {v.player_id: v.position or "" for v in model_values}, remaining,
-                           matchup_factors(current, schedule, defense, (through or 0) + 1))
+                           lambda week: matchup_factors(current, schedule, defense, week))
     values, replacement = value_players(current, previous, league, remaining, factors, consensus, playoff, losses)
     return Valuation(season=season, through_week=through, weeks_remaining=remaining, league=league,
                      replacement=MappingProxyType(replacement), values=values,

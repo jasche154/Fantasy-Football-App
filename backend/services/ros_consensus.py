@@ -19,7 +19,7 @@ slow to react to role changes the experts already see.
 """
 import json
 from collections import defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 from sqlalchemy import func, select
@@ -102,13 +102,13 @@ def expert_ranks(session: Session, season: int, scoring: str) -> dict[int, float
 
 
 def weekly_points(session: Session, season: int, position_of: Mapping[int, str],
-                  scoring: ScoringSettings) -> dict[int, float]:
-    """{player_id: this week's ESPN/props projection}, averaged across the two."""
+                  scoring: ScoringSettings) -> tuple[int | None, dict[int, float]]:
+    """(week, {player_id: that week's ESPN/props projection}), averaged across the two."""
     from services.weekly_model import points_from_stats
 
     week = _latest_week(session, season, "espn")
     if week is None:
-        return {}
+        return None, {}
     rows = session.execute(select(WeeklySourceProjection.player_id, WeeklySourceProjection.source,
                                   WeeklySourceProjection.stats).where(
         WeeklySourceProjection.season == season, WeeklySourceProjection.week == week,
@@ -121,7 +121,7 @@ def weekly_points(session: Session, season: int, position_of: Mapping[int, str],
         if not position or not parsed or (source == "vegas_props" and PRIMARY_STAT[position] not in parsed):
             continue
         points[player_id].append(points_from_stats(parsed, position, scoring))
-    return {pid: sum(v) / len(v) for pid, v in points.items()}
+    return week, {pid: sum(v) / len(v) for pid, v in points.items()}
 
 
 def season_ending(tag: str, body_part: str | None) -> bool:
@@ -168,11 +168,13 @@ def availability(session: Session, remaining_weeks: int) -> dict[int, float]:
 
 def ros_inputs(session: Session, season: int, scoring_key: str, scoring: ScoringSettings,
                model_ppg: Mapping[int, float], positions: Mapping[int, str],
-               remaining_weeks: int, matchup: Mapping[int, float] | None = None) -> dict[int, RosInputs]:
-    """matchup: this week's matchup factor per player; the weekly piece is divided by it, so one
-    easy or hard matchup doesn't move rest-of-season value (only the player's role does)."""
+               remaining_weeks: int,
+               matchup_for: Callable[[int], Mapping[int, float]] | None = None) -> dict[int, RosInputs]:
+    """matchup_for(week): each player's matchup factor that week. The weekly piece is divided by the
+    factor for the week it projects, so one easy or hard matchup doesn't move rest-of-season value."""
     ranks = expert_ranks(session, season, scoring_key)
-    weekly = weekly_points(session, season, positions, scoring)
+    week, weekly = weekly_points(session, season, positions, scoring)
+    matchup = matchup_for(week) if matchup_for and week is not None else {}
     avail = availability(session, remaining_weeks)
     curves: dict[str, list[float]] = defaultdict(list)
     for pid, ppg in model_ppg.items():
@@ -185,7 +187,7 @@ def ros_inputs(session: Session, season: int, scoring_key: str, scoring: Scoring
         curve = curves[positions.get(pid, "")]
         out[pid] = RosInputs(model=ppg, experts=round(_rank_points(curve, rank), 2) if rank and curve else None,
                              expert_rank=rank, availability=avail.get(pid, 1.0),
-                             weekly=weekly[pid] / (matchup or {}).get(pid, 1.0) if pid in weekly else None)
+                             weekly=weekly[pid] / matchup.get(pid, 1.0) if pid in weekly else None)
     return out
 
 

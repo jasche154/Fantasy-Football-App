@@ -2,6 +2,7 @@
 advice for the league's waiver type (services/waiver_advice.py), and trade offers that must help
 your lineup without gutting theirs.
 """
+import logging
 from collections.abc import Sequence
 
 import httpx
@@ -13,19 +14,27 @@ from database.models import Team
 from services import league_insights, lineup_gain
 from services import my_team as mt
 from services import waiver_advice as wa
+from services.playoffs import playoff_weeks
 
 CANDIDATE_POOL = 30               # waiver candidates scored by lineup gain (from the value-ranked list)
+MAX_SHOWN = CANDIDATE_POOL
 TRADE_GIVE_LIMIT = 0.5            # their lineup may lose at most this x weeks left
 LOOKAHEAD_WEEKS = 4
 HTTP_TIMEOUT_SECONDS = 15.0
+log = logging.getLogger(__name__)
 
 
 def _insights(session: Session, league_id: int) -> dict | None:
     """Standings, balances, priorities and bid history (cached an hour); None if Yahoo is unreachable."""
+    from integrations.token_crypto import TokenCryptoError
+    from integrations.yahoo import YahooError
+    from services.yahoo_sync import YahooNotConfigured
+
     try:
         with httpx.Client(timeout=HTTP_TIMEOUT_SECONDS) as http:
             return league_insights.build(session, get_settings(), http, league_id)
-    except Exception:                 # Yahoo down or not connected: advice falls back to estimates
+    except (httpx.HTTPError, YahooError, YahooNotConfigured, TokenCryptoError, LookupError):
+        log.warning("League standings unavailable; waiver advice falls back to estimates", exc_info=True)
         return None
 
 
@@ -54,7 +63,9 @@ def waiver_plan(session: Session, league_id: int, position: str | None = None, l
     weeks_left = len(horizon.weeks)
     injured_starter_teams = {v.team for v in roster if v.position == "RB"
                              and projector.available(v, 1) < 0.5}
-    by_value = sorted(candidates, key=lambda c: -c.ros_value)
+    # Demand rank across every position: filtering to TEs must not make the best TE "rank 1".
+    pool = candidates if position is None else mt.league_waivers(session, league_id, None, CANDIDATE_POOL)[2]
+    by_value = sorted({c.player.player_id: c for c in [*pool, *candidates]}.values(), key=lambda c: -c.ros_value)
     demand_rank = {c.player.player_id: i + 1 for i, c in enumerate(by_value)}
     rows = []
     for c in candidates:
@@ -93,6 +104,9 @@ def score_trades(session: Session, league_id: int, by_team: Sequence) -> list[tu
     them more than TRADE_GIVE_LIMIT x weeks left, best for you first."""
     team = mt.build_my_team(session, league_id)
     horizon, projector = lineup_gain.context_for(team)
+    # Their gain uses neutral playoff weights: we don't know their playoff odds the way we know yours.
+    neutral = lineup_gain.horizon(horizon.current_week, max(horizon.weeks), playoff_weeks(mt.league_rules(team.league)),
+                                  None)
     mine = lineup_gain.roster_values(team)
     rosters = mt.rosters(session, team.league)
     floor = -TRADE_GIVE_LIMIT * len(horizon.weeks)
@@ -102,7 +116,7 @@ def score_trades(session: Session, league_id: int, by_team: Sequence) -> list[tu
         scored = []
         for offer in team_offers.offers:
             my_gain = lineup_gain.gain(mine, horizon, projector, team.settings, add=[offer.get], drop=list(offer.give))
-            their_gain = lineup_gain.gain(theirs, horizon, projector, team.settings, add=list(offer.give),
+            their_gain = lineup_gain.gain(theirs, neutral, projector, team.settings, add=list(offer.give),
                                           drop=[offer.get])
             if my_gain > 0 and their_gain >= floor:
                 scored.append((offer, my_gain, their_gain))

@@ -3,7 +3,7 @@
 The playoff weeks come from the league (Yahoo's playoff start week, through the final),
 falling back to DEFAULT_PLAYOFF_WEEKS (16-18). For each rostered QB/RB/WR/TE and each
 playoff week:
-    projection = healthy points per game x (1 - weekly injury hazard)
+    projection = healthy points per game x long-run share of weeks played
                  x (that week's opponent defense factor)^ROS_SCHEDULE_WEIGHT
 and 0 on a bye. The best lineup for each week fills your slots from those projections, so
 you can see which week is weak (byes, tough defenses) and where a trade or pickup helps.
@@ -50,12 +50,12 @@ def playoff_cells(value, weeks, schedule, defense) -> list[dict]:
 
 def playoff_rate(value) -> float:
     """Points per game in the playoff weeks: his healthy rate (a player hurt now is usually back by then)
-    x the chance a healthy player is available in a given week (services/lineup_gain.HAZARD)."""
-    from services.lineup_gain import HAZARD
+    x the long-run share of weeks a healthy player plays (services/lineup_gain.healthy_share)."""
+    from services.lineup_gain import healthy_share
 
     share = getattr(value, "availability", 1.0) or 1.0
     healthy = value.ros_ppg / share if share > 0.05 else value.ros_ppg
-    return healthy * (1 - HAZARD.get(value.position, 0.05))
+    return healthy * healthy_share(value.position)
 
 
 def _total(cells: list[dict]) -> float:

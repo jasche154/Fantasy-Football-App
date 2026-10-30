@@ -8,12 +8,14 @@ Every CHECK_HOURS (first check shortly after startup) a background thread:
 2. **Re-imports your Yahoo leagues** (rosters, lineups, rules) when Yahoo is connected,
    so My Team, league waivers and league trades follow adds, drops and trades.
 3. **Backs up the database** once a day (services/backup.py).
-Every PROPS_TICK_MINUTES it also buys Vegas props for games kicking off within two hours.
 4. **Saves the pre-game snapshot** for the current week while it has games left: refreshes
    the outside sources (same caches and Odds API credit budget as opening the Week X page),
    then builds the default league's rankings, which records each player's pre-kickoff
    projection in projection_history. That's what the next weight update learns from, so
    learning keeps going even in weeks you never open the Week X page.
+
+Every PROPS_TICK_MINUTES on game days it also buys Vegas props for games kicking off within
+two hours (integrations/odds_api.py).
 
 Turn it off with AUTO_UPDATE=false in backend/.env. It only runs while the API is running.
 """

@@ -17,6 +17,8 @@ def key_lock(key: Hashable) -> Lock:
         lock = _locks.get(key)
         if lock is None:
             if len(_locks) >= MAX_LOCKS:
-                _locks.pop(next(iter(_locks)))       # old keys; a lock in use is still held by its holder
+                idle = next((k for k, held in _locks.items() if not held.locked()), None)
+                if idle is not None:                 # never drop a lock someone holds
+                    _locks.pop(idle)
             lock = _locks[key] = Lock()
         return lock

@@ -108,14 +108,15 @@ def _refresh_status(session: Session, http: httpx.Client, force: bool) -> dict:
 
 def _props_budget_teams(session: Session, season: int) -> set[str] | None:
     """None when credits cover every game left this month; else the NFL teams on your rosters."""
-    from database.models import Player, Roster
+    from database.models import Player
     from services import system_status
+    from services.my_team import my_leagues, rosters
 
     credits = (system_status.read(session, "odds_credits") or {}).get("remaining")
     if credits is None or credits >= odds_api.credits_needed(session, season):
         return None
-    teams = set(session.scalars(select(Player.nfl_team).join(Roster, Roster.player_id == Player.id)
-                                .where(Player.nfl_team.is_not(None))))
+    mine = {s.player_id for league, team in my_leagues(session) for s in rosters(session, league).get(team.id, [])}
+    teams = set(session.scalars(select(Player.nfl_team).where(Player.id.in_(mine), Player.nfl_team.is_not(None))))
     return teams or None
 
 

@@ -209,11 +209,6 @@ def samples_for_week(session: Session, season: int, week: int, relevant_only: bo
     return samples
 
 
-def _week_complete(session: Session, season: int, week: int) -> bool:
-    games = [g for g in load_schedule(session, season).games if g.week == week]
-    return bool(games) and all(g.is_final for g in games)
-
-
 def learn(session: Session, season: int, apply: bool = True, through_week: int | None = None) -> list[Update]:
     """Refit the weights after every completed, not-yet-learned week (up to through_week)."""
     _ensure_table(session)
@@ -221,9 +216,12 @@ def learn(session: Session, season: int, apply: bool = True, through_week: int |
     weeks = sorted(set(session.scalars(select(ProjectionHistory.week).where(ProjectionHistory.season == season))))
     pooled: list[Sample] = []
     current, _ = effective_weights(session, season, min(weeks) if weeks else None)
+    schedule = load_schedule(session, season)
+    complete = {w for w in weeks if any(g.week == w for g in schedule.games)
+                and all(g.is_final for g in schedule.games if g.week == w)}
     updates = []
     for week in weeks:
-        if (through_week is not None and week > through_week) or not _week_complete(session, season, week):
+        if (through_week is not None and week > through_week) or week not in complete:
             continue
         samples = samples_for_week(session, season, week)
         pooled += samples

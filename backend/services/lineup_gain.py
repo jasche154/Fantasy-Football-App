@@ -9,7 +9,10 @@
     * Questionable/Doubtful/low snaps now: healthy from next week, x (1 - weekly injury hazard);
     * Out now: plays week k with probability 1 - OUT_PERSIST^k;
     * IR / PUP / suspended: out for IR_WEEKS;
-    * healthy: x (1 - weekly injury hazard) (QB 8.8%, WR 5.4%, RB/TE 4.3%, from 2021-25 starters).
+    * healthy: x his long-run share of weeks played, from the weekly injury hazard (QB 8.8%,
+      WR 5.4%, RB/TE 4.3%, 2021-25 starters) and the 60% chance an injured player is still out
+      the next week: 1 - hazard / (1 - 0.6 + hazard), e.g. a receiver misses about 12% of weeks.
+      The season simulation (services/league_insights.py) runs the same chain week by week.
 - Best lineup: QB/RB/WR/TE slots and FLEX (kickers and defenses aren't projected that far out).
 
 Used for waiver pickups (with the named drop), trade offers on real rosters, and the playoff planner.
@@ -42,6 +45,12 @@ class Horizon:
         return sorted(self.weights)
 
 
+def healthy_share(position: str | None) -> float:
+    """Long-run share of weeks a healthy player plays (the steady state of the injury chain)."""
+    hazard = HAZARD.get(position or "", 0.05)
+    return 1 - hazard / (1 - OUT_PERSIST + hazard)
+
+
 def horizon(current_week: int, end_week: int, playoff_weeks: Iterable[int], playoff_odds: float | None) -> Horizon:
     playoffs = set(playoff_weeks)
     odds = max(PLAYOFF_MIN, min(1.0, playoff_odds if playoff_odds is not None else DEFAULT_PLAYOFF_ODDS))
@@ -62,12 +71,12 @@ class Projector:
 
     def available(self, value, weeks_ahead: int) -> float:
         status = (getattr(self.availability.get(value.player_id), "status", None) or "").upper()
-        hazard = 1 - HAZARD.get(value.position, 0.05)
+        share = healthy_share(value.position)
         if status in IR_STATUSES:
-            return 0.0 if weeks_ahead < IR_WEEKS else hazard
+            return 0.0 if weeks_ahead < IR_WEEKS else share
         if status in OUT_STATUSES:
-            return (1 - OUT_PERSIST ** weeks_ahead) * hazard
-        return hazard
+            return (1 - OUT_PERSIST ** weeks_ahead) * share
+        return share
 
     def points(self, value, week: int) -> float:
         key = (value.player_id, week)

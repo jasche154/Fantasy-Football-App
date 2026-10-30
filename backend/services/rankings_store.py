@@ -23,6 +23,7 @@ from collections.abc import Iterable
 from datetime import timedelta
 from functools import lru_cache
 from pathlib import Path
+from threading import Lock
 
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -34,14 +35,14 @@ from database.models import Base, ProjectionHistory, RankingsSnapshot, utc_now
 log = logging.getLogger(__name__)
 SERVICES_DIR = Path(__file__).parent
 # Changing any of these changes the numbers, so it invalidates saved snapshots.
-MODEL_FILES = ("weekly_rankings.py", "weekly_adjust.py", "weekly_model.py", "injuries.py", "flags.py",
+MODEL_FILES = ("weekly_rankings.py", "weekly_adjust.py", "weekly_model.py", "injuries.py", "availability.py", "flags.py",
                "valuation.py", "projections.py", "ros_consensus.py", "schedule_strength.py",
                "projection_ranges.json", "score_ranges.py", "score_ranges.json")
 SNAPSHOT_TTL = timedelta(days=21)
 KEY_FILE = SERVICES_DIR.parent / ".snapshot_key"
 SIGNATURE_BYTES = 32
 TABLES = (RankingsSnapshot.__table__, ProjectionHistory.__table__)
-UNREADABLE = (SQLAlchemyError, pickle.UnpicklingError, AttributeError, ImportError, EOFError, TypeError)
+UNREADABLE = (SQLAlchemyError, pickle.UnpicklingError, AttributeError, ImportError, EOFError, TypeError, OSError)
 
 
 @lru_cache(maxsize=1)
@@ -70,11 +71,22 @@ def _ensure_tables(session: Session) -> None:
         _ready.add(url)
 
 
-@lru_cache(maxsize=1)
+_key_lock = Lock()
+_key: bytes | None = None
+
+
 def _signing_key() -> bytes:
-    if not KEY_FILE.exists():
-        KEY_FILE.write_bytes(secrets.token_bytes(32))
-    return KEY_FILE.read_bytes()
+    """The local signing key, created once (exclusive create, so two threads can't write different keys)."""
+    global _key
+    with _key_lock:
+        if _key is None:
+            try:
+                with KEY_FILE.open("xb") as handle:
+                    handle.write(secrets.token_bytes(32))
+            except FileExistsError:
+                pass
+            _key = KEY_FILE.read_bytes()
+        return _key
 
 
 def _sign(payload: bytes) -> bytes:
@@ -114,7 +126,7 @@ def save(session: Session, key: str, season: int, week: int, rankings: object) -
         session.add(RankingsSnapshot(cache_key=key, season=season, week=week,
                                      payload=_sign(pickle.dumps(rankings, protocol=pickle.HIGHEST_PROTOCOL))))
         session.commit()
-    except SQLAlchemyError:
+    except (SQLAlchemyError, OSError):
         log.warning("Could not save a rankings snapshot", exc_info=True)
         session.rollback()
 

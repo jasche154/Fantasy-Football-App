@@ -85,7 +85,7 @@ def my_team(league_id: int, session: Session = Depends(get_session)) -> dict:
 
 
 @router.get("/{league_id}/waivers")
-def waivers(league_id: int, position: Position | None = None, limit: int = Query(25, ge=1, le=100),
+def waivers(league_id: int, position: Position | None = None, limit: int = Query(25, ge=1, le=30),
             session: Session = Depends(get_session)) -> dict:
     """Free agents in your league scored by how much they add to your lineup (with the player to drop),
     and what to do for your league's waiver type: a FAAB bid, a priority claim or wait, or add now."""

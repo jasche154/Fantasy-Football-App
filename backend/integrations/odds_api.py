@@ -5,7 +5,7 @@ The free plan gives 500 credits a month. Listing events is free; each game's pro
 (2) before kickoff, after Sunday-morning injury news and close to inactives (the auto-update
 checks every 15 minutes on game days). That is about 16 x 7 = ~112 credits a week; when the
 month's remaining credits can't cover every game left, only games with a player on one of
-your rosters (and every one-game Thursday/Monday slate) are bought. Buying a game again needs
+your rosters (and every Thursday, Saturday and Monday game) are bought. Buying a game again needs
 an explicit force (CLI --force-props).
 
 - Every purchase is logged per event in external_api_calls, so the budget survives
@@ -36,7 +36,7 @@ SOURCE = "vegas_props"
 CALL_LOG_SOURCE = "odds_api"
 REGIONS = "us"
 PROPS_WINDOW_HOURS = 2           # close to kickoff: the lines know Sunday's news and inactives
-ONE_GAME_SLATE_DAYS = (0, 3)     # Monday, Thursday (datetime.weekday): always bought
+STANDALONE_DAYS = (0, 3, 5)      # Monday, Thursday, Saturday (datetime.weekday): small slates, always bought
 EMPTY_RETRY_HOURS = 6
 CREDIT_RESERVE = 10
 PARSE_ERRORS = (KeyError, TypeError, ValueError, AttributeError)
@@ -207,7 +207,7 @@ def _due_games(session: Session, events: list[dict], games: dict, season: int, w
 
 def _always_buy(game: NflGame) -> bool:
     try:
-        return datetime.strptime(game.gameday or "", "%Y-%m-%d").weekday() in ONE_GAME_SLATE_DAYS
+        return datetime.strptime(game.gameday or "", "%Y-%m-%d").weekday() in STANDALONE_DAYS
     except ValueError:
         return False
 
