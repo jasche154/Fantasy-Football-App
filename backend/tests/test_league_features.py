@@ -45,16 +45,50 @@ def test_parse_transactions_reads_trades_and_adds():
     assert yahoo.parse_transactions({"league": []}) == []
 
 
+def _flat(values: dict, weeks) -> dict:
+    return {team: {week: value for week in weeks} for team, value in values.items()}
+
+
 def test_simulated_odds_favor_strong_teams_and_respect_the_cutoff():
     teams = ["a", "b", "c", "d"]
-    games = [("a", "b"), ("c", "d")] * 6
-    odds = li.simulate_season(teams, {"a": 130, "b": 80, "c": 100, "d": 100}, {t: 3 for t in teams},
+    weeks = range(8, 14)
+    games = [g for week in weeks for g in ((week, "a", "b"), (week, "c", "d"))]
+    odds = li.simulate_season(teams, _flat({"a": 130, "b": 80, "c": 100, "d": 100}, weeks), {t: 3 for t in teams},
                               {t: 700 for t in teams}, games, playoff_teams=2, sims=4000)
     assert odds["a"]["playoff_odds"] > 0.9 > odds["c"]["playoff_odds"] > odds["b"]["playoff_odds"]
     assert sum(o["playoff_odds"] for o in odds.values()) == pytest.approx(2.0, abs=0.01)
-    done = li.simulate_season(teams, {t: 100 for t in teams}, {"a": 9, "b": 8, "c": 1, "d": 0},
+    done = li.simulate_season(teams, _flat({t: 100 for t in teams}, weeks), {"a": 9, "b": 8, "c": 1, "d": 0},
                               {t: 0 for t in teams}, [], playoff_teams=2, sims=100)
     assert done["a"]["playoff_odds"] == done["b"]["playoff_odds"] == 1.0 and done["c"]["playoff_odds"] == 0.0
+
+
+def test_simulation_uses_each_weeks_projection():
+    # Equal teams, but "a" is projected 60 points lower in the only game (say, a brutal bye week).
+    odds = li.simulate_season(["a", "b"], {"a": {9: 40}, "b": {9: 100}}, {"a": 0, "b": 0}, {"a": 0, "b": 0},
+                              [(9, "a", "b")], playoff_teams=1, sims=2000)
+    assert odds["b"]["expected_wins"] > 0.95 and odds["a"]["expected_wins"] < 0.05
+
+
+def test_weekly_best_ball_covers_byes_with_the_best_waiver_player():
+    from types import SimpleNamespace
+
+    from services.league import LeagueSettings
+
+    def player(pid, position, ppg, bye=None):
+        return SimpleNamespace(player_id=pid, position=position, ros_ppg=ppg, bye=bye)
+
+    settings = LeagueSettings(starters={"QB": 1, "RB": 1, "WR": 1, "TE": 0, "FLEX": 0})
+    roster = [player(1, "QB", 20, bye=10), player(2, "RB", 15), player(3, "RB", 9), player(4, "WR", 12, bye=11),
+              player(5, "QB", 6)]
+    free = [player(10, "QB", 11), player(11, "QB", 14, bye=10), player(12, "WR", 7)]
+
+    def project(value, week):
+        return None if value.bye == week else value.ros_ppg
+
+    weekly = li.weekly_strengths({"mine": roster}, free, [9, 10, 11], settings, project)["mine"]
+    assert weekly[9] == 47.0             # QB 20 + RB 15 + WR 12: the best player at each spot
+    assert weekly[10] == 38.0            # QB on bye: best waiver QB that week is 11 (the 14 is on bye too) > backup 6
+    assert weekly[11] == 42.0            # WR on bye and no other WR: the waiver WR (7) fills in
 
 
 def test_tendencies_label_traders_waiver_regulars_and_quiet_managers():
@@ -166,3 +200,4 @@ def test_league_overview_endpoint_combines_standings_schedule_and_rosters(client
     assert teams["My Squad"]["playoff_odds"] + teams["Rival"]["playoff_odds"] == pytest.approx(
         min(body["playoff_teams"], 2), abs=0.01)
     assert sorted(t["power_rank"] for t in body["teams"]) == [1, 2]
+    assert sorted(map(int, teams["My Squad"]["weekly_projection"])) == list(range(8, 16))

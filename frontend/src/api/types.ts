@@ -713,6 +713,8 @@ export interface PowerRankingRow {
   points_against: number;
   strength: number | null;
   remaining_opponent_strength: number | null;
+  /** Best-ball lineup projection for each remaining week (byes covered by a waiver pickup). */
+  weekly_projection?: Record<string, number>;
   playoff_odds?: number;
   top_seed_odds?: number;
   expected_wins?: number;

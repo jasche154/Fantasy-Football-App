@@ -361,9 +361,13 @@ noise. The production ridge (20) stays. Learned source weights move in small cap
 `services/league_insights.py`, read live from Yahoo (standings, the season's adds and trades,
 and the scoreboard for every remaining regular-season week), cached for an hour:
 - **Strength** is each team's best QB/RB/WR/TE lineup in rest-of-season points per game.
+- **Weekly best ball:** for every remaining week, each team plays its best possible lineup from
+  its whole roster (not IR), with every player projected against that week's opponent. A player
+  on bye is out, and for each one the team gets that week's best free agent at his position (a
+  rough waiver pickup), so byes cost only the gap to the waiver wire.
 - **Playoff odds:** each remaining game is simulated 10,000 times, every team scoring
-  Normal(strength, 25 points) that week. Wins and points for are added to the real standings;
-  the top `playoff_teams` (Yahoo's setting) by wins, then points for, make it.
+  Normal(that week's best-ball projection, 25 points). Wins and points for are added to the
+  real standings; the top `playoff_teams` (Yahoo's setting) by wins, then points for, make it.
 - **Tendencies:** "Active trader" (2+ trades), "Waiver regular" (1.5× the league's median
   moves), "Quiet" (2 moves or fewer, no trades), plus the positions each manager has traded for
   and picked up.

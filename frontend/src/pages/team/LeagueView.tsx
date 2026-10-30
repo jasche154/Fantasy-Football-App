@@ -34,7 +34,9 @@ export function LeagueView({ league }: { league: MyLeague }) {
           <p className="hint">
             Ranked by each team's best lineup in rest-of-season points per game. Playoff odds simulate the last{' '}
             {d.regular_season_weeks_left} regular-season weeks {d.simulations.toLocaleString()} times from Yahoo's
-            schedule; the top {d.playoff_teams} make it. Kickers and defenses aren't counted.
+            schedule; the top {d.playoff_teams} make it. Each week every team plays its best-ball lineup (its best
+            players at each spot against that week's opponents), and a player on bye is covered by the best free agent
+            at his position that week. Kickers and defenses aren't counted.
           </p>
           <div className="table-wrap">
             <table className="data-table">

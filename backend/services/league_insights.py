@@ -3,10 +3,16 @@
 Power rankings
 - Strength: each team's best lineup of QB/RB/WR/TE by rest-of-season points per game
   (kickers and defenses aren't projected, the same for every team).
+- Weekly projection (best ball): for every remaining week, each team's best lineup from its
+  whole roster (not IR), each player projected against that week's opponent:
+      rest-of-season points per game x (opponent defense factor)^ROS_SCHEDULE_WEIGHT
+  A player on bye is out that week. For each player a team has on bye, it also gets the
+  week's best free agent at his position (the best unrostered player in the league, not on
+  bye) as a rough waiver pickup, so a bye week costs only the gap to the waiver wire.
 - Playoff odds: the rest of the regular season is simulated SIMULATIONS times from Yahoo's
-  real remaining schedule. Each week a team scores Normal(strength, WEEKLY_SD); wins and
-  points for are added to the current standings, and the top playoff_teams (wins, then
-  points for) make it. The weekly spread is what one team's total typically varies by.
+  real remaining schedule. Each game a team scores Normal(that week's projection, WEEKLY_SD);
+  wins and points for are added to the current standings, and the top playoff_teams (wins,
+  then points for) make it. The weekly spread is what one team's total typically varies by.
 
 Tendencies (from the season's transactions and Yahoo's move/trade counts)
 - how often each manager trades and works the waiver wire, which positions they trade for
@@ -17,7 +23,7 @@ Everything is read live from Yahoo and cached for CACHE_SECONDS per league.
 """
 import time
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from threading import Lock
 from types import SimpleNamespace
 
@@ -32,7 +38,7 @@ from integrations import yahoo
 from services import my_team as mt
 from services import yahoo_sync
 from services.playoffs import playoff_weeks
-from services.valuation import build_valuation
+from services.valuation import ROS_SCHEDULE_WEIGHT, build_valuation
 
 SIMULATIONS = 10_000
 WEEKLY_SD = 25.0                 # one team's weekly total: typical spread around its projection
@@ -57,21 +63,75 @@ def lineup_strength(valuation, settings, spots: Sequence[mt.RosterSpot]) -> floa
     return round(sum(by_id[pid] for ids in best.values() for pid in ids), 1)
 
 
-def simulate_season(teams: Sequence[str], strength: Mapping[str, float], wins: Mapping[str, float],
-                    points_for: Mapping[str, float], games: Sequence[tuple[str, str]], playoff_teams: int,
+def weekly_strengths(rosters: Mapping[str, Sequence], free_agents: Sequence, weeks: Sequence[int], settings,
+                     project: Callable[[object, int], float | None]) -> dict[str, dict[int, float]]:
+    """{team: {week: best-ball lineup projection}} (see the module docstring).
+
+    rosters hold each team's player values (IR excluded); project(value, week) is that week's
+    projection, or None on a bye.
+    """
+    waiver: dict[tuple[str, int], float] = {}
+    for value in free_agents:
+        for week in weeks:
+            points = project(value, week)
+            if points is not None and points > waiver.get((value.position, week), 0.0):
+                waiver[(value.position, week)] = points
+    out: dict[str, dict[int, float]] = {}
+    for team, values in rosters.items():
+        out[team] = {}
+        for week in weeks:
+            pool, byes = [], Counter()
+            for value in values:
+                points = project(value, week)
+                if points is None:
+                    byes[value.position] += 1
+                else:
+                    pool.append(SimpleNamespace(player_id=value.player_id, position=value.position, projection=points))
+            for position, count in byes.items():          # one rough pickup per player on bye
+                pool += [SimpleNamespace(player_id=-(len(pool) + i + 1), position=position,
+                                         projection=waiver.get((position, week), 0.0)) for i in range(count)]
+            best = mt.best_lineup(pool, settings)
+            by_id = {p.player_id: p.projection for p in pool}
+            out[team][week] = round(sum(by_id[pid] for ids in best.values() for pid in ids), 1)
+    return out
+
+
+def _active_values(valuation, spots: Sequence[mt.RosterSpot]) -> list:
+    return [v for s in spots if s.slot not in ("IR", "IR+", "NA")
+            and (v := valuation.by_id.get(s.player_id)) is not None and v.position in mt.MODELED and v.team]
+
+
+def _free_agents(valuation, rosters: Mapping[int, Sequence[mt.RosterSpot]]) -> list:
+    rostered = {s.player_id for spots in rosters.values() for s in spots}
+    return [v for v in valuation.values if v.position in mt.MODELED and v.team and v.player_id not in rostered]
+
+
+def _projector(valuation) -> Callable[[object, int], float | None]:
+    schedule, defense = valuation.schedule, valuation.defense
+
+    def project(value, week: int) -> float | None:
+        opponent = schedule.opponent(value.team, week)
+        if opponent is None:
+            return None                                   # bye
+        return value.ros_ppg * defense.factor(opponent, value.position) ** ROS_SCHEDULE_WEIGHT
+    return project
+
+
+def simulate_season(teams: Sequence[str], strength: Mapping[str, Mapping[int, float]], wins: Mapping[str, float],
+                    points_for: Mapping[str, float], games: Sequence[tuple[int, str, str]], playoff_teams: int,
                     sims: int = SIMULATIONS, seed: int = 11) -> dict[str, dict]:
-    """{team: {playoff_odds, expected_wins, top_seed_odds}} over the remaining games."""
+    """{team: {playoff_odds, expected_wins, top_seed_odds}} over the remaining (week, home, away) games,
+    each team scoring around its projection for that week."""
     rng = np.random.default_rng(seed)
     index = {t: i for i, t in enumerate(teams)}
     total_wins = np.tile(np.array([wins.get(t, 0.0) for t in teams], dtype=float), (sims, 1))
     total_points = np.tile(np.array([points_for.get(t, 0.0) for t in teams], dtype=float), (sims, 1))
-    means = np.array([strength.get(t, 0.0) for t in teams])
-    for home, away in games:
+    for week, home, away in games:
         if home not in index or away not in index:
             continue
         a, b = index[home], index[away]
-        score_a = rng.normal(means[a], WEEKLY_SD, sims)
-        score_b = rng.normal(means[b], WEEKLY_SD, sims)
+        score_a = rng.normal(strength.get(home, {}).get(week, 0.0), WEEKLY_SD, sims)
+        score_b = rng.normal(strength.get(away, {}).get(week, 0.0), WEEKLY_SD, sims)
         total_wins[:, a] += score_a > score_b
         total_wins[:, b] += score_b > score_a
         total_points[:, a] += score_a
@@ -120,14 +180,14 @@ def tendencies(standings: Sequence[dict], transactions: Sequence[dict]) -> dict[
     return out
 
 
-def _remaining_games(http: httpx.Client, token, league_key: str, first: int, last: int) -> list[tuple[str, str]]:
+def _remaining_games(http: httpx.Client, token, league_key: str, first: int, last: int) -> list[tuple[int, str, str]]:
     games = []
     for week in range(first, last + 1):
         board = yahoo.parse_scoreboard(yahoo.api_get(http, token, f"league/{league_key}/scoreboard;week={week}"))
         for matchup in board:
             keys = [t["team_key"] for t in matchup["teams"]]
             if len(keys) == 2:
-                games.append((keys[0], keys[1]))
+                games.append((week, keys[0], keys[1]))
     return games
 
 
@@ -153,18 +213,22 @@ def build(session: Session, settings: Settings, http: httpx.Client, reference: i
     rosters = mt.rosters(session, league)
     strength = {s["team_key"]: lineup_strength(valuation, league_settings, rosters.get(teams[s["team_key"]].id, []))
                 for s in standings if s["team_key"] in teams}
+    remaining_weeks = sorted({week for week, _, _ in games})
+    weekly = weekly_strengths(
+        {key: _active_values(valuation, rosters.get(team.id, [])) for key, team in teams.items()},
+        _free_agents(valuation, rosters), remaining_weeks, league_settings, _projector(valuation))
     wins = {s["team_key"]: s["wins"] + 0.5 * s["ties"] for s in standings}
     points = {s["team_key"]: s["points_for"] for s in standings}
     keys = [s["team_key"] for s in standings]
     playoff_teams = int(rules.get("playoff_teams") or (6 if len(keys) >= 10 else 4))     # Yahoo's defaults
-    odds = simulate_season(keys, strength, wins, points, games, playoff_teams)
+    odds = simulate_season(keys, weekly, wins, points, games, playoff_teams)
     habits = tendencies(standings, transactions)
     remaining_opponents: dict[str, list[float]] = {k: [] for k in keys}
-    for home, away in games:
-        if home in remaining_opponents and away in strength:
-            remaining_opponents[home].append(strength[away])
-        if away in remaining_opponents and home in strength:
-            remaining_opponents[away].append(strength[home])
+    for week, home, away in games:
+        if home in remaining_opponents and away in weekly:
+            remaining_opponents[home].append(weekly[away][week])
+        if away in remaining_opponents and home in weekly:
+            remaining_opponents[away].append(weekly[home][week])
 
     rows = []
     for s in standings:
@@ -175,6 +239,7 @@ def build(session: Session, settings: Settings, http: httpx.Client, reference: i
                      "standing": s["rank"], "points_for": round(s["points_for"], 1),
                      "points_against": round(s["points_against"], 1), "strength": strength.get(team_key),
                      "remaining_opponent_strength": round(sum(opponents) / len(opponents), 1) if opponents else None,
+                     "weekly_projection": weekly.get(team_key, {}),
                      **odds.get(team_key, {}), "tendencies": habits.get(team_key)})
     rows.sort(key=lambda r: -(r["strength"] or 0))
     for rank, row in enumerate(rows, start=1):
