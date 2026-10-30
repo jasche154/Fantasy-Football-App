@@ -22,7 +22,7 @@ GROUPS: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
     (("waiver", "waivers", "pickup", "pick up", "add", "drop", "faab", "free agent", "free agents", "stream"),
      ("get_league_waivers", "get_waiver_targets", "get_trending_players")),
     (("playoff", "playoffs", "championship", "weeks 15", "weeks 16", "week 16", "week 17", "week 18"),
-     ("get_playoff_outlook", "get_schedule_strength", "find_league_trades")),
+     ("get_playoff_outlook", "get_schedule_strength", "find_league_trades", "get_power_rankings")),
     (("schedule", "sos", "strength of schedule", "defense", "defenses", "matchups"),
      ("get_schedule_strength",)),
     (("rank", "ranks", "ranking", "rankings", "top", "best", "ecr", "tier", "rest of season", "ros"),
@@ -41,10 +41,17 @@ GROUPS: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
      ("get_player_game_log", "get_player_profile")),
     (("trending", "hot", "most added", "most dropped"),
      ("get_trending_players",)),
+    (("power", "standings", "standing", "odds", "make the playoffs", "contender", "contenders", "best team",
+      "worst team", "tendency", "tendencies", "active", "trader", "traders", "manager", "managers"),
+     ("get_power_rankings",)),
+    (("news", "update", "updates", "practice", "practicing", "status", "injury", "injured", "hurt", "return",
+      "returning", "questionable", "doubtful"),
+     ("get_player_news",)),
     (("roster", "rosters", "team", "teams", "league", "manager", "managers", "everyone"),
      ("get_league_rosters", "get_my_team")),
 )
-PLAYER_TOOLS = ("get_player_profile", "get_player_game_log", "explain_projection", "compare_players")
+PLAYER_TOOLS = ("get_player_profile", "get_player_game_log", "explain_projection", "compare_players",
+                "get_player_news")
 DEFAULT = ("get_player_profile", "get_weekly_rankings", "get_fantasy_rankings", "get_league_waivers",
            "find_league_trades", "get_my_matchup")
 ROUTING_MESSAGES = 2

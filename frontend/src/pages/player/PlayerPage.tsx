@@ -1,8 +1,9 @@
 import { ApiError } from '../../api/client';
-import { getPlayer } from '../../api/data';
+import { getPlayer, getPlayerNews } from '../../api/data';
 import type { PlayerProfile } from '../../api/types';
 import { AsyncView } from '../../components/AsyncView';
 import { Card } from '../../components/Card';
+import { NewsList } from '../../components/NewsList';
 import { PositionChip } from '../../components/PlayerLink';
 import { SelectField } from '../../components/SelectField';
 import { EmptyState, ErrorState, Skeleton } from '../../components/StatusViews';
@@ -58,6 +59,18 @@ function PlayerHeader({ profile, selectedSeason }: { profile: PlayerProfile; sel
   );
 }
 
+function PlayerNews({ playerId }: { playerId: number }) {
+  const news = useAsync((signal) => getPlayerNews(playerId, signal), [playerId]);
+  if (news.error || (news.data && news.data.items.length === 0)) return null;      // news is extra: hide when missing
+  return (
+    <Card title="Latest news" eyebrow="Via Sleeper">
+      <AsyncView state={news} loading={<Skeleton lines={3} label="Loading news…" />}>
+        {(d) => <NewsList items={d.items.slice(0, 5)} />}
+      </AsyncView>
+    </Card>
+  );
+}
+
 function PlayerBody({ profile, selectedSeason }: { profile: PlayerProfile; selectedSeason: number | undefined }) {
   return (
     <>
@@ -76,6 +89,7 @@ function PlayerBody({ profile, selectedSeason }: { profile: PlayerProfile; selec
           <SignalsPanel signals={profile.signals} />
         </div>
       </div>
+      <PlayerNews playerId={profile.player.id} />
       <Card title="Advanced stats" eyebrow="Next Gen Stats & usage">
         <AdvancedStats advanced={profile.advanced} />
       </Card>

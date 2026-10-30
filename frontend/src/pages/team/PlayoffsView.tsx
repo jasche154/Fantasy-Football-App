@@ -1,11 +1,51 @@
 import { getPlayoffs } from '../../api/data';
-import type { MyLeague } from '../../api/types';
+import type { MyLeague, PlayoffFix, PlayoffFixOption } from '../../api/types';
 import { AsyncView } from '../../components/AsyncView';
 import { PlayerLink } from '../../components/PlayerLink';
 import { EmptyState, TableSkeleton } from '../../components/StatusViews';
 import { useAsync } from '../../hooks/useAsync';
 import { formatNumber } from '../../lib/format';
 import { factorTone } from '../../lib/matchup';
+
+function FixOptions({ title, options }: { title: string; options: readonly PlayoffFixOption[] }) {
+  if (options.length === 0) return null;
+  return (
+    <p className="playoff-fix__options">
+      <span className="playoff-fix__kind">{title}:</span>{' '}
+      {options.map((o, index) => (
+        <span key={o.player.id}>
+          {index > 0 && ', '}
+          <PlayerLink player={o.player} /> {formatNumber(o.playoff_total)} (+{formatNumber(o.gain)}){o.owner && ` on ${o.owner}`}
+        </span>
+      ))}
+    </p>
+  );
+}
+
+/** Upgrades over your weakest starter at each position, totalled across the playoff weeks. */
+function PlayoffPlanner({ fixes }: { fixes: readonly PlayoffFix[] }) {
+  return (
+    <section className="playoff-plan" aria-label="Playoff planner">
+      <h2 className="section-title">Playoff planner</h2>
+      {fixes.length === 0 ? (
+        <p className="hint">No free agent or trade target beats your starters by 3+ points over the playoff weeks.</p>
+      ) : (
+        <ul className="playoff-fix-list">
+          {fixes.map((fix) => (
+            <li key={fix.position} className="playoff-fix">
+              <p className="playoff-fix__head">
+                <strong>{fix.position}</strong>
+                {fix.weakest_starter && <> · weakest starter {fix.weakest_starter.name}, {formatNumber(fix.weakest_starter.playoff_total)} playoff points</>}
+              </p>
+              <FixOptions title="Pick up" options={fix.waivers} />
+              <FixOptions title="Trade for" options={fix.trade_targets} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
 
 /** Your roster across the fantasy-playoff weeks: opponents, byes, projections, and the best lineup each week. */
 export function PlayoffsView({ league }: { league: MyLeague }) {
@@ -68,6 +108,7 @@ export function PlayoffsView({ league }: { league: MyLeague }) {
             </table>
           </div>
           {d.weakest_week && <p>Your weakest playoff week is <strong>week {d.weakest_week}</strong>: target players with good matchups that week.</p>}
+          {d.fixes && <PlayoffPlanner fixes={d.fixes} />}
         </section>
       )}
     </AsyncView>

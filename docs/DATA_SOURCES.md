@@ -37,6 +37,7 @@ Researched 2026-10-22; weekly sources added 2026-10-23. "In use" means the app l
 | Source | What it gives | Access | Caveats |
 |---|---|---|---|
 | Yahoo Sports expert rankings | Weekly positional ranks from 40+ rankers, including Josh Norris (id 1408) and Hayden Winks (7666), plus consensus | `https://sports.yahoo.com/api/fanPro/?position=RB&type=WK&wtype=WK&week=7&scoring=PPR&experts=show&year=2026` (the JSON behind Yahoo's rankings articles; `position=ALL` fails for weekly) | Undocumented; Yahoo's terms restrict automated access. 12 requests per refresh, cached 3 h, latest snapshot only. Players map through the Yahoo id crosswalk. |
+| Sleeper player news | Headlines and short summaries from Sleeper's partners (FantasyPros, RotoWire), with links | `https://api.sleeper.app/players/nfl/{sleeper_id}/news` (what Sleeper's app reads; not in the documented API) | Undocumented and may change. No key. Cached 30 min per player; only the headline, summary, source and link are shown, never stored. A failure just hides the news. |
 | ESPN fantasy projections | Weekly projected stat lines (ESPN stat ids 3/4/20 passing, 24/25 rushing, 53/42/43 receiving) | `lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/{season}/segments/0/leaguedefaults/3?view=kona_player_info` with an `X-Fantasy-Filter` header | Undocumented; the Disney terms prohibit automated data collection. 1 request per refresh, cached 3 h. |
 
 Remove a source from `WEEKLY_SOURCES` to stop contacting it.

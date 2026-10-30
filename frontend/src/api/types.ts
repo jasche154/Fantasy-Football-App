@@ -676,4 +676,101 @@ export interface PlayoffsResponse {
   players: { player: PlayerSummary; slot: string; ros_ppg: number; weeks: PlayoffCell[]; playoff_total: number }[];
   lineups: Record<string, { projected: number; starters: number[]; empty_slots: string[] }>;
   weakest_week: number | null;
+  fixes?: PlayoffFix[];
+}
+
+export interface PlayoffFixOption {
+  player: PlayerSummary;
+  playoff_total: number;
+  gain: number;
+  owner: string | null;
+}
+
+export interface PlayoffFix {
+  position: Position;
+  weakest_starter: { name: string; playoff_total: number } | null;
+  waivers: PlayoffFixOption[];
+  trade_targets: PlayoffFixOption[];
+}
+
+export interface ManagerTendencies {
+  moves: number;
+  trades: number;
+  label: 'Active trader' | 'Waiver regular' | 'Quiet' | null;
+  trades_for: string[];
+  trades_away: string[];
+  picks_up: string[];
+}
+
+export interface PowerRankingRow {
+  power_rank: number;
+  team: string;
+  team_key: string;
+  is_users_team: boolean;
+  record: string;
+  standing: number | null;
+  points_for: number;
+  points_against: number;
+  strength: number | null;
+  remaining_opponent_strength: number | null;
+  /** Best-ball lineup projection for each remaining week (byes covered by a waiver pickup). */
+  weekly_projection?: Record<string, number>;
+  playoff_odds?: number;
+  top_seed_odds?: number;
+  expected_wins?: number;
+  tendencies: ManagerTendencies | null;
+}
+
+export interface LeagueOverview {
+  league: string;
+  playoff_teams: number;
+  regular_season_weeks_left: number;
+  simulations: number;
+  teams: PowerRankingRow[];
+}
+
+export interface NewsItem {
+  title: string;
+  summary: string | null;
+  analysis: string | null;
+  source: string;
+  url: string | null;
+  published: string | null;
+  player?: { id: number; name: string };
+}
+
+export interface NewsResponse {
+  items: NewsItem[];
+  note?: string;
+}
+
+export interface CompareGame {
+  season: number;
+  week: number;
+  opponent: string | null;
+  fantasy_points: number;
+  expected_points: number | null;
+  targets: number;
+  receptions: number;
+  carries: number;
+  scrimmage_yards: number;
+  passing_yards: number;
+  touchdowns: number;
+  snap_pct: number | null;
+}
+
+export interface CompareSummary {
+  season: number;
+  games: number;
+  ppg: number;
+  expected_ppg: number | null;
+  best: number;
+  worst: number;
+  targets_per_game: number;
+  carries_per_game: number;
+}
+
+export interface CompareResponse {
+  seasons: number[];
+  players: { player: PlayerSummary; games: CompareGame[]; summary: CompareSummary[] }[];
 }

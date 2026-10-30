@@ -21,6 +21,10 @@ interface LineChartProps {
   xLabel: string;
   yLabel: string;
   digits?: number;
+  /** Text for an x value (default: the number), e.g. "2025 W5". */
+  xFormat?: (x: number) => string;
+  /** Label every nth x tick (default: every one). */
+  xTickEvery?: number;
 }
 
 const WIDTH = 720;
@@ -35,7 +39,7 @@ export function linePath(points: readonly LinePoint[], x: (v: number) => number,
 }
 
 /** Multi-series line chart (e.g. weekly fantasy points for up to five players). */
-export function LineChart({ title, description, series, xLabel, yLabel, digits = 1 }: LineChartProps) {
+export function LineChart({ title, description, series, xLabel, yLabel, digits = 1, xFormat = String, xTickEvery = 1 }: LineChartProps) {
   const id = useId();
   const [hovered, setHovered] = useState<{ series: number; point: LinePoint } | null>(null);
   const allPoints = series.flatMap((s) => s.points);
@@ -44,7 +48,7 @@ export function LineChart({ title, description, series, xLabel, yLabel, digits =
   const yTicks = niceTicks(Math.min(0, yMinRaw), yMaxRaw);
   const x = linearScale([xMin, xMax], [PAD.left, WIDTH - PAD.right]);
   const y = linearScale([yTicks[0], yTicks[yTicks.length - 1]], [HEIGHT - PAD.bottom, PAD.top]);
-  const xTicks = Array.from({ length: xMax - xMin + 1 }, (_, index) => xMin + index);
+  const xTicks = Array.from({ length: xMax - xMin + 1 }, (_, index) => xMin + index).filter((_, index) => index % xTickEvery === 0);
 
   const hoveredSeries = hovered ? series[hovered.series] : undefined;
   return (
@@ -60,7 +64,7 @@ export function LineChart({ title, description, series, xLabel, yLabel, digits =
           </g>
         ))}
         {xTicks.map((tick) => (
-          <text key={tick} x={x(tick)} y={HEIGHT - PAD.bottom + 18} textAnchor="middle">{tick}</text>
+          <text key={tick} x={x(tick)} y={HEIGHT - PAD.bottom + 18} textAnchor="middle">{xFormat(tick)}</text>
         ))}
       </g>
       <text className="auto-chart__axis" x={(PAD.left + WIDTH - PAD.right) / 2} y={HEIGHT - 4} textAnchor="middle">{xLabel}</text>
@@ -75,7 +79,7 @@ export function LineChart({ title, description, series, xLabel, yLabel, digits =
                 <circle className="auto-chart__dot-hit" cx={x(p.x)} cy={y(p.y)} r={9} />
                 <circle className={hovered?.series === index && hovered.point === p ? 'auto-chart__dot is-hovered' : 'auto-chart__dot'}
                   cx={x(p.x)} cy={y(p.y)} r={hovered?.series === index && hovered.point === p ? 6 : 4}>
-                  <title>{`${item.name}, ${xLabel.toLowerCase()} ${p.x}${p.label ? ` ${p.label}` : ''}: ${formatNumber(p.y, digits)}`}</title>
+                  <title>{`${item.name}, ${xLabel.toLowerCase()} ${xFormat(p.x)}${p.label ? ` ${p.label}` : ''}: ${formatNumber(p.y, digits)}`}</title>
                 </circle>
               </g>
             ))}
@@ -85,7 +89,7 @@ export function LineChart({ title, description, series, xLabel, yLabel, digits =
     </svg>
     {hovered && hoveredSeries && (
       <ChartTooltip x={x(hovered.point.x)} y={y(hovered.point.y)} width={WIDTH} height={HEIGHT} title={hoveredSeries.name}
-        meta={`${xLabel} ${hovered.point.x}${hovered.point.label ? ` · ${hovered.point.label}` : ''}`}
+        meta={`${xLabel} ${xFormat(hovered.point.x)}${hovered.point.label ? ` · ${hovered.point.label}` : ''}`}
         rows={[{ label: yLabel, value: formatNumber(hovered.point.y, digits) }]} />
     )}
     </div>
