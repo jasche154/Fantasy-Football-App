@@ -206,5 +206,38 @@ def parse_roster(content: dict) -> list[dict]:
     return players
 
 
+RECEPTION_STAT_ID = 11
+# Yahoo roster slots -> this app's starter keys (K and DEF aren't modeled).
+SLOT_MAP = {"QB": "QB", "RB": "RB", "WR": "WR", "TE": "TE", "W/R/T": "FLEX", "W/R": "FLEX", "W/T": "FLEX",
+            "R/T": "FLEX"}
+SUPERFLEX_SLOTS = {"Q/W/R/T", "SUPERFLEX", "OP"}
+
+
+def parse_settings(content: dict) -> dict:
+    """Scoring preset, starter slots and bench size from /league/{league_key}/settings."""
+    league = content.get("league") or []
+    settings = merge(merge(league[1:]).get("settings")) if len(league) > 1 else {}
+    starters: dict[str, int] = {}
+    bench, superflex = 0, False
+    for item in (settings.get("roster_positions") or []):
+        slot = (item or {}).get("roster_position") or {}
+        position, count = slot.get("position"), int(slot.get("count") or 0)
+        if position == "BN":
+            bench += count
+        elif position in SUPERFLEX_SLOTS:
+            superflex = True
+        elif position in SLOT_MAP:
+            key = SLOT_MAP[position]
+            starters[key] = starters.get(key, 0) + count
+    reception = 0.0
+    for item in ((settings.get("stat_modifiers") or {}).get("stats") or []):
+        stat = (item or {}).get("stat") or {}
+        if int(stat.get("stat_id") or 0) == RECEPTION_STAT_ID:
+            reception = float(stat.get("value") or 0)
+    scoring = "ppr" if reception >= 0.75 else "half" if reception >= 0.25 else "std"
+    return {"scoring": scoring, "reception_points": reception, "starters": starters, "bench": bench,
+            "superflex": superflex}
+
+
 def league_team_keys(teams: Iterable[dict]) -> list[str]:
     return [t["team_key"] for t in teams if t.get("team_key")]

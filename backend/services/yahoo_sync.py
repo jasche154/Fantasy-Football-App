@@ -146,8 +146,10 @@ def import_league(session: Session, settings: Settings, http: httpx.Client, leag
     if meta is None:
         raise LookupError(f"League {league_key} isn't one of your Yahoo NFL leagues.")
     week = meta.get("current_week") or 1
+    rules = yahoo.parse_settings(yahoo.api_get(http, token, f"league/{league_key}/settings"))
     league = _upsert_league(session, get_connection(session), meta,
-                            {"scoring_type": meta.get("scoring_type"), "num_teams": meta.get("num_teams")})
+                            {"scoring_type": meta.get("scoring_type"), "num_teams": meta.get("num_teams"),
+                             "week": week, **rules})
     matcher = PlayerMatcher(session)
     teams = yahoo.parse_teams(yahoo.api_get(http, token, f"league/{league_key}/teams"))
     spots, unmatched, untracked = 0, [], []

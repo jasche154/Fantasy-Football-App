@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from database.models import Player
 from services.league import POSITIONS
+from services.my_team import my_leagues
 from services.projections import latest_season, latest_week
 from tools.definitions import TOOL_ERRORS, TOOLS, sanitize_for_agent
 from tools.registry import ToolError, ToolRegistry
@@ -51,7 +52,8 @@ Field guide (use these meanings; don't relabel fields):
 - evaluate_trade: `give` = players the user sends, `get` = players the user receives. Verdicts
   "slight_win" / "big_win" mean the USER wins; "slight_loss" / "big_loss" mean the user loses.
 
-Data available: NFL seasons through {season}, regular season through week {week}."""
+Data available: NFL seasons through {season}, regular season through week {week}.
+{leagues}"""
 
 
 class LLMClient(Protocol):
@@ -152,6 +154,17 @@ def _assistant_message(content: str | None, calls: Sequence[Mapping[str, Any]]) 
         for c in calls]}
 
 
+def league_context(session: Session) -> str:
+    """Tells the model which Yahoo leagues are imported, so 'my team' questions use the real roster."""
+    leagues = my_leagues(session)
+    if not leagues:
+        return ""
+    names = "; ".join(f"{league.name} (team: {team.name})" for league, team in leagues)
+    return (f"The user's imported Yahoo leagues: {names}. For their team, waivers or trades, call get_my_team, "
+            "get_league_waivers and find_league_trades (pass the league name when there's more than one) "
+            "instead of asking them to list players. Use each league's own scoring.")
+
+
 _names_cache: "WeakKeyDictionary[Any, frozenset[str]]" = WeakKeyDictionary()
 
 
@@ -174,7 +187,8 @@ def run_agent(session: Session, client: LLMClient, history: Sequence[Mapping[str
               registry: ToolRegistry = TOOLS, max_rounds: int = MAX_ROUNDS) -> AgentReply:
     season = latest_season(session)
     week = latest_week(session, season) if season else None
-    messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT.format(season=season, week=week)},
+    messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT.format(
+                                season=season, week=week, leagues=league_context(session))},
                             *({"role": m["role"], "content": m["content"]} for m in history)]
     schemas, trace, revised = registry.openai_schemas(), [], False
     for _ in range(max_rounds):

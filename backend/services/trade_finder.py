@@ -11,7 +11,7 @@ other teams whose rest-of-season value makes a deal the other manager should acc
 Offers are ranked by how close to fair they are (a small edge for you first), then by the
 incoming player's rest-of-season scoring rate.
 """
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from itertools import combinations
 
@@ -51,13 +51,15 @@ def _market_percent(give: Sequence[PlayerValue], target: PlayerValue, valuation:
 
 
 def find_trades(valuation: Valuation, my_ids: Sequence[int], want_position: str | None = None,
-                limit: int = 10) -> list[TradeOffer]:
+                limit: int = 10, target_ids: Collection[int] | None = None) -> list[TradeOffer]:
+    """target_ids limits incoming players (e.g. one real team's roster)."""
     mine = [valuation.by_id[i] for i in dict.fromkeys(my_ids) if i in valuation.by_id]   # de-duplicated
     if not mine:
         return []
     my_set = {p.player_id for p in mine}
     targets = [v for v in valuation.values if v.player_id not in my_set and v.trade_value >= MIN_TARGET_VALUE
-               and (want_position is None or v.position == want_position)]
+               and (want_position is None or v.position == want_position)
+               and (target_ids is None or v.player_id in target_ids)]
     top = sorted(mine, key=lambda p: -p.trade_value)[:PAIR_POOL]
     packages = [(p,) for p in mine] + list(combinations(top, 2))
     shortlist = []

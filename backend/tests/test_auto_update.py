@@ -39,9 +39,10 @@ def test_run_once_loads_the_finished_week_and_saves_the_current_weeks_projection
     loads, refreshes = [], []
     factory = sessionmaker(bind=engine)
     result = auto_update.run_once(factory, today=date(2026, 10, 30), load_stats=loads.append,
+                                  sync_leagues=lambda s: 2,
                                   refresh=lambda s, season, week: refreshes.append((season, week)))
     # Week 7's game (Oct 17) is 1+ days past but its stats aren't loaded (latest week is 6).
-    assert loads == [[SEASON]] and result.loaded_week == WEEK
+    assert loads == [[SEASON]] and result.loaded_week == WEEK and result.synced_leagues == 2
     assert refreshes == [(SEASON, WEEK)] and result.snapshot_week == WEEK
     saved = session.scalar(select(func.count()).select_from(ProjectionHistory).where(ProjectionHistory.week == WEEK))
     assert saved > 0
@@ -49,7 +50,8 @@ def test_run_once_loads_the_finished_week_and_saves_the_current_weeks_projection
 
 def test_run_once_skips_the_snapshot_when_the_week_is_over_and_stops_without_data(engine):
     result = auto_update.run_once(sessionmaker(bind=engine), today=date(2026, 10, 30),
-                                  load_stats=lambda seasons: None, refresh=lambda *a: None)
+                                  load_stats=lambda seasons: None, refresh=lambda *a: None,
+                                  sync_leagues=lambda s: 0)
     assert result.loaded_week is None and result.snapshot_week is None and result.notes
 
 
@@ -61,3 +63,7 @@ def test_start_runs_one_thread_per_process(monkeypatch):
     assert auto_update.start(None) is True
     assert auto_update.start(None) is False
     assert started == ["auto-update"]
+
+
+def test_yahoo_sync_skips_without_a_connection(session):
+    assert auto_update.sync_yahoo_leagues(session) == 0

@@ -336,10 +336,31 @@ def test_yahoo_config_and_key_checked_before_any_oauth_step(session, seeded):
     assert seen == []                                        # the one-time code was not spent
 
 
+def _slot(position, count):
+    return {"roster_position": {"position": position, "count": count}}
+
+
+SETTINGS_JSON = {"fantasy_content": {"league": [{"league_key": "461.l.1"}, {"settings": [{
+    "roster_positions": [_slot("QB", 1), _slot("RB", 2), _slot("WR", 2), _slot("TE", 1), _slot("W/R/T", 1),
+                         _slot("K", 1), _slot("DEF", 1), _slot("BN", 6), _slot("IR", 2)],
+    "stat_modifiers": {"stats": [{"stat": {"stat_id": 4, "value": "0.04"}}, {"stat": {"stat_id": 11, "value": "0.5"}}]},
+}]}]}}
+
+
+def test_yahoo_league_settings_become_app_rules():
+    rules = yahoo.parse_settings(SETTINGS_JSON["fantasy_content"])
+    assert rules == {"scoring": "half", "reception_points": 0.5, "bench": 6, "superflex": False,
+                     "starters": {"QB": 1, "RB": 2, "WR": 2, "TE": 1, "FLEX": 1}}
+    no_catch_points = {"league": [{}, {"settings": [{"roster_positions": [_slot("Q/W/R/T", 1)], "stat_modifiers": {"stats": []}}]}]}
+    assert yahoo.parse_settings(no_catch_points)["scoring"] == "std"
+    assert yahoo.parse_settings(no_catch_points)["superflex"] is True
+
+
 def yahoo_api(handler_overrides: dict | None = None):
     responses = {"/oauth2/get_token": {"access_token": "A2", "refresh_token": "R2", "expires_in": 3600},
                  "users;use_login=1/games;game_keys=nfl/leagues": LEAGUES_JSON,
                  "league/461.l.1/teams": TEAMS_JSON,
+                 "league/461.l.1/settings": SETTINGS_JSON,
                  "team/461.l.1.t.1/roster;week=7": roster_json(["555", "999"]),
                  "team/461.l.1.t.2/roster;week=7": roster_json([])}
     responses.update(handler_overrides or {})
