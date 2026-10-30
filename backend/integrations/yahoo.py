@@ -263,6 +263,7 @@ def parse_settings(content: dict) -> dict:
         teams = _number(settings.get("num_playoff_teams"), int) or 6
         rounds = max(1, (max(teams, 2) - 1).bit_length())          # 4 teams: 2 rounds, 6 or 8: 3
         rules["playoff_weeks"] = [w for w in range(start, start + rounds) if w <= 18]
+        rules["playoff_teams"] = teams
     return rules
 
 
@@ -298,3 +299,52 @@ def parse_scoreboard(content: dict) -> list[dict]:
 
 def league_team_keys(teams: Iterable[dict]) -> list[str]:
     return [t["team_key"] for t in teams if t.get("team_key")]
+
+
+def parse_standings(content: dict) -> list[dict]:
+    """Each team's record, points for/against, playoff seed and activity from /league/{key}/standings."""
+    league = content.get("league") or []
+    standings = merge(league[1:]).get("standings") if len(league) > 1 else None
+    first = standings[0] if isinstance(standings, list) and standings else standings
+    out = []
+    for team in collection((first or {}).get("teams") if isinstance(first, dict) else None, "team"):
+        info = merge(team)
+        record = info.get("team_standings") or {}
+        totals = record.get("outcome_totals") or {}
+        out.append({"team_key": info.get("team_key"), "name": info.get("name"),
+                    "rank": _number(record.get("rank"), int) or None,
+                    "wins": _number(totals.get("wins"), int), "losses": _number(totals.get("losses"), int),
+                    "ties": _number(totals.get("ties"), int),
+                    "points_for": _float(record.get("points_for")) or 0.0,
+                    "points_against": _float(record.get("points_against")) or 0.0,
+                    "moves": _number(info.get("number_of_moves"), int),
+                    "trades": _number(info.get("number_of_trades"), int),
+                    "faab_balance": _float(info.get("faab_balance"))})
+    return out
+
+
+def parse_transactions(content: dict) -> list[dict]:
+    """Adds, drops and trades from /league/{key}/transactions: who moved which player where."""
+    league = content.get("league") or []
+    container = merge(league[1:]).get("transactions") if len(league) > 1 else None
+    out = []
+    for transaction in collection(container, "transaction"):
+        if not isinstance(transaction, list) or not transaction:
+            continue
+        meta = merge(transaction[0] if isinstance(transaction[0], (list, dict)) else {})
+        players_box = merge(transaction[1:]).get("players")
+        moves = []
+        for player in collection(players_box, "player"):
+            info = merge(player[0] if isinstance(player, list) and player and isinstance(player[0], list) else player)
+            data = merge(player[1:]).get("transaction_data") if isinstance(player, list) else None
+            data = data[0] if isinstance(data, list) and data else data
+            if not isinstance(data, dict):
+                continue
+            name = (info.get("name") or {}).get("full") if isinstance(info.get("name"), dict) else info.get("name")
+            moves.append({"yahoo_player_id": str(info.get("player_id")) if info.get("player_id") else None,
+                          "name": name, "position": info.get("display_position"), "type": data.get("type"),
+                          "from_team": data.get("source_team_key"), "to_team": data.get("destination_team_key"),
+                          "faab_bid": _float(meta.get("faab_bid"))})
+        out.append({"type": meta.get("type"), "status": meta.get("status"),
+                    "timestamp": _number(meta.get("timestamp"), int), "moves": moves})
+    return out

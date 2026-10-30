@@ -67,7 +67,11 @@ describe('MyTeamPage', () => {
         players: [{ player: BIJAN, slot: 'RB', ros_ppg: 18, weeks: [cell(16, 'NYG', 20.1), cell(17, null, 0), cell(18, 'CHI', 17)],
           playoff_total: 37.1 }],
         lineups: { 16: { projected: 95, starters: [1], empty_slots: [] }, 17: { projected: 80, starters: [], empty_slots: ['RB'] },
-          18: { projected: 78, starters: [1], empty_slots: [] } } }) }]);
+          18: { projected: 78, starters: [1], empty_slots: [] } },
+        fixes: [{ position: 'WR', weakest_starter: { name: 'Slow Receiver', playoff_total: 30 },
+          waivers: [{ player: { id: 9, name: 'Free Agent Guy', position: 'WR', team: 'NYJ' }, playoff_total: 36, gain: 6, owner: null }],
+          trade_targets: [{ player: { id: 10, name: 'Star Receiver', position: 'WR', team: 'MIN' }, playoff_total: 50, gain: 20,
+            owner: 'Rival' }] }] }) }]);
     const user = userEvent.setup();
     renderWithProviders(<MyTeamPage />);
     await screen.findByRole('region', { name: 'Lineup advice' });
@@ -79,6 +83,45 @@ describe('MyTeamPage', () => {
     expect(row).toHaveTextContent('BYE');
     expect(outlook).toHaveTextContent('empty: RB');
     expect(outlook).toHaveTextContent('Your weakest playoff week is week 18');
+    const planner = within(outlook).getByRole('region', { name: 'Playoff planner' });
+    expect(planner).toHaveTextContent('weakest starter Slow Receiver, 30.0 playoff points');
+    expect(planner).toHaveTextContent('Pick up: Free Agent GuyWRNYJ 36.0 (+6.0)');
+    expect(planner).toHaveTextContent('Trade for: Star ReceiverWRMIN 50.0 (+20.0) on Rival');
+  });
+
+  it('shows power rankings with playoff odds and manager tendencies', async () => {
+    const habits = { moves: 8, trades: 3, label: 'Active trader' as const, trades_for: ['RB'], trades_away: [], picks_up: ['WR'] };
+    mockFetch([META_ROUTE, { path: '/api/my-team/leagues', reply: json({ leagues: [LEAGUE] }) },
+      { path: '/api/my-team/1', reply: json(TEAM) }, { path: '/api/my-team/1/news', reply: json({ items: [] }) },
+      { path: '/api/my-team/1/league', reply: json({ league: 'Family League', playoff_teams: 6, regular_season_weeks_left: 7,
+        simulations: 10000, teams: [
+          { power_rank: 1, team: 'Rival', team_key: 'r', is_users_team: false, record: '6-1', standing: 1, points_for: 876.2,
+            points_against: 600, strength: 109.8, remaining_opponent_strength: 91.6, playoff_odds: 0.99, expected_wins: 10.8,
+            top_seed_odds: 0.6, tendencies: habits },
+          { power_rank: 2, team: 'My Squad', team_key: 'm', is_users_team: true, record: '4-3', standing: 4, points_for: 790,
+            points_against: 700, strength: 102.5, remaining_opponent_strength: 94.1, playoff_odds: 0.53, expected_wins: 8,
+            top_seed_odds: 0.05, tendencies: null }] }) }]);
+    const user = userEvent.setup();
+    renderWithProviders(<MyTeamPage />);
+    await screen.findByRole('region', { name: 'Lineup advice' });
+    await user.click(screen.getByRole('button', { name: 'League' }));
+    const table = await screen.findByRole('region', { name: 'Power rankings' });
+    const rival = within(table).getByText('Rival').closest('tr') as HTMLElement;
+    expect(rival).toHaveTextContent('99%');
+    expect(rival).toHaveTextContent('Active trader 3 trades, 8 moves · trades for RB · picks up WR');
+    expect(within(table).getByText('My Squad').closest('tr')).toHaveTextContent('53%');
+  });
+
+  it('lists the latest news for the roster under the lineup', async () => {
+    mockFetch([META_ROUTE, { path: '/api/my-team/leagues', reply: json({ leagues: [LEAGUE] }) },
+      { path: '/api/my-team/1', reply: json(TEAM) },
+      { path: '/api/my-team/1/news', reply: json({ items: [{ title: 'Bijan limited Wednesday', summary: 'Ankle.', analysis: null,
+        source: 'RotoWire', url: 'https://example.com/n', published: '2026-10-29T18:00:00+00:00',
+        player: { id: BIJAN.id, name: BIJAN.name } }] }) }]);
+    renderWithProviders(<MyTeamPage />);
+    const news = await screen.findByRole('region', { name: 'Roster news' });
+    expect(await within(news).findByText('Bijan limited Wednesday')).toBeInTheDocument();
+    expect(within(news).getByRole('link', { name: 'Full note' })).toHaveAttribute('rel', 'noopener noreferrer');
   });
 
   it('explains how to import a league when none is connected', async () => {

@@ -693,3 +693,19 @@
 .status-list dt { font-weight: 600; }
 .status-list dd { margin: 0; }
 .token-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+.news-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.news-item__title { margin: 0; font-weight: 600; }
+.news-item__player { color: var(--color-accent, inherit); }
+.news-item__summary { margin: 4px 0 0; }
+.news-item__meta { margin: 4px 0 0; font-size: 0.8rem; color: var(--color-text-muted); }
+.playoff-plan { margin-top: 24px; }
+.playoff-fix-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.playoff-fix__head, .playoff-fix__options { margin: 0; }
+.playoff-fix__kind { font-weight: 600; }
+.tendency { font-size: 0.85rem; color: var(--color-text-muted); }
+.row--mine { font-weight: 600; }
+.compare-controls { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; }
+.compare-seasons { display: flex; gap: 12px; border: 0; margin: 0; padding: 0; }
+.compare-seasons legend { font-weight: 600; float: left; margin-right: 8px; }
+.chip__remove { border: 0; background: none; cursor: pointer; font-size: 1rem; line-height: 1; padding: 0 2px; color: inherit; }

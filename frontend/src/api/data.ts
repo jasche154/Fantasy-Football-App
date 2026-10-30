@@ -24,6 +24,9 @@ import type {
   MyLeaguesResponse,
   MyTeamResponse,
   PlayoffsResponse,
+  LeagueOverview,
+  NewsResponse,
+  CompareResponse,
   KdstResponse,
   MatchupResponse,
   ModelAccuracyResponse,
@@ -265,4 +268,28 @@ export function getModelAccuracy(scoring: string, signal?: AbortSignal): Promise
 
 export function getPlayoffs(leagueId: number, signal?: AbortSignal): Promise<PlayoffsResponse> {
   return apiRequest(`/api/my-team/${leagueId}/playoffs`, { signal });
+}
+
+export function getLeagueOverview(leagueId: number, signal?: AbortSignal): Promise<LeagueOverview> {
+  return apiRequest(`/api/my-team/${leagueId}/league`, { signal });
+}
+
+export function getRosterNews(leagueId: number, signal?: AbortSignal): Promise<NewsResponse> {
+  return apiRequest(`/api/my-team/${leagueId}/news`, { query: { limit: 12 }, signal });
+}
+
+export function getPlayerNews(playerId: number, signal?: AbortSignal): Promise<NewsResponse> {
+  return apiRequest(`/api/players/${encodeURIComponent(String(playerId))}/news`, { signal });
+}
+
+export function getComparison(
+  ids: readonly number[],
+  seasons: readonly number[],
+  settings: LeagueSettings,
+  signal?: AbortSignal,
+): Promise<CompareResponse> {
+  return apiRequest('/api/compare', {
+    query: { ids: ids.join(','), seasons: seasons.join(','), ...settingsToParams(settings) },
+    signal,
+  });
 }

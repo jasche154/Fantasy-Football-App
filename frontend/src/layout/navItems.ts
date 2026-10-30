@@ -21,6 +21,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { route: 'stats', path: paths.stats, label: 'Advanced Stats', shortLabel: 'Stats', icon: 'stats', isPrimary: false },
   { route: 'waivers', path: paths.waivers, label: 'Waiver Wire', shortLabel: 'Waivers', icon: 'plus', isPrimary: false },
   { route: 'charts', path: paths.charts, label: 'Chart Studio', shortLabel: 'Charts', icon: 'chart', isPrimary: false },
+  { route: 'compare', path: paths.compare, label: 'Compare Players', shortLabel: 'Compare', icon: 'swap', isPrimary: false },
   { route: 'trade', path: paths.trade, label: 'Trade Calculator', shortLabel: 'Trade', icon: 'trade', isPrimary: true },
   { route: 'market', path: paths.market, label: 'Buy Low / Sell High', shortLabel: 'Market', icon: 'market', isPrimary: false },
   { route: 'ask', path: paths.ask, label: 'Ask AI', shortLabel: 'Ask AI', icon: 'ask', isPrimary: false },

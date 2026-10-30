@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { getLeagueTrades, getLeagueWaivers, getMyTeam, syncMyLeague } from '../../api/data';
-import type { LeagueTradesResponse, MyLeague, MyTeamResponse, MyTeamRosterRow, Position } from '../../api/types';
+import { getLeagueOverview, getLeagueTrades, getLeagueWaivers, getMyTeam, getRosterNews, syncMyLeague } from '../../api/data';
+import type { LeagueTradesResponse, ManagerTendencies, MyLeague, MyTeamResponse, MyTeamRosterRow, Position } from '../../api/types';
 import { AsyncView } from '../../components/AsyncView';
 import { PageHeader } from '../../components/Card';
 import { FlagChips, StatusBadge } from '../../components/FlagChips';
@@ -15,14 +15,17 @@ import { filterToPosition, type PositionFilterValue } from '../../lib/positions'
 import { paths, buildHash } from '../../router/routes';
 import { useMyLeague } from '../../state/useMyLeague';
 import { WaiverRow } from '../waivers/WaiversPage';
+import { NewsList } from '../../components/NewsList';
+import { LeagueView, TendencyNote } from './LeagueView';
 import { PlayoffsView } from './PlayoffsView';
 
-type View = 'lineup' | 'waivers' | 'trades' | 'playoffs';
+type View = 'lineup' | 'waivers' | 'trades' | 'playoffs' | 'league';
 const VIEWS: readonly { value: View; label: string }[] = [
   { value: 'lineup', label: 'Lineup' },
   { value: 'waivers', label: 'Waivers' },
   { value: 'trades', label: 'Trades' },
   { value: 'playoffs', label: 'Playoffs' },
+  { value: 'league', label: 'League' },
 ];
 const SCORING_LABELS: Record<string, string> = { ppr: 'PPR', half: 'Half PPR', std: 'Standard' };
 
@@ -121,7 +124,22 @@ function LineupView({ data }: { data: MyTeamResponse }) {
       <h2 className="section-title">Bench and IR</h2>
       <RosterTable rows={bench} caption="Bench and injured reserve" />
       <p className="hint">Kickers and team defenses aren't modeled, so they're not shown.</p>
+      <RosterNews leagueId={data.league.id} />
     </>
+  );
+}
+
+function RosterNews({ leagueId }: { leagueId: number }) {
+  const news = useAsync((signal) => getRosterNews(leagueId, signal), [leagueId]);
+  return (
+    <section aria-label="Roster news">
+      <h2 className="section-title">Latest news</h2>
+      <AsyncView state={news} loading={<TableSkeleton rows={3} columns={1} label="Loading news…" />}
+        isEmpty={(d) => d.items.length === 0} empty={<EmptyState title="No recent news for your players." />}
+        errorTitle="News is unavailable right now">
+        {(d) => <><NewsList items={d.items} showPlayer /><p className="hint attribution">News via Sleeper.</p></>}
+      </AsyncView>
+    </section>
   );
 }
 
@@ -145,13 +163,14 @@ function WaiversView({ league }: { league: MyLeague }) {
   );
 }
 
-function TradeTeam({ team }: { team: LeagueTradesResponse['teams'][number] }) {
+function TradeTeam({ team, habits }: { team: LeagueTradesResponse['teams'][number]; habits?: ManagerTendencies | null }) {
   return (
     <li className="league-trade">
       <div className="league-trade__head">
         <strong>{team.team}</strong>
         {team.owner && <span className="league-trade__owner">{team.owner}</span>}
         {team.needs.length > 0 && <span className="league-trade__needs">Needs {team.needs.join(', ')}</span>}
+        {habits && <TendencyNote habits={habits} />}
       </div>
       <ul className="league-trade__offers">
         {team.offers.map((offer) => (
@@ -171,6 +190,9 @@ function TradesView({ league }: { league: MyLeague }) {
   const [filter, setFilter] = useState<PositionFilterValue>('ALL');
   const position = filterToPosition(filter) as Position | undefined;
   const trades = useAsync((signal) => getLeagueTrades(league.id, position, signal), [league.id, position]);
+  // Best-effort: tendencies come from Yahoo; without them the offers still show.
+  const overview = useAsync((signal) => getLeagueOverview(league.id, signal).catch(() => null), [league.id]);
+  const habitsByTeam = new Map((overview.data?.teams ?? []).map((t) => [t.team, t.tendencies]));
   return (
     <>
       <div className="weekly-controls"><PositionFilter value={filter} onChange={setFilter} /></div>
@@ -181,7 +203,7 @@ function TradesView({ league }: { league: MyLeague }) {
           <>
             <p className="hint">Offers are fair by this app's values and by expert consensus. Teams that need what you'd send come first.</p>
             <ol className="league-trades" aria-label={`Trade ideas in ${data.league}`}>
-              {data.teams.map((team) => <TradeTeam key={team.team ?? ''} team={team} />)}
+              {data.teams.map((team) => <TradeTeam key={team.team ?? ''} team={team} habits={habitsByTeam.get(team.team ?? '')} />)}
             </ol>
           </>
         )}
@@ -235,7 +257,7 @@ export function MyTeamPage() {
               {(data) => data && <LineupView data={data} />}
             </AsyncView>
           ) : view === 'waivers' ? <WaiversView league={league} /> : view === 'playoffs' ? <PlayoffsView league={league} />
-            : <TradesView league={league} />
+            : view === 'league' ? <LeagueView league={league} /> : <TradesView league={league} />
         )}
       </AsyncView>
       {league && <p className="hint attribution">Fantasy data provided by Yahoo Fantasy.</p>}

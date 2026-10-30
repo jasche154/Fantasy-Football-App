@@ -379,8 +379,16 @@ TOOLS = ToolRegistry([
          _schema({"league": MY_LEAGUE}), league_tools.my_matchup),
     Tool("get_playoff_outlook",
          "The user's roster across their league's fantasy-playoff weeks: each player's projection and opponent per "
-         "week, byes, the best lineup total per week, and the weakest week.",
+         "week, byes, the best lineup total per week, the weakest week, and fixes (free agents and trade targets "
+         "who beat the user's weakest starter at each position over the playoff weeks).",
          _schema({"league": MY_LEAGUE}), league_tools.playoff_outlook),
+    Tool("get_power_rankings",
+         "Power rankings for the user's Yahoo league: each team's lineup strength, record, simulated playoff odds, "
+         "expected wins, and manager tendencies (active trader, waiver regular, quiet; positions they trade for).",
+         _schema({"league": MY_LEAGUE}), league_tools.power_rankings),
+    Tool("get_player_news",
+         "The latest news headlines and short summaries for one player (injuries, practice reports, role changes).",
+         _schema({"player": PLAYER}, ["player"]), league_tools.player_news),
     Tool("remember",
          "Save a short fact the user told you about themselves or their goals (record, priorities, players they "
          "won't trade) so you keep it in mind for the rest of the chat. Only facts the user stated.",

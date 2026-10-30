@@ -133,3 +133,27 @@ def playoffs(league_id: int, session: Session = Depends(get_session)) -> dict:
 
     _league_or_404(session, league_id)
     return playoff_outlook(session, league_id)
+
+
+@router.get("/{league_id}/league")
+def league_overview(league_id: int, session: Session = Depends(get_session)) -> dict:
+    """Power rankings with simulated playoff odds, and each manager's trading and waiver tendencies."""
+    from services import league_insights
+
+    _league_or_404(session, league_id)
+    try:
+        with httpx.Client(timeout=HTTP_TIMEOUT_SECONDS) as http:
+            return league_insights.build(session, get_settings(), http, league_id)
+    except YAHOO_ERRORS as exc:
+        raise _yahoo_http_error(exc) from exc
+
+
+@router.get("/{league_id}/news")
+def roster_news(league_id: int, limit: int = Query(15, ge=1, le=40), session: Session = Depends(get_session)) -> dict:
+    """The newest news across your roster (Sleeper's partners), newest first."""
+    from integrations.sleeper_news import news_for_players
+
+    league, mine = _league_or_404(session, league_id)
+    ids = [s.player_id for s in mt.rosters(session, league).get(mine.id, [])]
+    with httpx.Client(timeout=HTTP_TIMEOUT_SECONDS) as http:
+        return {"items": news_for_players(session, ids, http, limit), "source": "Sleeper"}

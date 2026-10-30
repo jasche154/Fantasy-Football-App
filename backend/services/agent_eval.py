@@ -59,6 +59,11 @@ CASES: tuple[Case, ...] = (
     Case("game-log", "How has Jahmyr Gibbs done in his last 3 games?", ("get_player_game_log", "get_player_profile")),
     Case("trending", "Who's trending on Sleeper?", ("get_trending_players",)),
     Case("other-team", "What does the best team in my league have on its roster?", ("get_league_rosters",)),
+    Case("power-rankings", "Who are the real contenders in my league?", ("get_power_rankings",)),
+    Case("playoff-odds", "What are my odds to make the playoffs?", ("get_power_rankings",)),
+    Case("tendencies", "Which managers in my league actually make trades?", ("get_power_rankings",)),
+    Case("news", "Any news on Lamar Jackson's ankle?", ("get_player_news",)),
+    Case("playoff-fix", "Who should I pick up or trade for to fix my playoff lineup?", ("get_playoff_outlook",), True),
     Case("remember", "I'm 5-1 and my priority is the playoffs. Who should I target?", ("remember",)),
 )
 ROSTER_ASKS = ("which players", "list your", "who is on your", "who's on your", "share your roster",

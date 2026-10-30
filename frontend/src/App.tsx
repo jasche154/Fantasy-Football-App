@@ -13,6 +13,7 @@ import { WeeklyPage } from './pages/weekly/WeeklyPage';
 import { MyTeamPage } from './pages/team/MyTeamPage';
 import { MatchupPage } from './pages/matchup/MatchupPage';
 import { ChartsPage } from './pages/charts/ChartsPage';
+import { ComparePage } from './pages/compare/ComparePage';
 import { WaiversPage } from './pages/waivers/WaiversPage';
 import type { HashLocation } from './router/routes';
 import { useHashLocation } from './router/useHashLocation';
@@ -35,6 +36,8 @@ function renderRoute(location: HashLocation): ReactNode {
       return <WeeklyPage />;
     case 'charts':
       return <ChartsPage />;
+    case 'compare':
+      return <ComparePage query={query} />;
     case 'waivers':
       return <WaiversPage />;
     case 'stats':
