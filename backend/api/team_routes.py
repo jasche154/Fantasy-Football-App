@@ -150,10 +150,14 @@ def league_overview(league_id: int, session: Session = Depends(get_session)) -> 
 
 @router.get("/{league_id}/news")
 def roster_news(league_id: int, limit: int = Query(15, ge=1, le=40), session: Session = Depends(get_session)) -> dict:
-    """The newest news across your roster (Sleeper's partners), newest first."""
-    from integrations.sleeper_news import news_for_players
+    """The newest news across your roster (Sleeper's partners), newest first, plus each player's
+    latest item time (`latest`) so the app can flag players with news you haven't opened."""
+    from integrations.sleeper_news import news_by_player
 
     league, mine = _league_or_404(session, league_id)
     ids = [s.player_id for s in mt.rosters(session, league).get(mine.id, [])]
     with httpx.Client(timeout=HTTP_TIMEOUT_SECONDS) as http:
-        return {"items": news_for_players(session, ids, http, limit), "source": "Sleeper"}
+        by_player = news_by_player(session, ids, http)
+    items = sorted((i for news in by_player.values() for i in news), key=lambda i: i["published"] or "", reverse=True)
+    return {"items": items[:limit], "source": "Sleeper",
+            "latest": {str(pid): news[0]["published"] for pid, news in by_player.items() if news[0]["published"]}}

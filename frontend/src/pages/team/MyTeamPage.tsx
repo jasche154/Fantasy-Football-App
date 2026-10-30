@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { getLeagueOverview, getLeagueTrades, getLeagueWaivers, getMyTeam, getRosterNews, syncMyLeague } from '../../api/data';
-import type { LeagueTradesResponse, ManagerTendencies, MyLeague, MyTeamResponse, MyTeamRosterRow, Position } from '../../api/types';
+import type {
+  LeagueTradesResponse, ManagerTendencies, MyLeague, MyTeamResponse, MyTeamRosterRow, NewsResponse, PlayerSummary, Position,
+} from '../../api/types';
 import { AsyncView } from '../../components/AsyncView';
 import { PageHeader } from '../../components/Card';
 import { FlagChips, StatusBadge } from '../../components/FlagChips';
@@ -8,7 +10,7 @@ import { PlayerLink } from '../../components/PlayerLink';
 import { PositionFilter } from '../../components/PositionFilter';
 import { SelectField } from '../../components/SelectField';
 import { EmptyState, TableSkeleton } from '../../components/StatusViews';
-import { useAsync } from '../../hooks/useAsync';
+import { useAsync, type AsyncResult } from '../../hooks/useAsync';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { EMPTY_VALUE, formatNumber } from '../../lib/format';
 import { filterToPosition, type PositionFilterValue } from '../../lib/positions';
@@ -16,6 +18,8 @@ import { paths, buildHash } from '../../router/routes';
 import { useMyLeague } from '../../state/useMyLeague';
 import { WaiverRow } from '../waivers/WaiversPage';
 import { NewsList } from '../../components/NewsList';
+import { NewsButton, NewsPanel } from '../../components/PlayerNews';
+import { loadSeen, markSeen, newsState, type SeenNews } from '../../lib/newsSeen';
 import { LeagueView, TendencyNote } from './LeagueView';
 import { PlayoffsView } from './PlayoffsView';
 
@@ -42,7 +46,13 @@ function ViewToggle({ value, onChange }: { value: View; onChange: (view: View) =
   );
 }
 
-function RosterTable({ rows, caption }: { rows: readonly MyTeamRosterRow[]; caption: string }) {
+interface NewsMarks {
+  latest: Readonly<Record<string, string>>;
+  seen: SeenNews;
+  open: (player: PlayerSummary) => void;
+}
+
+function RosterTable({ rows, caption, news }: { rows: readonly MyTeamRosterRow[]; caption: string; news: NewsMarks }) {
   return (
     <div className="table-wrap">
       <table className="data-table">
@@ -68,6 +78,8 @@ function RosterTable({ rows, caption }: { rows: readonly MyTeamRosterRow[]; capt
                 <td className="td--pos">{row.slot}</td>
                 <td className="td--player">
                   <PlayerLink player={row.player} />
+                  <NewsButton player={row.player} onOpen={news.open}
+                    state={newsState(news.latest[String(row.player.id)], news.seen, row.player.id)} />
                   {week && <StatusBadge status={week.status} playProb={week.play_prob} />}
                   {shouldStart && <span className="status-badge status-badge--ok">Start</span>}
                   {shouldSit && <span className="status-badge status-badge--out">Sit</span>}
@@ -96,6 +108,17 @@ function LineupView({ data }: { data: MyTeamResponse }) {
   const { lineup } = data;
   const starters = data.roster.filter((r) => r.starting);
   const bench = data.roster.filter((r) => !r.starting);
+  const roster = useAsync((signal) => getRosterNews(data.league.id, signal), [data.league.id]);
+  const [seen, setSeen] = useState<SeenNews>(loadSeen);
+  const [reading, setReading] = useState<PlayerSummary | null>(null);
+  const latest = roster.data?.latest ?? {};
+  const open = useCallback((player: PlayerSummary) => {
+    setReading(player);
+    const newest = latest[String(player.id)];
+    if (newest) setSeen((current) => markSeen(current, player.id, newest));
+  }, [latest]);
+  const close = useCallback(() => setReading(null), []);
+  const marks: NewsMarks = { latest, seen, open };
   return (
     <>
       <section className="lineup-advice" aria-label="Lineup advice">
@@ -120,24 +143,43 @@ function LineupView({ data }: { data: MyTeamResponse }) {
         )}
       </section>
       <h2 className="section-title">Starters</h2>
-      <RosterTable rows={starters} caption="Starters" />
+      <RosterTable rows={starters} caption="Starters" news={marks} />
       <h2 className="section-title">Bench and IR</h2>
-      <RosterTable rows={bench} caption="Bench and injured reserve" />
-      <p className="hint">Kickers and team defenses aren't modeled, so they're not shown.</p>
-      <RosterNews leagueId={data.league.id} />
+      <RosterTable rows={bench} caption="Bench and injured reserve" news={marks} />
+      <p className="hint">
+        Kickers and team defenses aren't modeled, so they're not shown. A highlighted news icon means news from the
+        last 48 hours you haven't opened; click it for the player's latest notes.
+      </p>
+      <RosterNews news={roster} seen={seen} onPlayer={open} />
+      {reading && <NewsPanel player={reading} onClose={close} />}
     </>
   );
 }
 
-function RosterNews({ leagueId }: { leagueId: number }) {
-  const news = useAsync((signal) => getRosterNews(leagueId, signal), [leagueId]);
+interface RosterNewsProps {
+  news: AsyncResult<NewsResponse>;
+  seen: SeenNews;
+  onPlayer: (player: PlayerSummary) => void;
+}
+
+const FEED_ITEMS = 8;
+
+function RosterNews({ news, seen, onPlayer }: RosterNewsProps) {
+  const openFromFeed = (player: { id: number; name: string }) => onPlayer({ id: player.id, name: player.name, position: null, team: null });
   return (
-    <section aria-label="Roster news">
-      <h2 className="section-title">Latest news</h2>
+    <section aria-label="Roster news" className="roster-news">
+      <h2 className="section-title">News feed</h2>
       <AsyncView state={news} loading={<TableSkeleton rows={3} columns={1} label="Loading news…" />}
         isEmpty={(d) => d.items.length === 0} empty={<EmptyState title="No recent news for your players." />}
         errorTitle="News is unavailable right now">
-        {(d) => <><NewsList items={d.items} showPlayer /><p className="hint attribution">News via Sleeper.</p></>}
+        {(d) => (
+          <>
+            <NewsList items={d.items.slice(0, FEED_ITEMS)} showPlayer onPlayer={openFromFeed}
+              isNew={(item) => Boolean(item.player && item.published
+                && newsState(item.published, seen, item.player.id) === 'new')} />
+            <p className="hint attribution">News via Sleeper from FantasyPros and RotoWire.</p>
+          </>
+        )}
       </AsyncView>
     </section>
   );

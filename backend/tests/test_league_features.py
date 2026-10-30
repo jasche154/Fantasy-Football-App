@@ -201,3 +201,27 @@ def test_league_overview_endpoint_combines_standings_schedule_and_rosters(client
         min(body["playoff_teams"], 2), abs=0.01)
     assert sorted(t["power_rank"] for t in body["teams"]) == [1, 2]
     assert sorted(map(int, teams["My Squad"]["weekly_projection"])) == list(range(8, 16))
+
+
+def test_roster_news_returns_the_feed_and_each_players_latest_time(client, session, league, monkeypatch):
+    from database.models import Player
+
+    row, ids = league
+    for name, sleeper_id in (("QB Player 01", "101"), ("WR Player 01", "102")):
+        session.get(Player, ids[name]).sleeper_player_id = sleeper_id
+    session.commit()
+    sleeper_news._cache.clear()
+    published = {"101": 1793000000000, "102": 1793100000000}
+
+    def handler(request):
+        sleeper_id = request.url.path.split("/")[3]
+        return httpx.Response(200, json=[{"metadata": {"title": f"Note {sleeper_id}"}, "source": "rotowire",
+                                          "published": published[sleeper_id]}])
+
+    real_client = httpx.Client
+    monkeypatch.setattr("api.team_routes.httpx.Client",
+                        lambda **kw: real_client(transport=httpx.MockTransport(handler)))
+    body = client.get(f"/api/my-team/{row.id}/news").json()
+    assert [i["title"] for i in body["items"]] == ["Note 102", "Note 101"]              # newest first
+    assert set(body["latest"]) == {str(ids["QB Player 01"]), str(ids["WR Player 01"])}
+    assert body["latest"][str(ids["WR Player 01"])].startswith("2026-10-")

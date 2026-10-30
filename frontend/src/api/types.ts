@@ -742,6 +742,8 @@ export interface NewsItem {
 export interface NewsResponse {
   items: NewsItem[];
   note?: string;
+  /** Roster news only: each player's newest item time, by player id. */
+  latest?: Record<string, string>;
 }
 
 export interface CompareGame {

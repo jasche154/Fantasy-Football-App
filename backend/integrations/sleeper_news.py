@@ -8,6 +8,7 @@ source and a link to the full note, and never store them.
 """
 import time
 from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from threading import Lock
 
@@ -25,6 +26,7 @@ MAX_ITEMS = 10
 MAX_TEXT = 600
 SOURCES = {"fantasy_pros": "FantasyPros", "rotowire": "RotoWire"}
 SAFE_LINK_PREFIXES = ("https://",)
+PARALLEL_REQUESTS = 8
 
 _cache: dict[str, tuple[float, list[dict]]] = {}
 _lock = Lock()
@@ -83,19 +85,27 @@ def fetch_news(sleeper_id: str, client: httpx.Client | None = None) -> list[dict
     return items
 
 
-def news_for_players(session: Session, player_ids: Iterable[int], client: httpx.Client | None = None,
-                     limit: int = MAX_ITEMS) -> list[dict]:
-    """Newest items across several players, each tagged with its player; players without news are skipped."""
+def news_by_player(session: Session, player_ids: Iterable[int],
+                   client: httpx.Client | None = None) -> dict[int, list[dict]]:
+    """{player_id: newest-first items} for players with a Sleeper id; fetched in parallel, failures skipped."""
     rows = session.execute(select(Player.id, Player.full_name, Player.sleeper_player_id)
-                           .where(Player.id.in_(list(player_ids)))).all()
-    items = []
-    for player_id, name, sleeper_id in rows:
-        if not sleeper_id:
-            continue
+                           .where(Player.id.in_(list(player_ids)), Player.sleeper_player_id.is_not(None))).all()
+
+    def one(row) -> tuple[int, list[dict]]:
+        player_id, name, sleeper_id = row
         try:
             news = fetch_news(sleeper_id, client)
-        except SleeperError:
-            continue                                   # one player's feed failing never hides the rest
-        items += [{**item, "player": {"id": player_id, "name": name}} for item in news]
+        except (SleeperError, ValueError):
+            news = []                                  # one player's feed failing never hides the rest
+        return player_id, [{**item, "player": {"id": player_id, "name": name}} for item in news]
+
+    with ThreadPoolExecutor(max_workers=PARALLEL_REQUESTS) as pool:
+        return {pid: items for pid, items in pool.map(one, rows) if items}
+
+
+def news_for_players(session: Session, player_ids: Iterable[int], client: httpx.Client | None = None,
+                     limit: int = MAX_ITEMS) -> list[dict]:
+    """Newest items across several players, each tagged with its player."""
+    items = [item for news in news_by_player(session, player_ids, client).values() for item in news]
     items.sort(key=lambda i: i["published"] or "", reverse=True)
     return items[:limit]
