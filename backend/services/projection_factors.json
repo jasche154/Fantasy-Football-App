@@ -1,0 +1,82 @@
+{
+  "seasons": [
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+  ],
+  "features": [
+    "calibration",
+    "opp_pass_epa",
+    "opp_rush_epa",
+    "opp_sack",
+    "wind",
+    "cold",
+    "indoors"
+  ],
+  "held_out": {
+    "2024": {
+      "before": {
+        "rmse": 7.707,
+        "mae": 6.046,
+        "rank_corr": 0.526
+      },
+      "after": {
+        "rmse": 7.549,
+        "mae": 5.85,
+        "rank_corr": 0.529
+      }
+    },
+    "2025": {
+      "before": {
+        "rmse": 7.654,
+        "mae": 6.006,
+        "rank_corr": 0.502
+      },
+      "after": {
+        "rmse": 7.448,
+        "mae": 5.772,
+        "rank_corr": 0.506
+      }
+    }
+  },
+  "positions": {
+    "QB": {
+      "calibration": -0.03076,
+      "opp_pass_epa": -0.07304,
+      "opp_rush_epa": -0.00108,
+      "opp_sack": -0.11932,
+      "wind": -0.10247,
+      "cold": -0.06367,
+      "indoors": 0.00236
+    },
+    "RB": {
+      "calibration": -0.07478,
+      "opp_pass_epa": -0.02271,
+      "opp_rush_epa": -0.00738,
+      "opp_sack": 0.03389,
+      "wind": -0.06201,
+      "cold": 0.06888,
+      "indoors": 0.00404
+    },
+    "WR": {
+      "calibration": -0.10746,
+      "opp_pass_epa": -0.05896,
+      "opp_rush_epa": -0.00257,
+      "opp_sack": -0.03441,
+      "wind": -0.01283,
+      "cold": -0.03567,
+      "indoors": 0.0394
+    },
+    "TE": {
+      "calibration": -0.04447,
+      "opp_pass_epa": 0.00136,
+      "opp_rush_epa": -0.04196,
+      "opp_sack": -0.05042,
+      "wind": -0.14079,
+      "cold": -0.04186,
+      "indoors": 0.0024
+    }
+  }
+}

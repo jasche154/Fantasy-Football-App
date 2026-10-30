@@ -45,6 +45,19 @@ STATUS_CACHE_HOURS = 1       # live injury designations
 _refresh_lock = threading.Lock()
 
 
+def _refresh_weather(session: Session, http: httpx.Client, season: int, week: int, force: bool) -> dict:
+    """Kickoff forecasts for upcoming outdoor games (free, best-effort)."""
+    from services.weather import refresh_forecasts
+
+    try:
+        stored = refresh_forecasts(session, http, season, week, force)
+    except Exception:          # weather is optional; never fail the refresh over it
+        log.warning("Weather refresh failed", exc_info=True)
+        session.rollback()
+        return _status("error", "Weather forecast unavailable; projections use no weather adjustment.")
+    return _status("updated" if stored else "fresh", rows=stored)
+
+
 def _is_fresh(session: Session, season: int, week: int, source: str) -> bool:
     fetched = last_fetched(session, season, week, source)
     return fetched is not None and datetime.now(timezone.utc) - fetched < timedelta(hours=CACHE_HOURS)
@@ -188,8 +201,10 @@ def refresh_sources(session: Session, season: int, week: int, settings: Settings
     owns_client = http is None
     http = http or httpx.Client(timeout=TIMEOUT_SECONDS, follow_redirects=True)
     try:
-        return {source: _refresh_one(session, http, settings, source, season, week, force, force_props)
-                for source in ALL_SOURCES}
+        statuses = {source: _refresh_one(session, http, settings, source, season, week, force, force_props)
+                    for source in ALL_SOURCES}
+        statuses["weather"] = _refresh_weather(session, http, season, week, force)
+        return statuses
     finally:
         if owns_client:
             http.close()

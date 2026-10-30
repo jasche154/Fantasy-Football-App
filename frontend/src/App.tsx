@@ -11,6 +11,7 @@ import { StatsPage } from './pages/stats/StatsPage';
 import { TradePage } from './pages/trade/TradePage';
 import { WeeklyPage } from './pages/weekly/WeeklyPage';
 import { MyTeamPage } from './pages/team/MyTeamPage';
+import { MatchupPage } from './pages/matchup/MatchupPage';
 import { ChartsPage } from './pages/charts/ChartsPage';
 import { WaiversPage } from './pages/waivers/WaiversPage';
 import type { HashLocation } from './router/routes';
@@ -26,6 +27,8 @@ function renderRoute(location: HashLocation): ReactNode {
       return <DashboardPage />;
     case 'team':
       return <MyTeamPage />;
+    case 'matchup':
+      return <MatchupPage />;
     case 'rankings':
       return <RankingsPage />;
     case 'weekly':

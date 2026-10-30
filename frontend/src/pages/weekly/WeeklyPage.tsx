@@ -13,6 +13,8 @@ import { EmptyState, TableSkeleton } from '../../components/StatusViews';
 import { useAction } from '../../hooks/useAction';
 import { useAsync } from '../../hooks/useAsync';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
+import { AccuracyView } from './AccuracyView';
+import { KdstView } from './KdstView';
 import { filterToPosition, positionFilterLabel, type PositionFilterValue } from '../../lib/positions';
 import { describeSettings } from '../../state/leagueSettings';
 import { useLeagueSettings } from '../../state/SettingsContext';
@@ -26,11 +28,14 @@ const WEEKLY_LIMIT = 200;
 export const REFRESH_RELOAD_MS = 25_000;
 const LAST_WEEK = 18;
 const WEEK_OPTIONS = Array.from({ length: LAST_WEEK }, (_, index) => ({ value: index + 1, label: `Week ${index + 1}` }));
-type View = 'rankings' | 'startsit' | 'schedule';
+type View = 'rankings' | 'startsit' | 'schedule' | 'kickers' | 'defenses' | 'accuracy';
 const VIEWS: readonly { value: View; label: string }[] = [
   { value: 'rankings', label: 'Rankings' },
   { value: 'startsit', label: 'Start / Sit' },
   { value: 'schedule', label: 'Schedule strength' },
+  { value: 'kickers', label: 'Kickers' },
+  { value: 'defenses', label: 'Defenses' },
+  { value: 'accuracy', label: 'Accuracy' },
 ];
 
 function ViewToggle({ value, onChange }: { value: View; onChange: (view: View) => void }) {
@@ -125,7 +130,8 @@ export function WeeklyPage() {
         }
       />
       <ViewToggle value={view} onChange={setView} />
-      {view === 'startsit' ? <StartSit week={shownWeek} /> : view === 'schedule' ? (
+      {view === 'kickers' ? <KdstView position="K" week={shownWeek} /> : view === 'defenses' ? <KdstView position="DST" week={shownWeek} />
+        : view === 'accuracy' ? <AccuracyView /> : view === 'startsit' ? <StartSit week={shownWeek} /> : view === 'schedule' ? (
         <section aria-label="Schedule strength">
           {!position && <p className="field__hint">Showing WR. Pick a position above to rate defenses against it.</p>}
           <ScheduleStrengthView position={position ?? 'WR'} week={shownWeek} />

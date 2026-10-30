@@ -48,7 +48,7 @@ def my_team(league_id: int, session: Session = Depends(get_session)) -> dict:
         team = mt.build_my_team(session, league_id)
     except NoDataError as exc:
         raise HTTPException(503, str(exc)) from exc
-    by_id = {p.player_id: p for p in team.rankings.players}
+    by_id = team.weekly()
     flags = flags_for(team.rankings, team.valuation)
     # Rostered players with no stats this season (a rookie yet to play) still need a name.
     unknown = {s.player_id for s in team.spots if s.player_id not in team.valuation.by_id}
@@ -109,5 +109,18 @@ def sync(league_id: int, session: Session = Depends(get_session)) -> dict:
     try:
         with httpx.Client(timeout=HTTP_TIMEOUT_SECONDS) as http:
             return yahoo_sync.import_league(session, get_settings(), http, league.platform_league_id)
+    except YAHOO_ERRORS as exc:
+        raise _yahoo_http_error(exc) from exc
+
+
+@router.get("/{league_id}/matchup")
+def matchup(league_id: int, session: Session = Depends(get_session)) -> dict:
+    """This week's opponent, both lineups, win probability, and the upside / safe / expected lineups."""
+    from services.matchup import build_matchup
+
+    _league_or_404(session, league_id)
+    try:
+        with httpx.Client(timeout=HTTP_TIMEOUT_SECONDS) as http:
+            return build_matchup(session, get_settings(), http, league_id)
     except YAHOO_ERRORS as exc:
         raise _yahoo_http_error(exc) from exc

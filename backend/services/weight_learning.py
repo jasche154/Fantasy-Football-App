@@ -48,6 +48,9 @@ PRIOR_ROWS = 3000          # player-weeks of evidence the default weights are wo
 MAX_STEP = 0.03            # the most any one weight moves in a week
 MIN_WEIGHT = 0.05          # no source is ever dropped entirely
 MIN_ROWS = 100             # fewer scored player-weeks than this: too noisy to learn from
+MIN_POSITION_ROWS = 30     # per position, for its own step
+BY_POSITION = "_by_position"
+POSITIONS = ("QB", "RB", "WR", "TE")
 SCORING_PREFERENCE = ("ppr", "half", "std")    # one row per player-week, in this order
 FIT_STEPS, FIT_RATE = 3000, 0.5
 
@@ -56,6 +59,7 @@ FIT_STEPS, FIT_RATE = 3000, 0.5
 class Sample:
     sources: Mapping[str, float]
     actual: float
+    position: str = ""
 
 
 @dataclass(frozen=True)
@@ -152,6 +156,16 @@ def effective_weights(session: Session, season: int | None = None,
     return {k: learned.get(k, v) for k, v in DEFAULT_WEIGHTS.items()}, latest
 
 
+def position_weights(session: Session, season: int | None = None,
+                     before_week: int | None = None) -> dict[str, dict[str, float]]:
+    """{position: weights} learned so far (each starts from the global weights); {} before any learning."""
+    global_weights, latest = effective_weights(session, season, before_week)
+    if latest is None:
+        return {}
+    by_position = json.loads(latest.weights).get(BY_POSITION) or {}
+    return {pos: {k: w.get(k, global_weights[k]) for k in DEFAULT_WEIGHTS} for pos, w in by_position.items()}
+
+
 def samples_for_week(session: Session, season: int, week: int) -> list[Sample]:
     """Pre-kickoff source points and actual points for every player who played that week."""
     rows = session.scalars(select(ProjectionHistory).where(
@@ -165,7 +179,7 @@ def samples_for_week(session: Session, season: int, week: int) -> list[Sample]:
         actual = actuals[row.scoring].get((row.player_id, week))
         sources = {k: v for k, v in json.loads(row.sources).items() if k in DEFAULT_WEIGHTS}
         if actual is not None and sources:
-            samples.append(Sample(sources, actual))
+            samples.append(Sample(sources, actual, row.position))
     return samples
 
 
@@ -180,6 +194,7 @@ def learn(session: Session, season: int, apply: bool = True) -> list[Update]:
     learned = set(session.scalars(select(LearnedWeights.week).where(LearnedWeights.season == season)))
     weeks = sorted(set(session.scalars(select(ProjectionHistory.week).where(ProjectionHistory.season == season))))
     current, _ = effective_weights(session)
+    by_position = position_weights(session)
     updates = []
     for week in weeks:
         if week in learned or not _week_complete(session, season, week):
@@ -190,15 +205,23 @@ def learn(session: Session, season: int, apply: bool = True) -> list[Update]:
             continue
         optimal = fit_weights(samples, list(DEFAULT_WEIGHTS))
         after = conservative_step(current, optimal, len(samples))
+        positions_after = {}
+        for pos in POSITIONS:
+            own = [s for s in samples if s.position == pos]
+            # Each position follows the global step, then takes its own (smaller) step on its own games.
+            start = conservative_step(by_position.get(pos, current), after, PRIOR_ROWS) if pos in by_position else after
+            positions_after[pos] = (conservative_step(start, fit_weights(own, list(DEFAULT_WEIGHTS)), len(own))
+                                    if len(own) >= MIN_POSITION_ROWS else start)
         update = Update(season, week, len(samples), dict(current), optimal, after,
                         mae(current, samples), mae(after, samples))
         updates.append(update)
         if apply:
-            session.add(LearnedWeights(season=season, week=week, rows=len(samples), weights=json.dumps(after),
+            session.add(LearnedWeights(season=season, week=week, rows=len(samples),
+                                       weights=json.dumps({**after, BY_POSITION: positions_after}),
                                        optimal=json.dumps(optimal), mae_before=update.mae_before,
                                        mae_after=update.mae_after))
             session.commit()
-        current = after
+        current, by_position = after, positions_after
     return updates
 
 

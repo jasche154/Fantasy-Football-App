@@ -54,6 +54,15 @@ only *explains* numbers that came back from a tool call. Every output is labeled
 - **Player pages:** season summary, weekly game log, NGS advanced stats, projection
 - **Trade calculator:** values both sides, applies a consolidation discount, gives a verdict, and suggests players that would balance the deal
 - **Buy low / sell high:** finds players whose production is out of line with their usage, with plain-English reasons
+- **Matchup page:** your Yahoo opponent this week, both lineups, and your win probability from
+  20,000 simulated weeks (next to Yahoo's own). It also recommends the expected, **upside** or
+  **safe** lineup, whichever wins most often against this opponent.
+- **Kicker and defense projections** from advanced team stats: field-goal tries from the
+  implied total and red-zone TD / stop rates, the kicker's accuracy by distance with
+  wind and cold, and log5 sacks and takeaways with points-allowed tiers. Shown in Week X
+  and used in My Team lineups with your league's own K/DEF scoring.
+- **Model accuracy view:** live projection error, floor/ceiling coverage, the held-out
+  backtest and the learned source weights.
 - **My Team (Yahoo):** import your Yahoo leagues, with their own scoring and roster slots, and get:
   - your roster with this week's projections and a best-lineup check ("Start Gibbs over Corum, +10.5");
   - waivers limited to players actually free in your league;
@@ -151,6 +160,7 @@ Open <http://localhost:5173>. The UI talks to `http://localhost:8000` by default
 | Page | What you can do |
 |---|---|
 | **Dashboard** | Top buy-low and sell-high players with the reason behind each, Sleeper's most-added players, data freshness |
+| **Matchup** | This week's Yahoo opponent. Both starting lineups with projections and ranges, live points as games finish, and your win probability (with Yahoo's for comparison). **Lineup strategy** compares three versions of your lineup: most points, upside (favoring ceilings) and safe (favoring floors). Each is simulated against the opponent, and the one that wins most often is recommended, with the swaps to make |
 | **My Team** | Your imported Yahoo team (pick the league if you have several). **Lineup:** starters and bench with this week's projection, range, flags and rest-of-season value; the best lineup under your league's slots, with "Start X over Y (+points)" advice and Start/Sit tags. **Waivers:** players on no roster in your league. **Trades:** fair offers with each real team, built from their roster, teams that need what you'd send first. **Sync from Yahoo** re-imports now (the app also re-syncs every 6 hours) |
 | **Week X Rankings** | This week's projections by position; pick any week. Each row shows the matchup grade (opponent-adjusted, #1 = easiest), the Vegas implied team total, the blended projection, and every source's number (props, Josh & Hayden, Yahoo, ESPN, model). For finished games, **Actual** shows what each player scored (green beat the projection by 20%+, red missed by 20%+, DNP sat). Click a column header (Proj, Actual, Team total, or any source) to sort by it. **Schedule strength** switches to defenses ranked by adjusted points allowed and each team's upcoming opponents. **Refresh sources** re-pulls Yahoo and ESPN (Vegas props follow their credit budget) |
 | **Rankings** | Rest-of-season rankings by position; sort by actual, expected, or projected points, schedule strength, **Playoff SOS** (weeks 15–17), trade value, or ECR |
@@ -293,6 +303,67 @@ the 10th/90th percentile of actual ÷ projected points.
 - Example: a WR projected for 16+ has a floor of about 0.40× his projection (a 20-point
   projection floors near 8, not 2).
 
+### Model adjustments: calibration, EPA matchup, weather
+`python -m services.projection_factors --fit` refits these and prints how they do on held-out seasons.
+- **What it does:** multiplies the model's number, and only the model's (props and experts
+  already price matchups and weather), by `1 + b . x` per position:
+  - **Calibration:** the raw model ran 3–11% high depending on position.
+  - **EPA matchup:** the opponent's EPA allowed per dropback and per run, and its sack rate,
+    from data before the week.
+  - **Weather:** wind over 10 mph and cold under 40°F outdoors, and domes.
+- **Weather data:** recorded conditions for past games come from nflverse. Upcoming outdoor
+  games get a free Open-Meteo forecast for kickoff at the home stadium (`services/weather.py`;
+  refreshed with the other weekly sources). Neutral-site games are skipped.
+- **How it was fit:** least squares, so projections stay expected points (a median fit
+  "improves" MAE just by shading every projection down). The fit only ever sees seasons
+  before the one it's scored on.
+- **Effects that showed up:**
+  - Wind hurts QBs and TEs the most, cold helps RBs, domes help WRs, and a strong pass rush
+    hurts QBs.
+  - The EPA terms come out slightly negative: schedule strength and Vegas totals already
+    lean on matchups, and EPA pulls back the overshoot.
+  - **Tested and dropped:** red-zone role (expected points already carry expected TDs), game
+    script and the game total. None helped in both test seasons.
+
+| Held-out season | RMSE | MAE | Rank correlation |
+|---|---|---|---|
+| 2024 (fit on 2021–23) | 7.71 → **7.55** | 6.05 → **5.85** | 0.526 → **0.529** |
+| 2025 (fit on 2021–24) | 7.65 → **7.45** | 6.01 → **5.77** | 0.502 → **0.506** |
+
+Most of the gain is calibration (getting the level right). The matchup and weather terms add
+a little to ranking; Vegas totals already price in most of what they know.
+
+### Kicker and defense projections
+`python -m services.kdst_model --fit` refits these. Both use team profiles (rates shrunk
+toward the league with four games of league-average evidence) built only from games before
+the week.
+
+**Kicker**
+- **Field-goal tries:** from the team's Vegas implied total, its red-zone TD rate
+  (stalled drives become field goals) and the opponent's red-zone TD rate allowed (stop %).
+- **Distance and makes:** attempts split into 0-39 / 40-49 / 50+ yards by the league mix.
+  Make rates are the kicker's own, shrunk toward the league with 8 attempts of evidence,
+  then lowered for wind and cold.
+- **Extra points:** expected TDs × his PAT rate.
+
+**Defense**
+- **Sacks:** the opponent's dropbacks × a log5 blend of this defense's sack rate and the
+  opponent's sacks allowed. Takeaways work the same way against the opponent's giveaways.
+- **Return TDs:** a rate per takeaway.
+- **Points allowed:** the opponent's implied total plus the historical spread of
+  outcomes, scored on the points-allowed tiers.
+
+**Tested and left out:** the 4th-down go rate and defensive EPA per play didn't beat Vegas
+totals in both held-out seasons.
+
+| Held-out season | Kicker MAE (model vs season-to-date avg) | Kicker rank corr. | Defense MAE | Defense rank corr. |
+|---|---|---|---|---|
+| 2024 | **3.61** vs 4.01 | **0.24** vs 0.06 | **4.03** vs 4.60 | **0.39** vs 0.12 |
+| 2025 | **3.76** vs 4.07 | **0.16** vs 0.09 | **4.20** vs 4.85 | **0.31** vs 0.10 |
+
+Week X has **Kickers** and **Defenses** views (Yahoo default scoring). My Team and Matchup
+score kickers and defenses with each league's own rules, imported from Yahoo.
+
 ### Breakout and regression flags
 
 | Flag | Meaning |
@@ -368,6 +439,10 @@ after week to gain real weight.
   week's pre-game projections, so the learner has data even in weeks you never open Week X.
   `python -m database.populate_stats` does the same by hand.
   `python -m services.weight_learning --season 2026 --dry-run` shows what it would change.
+- **Per position:** each position (QB/RB/WR/TE) also takes its own step from its own players
+  that week, with the same caps, starting from the global weights; a position with fewer than
+  30 scored players that week just follows the global step. So props can end up counting for
+  more at QB and the experts more at WR if that's what the results show.
 - **Storage:** each update is a row in the local `learned_weights` table. Delete the rows to
   go back to the starting weights.
 
@@ -437,6 +512,9 @@ League parameters accepted by every valuation endpoint: `scoring=ppr|half|std`,
 | GET | `/api/my-team/{league_id}` | Your roster with projections and the best-lineup advice |
 | GET | `/api/my-team/{league_id}/waivers?position=` | Waiver targets on no roster in that league |
 | GET | `/api/my-team/{league_id}/trades?want_position=` | Trade offers with each real team, by their needs |
+| GET | `/api/my-team/{league_id}/matchup` | This week's opponent, both lineups, win probability, expected/upside/safe lineups |
+| GET | `/api/rankings/weekly/kdst?position=K\|DST&week=` | Kicker or defense projections with their inputs |
+| GET | `/api/model/accuracy?scoring=` | Live accuracy, floor/ceiling coverage, held-out backtest, learned weights |
 | POST | `/api/my-team/{league_id}/sync` | Re-import that league from Yahoo now |
 | GET | `/api/agent/tools` | Tool definitions (JSON Schema) |
 | POST | `/api/agent/tools/{name}` | Body `{"arguments": {...}}`; run one tool |

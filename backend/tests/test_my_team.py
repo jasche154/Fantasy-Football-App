@@ -127,3 +127,27 @@ def test_agent_prompt_mentions_imported_leagues(session, league):
     from services.agent import league_context
 
     assert '{"league": "Family League", "team": "My Squad"}' in league_context(session)
+
+
+def test_matchup_simulates_both_lineups_and_picks_the_best_strategy(session, league, monkeypatch, client):
+    from integrations import yahoo
+    from services import matchup as mu
+
+    row, ids = league
+    team = lambda key, name: {"team": [[{"team_key": key}, {"name": name}],  # noqa: E731
+                                       {"win_probability": 0.4, "team_points": {"total": "0"},
+                                        "team_projected_points": {"total": "100"}}]}
+    board = {"league": [{}, {"scoreboard": {"0": {"matchups": {"0": {"matchup": {"0": {"teams": {
+        "0": team("Family League-My Squad", "My Squad"), "1": team("Family League-Rival", "Rival"), "count": 2}}}},
+        "count": 1}}}}]}
+    monkeypatch.setattr(mu.yahoo_sync, "fresh_token", lambda *a, **k: "token")
+    monkeypatch.setattr(mu.yahoo, "api_get", lambda http, token, path: board)
+    body = client.get(f"/api/my-team/{row.id}/matchup").json()
+    assert body["me"]["team"] == "My Squad" and body["opponent"]["team"] == "Rival"
+    assert 0.0 <= body["win_probability"] <= 1.0 and body["yahoo_win_probability"] == 0.4
+    assert set(body["strategies"]) == {"expected", "upside", "safe"}
+    assert body["strategies"][body["recommended"]]["win_probability"] == max(
+        s["win_probability"] for s in body["strategies"].values())
+    assert "RB Player 01" in body["changes"]["start"]                       # the benched stud starts
+    monkeypatch.setattr(mu.yahoo, "api_get", lambda http, token, path: {"league": []})
+    assert client.get(f"/api/my-team/{row.id}/matchup").status_code == 404   # no matchup (bye)

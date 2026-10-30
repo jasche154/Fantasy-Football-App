@@ -15,6 +15,7 @@ export interface NavItem {
 export const NAV_ITEMS: readonly NavItem[] = [
   { route: 'dashboard', path: paths.dashboard, label: 'Dashboard', shortLabel: 'Home', icon: 'home', isPrimary: true },
   { route: 'team', path: paths.team, label: 'My Team', shortLabel: 'Team', icon: 'team', isPrimary: true },
+  { route: 'matchup', path: paths.matchup, label: 'Matchup', shortLabel: 'Matchup', icon: 'trade', isPrimary: false },
   { route: 'rankings', path: paths.rankings, label: 'Rankings', shortLabel: 'Ranks', icon: 'rankings', isPrimary: true },
   { route: 'weekly', path: paths.weekly, label: 'Week X Rankings', shortLabel: 'Week', icon: 'calendar', isPrimary: true },
   { route: 'stats', path: paths.stats, label: 'Advanced Stats', shortLabel: 'Stats', icon: 'stats', isPrimary: false },

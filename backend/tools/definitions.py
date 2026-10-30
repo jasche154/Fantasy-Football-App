@@ -194,7 +194,7 @@ def _my_team(session: Session, league: str | None = None) -> dict:
     """The user's roster with this week's projections and lineup advice, compact."""
     league_row, _ = _league_ref(session, league)
     team = my_team.build_my_team(session, league_row.id)
-    by_id = {p.player_id: p for p in team.rankings.players}
+    by_id = team.weekly()
     roster = []
     for spot in team.spots:
         value, weekly = team.valuation.by_id.get(spot.player_id), by_id.get(spot.player_id)

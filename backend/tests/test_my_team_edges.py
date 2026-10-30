@@ -109,7 +109,8 @@ def test_dual_position_players_are_kept():
     from services.yahoo_sync import modeled_position
 
     assert modeled_position("RB,WR") == "RB" and modeled_position("WR") == "WR"
-    assert modeled_position("K") is None and modeled_position("DEF") is None and modeled_position(None) is None
+    assert modeled_position("K") == "K" and modeled_position("DEF") == "DST" and modeled_position(None) is None
+    assert modeled_position("P") is None
 
 
 def test_yahoo_id_is_saved_only_on_a_strict_name_position_team_match(session, seeded):

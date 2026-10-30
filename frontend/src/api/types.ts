@@ -552,3 +552,82 @@ export interface LeagueSyncResult {
   unmatched_players: string[];
   untracked_players: string[];
 }
+
+/* ---------- Kickers, defenses, matchup, accuracy ---------- */
+
+export interface KdstRow {
+  rank: number;
+  player: { id: number | null; name: string; position: string; team: string };
+  opponent: string;
+  projection: number;
+  reasons: string[];
+  fg_attempts?: number;
+  fg_made?: number;
+  pat_made?: number;
+  wind?: number | null;
+  temp?: number | null;
+  indoors?: boolean;
+  sacks?: number;
+  takeaways?: number;
+  opp_implied?: number;
+}
+
+export interface KdstResponse {
+  season: number;
+  week: number;
+  position: 'K' | 'DST';
+  results: KdstRow[];
+}
+
+export interface MatchupStarter {
+  slot: string;
+  player_id: number;
+  name: string;
+  position: string | null;
+  team: string | null;
+  opponent: string | null;
+  projection: number;
+  floor: number | null;
+  ceiling: number | null;
+  actual: number | null;
+  status: string | null;
+}
+
+export interface MatchupSide {
+  team: string;
+  starters: MatchupStarter[];
+  projected: number;
+  yahoo_points: number | null;
+  yahoo_projected: number | null;
+}
+
+export interface MatchupResponse {
+  league: { id: number; name: string };
+  week: number;
+  me: MatchupSide;
+  opponent: MatchupSide;
+  win_probability: number;
+  yahoo_win_probability: number | null;
+  strategies: Record<string, { projected: number; win_probability: number }>;
+  recommended: string;
+  changes: { start: string[]; sit: string[] };
+  simulations: number;
+}
+
+export interface HeldOutResult {
+  before: { rmse: number; mae: number; rank_corr: number };
+  after: { rmse: number; mae: number; rank_corr: number };
+}
+
+export interface ModelAccuracyResponse {
+  season: number | null;
+  live: {
+    n: number;
+    weeks: number[];
+    blend_mae: number | null;
+    bias_by_position?: Record<string, number>;
+    range?: { n: number; below_floor: number | null; above_ceiling: number | null };
+  };
+  backtest: { seasons: number[]; held_out: Record<string, HeldOutResult> } | null;
+  weight_history: { season: number; week: number; rows: number; weights: Record<string, number> }[];
+}

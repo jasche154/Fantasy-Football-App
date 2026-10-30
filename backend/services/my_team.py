@@ -14,7 +14,7 @@ aren't modeled, so they're left out of the lineup check.
 """
 import json
 from collections import defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 
@@ -26,12 +26,13 @@ from integrations.weekly_sources import normalize_name
 from services.league import DEFAULT_STARTERS, LeagueSettings
 from services.trade_finder import TradeOffer, find_trades
 from services.valuation import Valuation, build_valuation
+from services.kdst_rankings import weekly_players
 from services.waivers import WaiverCandidate, waiver_candidates
 from services.weekly_rankings import WeeklyPlayer, WeeklyRankings, build_weekly_rankings
 
-MODELED = ("QB", "RB", "WR", "TE")
+MODELED = ("QB", "RB", "WR", "TE")          # trade values and waivers; K / DST are lineup-only
 FLEX_POSITIONS = ("RB", "WR", "TE")
-SLOT_ORDER = ("QB", "RB", "WR", "TE", "FLEX", "SUPERFLEX")
+SLOT_ORDER = ("QB", "RB", "WR", "TE", "FLEX", "SUPERFLEX", "K", "DST")
 NEED_SHARE = 1 / 3                 # bottom third of the league at a position = a need
 OFFERS_PER_TEAM = 3
 
@@ -77,6 +78,11 @@ class MyTeam:
     spots: list[RosterSpot]
     best: dict[str, list[int]] = field(default_factory=dict)
     changes: list[LineupChange] = field(default_factory=list)
+    extra: dict[int, WeeklyPlayer] = field(default_factory=dict)     # rostered kickers and defenses
+
+    def weekly(self) -> dict[int, WeeklyPlayer]:
+        """Every rostered player's projection this week, kickers and defenses included."""
+        return {**{p.player_id: p for p in self.rankings.players}, **self.extra}
 
 
 SCORING_PRESETS = ("ppr", "half", "std")
@@ -170,9 +176,14 @@ def _eligible(slot: str, position: str) -> bool:
 
 
 def best_lineup(players: Sequence[WeeklyPlayer], settings: LeagueSettings,
-                available: set[int] | None = None) -> dict[str, list[int]]:
-    """{slot: [player ids]} filling each slot with the best remaining projection that can play it."""
-    pool = sorted((p for p in players if available is None or p.player_id in available), key=lambda p: -p.projection)
+                available: set[int] | None = None,
+                key: Callable[[WeeklyPlayer], float] | None = None) -> dict[str, list[int]]:
+    """{slot: [player ids]} filling each slot with the best remaining player who can play it.
+
+    `key` ranks players (default: projection); the matchup page also tries upside and safe keys.
+    """
+    key = key or (lambda p: p.projection)
+    pool = sorted((p for p in players if available is None or p.player_id in available), key=lambda p: -key(p))
     used: set[int] = set()
     lineup: dict[str, list[int]] = defaultdict(list)
     for slot in _slots(settings):
@@ -211,11 +222,23 @@ def build_my_team(session: Session, reference: int | str | None) -> MyTeam:
     valuation = build_valuation(session, settings)
     rankings = build_weekly_rankings(session, settings)
     spots = rosters(session, league).get(team.id, [])
-    by_id = {p.player_id: p for p in rankings.players}
+    rules = league_rules(league)
+    extra = weekly_players(session, rankings.season, rankings.week, [s.player_id for s in spots],
+                           rules.get("k_scoring"), rules.get("dst_scoring"))
+    by_id = {**{p.player_id: p for p in rankings.players}, **extra}
     available = {s.player_id for s in spots if s.slot not in ("IR", "IR+", "NA")}
     best = best_lineup([by_id[s.player_id] for s in spots if s.player_id in by_id], settings, available)
     names = {v.player_id: v.name for v in valuation.values}
-    return MyTeam(league, team, settings, rankings, valuation, spots, best, lineup_changes(spots, best, by_id, names))
+    names.update({pid: p.name for pid, p in extra.items()})
+    return MyTeam(league, team, settings, rankings, valuation, spots, best, lineup_changes(spots, best, by_id, names),
+                  extra)
+
+
+def player_name(session: Session, player_id: int) -> str:
+    from database.models import Player
+
+    player = session.get(Player, player_id)
+    return player.full_name if player and player.full_name else f"Player {player_id}"
 
 
 def lineup_total(ids: Sequence[int], by_id: Mapping[int, WeeklyPlayer]) -> float:
