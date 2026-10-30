@@ -206,6 +206,8 @@ def _my_team(session: Session, league: str | None = None) -> dict:
                      "a questionable player can still be the better start. Recommend best_lineup."),
             "lineup_changes": [f"Start {c.start.name} ({c.start.projection:.1f}) over "
                                f"{f'{c.bench_name} ({c.bench_projection:.1f})' if c.bench_name else 'an empty slot'}"
+                               + {"toss_up": " (toss-up: under 1.5 points apart, about a coin flip)",
+                                  "lean": " (lean: 1.5-3 points apart)"}.get(c.confidence, "")
                                for c in team.changes]}
 
 

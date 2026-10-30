@@ -153,16 +153,25 @@ SECRET_ENV_VARS = ("GROQ_API_KEY", "FANTASYPROS_API_KEY", "ODDS_API_KEY", "YAHOO
                    "YAHOO_REDIRECT_URI", "TOKEN_ENCRYPTION_KEY", "AGENT_SHARE_PFR_DATA", "API_TOKEN")
 
 
+def _clear_caches() -> None:
+    from services import league_insights, matchup
+
+    valuation_module._cache.clear()
+    matchup._cache.clear()
+    league_insights._cache.clear()
+    league_insights._schedule.clear()
+
+
 @pytest.fixture(autouse=True)
 def isolated_state(monkeypatch):
     """Fresh settings (no secrets) and an empty value cache for every test."""
     for name in SECRET_ENV_VARS:
         monkeypatch.delenv(name, raising=False)
     get_settings.cache_clear()
-    valuation_module._cache.clear()
+    _clear_caches()
     yield
     get_settings.cache_clear()
-    valuation_module._cache.clear()
+    _clear_caches()
 
 
 @pytest.fixture

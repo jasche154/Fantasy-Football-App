@@ -157,7 +157,9 @@ def test_matchup_simulates_both_lineups_and_picks_the_best_strategy(session, lea
     on_bench = {r["player_id"] for r in body["bench"]}
     assert ids["RB Player 05"] in on_bench and not on_bench & {r["player_id"] for r in updated["starters"]}
     assert [r["projection"] for r in body["bench"]] == sorted((r["projection"] for r in body["bench"]), reverse=True)
+    assert client.get(f"/api/my-team/{row.id}/matchup").json() == body          # cached for 5 minutes
     monkeypatch.setattr(mu.yahoo, "api_get", lambda http, token, path: {"league": []})
+    mu._cache.clear()
     assert client.get(f"/api/my-team/{row.id}/matchup").status_code == 404   # no matchup (bye)
 
 

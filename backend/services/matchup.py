@@ -12,8 +12,10 @@
   are each simulated against the opponent's lineup, and the one that wins most often is
   recommended. A big underdog usually wins more with upside; a big favorite with safe floors.
 """
+import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from threading import Lock
 
 import httpx
 import numpy as np
@@ -22,6 +24,7 @@ from sqlalchemy.orm import Session
 from config import Settings
 from integrations import yahoo
 from services import my_team as mt
+from services.build_locks import key_lock
 from services import yahoo_sync
 from services.weekly_rankings import WeeklyPlayer
 
@@ -30,6 +33,8 @@ UPSIDE_WEIGHT = 0.5
 SAFE_WEIGHT = 0.5
 Z90 = 1.2816                      # the 90th percentile of a standard normal
 MODES = ("expected", "upside", "safe")
+MODE_EDGE = 0.03                  # win-probability edge needed to recommend upside/safe over expected
+CACHE_SECONDS = 300               # Yahoo's scoreboard + 20,000-run simulations: reuse for 5 minutes
 
 
 @dataclass(frozen=True)
@@ -93,7 +98,25 @@ def _side(session: Session, league, team_meta: dict, rosters: Mapping[int, Seque
                 yahoo_win_probability=team_meta.get("win_probability"))
 
 
+_cache: dict[int, tuple[float, dict]] = {}
+_cache_lock = Lock()
+
+
 def build_matchup(session: Session, settings: Settings, http: httpx.Client, reference: int | str | None) -> dict:
+    """The matchup (see the module docstring), cached per league for CACHE_SECONDS."""
+    league, _ = mt.find_league(session, reference)
+    with key_lock(("matchup", league.id)):
+        with _cache_lock:
+            cached = _cache.get(league.id)
+        if cached and time.time() - cached[0] < CACHE_SECONDS:
+            return cached[1]
+        result = _build_matchup(session, settings, http, reference)
+        with _cache_lock:
+            _cache[league.id] = (time.time(), result)
+        return result
+
+
+def _build_matchup(session: Session, settings: Settings, http: httpx.Client, reference: int | str | None) -> dict:
     from sqlalchemy import select
 
     from database.models import Team
@@ -134,7 +157,10 @@ def build_matchup(session: Session, settings: Settings, http: httpx.Client, refe
         ids = [pid for slot_ids in slots.values() for pid in slot_ids]
         options[mode] = {"lineup": slots, "projected": round(sum(weekly[pid].projection for pid in ids), 1),
                          "win_probability": round(win_probability(lineup(ids), their_lineup), 3)}
-    recommended = max(MODES, key=lambda m: (options[m]["win_probability"], m == "expected"))
+    # Upside or safe only when it wins clearly more often; small edges are model noise.
+    challenger = max(("upside", "safe"), key=lambda m: options[m]["win_probability"])
+    recommended = challenger if (options[challenger]["win_probability"] - options["expected"]["win_probability"]
+                                 >= MODE_EDGE) else "expected"
     current_ids = {pid for _, pid in mine.starters}
     rec_ids = {pid for ids in options[recommended]["lineup"].values() for pid in ids}
     names = {pid: p.name for pid, p in weekly.items()}

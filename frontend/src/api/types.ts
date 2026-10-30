@@ -540,6 +540,8 @@ export interface LineupChange {
   bench_projection: number | null;
   slot: string;
   gain: number;
+  /** toss_up: under 1.5 points apart (about a coin flip); lean: 1.5-3; clear: more. */
+  confidence?: 'toss_up' | 'lean' | 'clear';
 }
 
 export interface MyTeamResponse {

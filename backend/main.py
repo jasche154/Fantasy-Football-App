@@ -20,6 +20,8 @@ from services.valuation import build_valuation
 log = logging.getLogger("fantasy_app")
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 OPEN_PATHS = {"/api/meta"}           # readable without the API token (tells the app a token is needed)
+# Without API_TOKEN, only this machine may call the API ("testclient" is FastAPI's test client).
+LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
 
 
 def _warm_cache() -> None:
@@ -75,6 +77,14 @@ def create_app(warm_cache: bool = True) -> FastAPI:
         origin = request.headers.get("origin")
         if request.method not in SAFE_METHODS and origin and origin not in settings.cors_origins:
             return JSONResponse({"detail": "Cross-site request blocked."}, status_code=403)
+        # Browsers label requests a page on another site makes (even <img> GETs). Several GETs
+        # call Yahoo or run simulations, so other sites can't trigger them either.
+        if request.url.path.startswith("/api") and request.headers.get("sec-fetch-site") == "cross-site":
+            return JSONResponse({"detail": "Cross-site request blocked."}, status_code=403)
+        # Bound to 0.0.0.0 without a token, the Host check alone wouldn't stop other machines.
+        client = request.client.host if request.client else None
+        if not settings.api_token and client is not None and client not in LOOPBACK_HOSTS:
+            return JSONResponse({"detail": "Set API_TOKEN to allow access from other machines."}, status_code=403)
         return await call_next(request)
 
     for module in (data_routes, market_routes, weekly_routes, team_routes, model_routes, integration_routes, agent_routes,

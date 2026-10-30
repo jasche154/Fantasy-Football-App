@@ -23,6 +23,7 @@ Everything is read live from Yahoo and cached for CACHE_SECONDS per league.
 """
 import time
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Callable, Mapping, Sequence
 from threading import Lock
 from types import SimpleNamespace
@@ -37,6 +38,7 @@ from database.models import Team
 from integrations import yahoo
 from services import my_team as mt
 from services import yahoo_sync
+from services.build_locks import key_lock
 from services.playoffs import playoff_weeks
 from services.valuation import ROS_SCHEDULE_WEIGHT, build_valuation
 
@@ -180,18 +182,37 @@ def tendencies(standings: Sequence[dict], transactions: Sequence[dict]) -> dict[
     return out
 
 
+_schedule: dict[tuple[str, int], list[tuple[str, str]]] = {}      # (league key, week): pairings; fixed all season
+SCHEDULE_WORKERS = 6
+
+
 def _remaining_games(http: httpx.Client, token, league_key: str, first: int, last: int) -> list[tuple[int, str, str]]:
-    games = []
-    for week in range(first, last + 1):
+    """Every remaining (week, team, team) pairing. Pairings don't change, so each week is fetched
+    once per run of the app, and missing weeks are fetched in parallel."""
+    def fetch(week: int) -> tuple[int, list[tuple[str, str]]]:
         board = yahoo.parse_scoreboard(yahoo.api_get(http, token, f"league/{league_key}/scoreboard;week={week}"))
-        for matchup in board:
-            keys = [t["team_key"] for t in matchup["teams"]]
-            if len(keys) == 2:
-                games.append((week, keys[0], keys[1]))
-    return games
+        return week, [(m["teams"][0]["team_key"], m["teams"][1]["team_key"]) for m in board if len(m["teams"]) == 2]
+
+    weeks = range(first, last + 1)
+    with _lock:
+        missing = [w for w in weeks if (league_key, w) not in _schedule]
+    if missing:
+        with ThreadPoolExecutor(max_workers=SCHEDULE_WORKERS) as pool:
+            fetched = list(pool.map(fetch, missing))
+        with _lock:
+            for week, pairs in fetched:
+                _schedule[(league_key, week)] = pairs
+    with _lock:
+        return [(w, a, b) for w in weeks for a, b in _schedule.get((league_key, w), [])]
 
 
 def build(session: Session, settings: Settings, http: httpx.Client, reference: int | str | None) -> dict:
+    league, _ = mt.find_league(session, reference)
+    with key_lock(("league_insights", league.id)):
+        return _build(session, settings, http, reference)
+
+
+def _build(session: Session, settings: Settings, http: httpx.Client, reference: int | str | None) -> dict:
     league, mine = mt.find_league(session, reference)
     with _lock:
         cached = _cache.get(league.id)

@@ -76,7 +76,7 @@ def my_team(league_id: int, session: Session = Depends(get_session)) -> dict:
                          "bench": serialize.player_ref(team.valuation.by_id[c.bench_id])
                          if c.bench_id in team.valuation.by_id else None,
                          "bench_projection": c.bench_projection if c.bench_id is not None else None,
-                         "slot": c.slot, "gain": c.gain} for c in team.changes],
+                         "slot": c.slot, "gain": c.gain, "confidence": c.confidence} for c in team.changes],
         },
     }
 

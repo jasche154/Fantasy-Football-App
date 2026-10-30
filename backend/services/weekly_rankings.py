@@ -27,6 +27,7 @@ from services import projection_factors, rankings_store
 from services.game_features import conditions_for, team_profiles
 from services.projection_factors import inputs_for
 from services.weather import forecasts
+from services.build_locks import key_lock
 from services.weight_learning import DEFAULT_WEIGHTS, effective_weights, position_weights
 from services.league import POSITIONS, LeagueSettings
 from services.projections import PlayerSeason
@@ -323,15 +324,19 @@ def build_weekly_rankings(session: Session, league: LeagueSettings, week: int | 
         if key in _cache:
             return _cache[key]
     stored_key = rankings_store.cache_key(*key)
-    rankings = rankings_store.load(session, stored_key)
-    if not isinstance(rankings, WeeklyRankings):
-        rankings = _build(session, league, valuation, week)
-        rankings_store.save(session, stored_key, valuation.season, week, rankings)
-        rankings_store.record_history(session, rankings)
-    with _cache_lock:
-        if len(_cache) >= CACHE_SIZE:
-            _cache.pop(next(iter(_cache)))
-        _cache[key] = rankings
+    with key_lock(("weekly", stored_key)):
+        with _cache_lock:
+            if key in _cache:
+                return _cache[key]                 # built by a request we waited for
+        rankings = rankings_store.load(session, stored_key)
+        if not isinstance(rankings, WeeklyRankings):
+            rankings = _build(session, league, valuation, week)
+            rankings_store.save(session, stored_key, valuation.season, week, rankings)
+            rankings_store.record_history(session, rankings)
+        with _cache_lock:
+            if len(_cache) >= CACHE_SIZE:
+                _cache.pop(next(iter(_cache)))
+            _cache[key] = rankings
     return rankings
 
 

@@ -8,17 +8,24 @@
 
 Both tables live in the local database (gitignored). Failures here never break rankings:
 they are logged and the caller falls back to computing.
+
+Snapshots are pickled, so each is signed (HMAC-SHA256) with a key kept in a local file
+(backend/.snapshot_key, gitignored, made on first use). A snapshot that doesn't verify,
+for example from a tampered database or an edited backup, is ignored instead of unpickled.
 """
 import hashlib
+import hmac
 import json
 import logging
 import pickle
+import secrets
 from collections.abc import Iterable
 from datetime import timedelta
 from functools import lru_cache
 from pathlib import Path
 
 from sqlalchemy import delete, select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -31,6 +38,8 @@ MODEL_FILES = ("weekly_rankings.py", "weekly_adjust.py", "weekly_model.py", "inj
                "valuation.py", "projections.py", "ros_consensus.py", "schedule_strength.py",
                "projection_ranges.json")
 SNAPSHOT_TTL = timedelta(days=21)
+KEY_FILE = SERVICES_DIR.parent / ".snapshot_key"
+SIGNATURE_BYTES = 32
 TABLES = (RankingsSnapshot.__table__, ProjectionHistory.__table__)
 UNREADABLE = (SQLAlchemyError, pickle.UnpicklingError, AttributeError, ImportError, EOFError, TypeError)
 
@@ -61,11 +70,31 @@ def _ensure_tables(session: Session) -> None:
         _ready.add(url)
 
 
+@lru_cache(maxsize=1)
+def _signing_key() -> bytes:
+    if not KEY_FILE.exists():
+        KEY_FILE.write_bytes(secrets.token_bytes(32))
+    return KEY_FILE.read_bytes()
+
+
+def _sign(payload: bytes) -> bytes:
+    return hmac.new(_signing_key(), payload, hashlib.sha256).digest() + payload
+
+
+def _verified(blob: bytes) -> bytes | None:
+    signature, payload = blob[:SIGNATURE_BYTES], blob[SIGNATURE_BYTES:]
+    expected = hmac.new(_signing_key(), payload, hashlib.sha256).digest()
+    return payload if hmac.compare_digest(signature, expected) else None
+
+
 def load(session: Session, key: str) -> object | None:
     try:
         _ensure_tables(session)
         row = session.get(RankingsSnapshot, key)
-        return pickle.loads(row.payload) if row else None   # written only by save() below
+        payload = _verified(row.payload) if row else None
+        if row and payload is None:
+            log.warning("Ignoring a rankings snapshot that failed its signature check")
+        return pickle.loads(payload) if payload else None     # signed by save() below
     except UNREADABLE:
         log.warning("Ignoring an unreadable rankings snapshot", exc_info=True)
         session.rollback()
@@ -73,14 +102,17 @@ def load(session: Session, key: str) -> object | None:
 
 
 def save(session: Session, key: str, season: int, week: int, rankings: object) -> None:
-    """Store the snapshot, replacing older ones for the same week and any past the TTL."""
+    """Store the snapshot (replacing this key) and drop any past the TTL.
+
+    Other snapshots for the same week stay: each league setting (a Yahoo league's scoring,
+    the default PPR) has its own, and switching between them shouldn't force a rebuild.
+    """
     try:
         _ensure_tables(session)
         session.execute(delete(RankingsSnapshot).where(
-            (RankingsSnapshot.computed_at < utc_now() - SNAPSHOT_TTL)
-            | ((RankingsSnapshot.season == season) & (RankingsSnapshot.week == week))))
+            (RankingsSnapshot.computed_at < utc_now() - SNAPSHOT_TTL) | (RankingsSnapshot.cache_key == key)))
         session.add(RankingsSnapshot(cache_key=key, season=season, week=week,
-                                     payload=pickle.dumps(rankings, protocol=pickle.HIGHEST_PROTOCOL)))
+                                     payload=_sign(pickle.dumps(rankings, protocol=pickle.HIGHEST_PROTOCOL))))
         session.commit()
     except SQLAlchemyError:
         log.warning("Could not save a rankings snapshot", exc_info=True)
@@ -91,19 +123,21 @@ def record_history(session: Session, rankings) -> int:
     """Upsert pre-kickoff projections; games already final keep their last pre-game row."""
     try:
         _ensure_tables(session)
-        written = 0
-        for player in rankings.players:
-            if player.matchup.game_final:
-                continue
-            session.merge(ProjectionHistory(
-                season=rankings.season, week=rankings.week, scoring=rankings.scoring,
-                player_id=player.player_id, position=player.position, projection=player.projection,
-                if_active=player.if_active, play_prob=player.play_prob, floor=player.floor,
-                ceiling=player.ceiling, computed_at=utc_now(),
-                sources=json.dumps({name: round(v.points, 2) for name, v in player.sources.items()})))
-            written += 1
+        now = utc_now()
+        rows = [dict(season=rankings.season, week=rankings.week, scoring=rankings.scoring,
+                     player_id=player.player_id, position=player.position, projection=player.projection,
+                     if_active=player.if_active, play_prob=player.play_prob, floor=player.floor,
+                     ceiling=player.ceiling, computed_at=now,
+                     sources=json.dumps({name: round(v.points, 2) for name, v in player.sources.items()}))
+                for player in rankings.players if not player.matchup.game_final]
+        if rows:                                       # one upsert instead of a SELECT + write per player
+            statement = sqlite_insert(ProjectionHistory)
+            session.execute(statement.on_conflict_do_update(
+                index_elements=["season", "week", "scoring", "player_id"],
+                set_={c: statement.excluded[c] for c in ("position", "projection", "if_active", "play_prob",
+                                                          "floor", "ceiling", "sources", "computed_at")}), rows)
         session.commit()
-        return written
+        return len(rows)
     except SQLAlchemyError:
         log.warning("Could not record projection history", exc_info=True)
         session.rollback()

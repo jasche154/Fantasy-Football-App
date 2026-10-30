@@ -75,7 +75,9 @@ class Roster(Base):
 
 class PlayerStatsWeekly(Base):
     __tablename__ = "player_stats_weekly"
-    __table_args__ = (Index("ix_player_stats_weekly_player_season_week", "player_id", "season", "week"),)
+    __table_args__ = (Index("ix_player_stats_weekly_player_season_week", "player_id", "season", "week"),
+                      # The data-version checks on every request filter by season (and week).
+                      Index("ix_player_stats_weekly_season_week", "season", "week"))
 
     id: Mapped[int] = mapped_column(primary_key=True)
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id"))

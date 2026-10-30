@@ -136,6 +136,12 @@ function LineupView({ data }: { data: MyTeamResponse }) {
                   Start <strong>{change.start.name}</strong> ({formatNumber(change.start_projection)}) at {change.slot}
                   {change.bench ? <> over <strong>{change.bench.name}</strong> ({formatNumber(change.bench_projection ?? 0)})</> : ' in the empty slot'}
                   {' '}<span className="lineup-advice__gain">+{formatNumber(change.gain)}</span>
+                  {change.confidence === 'toss_up' && (
+                    <span className="status-badge status-badge--missing" title="Under 1.5 points apart: the higher projection wins only about half the time">Toss-up</span>
+                  )}
+                  {change.confidence === 'lean' && (
+                    <span className="status-badge" title="1.5-3 points apart: right about 58% of the time">Lean</span>
+                  )}
                 </li>
               ))}
             </ul>

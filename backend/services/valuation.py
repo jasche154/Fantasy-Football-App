@@ -15,6 +15,8 @@ from typing import Mapping
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from services.build_locks import key_lock
+
 from config import get_settings
 from database.models import DataLoad, PlayerStatsWeekly
 from services.league import LeagueSettings, replacement_levels
@@ -213,9 +215,14 @@ def build_valuation(session: Session, league: LeagueSettings, season: int | None
         cached = _cache.get(key)
     if cached is not None:
         return cached
-    valuation = _compute(session, league, season)
-    with _cache_lock:
-        if len(_cache) >= CACHE_SIZE:
-            _cache.pop(next(iter(_cache)))
-        _cache[key] = valuation
+    with key_lock(("valuation", key)):
+        with _cache_lock:
+            cached = _cache.get(key)              # built by a request we waited for
+        if cached is not None:
+            return cached
+        valuation = _compute(session, league, season)
+        with _cache_lock:
+            if len(_cache) >= CACHE_SIZE:
+                _cache.pop(next(iter(_cache)))
+            _cache[key] = valuation
     return valuation
