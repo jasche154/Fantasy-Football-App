@@ -203,8 +203,12 @@ def _my_team(session: Session, league: str | None = None) -> dict:
                        "this_week_proj": weekly.projection if weekly else 0.0,
                        "status": weekly.status if weekly else "no projection (bye or out)",
                        "ros_ppg": value.ros_ppg, "pos_rank_ros": value.pos_rank})
+    names = {v.player_id: v.name for v in team.valuation.values}
     return {"league": team.league.name, "team": team.team.name, "scoring": team.settings.scoring,
             "teams": team.settings.teams, "week": team.rankings.week, "roster": roster,
+            "best_lineup": {slot: [names.get(pid, str(pid)) for pid in ids] for slot, ids in team.best.items()},
+            "note": ("this_week_proj is a projection that already accounts for each player's chance to play, so "
+                     "a questionable player can still be the better start. Recommend best_lineup."),
             "lineup_changes": [f"Start {c.start.name} ({c.start.projection:.1f}) over "
                                f"{f'{c.bench_name} ({c.bench_projection:.1f})' if c.bench_name else 'an empty slot'}"
                                for c in team.changes]}

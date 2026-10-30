@@ -477,3 +477,78 @@ export interface ScheduleStrengthResponse {
   defenses: DefenseStrengthRow[];
   offenses: OffenseScheduleRow[];
 }
+
+/* ---------- My Team (imported Yahoo leagues) ---------- */
+
+export interface MyLeague {
+  id: number;
+  key: string;
+  name: string;
+  season: number;
+  team: string | null;
+  scoring: Scoring;
+  teams: number | null;
+  starters: Record<string, number> | null;
+  week: number | null;
+}
+
+export interface MyLeaguesResponse {
+  leagues: MyLeague[];
+}
+
+export interface MyTeamRosterRow {
+  /** Yahoo slot: QB, RB, WR, TE, W/R/T, BN, IR, ... */
+  slot: string;
+  starting: boolean;
+  in_best_lineup: boolean;
+  player: PlayerSummary;
+  /** This week's projection row; null on a bye, ruled out, or not covered. */
+  week: WeeklyPlayer | null;
+  ros_ppg: number | null;
+  trade_value: number | null;
+  pos_rank: string | null;
+}
+
+export interface LineupChange {
+  start: PlayerSummary;
+  start_projection: number;
+  bench: PlayerSummary | null;
+  bench_projection: number | null;
+  slot: string;
+  gain: number;
+}
+
+export interface MyTeamResponse {
+  league: MyLeague;
+  week: number;
+  roster: MyTeamRosterRow[];
+  lineup: { current_total: number; best_total: number; changes: LineupChange[] };
+}
+
+export interface LeagueWaiversResponse {
+  league: string;
+  season: number;
+  week: number;
+  results: WaiverCandidate[];
+}
+
+export interface LeagueTeamOffers {
+  team: string | null;
+  owner: string | null;
+  needs: Position[];
+  offers: (TradeOffer & { fills_their_need: Position[] })[];
+}
+
+export interface LeagueTradesResponse {
+  league: string;
+  perspective: string;
+  teams: LeagueTeamOffers[];
+}
+
+export interface LeagueSyncResult {
+  league_id: number;
+  teams: number;
+  roster_spots: number;
+  unmatched_players: string[];
+  untracked_players: string[];
+}

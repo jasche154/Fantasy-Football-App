@@ -653,3 +653,22 @@
 .actual--pos { color: var(--color-pos); }
 .actual--neg { color: var(--color-neg); }
 .source-weights__learned { color: var(--color-text-subtle); font-weight: 500; }
+
+/* My Team */
+.lineup-advice { margin-bottom: var(--space-4); padding: var(--space-3) var(--space-4); border-radius: var(--radius-md);
+  border: 1px solid var(--color-border); background: var(--color-surface-2); }
+.lineup-advice__summary, .lineup-advice__ok { margin: 0 0 var(--space-2); }
+.lineup-advice__ok { margin: 0; color: var(--color-pos); font-weight: 650; }
+.lineup-advice__list { margin: 0; padding-left: var(--space-4); display: grid; gap: var(--space-1); }
+.lineup-advice__gain { color: var(--color-pos); font-weight: 750; font-variant-numeric: tabular-nums; }
+.row--promote td { background: var(--color-pos-soft); }
+.row--demote td { background: var(--color-neg-soft); }
+.section-title { margin: var(--space-4) 0 var(--space-2); font-size: 1rem; }
+.hint { color: var(--color-text-subtle); font-size: 0.85rem; }
+.league-trades { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-3); }
+.league-trade { padding: var(--space-3) var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-md);
+  background: var(--color-surface-1); }
+.league-trade__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); margin-bottom: var(--space-2); }
+.league-trade__owner { color: var(--color-text-subtle); font-size: 0.85rem; }
+.league-trade__needs { color: var(--color-warn); font-size: 0.8rem; font-weight: 650; }
+.league-trade__offers { margin: 0; padding-left: var(--space-4); display: grid; gap: var(--space-2); }

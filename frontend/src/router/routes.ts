@@ -2,6 +2,7 @@ import { buildQuery, type QueryParams } from '../lib/query';
 
 export type StaticRouteName =
   | 'dashboard'
+  | 'team'
   | 'rankings'
   | 'weekly'
   | 'charts'
@@ -25,6 +26,7 @@ export interface HashLocation {
 }
 
 const STATIC_ROUTES: Readonly<Record<string, StaticRouteName>> = {
+  team: 'team',
   rankings: 'rankings',
   weekly: 'weekly',
   charts: 'charts',
@@ -38,6 +40,7 @@ const STATIC_ROUTES: Readonly<Record<string, StaticRouteName>> = {
 
 export const paths = {
   dashboard: '/',
+  team: '/team',
   rankings: '/rankings',
   weekly: '/weekly',
   charts: '/charts',

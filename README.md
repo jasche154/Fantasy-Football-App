@@ -54,6 +54,11 @@ only *explains* numbers that came back from a tool call. Every output is labeled
 - **Player pages:** season summary, weekly game log, NGS advanced stats, projection
 - **Trade calculator:** values both sides, applies a consolidation discount, gives a verdict, and suggests players that would balance the deal
 - **Buy low / sell high:** finds players whose production is out of line with their usage, with plain-English reasons
+- **My Team (Yahoo):** import your Yahoo leagues, with their own scoring and roster slots, and get:
+  - your roster with this week's projections and a best-lineup check ("Start Gibbs over Corum, +10.5");
+  - waivers limited to players actually free in your league;
+  - trade ideas with the real teams in your league, matched to each team's weak positions.
+  The AI assistant uses the same roster.
 - **Integrations:** Sleeper trending adds/drops, FantasyPros ROS rankings (with your key), and Yahoo league and roster import (OAuth)
 - **AI assistant and agent tools:** 17 validated tools that any agent can call over REST
   or MCP (Claude Desktop / Claude Code), plus a built-in Groq-powered chat
@@ -146,6 +151,7 @@ Open <http://localhost:5173>. The UI talks to `http://localhost:8000` by default
 | Page | What you can do |
 |---|---|
 | **Dashboard** | Top buy-low and sell-high players with the reason behind each, Sleeper's most-added players, data freshness |
+| **My Team** | Your imported Yahoo team (pick the league if you have several). **Lineup:** starters and bench with this week's projection, range, flags and rest-of-season value; the best lineup under your league's slots, with "Start X over Y (+points)" advice and Start/Sit tags. **Waivers:** players on no roster in your league. **Trades:** fair offers with each real team, built from their roster, teams that need what you'd send first. **Sync from Yahoo** re-imports now (the app also re-syncs every 6 hours) |
 | **Week X Rankings** | This week's projections by position; pick any week. Each row shows the matchup grade (opponent-adjusted, #1 = easiest), the Vegas implied team total, the blended projection, and every source's number (props, Josh & Hayden, Yahoo, ESPN, model). For finished games, **Actual** shows what each player scored (green beat the projection by 20%+, red missed by 20%+, DNP sat). Click a column header (Proj, Actual, Team total, or any source) to sort by it. **Schedule strength** switches to defenses ranked by adjusted points allowed and each team's upcoming opponents. **Refresh sources** re-pulls Yahoo and ESPN (Vegas props follow their credit budget) |
 | **Rankings** | Rest-of-season rankings by position; sort by actual, expected, or projected points, schedule strength, **Playoff SOS** (weeks 15–17), trade value, or ECR |
 | **Week X → Start / Sit** | Add up to four players. Each shows its projection, floor–ceiling range, injury status, "if <teammate> sits" scenarios, flags, and a **Why?** breakdown. A tiebreaker (most points / safe / upside) decides close calls |
@@ -427,6 +433,11 @@ League parameters accepted by every valuation endpoint: `scoring=ppr|half|std`,
 | POST | `/api/integrations/yahoo/exchange` | Body `{"code": "<code or full redirect URL>"}` |
 | GET | `/api/integrations/yahoo/leagues` | Your Yahoo NFL leagues |
 | POST | `/api/integrations/yahoo/leagues/{key}/import` | Import teams and rosters |
+| GET | `/api/my-team/leagues` | Your imported leagues (your team, scoring, starter slots) |
+| GET | `/api/my-team/{league_id}` | Your roster with projections and the best-lineup advice |
+| GET | `/api/my-team/{league_id}/waivers?position=` | Waiver targets on no roster in that league |
+| GET | `/api/my-team/{league_id}/trades?want_position=` | Trade offers with each real team, by their needs |
+| POST | `/api/my-team/{league_id}/sync` | Re-import that league from Yahoo now |
 | GET | `/api/agent/tools` | Tool definitions (JSON Schema) |
 | POST | `/api/agent/tools/{name}` | Body `{"arguments": {...}}`; run one tool |
 | POST | `/api/agent/chat` | Body `{"messages": [{"role": "user", "content": "..."}]}`; answer plus tool trace |
@@ -436,7 +447,15 @@ Full TypeScript types for every response: [`docs/API.md`](docs/API.md).
 
 ## AI assistant and agent tools
 
-The same 17 tools are exposed three ways: `search_players`, `get_player_profile`,
+With a Yahoo league imported, three more tools answer from your real roster:
+- `get_my_team`: your roster, projections and lineup advice;
+- `get_league_waivers`: players free in your league;
+- `find_league_trades`: offers with real teams.
+
+The assistant's instructions name your imported leagues, so "who should I start?" or "find
+me a WR trade" needs no player list.
+
+The same 17 general tools are exposed three ways: `search_players`, `get_player_profile`,
 `get_player_game_log`, `compare_players`, `get_fantasy_rankings`,
 `list_leaderboard_metrics`, `get_leaderboard`, `evaluate_trade`, `get_buy_low_candidates`,
 `get_sell_high_candidates`, `get_weekly_rankings`, `get_schedule_strength`, `explain_projection`,
@@ -526,8 +545,13 @@ restarts, and after a failed call it waits 30 minutes before trying again. Attri
    can't serve, so the browser shows an error page. **That's expected.** Copy the whole URL from the address bar.
 4. Paste it into `POST /api/integrations/yahoo/exchange` or the Settings page. The app
    pulls out the `code`, checks the one-time `state`, and stores encrypted tokens. Tokens refresh automatically.
-5. List your leagues and import one. Rosters are matched to players through the nflverse ID
-   crosswalk, and anything unmatched (kickers, defenses) is listed in the response.
+5. List your leagues and import one. The import brings in the league's rules (scoring from
+   the points per reception, starter slots, bench size) and every team's roster.
+   - **Player matching:** by Yahoo id through the nflverse crosswalk, or by name + position +
+     team when the crosswalk doesn't have a recent rookie yet (the Yahoo id is then saved).
+   - **Not modeled:** kickers and defenses are listed as `untracked_players`.
+   - **Keeping it current:** while the API runs, imported leagues re-sync every 6 hours.
+     The **My Team** page has a **Sync from Yahoo** button for an immediate refresh.
 
 Yahoo requires showing "Fantasy data provided by Yahoo Fantasy" wherever its data appears.
 
