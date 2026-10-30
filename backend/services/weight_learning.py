@@ -28,6 +28,7 @@ if __package__ in (None, ""):
 import argparse  # noqa: E402
 import json
 import logging
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from statistics import mean
@@ -49,6 +50,7 @@ MAX_STEP = 0.03            # the most any one weight moves in a week
 MIN_WEIGHT = 0.05          # no source is ever dropped entirely
 MIN_ROWS = 100             # fewer scored player-weeks than this: too noisy to learn from
 MIN_POSITION_ROWS = 30     # per position, for its own step
+MIN_SOURCE_ROWS = 30       # a source on fewer rows that week keeps its weight (e.g. no props backfilled)
 BY_POSITION = "_by_position"
 POSITIONS = ("QB", "RB", "WR", "TE")
 SCORING_PREFERENCE = ("ppr", "half", "std")    # one row per player-week, in this order
@@ -105,6 +107,21 @@ def fit_weights(samples: Sequence[Sample], keys: Sequence[str]) -> dict[str, flo
         w = w * np.exp(-FIT_RATE * grad / (np.abs(grad).max() + 1e-12))
         w = w / w.sum()
     return {k: round(float(w[index[k]]), 4) for k in keys}
+
+
+def week_optimal(samples: Sequence[Sample], current: Mapping[str, float]) -> dict[str, float]:
+    """Best-fit weights over the sources the week's rows have; the others keep their current weight.
+
+    A source missing that week (no props for a backfilled week, an expert who didn't rank it)
+    says nothing about how good it is, so it neither gains nor loses weight.
+    """
+    counts = Counter(k for s in samples for k in s.sources)
+    present = [k for k in current if counts[k] >= MIN_SOURCE_ROWS]
+    if not present:
+        return dict(current)
+    fitted = fit_weights(samples, present)
+    mass = sum(current[k] for k in present)
+    return {k: round(fitted[k] * mass, 4) if k in present else current[k] for k in current}
 
 
 def conservative_step(current: Mapping[str, float], optimal: Mapping[str, float], rows: int) -> dict[str, float]:
@@ -188,8 +205,8 @@ def _week_complete(session: Session, season: int, week: int) -> bool:
     return bool(games) and all(g.is_final for g in games)
 
 
-def learn(session: Session, season: int, apply: bool = True) -> list[Update]:
-    """Update the weights from every completed, not-yet-learned week with enough history."""
+def learn(session: Session, season: int, apply: bool = True, through_week: int | None = None) -> list[Update]:
+    """Update the weights from every completed, not-yet-learned week with enough history (up to through_week)."""
     _ensure_table(session)
     learned = set(session.scalars(select(LearnedWeights.week).where(LearnedWeights.season == season)))
     weeks = sorted(set(session.scalars(select(ProjectionHistory.week).where(ProjectionHistory.season == season))))
@@ -197,20 +214,20 @@ def learn(session: Session, season: int, apply: bool = True) -> list[Update]:
     by_position = position_weights(session)
     updates = []
     for week in weeks:
-        if week in learned or not _week_complete(session, season, week):
+        if week in learned or (through_week is not None and week > through_week) or not _week_complete(session, season, week):
             continue
         samples = samples_for_week(session, season, week)
         if len(samples) < MIN_ROWS:
             log.info("Week %s: %s scored player-weeks, too few to learn from", week, len(samples))
             continue
-        optimal = fit_weights(samples, list(DEFAULT_WEIGHTS))
+        optimal = week_optimal(samples, current)
         after = conservative_step(current, optimal, len(samples))
         positions_after = {}
         for pos in POSITIONS:
             own = [s for s in samples if s.position == pos]
             # Each position follows the global step, then takes its own (smaller) step on its own games.
             start = conservative_step(by_position.get(pos, current), after, PRIOR_ROWS) if pos in by_position else after
-            positions_after[pos] = (conservative_step(start, fit_weights(own, list(DEFAULT_WEIGHTS)), len(own))
+            positions_after[pos] = (conservative_step(start, week_optimal(own, start), len(own))
                                     if len(own) >= MIN_POSITION_ROWS else start)
         update = Update(season, week, len(samples), dict(current), optimal, after,
                         mae(current, samples), mae(after, samples))

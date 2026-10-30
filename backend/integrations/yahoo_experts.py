@@ -75,15 +75,18 @@ def ranking_rows(payload: dict, season: int, week: int, scoring: str, matcher: P
     return rows
 
 
-def refresh(session: Session, http: httpx.Client, season: int, week: int) -> int:
+def refresh(session: Session, http: httpx.Client, season: int, week: int, include_ros: bool = True) -> int:
     """Fetch every position in every scoring format, then replace the week's snapshot.
 
     Everything is fetched before anything is stored, so a failure partway through never
     leaves one scoring format fresh and another stale. The first failed request stops it.
+    Backfills of past weeks skip the rest-of-season ranks (include_ros=False): only the
+    current ROS ranks are used.
     """
     matcher = PlayerMatcher(session)
     fetched: dict[tuple[str, str], list[dict]] = {}
-    for source, rank_type in RANK_TYPES.items():
+    rank_types = RANK_TYPES if include_ros else {SOURCE: RANK_TYPES[SOURCE]}
+    for source, rank_type in rank_types.items():
         for scoring in SCORING_PARAMS:
             rows = []
             for position in POSITIONS:
