@@ -262,3 +262,14 @@ def test_scoreboard_parser_reads_points_projection_and_win_probability():
     assert matchup["teams"][0] == {"team_key": "t1", "name": "Mine", "points": 8.6, "projected": 102.6,
                                    "win_probability": 0.32}
     assert yahoo.parse_scoreboard({}) == []
+
+
+def test_yahoo_playoff_start_week_becomes_the_playoff_weeks():
+    def rules(start, teams, uses="1"):
+        return yahoo.parse_settings({"league": [{}, {"settings": [{"playoff_start_week": start, "num_playoff_teams": teams,
+                                                                    "uses_playoff": uses}]}]})
+    assert rules("16", "6")["playoff_weeks"] == [16, 17, 18]
+    assert rules("15", "4")["playoff_weeks"] == [15, 16]
+    assert rules("17", "8")["playoff_weeks"] == [17, 18]                  # cut at the last NFL week
+    assert "playoff_weeks" not in rules("16", "6", uses="0")
+    assert "playoff_weeks" not in rules("nope", "6")

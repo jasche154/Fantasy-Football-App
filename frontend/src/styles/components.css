@@ -683,3 +683,5 @@
 .accuracy section + section { margin-top: var(--space-4); }
 
 .matchup-updated { margin-top: var(--space-4); display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: var(--space-4); }
+
+.playoff-weak { background: var(--color-warn-soft); }

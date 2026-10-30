@@ -93,7 +93,7 @@ def test_prior_season_needs_enough_games_to_count():
 
 def test_build_valuation_on_seeded_league(session, seeded):
     valuation = build_valuation(session, LeagueSettings())
-    assert valuation.season == CURRENT and valuation.through_week == 6 and valuation.weeks_remaining == 11
+    assert valuation.season == CURRENT and valuation.through_week == 6 and valuation.weeks_remaining == 12   # through week 18
     assert valuation.by_id[seeded["chase"]].trade_value > 0
     assert set(valuation.replacement) == {"QB", "RB", "WR", "TE"}
     assert build_valuation(session, LeagueSettings()) is valuation     # cached

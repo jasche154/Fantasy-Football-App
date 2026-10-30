@@ -26,7 +26,7 @@ def test_player_detail(client, seeded):
 
 def test_rankings_filters_and_ecr(client, seeded):
     body = client.get("/api/rankings", params={"position": "WR", "limit": 5}).json()
-    assert body["season"] == CURRENT and body["weeks_remaining"] == 11 and len(body["results"]) == 5
+    assert body["season"] == CURRENT and body["weeks_remaining"] == 12 and len(body["results"]) == 5
     assert all(r["player"]["position"] == "WR" for r in body["results"])
     assert [r["rank"] for r in body["results"]] == [1, 2, 3, 4, 5]
     assert all(r["playoff_factor"] > 0 for r in body["results"])

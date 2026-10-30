@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     token_encryption_key: str | None = None
 
     # Last week of the fantasy season (playoffs included); drives "weeks remaining".
-    fantasy_end_week: int = 17
+    fantasy_end_week: int = 18          # the fantasy final; playoffs default to weeks 16-18
 
 
 @lru_cache

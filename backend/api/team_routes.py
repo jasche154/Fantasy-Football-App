@@ -124,3 +124,12 @@ def matchup(league_id: int, session: Session = Depends(get_session)) -> dict:
             return build_matchup(session, get_settings(), http, league_id)
     except YAHOO_ERRORS as exc:
         raise _yahoo_http_error(exc) from exc
+
+
+@router.get("/{league_id}/playoffs")
+def playoffs(league_id: int, session: Session = Depends(get_session)) -> dict:
+    """Each player's fantasy-playoff weeks (opponent, schedule factor, bye, projection) and the best lineup per week."""
+    from services.playoffs import playoff_outlook
+
+    _league_or_404(session, league_id)
+    return playoff_outlook(session, league_id)

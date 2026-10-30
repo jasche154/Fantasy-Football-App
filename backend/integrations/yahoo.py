@@ -256,8 +256,14 @@ def parse_settings(content: dict) -> dict:
             if -20 <= value <= 20:                       # anything outside this is corrupt data
                 (k_scoring if stat_id in YAHOO_K else dst_scoring)[(YAHOO_K | YAHOO_DST)[stat_id]] = value
     scoring = "ppr" if reception >= 0.75 else "half" if reception >= 0.25 else "std"
-    return {"scoring": scoring, "reception_points": reception, "starters": starters, "bench": bench,
-            "superflex": superflex, "k_scoring": k_scoring, "dst_scoring": dst_scoring}
+    rules = {"scoring": scoring, "reception_points": reception, "starters": starters, "bench": bench,
+             "superflex": superflex, "k_scoring": k_scoring, "dst_scoring": dst_scoring}
+    start = _number(settings.get("playoff_start_week"), int)
+    if str(settings.get("uses_playoff", "1")) == "1" and 1 <= start <= 18:
+        teams = _number(settings.get("num_playoff_teams"), int) or 6
+        rounds = max(1, (max(teams, 2) - 1).bit_length())          # 4 teams: 2 rounds, 6 or 8: 3
+        rules["playoff_weeks"] = [w for w in range(start, start + rounds) if w <= 18]
+    return rules
 
 
 def _float(value: object) -> float | None:
