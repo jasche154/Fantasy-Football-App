@@ -109,6 +109,12 @@ export interface TradeOffer {
   give: PlayerSummary[];
   get: PlayerSummary;
   get_ros_ppg: number;
+  market_percent_difference?: number;
+  /** Rough chance the other manager accepts (0-1), from how the market sees the deal for them. */
+  accept_chance?: number;
+  /** League trades: who they drop to fit a 2-for-1, and the free agent for the spot you open. */
+  their_drop?: PlayerSummary | null;
+  your_add?: PlayerSummary | null;
   evaluation: TradeResult;
 }
 

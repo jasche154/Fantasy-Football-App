@@ -1,6 +1,9 @@
 import { TradeFinder } from './TradeFinder';
 import { useRef } from 'react';
+import { getMyLeagues } from '../../api/data';
 import { AsyncView } from '../../components/AsyncView';
+import { SelectField } from '../../components/SelectField';
+import { useAsync } from '../../hooks/useAsync';
 import { Card, PageHeader } from '../../components/Card';
 import { Icon } from '../../components/Icon';
 import { LiveStatus } from '../../components/LiveStatus';
@@ -60,6 +63,24 @@ function TradeEvaluation({ trade }: { trade: TradeState }) {
   );
 }
 
+/** Imported Yahoo leagues to score the trade on; hidden when there are none (or they fail to load). */
+function LeaguePicker({ trade }: { trade: TradeState }) {
+  const leagues = useAsync((signal) => getMyLeagues(signal).catch(() => ({ leagues: [] })), []);
+  const options = leagues.data?.leagues ?? [];
+  if (options.length === 0) return null;
+  return (
+    <div className="inline-form">
+      <SelectField
+        label="Score on"
+        isInline
+        value={trade.ids.league === undefined ? '' : String(trade.ids.league)}
+        options={[{ value: '', label: 'Any league (no rosters)' }, ...options.map((l) => ({ value: String(l.id), label: l.name }))]}
+        onChange={(value) => trade.setLeague(value === '' ? undefined : Number(value))}
+      />
+    </div>
+  );
+}
+
 export function TradePage({ query }: { query: Readonly<Record<string, string>> }) {
   useDocumentTitle('Trade Calculator');
   const { settings } = useLeagueSettings();
@@ -67,13 +88,17 @@ export function TradePage({ query }: { query: Readonly<Record<string, string>> }
   const giveSearchRef = useRef<HTMLInputElement>(null);
   const allIds = [...trade.ids.give, ...trade.ids.get];
   const result = trade.currentResult;
+  const subtitle = trade.ids.league === undefined
+    ? `Rest-of-season values for ${describeSettings(settings)}.`
+    : 'Rest-of-season values and lineup gains on your imported league’s rosters and settings.';
   return (
     <>
       <PageHeader
         title="Trade calculator"
-        subtitle={`Rest-of-season values for ${describeSettings(settings)}.`}
+        subtitle={subtitle}
         actions={<TradeToolbar trade={trade} onCleared={() => giveSearchRef.current?.focus()} />}
       />
+      <LeaguePicker trade={trade} />
       <div className="trade-grid">
         <TradeSidePanel
           side="give"

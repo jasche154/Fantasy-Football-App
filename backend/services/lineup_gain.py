@@ -13,6 +13,7 @@
       WR 5.4%, RB/TE 4.3%, 2021-25 starters) and the 60% chance an injured player is still out
       the next week: 1 - hazard / (1 - 0.6 + hazard), e.g. a receiver misses about 12% of weeks.
       The season simulation (services/league_insights.py) runs the same chain week by week.
+      A backup (a QB2, whose share is the games his starter misses) keeps that smaller share.
 - Best lineup: QB/RB/WR/TE slots and FLEX (kickers and defenses aren't projected that far out).
 
 Used for waiver pickups (with the named drop), trade offers on real rosters, and the playoff planner.
@@ -76,7 +77,9 @@ class Projector:
             return 0.0 if weeks_ahead < IR_WEEKS else share
         if status in OUT_STATUSES:
             return (1 - OUT_PERSIST ** weeks_ahead) * share
-        return share
+        # A healthy player expected to miss more than his injury chain says is a backup (a QB2 plays
+        # only the games his starter misses): keep that share instead of treating him as a starter.
+        return min(share, getattr(value, "availability", 1.0) or 1.0)
 
     def points(self, value, week: int) -> float:
         key = (value.player_id, week)

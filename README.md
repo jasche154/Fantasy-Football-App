@@ -177,11 +177,11 @@ Open <http://localhost:5173>. The UI talks to `http://localhost:8000` by default
 | **Rankings** | Rest-of-season rankings by position; sort by actual, expected, or projected points, schedule strength, **Playoff SOS** (your league's playoff weeks, else the last three), trade value, or ECR |
 | **Week X → Start / Sit** | Add up to four players. Each shows its projection, floor–ceiling range, injury status, "if <teammate> sits" scenarios, flags, and a **Why?** breakdown. A tiebreaker (most points / safe / upside) decides close calls |
 | **Waiver Wire** | Players rostered in under 10–75% of ESPN leagues, ranked by rest-of-season value, this week's projection, next three matchups, and injury-driven opportunity, with a suggested FAAB bid |
-| **Trade Calculator → Trade finder** | Put the players you'd move in "You give", pick a position you want, and get 1-for-1 and 2-for-1 offers that are fair by this app's values *and* by market value (expert consensus, how the other manager will judge it), closest to fair first; **Load in calculator** opens one |
+| **Trade Calculator → Trade finder** | Put the players you'd move in "You give", pick a position you want, and get 1-for-1 and 2-for-1 offers that are fair by market value (expert consensus, how the other manager will judge it) with any edge from this app's values, best expected edge first, each with a rough chance they accept; results clear when you change the trade; **Load in calculator** opens one |
 | **Chart Studio** | Click a quick chart (Volume pays, Separators, RYOE leaders, Downfield QBs, Opportunity score) or pick one or two season metrics and a position; the chart type is chosen for you. Add players to highlight them, or add players with no metric for a weekly trend of any stat. Hover any point for a card with the player, team and both values (guide lines run to each axis); click a scatter point for that player's values, ranks among the plotted players, and quadrant. **Download SVG** saves the chart |
 | **Compare Players** | Add up to four players and pick seasons (up to four) and a stat: fantasy points, expected points, targets, carries, scrimmage yards, touchdowns or snap %. One chart puts every game on a single timeline ('25 W5 … '26 W7), with an optional 3-game average; the table summarizes each season (games, PPG, expected PPG, best, worst, usage). Links like `#/compare?ids=1,2&seasons=2025,2026` reopen a comparison |
 | **Advanced Stats** | Pick a category and metric, season, and minimum volume, then rank every qualified player |
-| **Trade Calculator** | Search players into "You give" / "You get". See each side's value, the verdict meter, and suggestions that even it out; the URL is shareable |
+| **Trade Calculator** | Search players into "You give" / "You get". See each side's value with why (rank, rate, games left, chance to play, schedule), the verdict meter, the market's view, and suggestions that even it out. **Score on** an imported league to use its settings and rosters and see both starting lineups' gains; the URL (including the league) is shareable |
 | **Buy / Sell** | Full buy-low and sell-high lists with every reason, filtered by position |
 | **Player page** | Weekly chart of actual vs expected points, game log, NGS stats, projection, signals |
 | **Ask AI** | Ask questions in plain English; each answer shows which tools it used |
@@ -441,10 +441,17 @@ add is worth twice as much). What to do depends on the league:
 
 Gains under 1 point are marked marginal.
 
-**Trades** (My Team → Trades). Offers with each real team are kept only if they add to your
-lineup and cost theirs at most half a point per remaining week; each shows both gains and the
-trade deadline. The standalone calculator discounts extra players more steeply (1, 0.7, 0.5,
-0.4) since depth is worth little.
+**Trades** (My Team → Trades). For each real team, up to 15 value-fair candidates (from the trade
+finder, built from active roster spots; IR/NA players aren't offered or targeted) are scored by
+both starting lineups before any are cut. An offer is kept only if it adds to your lineup and costs
+theirs at most half a point per weighted remaining week. Roster spots count: in a 2-for-1 the team
+getting two players drops the one it misses least ("they drop X"), and if your roster was full the
+spot you open is filled by the best of the top 10 free agents ("you add Y"); both are in the gains.
+Offers rank by your gain minus half of what they lose (`offer_score`), so a deal that helps both
+lineups ("Helps both lineups") beats a slightly bigger one that hurts them; at most three per team,
+no more than two built on the same player of yours. After the league's trade deadline the list is
+empty. The standalone calculator discounts extra players more steeply (1, 0.7, 0.5, 0.4) since
+depth is worth little; pick a league in the calculator ("Score on") to also see both lineups' gains.
 
 **Streaming** (My Team → Streaming): your defense (and quarterback, in one-QB leagues) and the
 best ten free agents over the next three weeks, with a plan that only switches for 2+ points.
@@ -593,15 +600,34 @@ moving players on matchup.
 - **Replacement level** depends on your league: starters league-wide (teams × slots, with
   FLEX and superflex filled by the best remaining players) plus each position's share of bench spots.
   The next player down is the "waiver-wire" baseline.
-- **`trade_value = max(0, ros_ppg − replacement_ppg) × weeks_remaining`**: rest-of-season
-  fantasy points above what you'd get from waivers. Weeks remaining run through week 17.
+- **`trade_value = availability × max(0, healthy_ppg − replacement_ppg) × games_left`**:
+  rest-of-season fantasy points above what you'd get from waivers.
+  - `availability` is the share of remaining games he's expected to play (injury status; for a
+    backup QB, the games his starter is expected to miss) and `healthy_ppg = ros_ppg / availability`
+    is his rate when he plays. An injured star keeps value for the games he will play: 18 ppg
+    healthy, out half of 8 games, replacement 9 is worth 0.5 × 9 × 8 = 36, not 0.
+  - `games_left` counts his team's remaining games through the fantasy end week (week 18 by
+    default), so a bye still ahead costs a week. Lineup gain keeps a backup's small share
+    instead of projecting him as a starter.
 
 ### Trade calculator
-Each side is sorted by value and weighted **1.0, 0.9, 0.8, …** (minimum 0.5). Lineup spots
-are limited, so two mid-tier players are worth less than their raw sum. Both sides get the
-same treatment, so an even 2-for-2 stays even. Verdict from the percent difference:
-**≤ 5% fair, ≤ 15% slight edge, more is lopsided.** "Balance it" suggests players not in
-the deal whose addition brings the trade closest to even.
+Each side is sorted by value and weighted **1.0, 0.7, 0.5, then 0.4** for every further player.
+Lineup spots are limited, so two mid-tier players are worth less than their raw sum. Both sides
+get the same treatment, so an even 2-for-2 stays even. Verdict from the percent difference:
+**≤ 5% fair, ≤ 15% slight edge, more is lopsided**, except that a gap under 0.4 points per week
+left is called fair and under 1.2 per week at most slight (between low-value players a few points
+is noise, even at a big percent). Each player shows his position rank, rate, games left, chance
+to play and schedule; the result also shows how expert consensus (the market) sees the deal.
+"Balance it" suggests players not in the deal whose addition brings the trade closest to even;
+when the trade is scored on a league (`league_id`), only players on the two rosters.
+
+### Trade finder
+1-for-1 and 2-for-1 offers for the players you'd move. An offer must be within −5%…+8% for you by
+this app's values and −15%…+5% by market (expert-consensus) value, and the app must like it for
+you at least as much as the market does: the edge comes from where this projection differs from
+consensus. Offers rank by expected edge, your edge × a rough chance they accept
+`1 / (1 + exp(−(their market edge + 0.02) / 0.04))` (about 62% for a deal the market calls even,
+32% for one it calls a 5% loss for them); offers with no edge for you follow, likeliest first.
 
 ### Buy low / sell high
 Per player (3+ games):
@@ -638,7 +664,7 @@ League parameters accepted by every valuation endpoint: `scoring=ppr|half|std`,
 | GET | `/api/leaderboards/metrics` | The metric catalog |
 | GET | `/api/leaderboards?category=&metric=` | Advanced-stat leaderboard (`season`, `min_volume`, `position`, `ascending`, `limit`) |
 | GET | `/api/experts/rankings` | FantasyPros ECR (ROS via API key if set, else the free weekly snapshot) |
-| POST | `/api/trade/evaluate` | Body `{"give": [ids], "get": [ids], "settings": {...}}`; values, verdict, balance suggestions |
+| POST | `/api/trade/evaluate` | Body `{"give": [ids], "get": [ids], "settings": {...}, "league_id": 1}` (league optional); values, verdict, market view, balance suggestions, and with a league both lineups' gains (`lineup`) |
 | GET | `/api/insights/buy-low` | Buy-low candidates with reasons |
 | GET | `/api/insights/sell-high` | Sell-high candidates with reasons |
 | GET | `/api/insights/trending?type=add\|drop` | Sleeper trending players |
@@ -650,7 +676,7 @@ League parameters accepted by every valuation endpoint: `scoring=ppr|half|std`,
 | GET | `/api/my-team/leagues` | Your imported leagues (your team, scoring, starter slots) |
 | GET | `/api/my-team/{league_id}` | Your roster with projections and the best-lineup advice |
 | GET | `/api/my-team/{league_id}/waivers?position=` | Waiver targets on no roster in that league |
-| GET | `/api/my-team/{league_id}/trades?want_position=` | Trade offers with each real team, by their needs |
+| GET | `/api/my-team/{league_id}/trades?want_position=` | Trade offers with each real team, scored by both lineups (named drop/add, `helps_both`, `accept_chance`); empty after the deadline |
 | GET | `/api/my-team/{league_id}/matchup` | This week's opponent, both lineups, win probability, expected/upside/safe lineups, the updated lineup and the bench |
 | GET | `/api/my-team/{league_id}/playoffs` | Each player's playoff weeks (opponent, bye, projection), the best lineup per week, and planner fixes |
 | GET | `/api/my-team/{league_id}/streaming` | DEF (and one-QB-league QB) streaming grid for 3 weeks with a suggested path |

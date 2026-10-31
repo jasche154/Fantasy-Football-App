@@ -1,4 +1,6 @@
 """Your imported Yahoo teams: roster and lineup, league-aware waivers and trades."""
+from datetime import date
+
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -113,14 +115,28 @@ def trades(league_id: int, want_position: Position | None = None, session: Sessi
 
     weeks = build_valuation(session, mt.league_settings(league)).weeks_remaining
     rules = mt.league_rules(league)
+    closed = deadline_passed(rules.get("trade_end_date"))
     return {"league": league.name, "perspective": "give = from your roster, get = from their roster",
-            "trade_end_date": rules.get("trade_end_date"),
+            "trade_end_date": rules.get("trade_end_date"), "deadline_passed": closed,
             "note": "your_gain / their_gain: points each starting lineup gains over the rest of the season",
-            "teams": [{"team": r.team.name, "owner": r.team.owner_display_name, "needs": list(r.needs),
-                       "offers": [{**serialize.trade_offer(o, weeks), "your_gain": mine, "their_gain": theirs,
-                                   "fills_their_need": [p.position for p in o.give if p.position in r.needs]}
-                                  for o, mine, theirs in offers]}
-                      for r, offers in score_trades(session, league_id, by_team)]}
+            "teams": [] if closed else [
+                {"team": r.team.name, "owner": r.team.owner_display_name, "needs": list(r.needs),
+                 "offers": [{**serialize.trade_offer(o, weeks), "your_gain": mine, "their_gain": theirs,
+                             "helps_both": theirs > 0,
+                             "fills_their_need": [p.position for p in o.give if p.position in r.needs]}
+                            for o, mine, theirs in offers]}
+                for r, offers in score_trades(session, league_id, by_team)]}
+
+
+def deadline_passed(trade_end_date: str | None, today: date | None = None) -> bool:
+    """True once the league's trade deadline (YYYY-MM-DD, trades allowed through that day) is behind us."""
+    if not trade_end_date:
+        return False
+    try:
+        deadline = date.fromisoformat(str(trade_end_date))
+    except ValueError:
+        return False
+    return (today or date.today()) > deadline
 
 
 @router.post("/{league_id}/sync")

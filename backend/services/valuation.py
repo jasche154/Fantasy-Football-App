@@ -1,7 +1,10 @@
 """Rest-of-season player values: projection -> value over replacement -> trade value.
 
-trade_value = max(0, ros_ppg - replacement_ppg) * weeks_remaining, i.e. the rest-of-season
-fantasy points a player is expected to score above the best waiver-wire option.
+trade_value = availability x max(0, healthy_ppg - replacement_ppg) x games_left, i.e. the
+rest-of-season fantasy points a player is expected to score above the best waiver-wire option:
+- healthy_ppg is his rate when he plays (ros_ppg / availability), so an injured star keeps his
+  value for the games he will play instead of being averaged down to replacement level;
+- games_left counts his team's remaining games, so a bye still ahead costs a week.
 
 ros_ppg includes strength of schedule: the player's rate is scaled by the average
 opponent-adjusted factor of the defenses left on their schedule (services.schedule_strength).
@@ -31,6 +34,7 @@ from services.schedule_strength import NEUTRAL, DefenseStrength, Schedule, defen
 
 # Exponent on the remaining-schedule factor; 1.0 applies the matchup difference in full.
 ROS_SCHEDULE_WEIGHT = 1.0
+MIN_SHARE = 0.05        # below this share of games, the rate isn't divided back out (too noisy)
 
 
 @dataclass(frozen=True)
@@ -58,6 +62,7 @@ class PlayerValue:
     expert_ros_ppg: float | None = None
     weekly_ppg: float | None = None
     availability: float = 1.0
+    games_left: int = 0                # his team's remaining games (byes excluded)
 
 
 @dataclass(frozen=True)
@@ -101,6 +106,7 @@ def value_players(current: Sequence[PlayerSeason], previous: Sequence[PlayerSeas
                   consensus: Mapping[int, "RosInputs"] | None = None,
                   playoff_factors: Mapping[int, float] | None = None,
                   role_losses: Mapping[int, tuple[str, float]] | None = None,
+                  games_left: Mapping[int, int] | None = None,
                   ) -> tuple[tuple[PlayerValue, ...], dict[str, float]]:
     """Pure valuation step, separated from data loading so it can be tested directly."""
     rates = {p.player_id: current_rate(p) for p in current}
@@ -121,12 +127,14 @@ def value_players(current: Sequence[PlayerSeason], previous: Sequence[PlayerSeas
 
     values = []
     for p in current:
-        vorp = round(max(0.0, projected[p.player_id] - replacement.get(p.position, 0.0)), 2)
+        share = consensus[p.player_id].availability if p.player_id in consensus else 1.0
+        vorp = round(expected_vorp(projected[p.player_id], share, replacement.get(p.position, 0.0)), 2)
+        games = (games_left or {}).get(p.player_id, remaining)
         values.append(PlayerValue(
             player_id=p.player_id, name=p.name, position=p.position, team=p.team,
             games=p.games_played, ppg=p.ppg, expected_ppg=p.expected_ppg,
             ros_ppg=projected[p.player_id], vorp_per_game=vorp,
-            trade_value=round(vorp * remaining, 1), base_ros_ppg=base[p.player_id],
+            trade_value=round(vorp * games, 1), games_left=games, base_ros_ppg=base[p.player_id],
             schedule_factor=round(factors[p.player_id], 3), model_ros_ppg=model[p.player_id],
             playoff_factor=round((playoff_factors or {}).get(p.player_id, 1.0), 3),
             is_rookie=p.player_id in rookies,
@@ -135,6 +143,13 @@ def value_players(current: Sequence[PlayerSeason], previous: Sequence[PlayerSeas
             **_consensus_fields(consensus.get(p.player_id)),
         ))
     return _rank(values), replacement
+
+
+def expected_vorp(expected_ppg: float, share: float, replacement: float) -> float:
+    """Points above replacement per remaining game: share x (rate when he plays - replacement)."""
+    if share <= MIN_SHARE:
+        return max(0.0, expected_ppg - replacement)
+    return share * max(0.0, expected_ppg / share - replacement)
 
 
 def _consensus_fields(inputs: "RosInputs | None") -> dict:
@@ -195,7 +210,11 @@ def _compute(session: Session, league: LeagueSettings, season: int) -> Valuation
                            {v.player_id: v.model_ros_ppg for v in model_values},
                            {v.player_id: v.position or "" for v in model_values}, remaining,
                            lambda week: matchup_factors(current, schedule, defense, week))
-    values, replacement = value_players(current, previous, league, remaining, factors, consensus, playoff, losses)
+    games_left = ({p.player_id: len(schedule.remaining_opponents(p.team, through or 0, end_week))
+                   for p in current if p.team}
+                  if any(g.week > (through or 0) for g in schedule.games) else None)     # no schedule loaded
+    values, replacement = value_players(current, previous, league, remaining, factors, consensus, playoff, losses,
+                                        games_left)
     return Valuation(season=season, through_week=through, weeks_remaining=remaining, league=league,
                      replacement=MappingProxyType(replacement), values=values,
                      seasons=tuple(current), by_id=MappingProxyType({v.player_id: v for v in values}),
