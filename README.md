@@ -663,6 +663,12 @@ plays again; numbers in `injury_recovery.json`).
 - Example, a knee injury with 10 games left and no news: worth 65% of his healthy value the week
   he's hurt, then 69%, 72%, 75%, 77%; a limited practice in week 2 jumps him to 82%; after he
   returns, 90%, 95%, 98%, then 100%.
+- **Special cases.** Doubtful counts as this week only (he usually sits it, and the fit only saw
+  players who did miss time); a suspension is at least 4 games with no post-return dip. The value
+  never keeps games he's sure to miss (this week, or what's left of IR), so late in the season an
+  IR player with one game left is worth 0 in trade value, lineup gain and the season sim alike.
+  Lineup gain and the season sim count his team's games, so a bye inside the absence isn't a
+  missed game, and without a loaded schedule a reported timeline's weeks are taken as games.
 - **Role on return.** A returning RB whose fill-in scored at least half his rate over 2+ games is
   flagged with the fill-in's name (Breece Hall with Braelon Allen). The value cut is the fitted
   `rb_role_loss`, which is **0** on 2021-25: returning RBs got their snaps and scoring back even

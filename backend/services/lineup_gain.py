@@ -10,8 +10,8 @@
     * Out or on IR now: out for his expected games missed (services/injury_recovery.py: body part,
       practice reports, a little shorter each week he's been out), playing the fractional week in
       part; his first games back keep the measured post-injury dip (a player already back isn't
-      discounted here, only in trade value). Weeks are calendar weeks, so a bye inside the absence
-      counts toward it. Out for the season: 0.
+      discounted here, only in trade value). Missed games are his team's games, so a bye inside the absence
+      doesn't use up a missed game. Out for the season: 0.
       Without that estimate: Out plays week k with probability 1 - OUT_PERSIST^k, IR waits IR_WEEKS;
     * healthy: x his long-run share of weeks played, from the weekly injury hazard (QB 8.8%,
       WR 5.4%, RB/TE 4.3%, 2021-25 starters) and the 60% chance an injured player is still out
@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 
 from services import my_team as mt
+from services.injury_recovery import games_to_weeks
 from services.valuation import MIN_SHARE, ROS_SCHEDULE_WEIGHT
 
 HAZARD = {"QB": 0.088, "WR": 0.054, "RB": 0.043, "TE": 0.043}
@@ -95,7 +96,11 @@ class Projector:
         share = healthy_share(value.position)
         missed = getattr(value, "expected_missed", 0.0) or 0.0
         if missed > 0:
-            return share * _after_injury(weeks_ahead, missed)
+            # Count his team's games, not calendar weeks: a bye inside the absence doesn't use up a game.
+            schedule = getattr(self.valuation, "schedule", None)
+            weeks = (games_to_weeks(missed, value.team, schedule, self.current_week) if schedule is not None
+                     else missed)
+            return share * _after_injury(weeks_ahead, weeks)
         if status in IR_STATUSES:
             return 0.0 if weeks_ahead < IR_WEEKS else share
         if status in OUT_STATUSES:

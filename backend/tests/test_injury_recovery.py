@@ -104,9 +104,11 @@ def test_lineup_gain_and_the_season_sim_use_the_same_expected_absence():
     rust = ir.params()["rust"]
     assert _after_injury(0, 1.5) == 0.0 and _after_injury(1, 1.5) == pytest.approx(0.5)
     assert _after_injury(2, 1.5) == pytest.approx(rust[0]) and _after_injury(5, 1.5) == 1.0
-    valuation = SimpleNamespace(values=[SimpleNamespace(player_id=1, expected_missed=3.4),
-                                        SimpleNamespace(player_id=2, expected_missed=0.2)])
-    assert _start_out(valuation) == {1: 3}
+    valuation = SimpleNamespace(through_week=6, schedule=_schedule(weeks=(7, 9, 10, 11, 12)), values=[
+        SimpleNamespace(player_id=1, team="AAA", expected_missed=3.4),        # games 7, 9, 10 (bye in 8) + part of 11
+        SimpleNamespace(player_id=2, team="AAA", expected_missed=0.2),
+        SimpleNamespace(player_id=3, team=None, expected_missed=2.0)])
+    assert _start_out(valuation) == {1: 4, 3: 2}
 
 
 def _pid(session, name):
@@ -153,3 +155,26 @@ def test_a_bye_inside_a_reported_timeline_is_not_a_missed_game():
     schedule = _schedule(weeks=(7, 9, 10))                                  # bye in week 8
     assert ir.news_games(3.0, "AAA", schedule, 7) == 2.0
     assert ir.news_games(3.0, None, schedule, 7) == 3.0
+
+
+@pytest.mark.parametrize("status,group,games_out,remaining", [
+    ("IR", "unknown", 6, 1), ("IR", "unknown", 6, 2), ("OUT", "knee", 5, 3), ("IR", "hamstring", 0, 10), ("OUT", "concussion", 2, 4),
+])
+def test_trade_value_never_keeps_games_he_is_sure_to_miss(status, group, games_out, remaining):
+    state = out(group, status=status, games_out=games_out)
+    assert state.share(remaining) <= 1 - state.expected_missed(remaining) / remaining + 0.001     # share has 3 decimals
+
+
+def test_doubtful_is_one_game_and_a_suspension_has_no_rust():
+    assert out(status="DOUBTFUL").expected_missed(REMAINING) == 1.0
+    suspended = out("unknown", status="SUS")
+    assert suspended.expected_missed(REMAINING) == ir.IR_MIN_GAMES and suspended.rust_games(REMAINING) == 0
+    assert suspended.note(REMAINING) == "Suspended: likely out 4 more games"
+
+
+def test_missed_games_become_weeks_around_byes_and_need_a_schedule():
+    schedule = _schedule(weeks=(7, 9, 10, 11))                              # bye in week 8
+    assert ir.games_to_weeks(2.0, "AAA", schedule, 7) == 3.0                # out weeks 7 and 9, back in 10
+    assert ir.games_to_weeks(1.5, "AAA", schedule, 7) == 2.5
+    assert ir.games_to_weeks(2.0, "ZZZ", schedule, 7) == 2.0                # team not in the schedule
+    assert ir.news_games(14.0, "KC", Schedule(games=()), 5) == 14.0        # no schedule: weeks as games

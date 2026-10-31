@@ -130,6 +130,10 @@ class Recovery:
             return 0.0
         fitted = params()
         ir = self.status in IR_STATUSES
+        if self.suspended:                               # a set number of games, not an injury
+            return float(min(max(1, IR_MIN_GAMES - self.games_out), remaining))
+        if self.status == "DOUBTFUL" and self.news_weeks is None:
+            return float(min(1, remaining))                # usually sits this week; no longer stint assumed
         if self.news_weeks is not None:
             # A reported timeline already counts time passed; a practice report is newer evidence.
             factor = fitted["practice_factor"].get(self.practice, 1.0) if self.practice in ("dnp", "practicing") else 1.0
@@ -144,9 +148,19 @@ class Recovery:
             missed = max(missed, IR_MIN_GAMES - self.games_out)
         return round(min(missed, remaining), 2)
 
+    @property
+    def suspended(self) -> bool:
+        return self.status == "SUS"
+
+    def _floor(self) -> float:
+        """The fewest games an out-now player misses: this one, or what's left of injured reserve."""
+        if self.status in IR_STATUSES and not self.suspended:
+            return float(max(1, IR_MIN_GAMES - self.games_out))
+        return 1.0
+
     def rust_games(self, remaining: int) -> float:
         """Points lost after he returns (slower first games, re-injury), in games."""
-        if self.season_ending or not (self.out_now or self.games_out or self.games_back is not None):
+        if self.season_ending or self.suspended or not (self.out_now or self.games_out or self.games_back is not None):
             return 0.0
         rust = params()["rust"]
         start = self.games_back if self.games_back is not None and not self.games_out else 0
@@ -171,8 +185,10 @@ class Recovery:
             discount = lost / max(remaining, 1)
         else:
             discount = lost / max(remaining + self.games_out, 1) * (1 - WEEKLY_RECOVERY) ** self.games_out
-        if self.status in IR_STATUSES:
-            discount = max(discount, (IR_MIN_GAMES - self.games_out) / max(remaining, 1))
+        if self.out_now:
+            # Never less than the games he's sure to miss (lineup gain and the season sim sit him for them).
+            certain = min(self._floor(), float(remaining)) + self.rust_games(remaining)
+            discount = max(discount, certain / max(remaining, 1))
         return round(min(1.0, max(0.0, discount)), 3)
 
     def share(self, remaining: int) -> float:
@@ -186,8 +202,7 @@ class Recovery:
         if not self.out_now:
             return 0.0
         games = self.discount(remaining) * remaining - self.rust_games(remaining)
-        floor = max(1.0, IR_MIN_GAMES - self.games_out) if self.status in IR_STATUSES else 1.0
-        return round(min(float(remaining), max(floor, games)), 2)
+        return round(min(float(remaining), max(self._floor(), games)), 2)
 
     def note(self, remaining: int) -> str | None:
         """Plain words for the UI and Ask AI: whole games ("likely out 2 more games"), not decimals."""
@@ -198,7 +213,8 @@ class Recovery:
             games = max(1, math.floor(self.expected_missed(remaining) + 0.5))
             practiced = {"practicing": ", practicing", "dnp": ", not practicing"}.get(self.practice or "", "")
             source = " (reported timeline)" if self.news_weeks is not None else " (surgery)" if self.surgery else ""
-            subject = "Not injury-related" if self.group == "non_injury" else f"{label} injury" if label else "Injured"
+            subject = ("Suspended" if self.suspended else "Not injury-related" if self.group == "non_injury"
+                       else f"{label} injury" if label else "Injured")
             return f"{subject}: likely out {games} more game{'' if games == 1 else 's'}{source}{practiced}"
         if self.games_out:
             word = label if self.group == "acl_achilles" else (label or "").lower()
@@ -245,8 +261,9 @@ def _last_game(player: PlayerSeason, schedule: Schedule) -> datetime | None:
     """His last kickoff (news from before it is about an earlier injury); the game day if no time is listed."""
     if not player.games or not player.team:
         return None
-    week = player.games[-1].week
-    game = next((g for g in schedule.games if g.week == week and player.team in (g.home_team, g.away_team)), None)
+    last = player.games[-1]
+    teams = {t for t in (last.opponent, player.team) if t}       # opponent: right even after a trade
+    game = next((g for g in schedule.games if g.week == last.week and teams & {g.home_team, g.away_team}), None)
     if game is None:
         return None
     if game.kickoff is not None:
@@ -257,12 +274,30 @@ def _last_game(player: PlayerSeason, schedule: Schedule) -> datetime | None:
         return None
 
 
+def _team_weeks(team: str | None, schedule: Schedule) -> list[int]:
+    return sorted(g.week for g in schedule.games if team in (g.home_team, g.away_team)) if team else []
+
+
 def news_games(weeks: float, team: str | None, schedule: Schedule, week: int) -> float:
-    """Calendar weeks out (a reported timeline) as games: a bye inside the window isn't a missed game."""
-    if not team:
+    """Calendar weeks out (a reported timeline) as games: a bye inside the window isn't a missed game.
+
+    Without the team's schedule (none loaded, or an unknown team), weeks are taken as games."""
+    played = _team_weeks(team, schedule)
+    if not played:
         return weeks
-    byes = sum(1 for w in range(week, week + int(weeks)) if schedule.opponent(team, w) is None)
+    last = played[-1]
+    byes = sum(1 for w in range(week, min(week + int(weeks), last + 1)) if w not in played)
     return max(0.0, weeks - byes)
+
+
+def games_to_weeks(games: float, team: str | None, schedule: Schedule, week: int) -> float:
+    """Games out as calendar weeks from `week` (a bye inside the absence doesn't use one up), so
+    lineup gain and the season sim sit him for the same games valuation discounts."""
+    played = [w for w in _team_weeks(team, schedule) if w >= week]
+    whole = int(games)
+    if not played or whole >= len(played):
+        return games
+    return (played[whole] - week) + (games - whole)
 
 
 def recovery_states(session: Session, seasons: Iterable[PlayerSeason], schedule: Schedule,

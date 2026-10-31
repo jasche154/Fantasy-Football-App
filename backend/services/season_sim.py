@@ -90,7 +90,11 @@ def weekly_lineups(rosters: Mapping[str, Sequence], free_agents: Sequence, weeks
 
 def _start_out(valuation) -> dict[int, int]:
     """{player id: weeks certainly out}: his expected games missed (services/injury_recovery.py), rounded."""
-    out = {v.player_id: math.floor(v.expected_missed + 0.5) for v in valuation.values}     # half-up, not to even
+    from services.injury_recovery import games_to_weeks
+
+    week = (valuation.through_week or 0) + 1
+    out = {v.player_id: math.floor(games_to_weeks(v.expected_missed, v.team, valuation.schedule, week) + 0.5)
+           for v in valuation.values if v.expected_missed > 0}                          # half-up, not to even
     return {pid: weeks for pid, weeks in out.items() if weeks > 0}
 
 

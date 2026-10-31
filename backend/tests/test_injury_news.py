@@ -151,3 +151,28 @@ def test_a_news_failure_never_fails_the_status_refresh(session, seeded, monkeypa
     monkeypatch.setattr(news, "refresh", lambda session, http: (_ for _ in ()).throw(RuntimeError("boom")))
     result = weekly_refresh._refresh_status(session, None, force=True)
     assert result["state"] == "updated" and result["rows"] == 12
+
+
+def test_refresh_stops_when_sleeper_looks_down_and_bad_stamps_are_dropped(session, seeded, monkeypatch):
+    from integrations.sleeper_news import parse_news
+
+    players = session.query(Player).filter(Player.position.in_(["RB", "WR"])).limit(8).all()
+    for i, player in enumerate(players):
+        player.sleeper_player_id = str(200 + i)
+        session.add(PlayerStatus(player_id=player.id, injury_status="Out", news_updated=1))
+    session.commit()
+    calls = []
+
+    def down(sleeper_id, client, fresh=False):
+        calls.append(sleeper_id)
+        raise SleeperError("timeout")
+
+    monkeypatch.setattr(news, "fetch_news", down)
+    result = news.refresh(session, None)
+    assert result["errors"] == news.MAX_FAILURES_IN_ROW == len(calls) and result["due"] == len(players)
+    retried = []
+    monkeypatch.setattr(news, "fetch_news", lambda sid, client, fresh=False: retried.append(sid) or [])
+    news.refresh(session, None)
+    assert retried[:len(players) - len(calls)] == [p.sleeper_player_id for p in players if p.sleeper_player_id not in calls]
+    rows = [{"metadata": {"title": "Out 6 weeks"}, "published": 1e20}, {"metadata": {"title": "x"}, "published": float("inf")}]
+    assert [i["published"] for i in parse_news(rows)] == [None, None]

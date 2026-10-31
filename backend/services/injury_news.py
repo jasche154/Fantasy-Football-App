@@ -27,6 +27,7 @@ import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from itertools import islice
 
 import httpx
 from sqlalchemy import select
@@ -42,6 +43,9 @@ log = logging.getLogger(__name__)
 OUT_TAGS = IR_STATUSES | SHORT_OUT            # the tags injury_recovery treats as "out now"
 POSITIONS = ("QB", "RB", "WR", "TE")
 MAX_FETCHES = 150             # news calls per refresh (Sleeper asks for under 1,000 a minute)
+MAX_FAILURES_IN_ROW = 5       # then Sleeper is probably down: stop instead of waiting out 150 timeouts
+MAX_TEXT = 1500               # characters of one headline parsed (bounds the regex work)
+MAX_CANDIDATES = 5            # timeline matches tried per sentence
 KEEP_DAYS = 240               # stored signals older than this are dropped (a season and its offseason)
 WEEKS_PER_MONTH = 4.3
 MAX_WEEKS = 26
@@ -104,7 +108,7 @@ def _about(prefix: str, surname: str | None) -> bool:
 
 
 def _timeline(sentence: str, surname: str | None) -> list[float] | None:
-    for match in TIMELINE.finditer(sentence):
+    for match in islice(TIMELINE.finditer(sentence), MAX_CANDIDATES):
         before, after = sentence[:match.start()], sentence[match.end():]
         if LOOKING_BACK.search(before) or AGO.match(after) or not _about(before, surname):
             continue
@@ -118,7 +122,7 @@ def _timeline(sentence: str, surname: str | None) -> list[float] | None:
 
 def signal(item: Mapping, surname: str | None = None) -> dict | None:
     """{published, season_ending, weeks} for one headline about the player, or None when it says neither."""
-    text = " ".join(t for t in (item.get("title"), item.get("summary")) if t).lower()
+    text = " ".join(t for t in (item.get("title"), item.get("summary")) if t).lower()[:MAX_TEXT]
     ending = False
     for m in SEASON_ENDING.finditer(text):
         sentence = SENTENCE.split(text[:m.start()])[-1]
@@ -160,7 +164,8 @@ def evidence(stored: Iterable[Mapping], since: datetime | None, now: datetime) -
     """Evidence published after `since` (his last kickoff): any season-ending headline wins; otherwise
     the median return date implied by the timelines. Later articles often restate the first
     diagnosis ("out 12 weeks" again a month later), so no single headline is trusted to restart it."""
-    usable = [(p, s) for s in stored if (p := _published(s)) and (since is None or p >= since) and p <= now]
+    since = max(since, now - timedelta(days=KEEP_DAYS)) if since else now - timedelta(days=KEEP_DAYS)
+    usable = [(p, s) for s in stored if (p := _published(s)) and since <= p <= now]
     usable.sort(key=lambda pair: pair[0], reverse=True)
     for published, s in usable:
         if s.get("season_ending"):
@@ -200,8 +205,14 @@ def refresh(session: Session, client: httpx.Client, limit: int = MAX_FETCHES) ->
     stored = {r.player_id: r for r in session.scalars(select(InjuryNews))}
     due = [r for r in rows if (r.injury_status or "").upper() in OUT_TAGS
            and (r.player_id not in stored or stored[r.player_id].news_updated != r.news_updated)]
-    fetched = errors = 0
+    # Least recently checked first, so players whose news keeps failing can't starve the rest.
+    oldest = datetime.min.replace(tzinfo=timezone.utc)
+    due.sort(key=lambda r: _aware(stored[r.player_id].checked_at) if r.player_id in stored else oldest)
+    fetched = errors = failures_in_row = 0
     for row in due[:limit]:
+        if failures_in_row >= MAX_FAILURES_IN_ROW:
+            log.warning("Sleeper news looks down; stopped after %s failures in a row", failures_in_row)
+            break
         try:
             items = fetch_news(row.sleeper_player_id, client, fresh=True)
             record = stored.get(row.player_id) or InjuryNews(player_id=row.player_id)
@@ -212,8 +223,27 @@ def refresh(session: Session, client: httpx.Client, limit: int = MAX_FETCHES) ->
             session.add(record)
             session.commit()
             fetched += 1
+            failures_in_row = 0
         except Exception as exc:  # noqa: BLE001 - one player's news must never stop the others
             session.rollback()
             errors += 1
+            failures_in_row += 1
             log.warning("Sleeper news failed for player %s: %s", row.player_id, type(exc).__name__)
+            _mark_checked(session, row.player_id)
     return {"due": len(due), "fetched": fetched, "errors": errors}
+
+
+def _aware(moment: datetime) -> datetime:
+    return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
+
+
+def _mark_checked(session: Session, player_id: int) -> None:
+    """A failed player moves to the back of the queue (his news stamp stays old, so he's retried)."""
+    try:
+        record = session.get(InjuryNews, player_id) or InjuryNews(player_id=player_id, signals="[]")
+        record.checked_at = utc_now()
+        session.add(record)
+        session.commit()
+    except Exception as exc:  # noqa: BLE001
+        session.rollback()
+        log.warning("Couldn't record the failed news check: %s", type(exc).__name__)
