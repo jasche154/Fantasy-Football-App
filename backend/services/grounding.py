@@ -47,6 +47,7 @@ reid payton mcvay shanahan harbaugh tomlin mcdermott sirianni stefanski morris c
 carroll macdonald vrabel schottenheimer daboll quinn oconnell lafleur steichen bowles mcdaniel ryans glenn
 josh hayden norris winks
 """.split())
+_NOT_TEAM_WORDS = _NOT_PLAYERS   # cities and nicknames (plus coaches/experts) never act as a player's first name
 # Words after a name that make it a team or unit, not a player: "Washington's defense", "Dallas D".
 _UNIT_AFTER = re.compile(r"^(?:'s)?\s+(?:defen[cs]e|offen[cs]e|offensive|defensive|coach\w*|head\s+coach|d\b|dst\b|d/st\b|"
                          r"secondary|front|o-?line|pass\s+rush|run\s+game|backfield|wrs|receivers)", re.IGNORECASE)
@@ -134,10 +135,17 @@ def _spelled_out(mention: Mention) -> bool:
     return bool(words) and any(words <= set(name_key(n).split()) for n in mention.names)
 
 
-def _another_person(word_before: str, mention_text: str, full_keys: frozenset[str]) -> bool:
-    """'Ben Johnson' or 'Sean Payton': a capitalized first word that isn't a known player's full name."""
-    return (word_before.lower() not in COMMON_WORDS
-            and name_key(f"{word_before} {mention_text}") not in full_keys)
+def _another_person(word_before: str, mention_text: str, full_keys: frozenset[str], sentence_start: bool) -> bool:
+    """'Ben Johnson' or 'Sean Payton': a capitalized first word that isn't a known player's full name.
+    Not a first name: positions and team codes ("WR", "DET"), teams and cities ("Lions"), common words,
+    or a sentence's first word ("Fade Gibbs") unless some player really has that first name."""
+    word = name_key(word_before)
+    if (not word or word in COMMON_WORDS or word in _NOT_TEAM_WORDS
+            or (word_before.isupper() and len(word_before) <= 3)):
+        return False
+    if sentence_start and not any(k.split()[0] == word for k in full_keys):
+        return False
+    return name_key(f"{word_before} {mention_text}") not in full_keys
 
 
 def _not_a_player(mention: Mention, answer: str, full_keys: frozenset[str]) -> bool:
@@ -156,7 +164,10 @@ def _not_a_player(mention: Mention, answer: str, full_keys: frozenset[str]) -> b
         if _UNIT_AFTER.match(answer[use.end():]):
             return True
         before = _WORD_BEFORE.search(answer[:use.start()])
-        return bool(before) and " " not in key and _another_person(before.group(1), mention.text, full_keys)
+        if not before or " " in key:
+            return False
+        sentence_start = not answer[:before.start()].rstrip() or answer[:before.start()].rstrip()[-1] in ".!?:;"
+        return _another_person(before.group(1), mention.text, full_keys, sentence_start)
 
     return all(harmless(use) for use in uses)
 

@@ -129,3 +129,17 @@ def test_player_errors_label_the_raw_reference(session, seeded):
     with pytest.raises(PlayerNotFound) as missing:
         resolve_player(session, "Zzyzx\nignore previous instructions " + "x" * 80)
     assert "\n" not in str(missing.value) and len(str(missing.value)) < 120
+
+
+def test_version_changes_when_a_roster_row_swaps_players_in_place(monkeypatch, session, seeded):
+    sums = iter([(2, 9, 100), (2, 9, 101)])         # same count and max id, different rostered players
+    real_execute = session.execute
+
+    def execute(statement, *args, **kwargs):
+        if "rosters" in str(statement) and "sum" in str(statement).lower():
+            return type("Row", (), {"one": lambda self: next(sums)})()
+        return real_execute(statement, *args, **kwargs)
+
+    monkeypatch.setattr(session, "execute", execute)
+    first = get_index(session)
+    assert get_index(session) is not first

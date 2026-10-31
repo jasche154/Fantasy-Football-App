@@ -28,6 +28,12 @@ DEFAULT_RETRY_AFTER = 60        # seconds, when a provider doesn't say
 MAX_RETRY_AFTER = 24 * 3600     # a daily cap resets within a day
 PROVIDER_DOWN_COOLDOWN = 30     # skip a failing provider this long before trying it again
 TOOL_CALL_KEYS = ("id", "type", "function")
+CHARS_PER_TOKEN = 4
+# A request estimated this far over a provider's input budget is skipped without a call. The
+# budgets sit below the real limits, so a small overshoot is still worth sending.
+SKIP_OVER_BUDGET = 1.5
+TOO_LARGE_MESSAGE = ("That question needed more data than the AI provider's free tier accepts in one request. "
+                     "Ask a narrower question (one player, position or league).")
 # The provider's own error text echoes model output, so only a tool name (an identifier) is kept.
 NOT_TOOL_NAMES = frozenset({"call", "calls", "choice", "use", "validation", "which", "that", "in", "with"})
 TOOL_NAME_IN_ERROR = re.compile(r"\btool\s+['\"`]?([A-Za-z_][A-Za-z0-9_]{0,63})\b")
@@ -113,9 +119,7 @@ def _raise_for_status(name: str, response: httpx.Response) -> None:
         raise ToolCallRejected(_rejection(message))
     if status == 413 or "request too large" in message.lower():
         log.warning("%s: request too large (HTTP %s)", name, status)
-        raise AgentUnavailable("That question needed more data than the AI provider's free tier accepts in "
-                               "one request. Ask a narrower question (one player, position or league).",
-                               kind="too_large")
+        raise AgentUnavailable(TOO_LARGE_MESSAGE, kind="too_large")
     if status == 429 or code == "rate_limit_exceeded":
         wait = _retry_after(response)
         log.warning("%s rate limit (HTTP %s), retry after %ss", name, status, wait)
@@ -271,36 +275,52 @@ class FallbackClient:
             _cooldowns[client.profile.name] = (self._clock() + seconds, kind)
 
     def complete(self, messages: list[dict], tools: list[dict] | None) -> dict:
+        estimate = estimate_tokens(messages, tools)
         last_error: AgentUnavailable | None = None
-        refused_at: int | None = None       # max_input_tokens of a provider that said "too large"
+        too_large: AgentUnavailable | None = None
+        too_small: set[str] = set()          # providers that can't take this request
+        refused_at = 0                       # largest max_input_tokens that answered "too large"
         for client in self._clients:
-            if self._ready_in(client) > 0:
+            limit = client.profile.max_input_tokens
+            if limit <= refused_at or limit * SKIP_OVER_BUDGET < estimate:
+                too_small.add(client.profile.name)
                 continue
-            if refused_at is not None and client.profile.max_input_tokens <= refused_at:
+            if self._ready_in(client) > 0:
                 continue
             try:
                 response = client.complete(messages, tools)
             except AgentUnavailable as exc:
                 if exc.kind == "too_large":
-                    refused_at = max(refused_at or 0, client.profile.max_input_tokens)
+                    too_small.add(client.profile.name)
+                    refused_at, too_large = max(refused_at, limit), exc
                 else:
                     self._cool_down(client, exc.retry_after or PROVIDER_DOWN_COOLDOWN, exc.kind)
-                last_error = exc
+                    last_error = exc
                 continue
             self._answered = client
             return response
-        return self._exhausted(last_error)
+        return self._exhausted(last_error, too_large, too_small)
 
-    def _exhausted(self, last_error: AgentUnavailable | None) -> dict:
+    def _exhausted(self, last_error: AgentUnavailable | None, too_large: AgentUnavailable | None,
+                   too_small: set[str]) -> dict:
         if last_error and last_error.kind != "rate_limit":
             raise last_error
-        wait, kind = min(self._cooldown(c) for c in self._clients)
+        cooling = [self._cooldown(c) for c in self._clients if c.profile.name not in too_small]
+        cooling = [entry for entry in cooling if entry[0] > 0]
+        if not cooling:                      # only providers too small for this request were left
+            raise too_large or AgentUnavailable(TOO_LARGE_MESSAGE, kind="too_large")
+        wait, kind = min(cooling)
         seconds = max(1, round(wait))
         if kind != "rate_limit":
             raise AgentUnavailable(f"The AI providers are unreachable right now. Try again in about {seconds} "
                                    "seconds.", kind="provider", retry_after=seconds)
         raise AgentUnavailable(f"Every configured AI provider is at its free-tier limit. Try again in about "
                                f"{seconds} seconds.", kind="rate_limit", retry_after=seconds)
+
+
+def estimate_tokens(messages: Sequence[dict], tools: Sequence[dict] | None) -> int:
+    """Rough request size (chars / 4), enough to skip providers that would refuse it."""
+    return len(json.dumps([list(messages), list(tools or [])], default=str)) // CHARS_PER_TOKEN
 
 
 LLMClientLike = OpenAICompatClient | FallbackClient

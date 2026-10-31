@@ -191,6 +191,9 @@ def test_teams_coaches_and_experts_are_not_ungrounded_players(answer):
     ("Pick up Parker Washington.", "Parker Washington"),
     ("Start Dalton in a superflex league.", "Andy Dalton"),
     ("Tucker is a sneaky flex.", "Sean Tucker"),
+    ("I like WR Gibbs more.", "Jahmyr Gibbs"),
+    ("Lions RB Gibbs is better.", "Jahmyr Gibbs"),
+    ("Fade Gibbs this week.", "Jahmyr Gibbs"),
 ])
 def test_invented_real_players_are_still_flagged(answer, stray):
     evidence = collect_evidence(convo('{"players": ["Puka Nacua (WR, LA)"]}'))

@@ -227,7 +227,8 @@ _cache: "WeakKeyDictionary[object, tuple[tuple, PlayerIndex]]" = WeakKeyDictiona
 def _version(session: Session) -> tuple:
     """Changes whenever a player, an imported roster or a new stats week lands."""
     players = session.execute(select(func.count(Player.id), func.max(Player.id))).one()
-    rosters = session.execute(select(func.count(Roster.id), func.max(Roster.id))).one()
+    # The player-id sum catches a drop + add that reuses the same row id (yahoo_sync rewrites a week's rosters).
+    rosters = session.execute(select(func.count(Roster.id), func.max(Roster.id), func.sum(Roster.player_id))).one()
     stats = session.execute(select(PlayerStatsWeekly.season, PlayerStatsWeekly.week)
                             .order_by(PlayerStatsWeekly.season.desc(), PlayerStatsWeekly.week.desc())
                             .limit(1)).first()

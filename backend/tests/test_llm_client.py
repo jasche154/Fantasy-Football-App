@@ -207,6 +207,10 @@ def test_too_large_moves_only_to_a_provider_with_a_bigger_input_budget():
     chain = FallbackClient([gemini_down, big, client_for("groq", respond(200, ok_body("tiny")), seen["groq"])])
     with pytest.raises(AgentUnavailable) as info:          # groq (5k) is smaller than openrouter (30k)
         chain.complete([], None)
+    assert info.value.kind == "provider" and seen["groq"] == []   # gemini's outage is what blocks it
+    llm_client.clear_cooldowns()
+    with pytest.raises(AgentUnavailable) as info:
+        FallbackClient([big, client_for("groq", respond(200, ok_body("tiny")), seen["groq"])]).complete([], None)
     assert info.value.kind == "too_large" and seen["groq"] == []
     llm_client.clear_cooldowns()
 
@@ -311,3 +315,31 @@ def test_real_settings_default_to_groq(monkeypatch):
     get_settings.cache_clear()
     client = build_llm_client(get_settings())
     assert get_settings().llm_chain == "groq" and client.profile.name == "groq"
+
+
+def test_too_large_then_rate_limited_reports_the_rate_limit():
+    chain = FallbackClient([client_for("groq", respond(413, {})),
+                            client_for("gemini", respond(429, {}, {"retry-after": "600"}))])
+    with pytest.raises(AgentUnavailable) as info:
+        chain.complete([], None)
+    assert info.value.kind == "rate_limit" and info.value.retry_after == 600
+    with pytest.raises(AgentUnavailable) as info:        # next round: still the real wait, not "unreachable"
+        chain.complete([], None)
+    assert info.value.kind == "rate_limit" and 590 <= info.value.retry_after <= 600
+
+
+def test_requests_far_over_a_budget_skip_that_provider_without_a_call():
+    groq_seen, gemini_seen = [], []
+    chain = FallbackClient([client_for("groq", respond(200, ok_body("small")), groq_seen),
+                            client_for("gemini", respond(200, ok_body("big")), gemini_seen)])
+    small = [{"role": "user", "content": "hi"}]
+    big = [{"role": "user", "content": "x" * (PROVIDERS["groq"].max_input_tokens * 4 * 2)}]
+    assert llm_client.estimate_tokens(big, None) > PROVIDERS["groq"].max_input_tokens * llm_client.SKIP_OVER_BUDGET
+
+    assert chain.complete(big, None)["content"] == "big" and groq_seen == []
+    assert chain.complete(small, None)["content"] == "small" and len(groq_seen) == 1
+
+    huge = [{"role": "user", "content": "x" * (PROVIDERS["gemini"].max_input_tokens * 4 * 2)}]
+    with pytest.raises(AgentUnavailable) as info:        # nobody can take it: too_large, no call made
+        chain.complete(huge, None)
+    assert info.value.kind == "too_large" and len(gemini_seen) == 1
