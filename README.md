@@ -451,7 +451,9 @@ Offers rank by your gain minus half of what they lose (`offer_score`), so a deal
 lineups ("Helps both lineups") beats a slightly bigger one that hurts them; at most three per team,
 no more than two built on the same player of yours. After the league's trade deadline the list is
 empty. The standalone calculator discounts extra players more steeply (1, 0.7, 0.5, 0.4) since
-depth is worth little; pick a league in the calculator ("Score on") to also see both lineups' gains.
+depth is worth little; pick a league in the calculator ("Score on") to also see both lineups' gains,
+scored exactly as on this list. If some players you give aren't on your roster there (or some you get
+already are), the value verdict still shows with a note instead of lineup gains.
 
 **Streaming** (My Team → Streaming): your defense (and quarterback, in one-QB leagues) and the
 best ten free agents over the next three weeks, with a plan that only switches for 2+ points.

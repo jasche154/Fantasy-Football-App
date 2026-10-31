@@ -41,14 +41,17 @@ def trade_evaluate(request: TradeRequest, session: Session = Depends(get_session
                                  "only QB/RB/WR/TE with games this season can be traded.")
     impact, pool = None, valuation.values
     if request.league_id is not None:
-        from services.league_moves import trade_impact
+        from services.league_trades import trade_impact
+        from services.valuation import NoDataError
 
         try:
             impact = trade_impact(session, request.league_id, request.give, request.get)
-        except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
+        except NoDataError as exc:
+            raise HTTPException(503, str(exc)) from exc
         pool_ids = impact.pop("pool_ids")
         pool = [v for v in valuation.values if v.player_id in pool_ids]      # only the two rosters
+        impact = {**impact, **{key: serialize.player_ref(impact[key]) if impact[key] else None
+                               for key in ("their_drop", "your_add")}}
     give, get = [valuation.by_id[p] for p in request.give], [valuation.by_id[p] for p in request.get]
     try:
         evaluation = evaluate_trade(give, get, pool, valuation.weeks_remaining)

@@ -62,7 +62,7 @@ class PlayerValue:
     expert_ros_ppg: float | None = None
     weekly_ppg: float | None = None
     availability: float = 1.0
-    games_left: int = 0                # his team's remaining games (byes excluded)
+    games_left: int | None = None      # his team's remaining games (byes excluded); None = not in the schedule
 
 
 @dataclass(frozen=True)
@@ -129,12 +129,13 @@ def value_players(current: Sequence[PlayerSeason], previous: Sequence[PlayerSeas
     for p in current:
         share = consensus[p.player_id].availability if p.player_id in consensus else 1.0
         vorp = round(expected_vorp(projected[p.player_id], share, replacement.get(p.position, 0.0)), 2)
-        games = (games_left or {}).get(p.player_id, remaining)
+        games = (games_left or {}).get(p.player_id)
         values.append(PlayerValue(
             player_id=p.player_id, name=p.name, position=p.position, team=p.team,
             games=p.games_played, ppg=p.ppg, expected_ppg=p.expected_ppg,
             ros_ppg=projected[p.player_id], vorp_per_game=vorp,
-            trade_value=round(vorp * games, 1), games_left=games, base_ros_ppg=base[p.player_id],
+            trade_value=round(vorp * (remaining if games is None else games), 1), games_left=games,
+            base_ros_ppg=base[p.player_id],
             schedule_factor=round(factors[p.player_id], 3), model_ros_ppg=model[p.player_id],
             playoff_factor=round((playoff_factors or {}).get(p.player_id, 1.0), 3),
             is_rookie=p.player_id in rookies,
@@ -210,8 +211,9 @@ def _compute(session: Session, league: LeagueSettings, season: int) -> Valuation
                            {v.player_id: v.model_ros_ppg for v in model_values},
                            {v.player_id: v.position or "" for v in model_values}, remaining,
                            lambda week: matchup_factors(current, schedule, defense, week))
+    scheduled = {team for game in schedule.games for team in (game.home_team, game.away_team)}
     games_left = ({p.player_id: len(schedule.remaining_opponents(p.team, through or 0, end_week))
-                   for p in current if p.team}
+                   for p in current if p.team in scheduled}       # unknown team: weeks_remaining
                   if any(g.week > (through or 0) for g in schedule.games) else None)     # no schedule loaded
     values, replacement = value_players(current, previous, league, remaining, factors, consensus, playoff, losses,
                                         games_left)

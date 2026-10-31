@@ -192,7 +192,8 @@ export interface TradeSidePlayer {
   pos_rank?: string;
   /** Share of remaining games he is expected to play (injury, or a backup role). */
   availability?: number;
-  games_left?: number;
+  /** Null when his team isn't in the loaded schedule. */
+  games_left?: number | null;
   schedule_factor?: number;
   playoff_factor?: number;
   expert_ros_ppg?: number | null;
@@ -235,9 +236,14 @@ export interface TradeResult {
 
 /** Points each real starting lineup gains over the rest of the season. */
 export interface TradeLineupImpact {
-  your_gain: number;
+  /** Null when the trade can't be scored on this league (see `note`). */
+  your_gain: number | null;
   their_gain: number | null;
   their_team: string | null;
+  /** Who they drop to fit the extra player, and the free agent for a spot you open. */
+  their_drop?: PlayerSummary | null;
+  your_add?: PlayerSummary | null;
+  note?: string | null;
 }
 
 export interface TradeRequest {

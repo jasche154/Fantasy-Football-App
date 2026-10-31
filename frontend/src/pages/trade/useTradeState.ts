@@ -97,7 +97,7 @@ export function useTradeState(query: Readonly<Record<string, string>>, settings:
           return { key: tradeKey, result };
         }
       : null,
-    [tradeKey, settings],
+    [tradeKey, ids.league === undefined ? settings : null],   // a league brings its own settings
   );
   useResolveMissing(ids, known, settings, remember, evaluation.status === 'error');
   const isCurrent = evaluation.status === 'success' && evaluation.data.key === tradeKey;

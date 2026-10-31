@@ -45,12 +45,16 @@ export function marketText(market: number | null | undefined): string | null {
   return `By expert consensus it favours ${side} by ${formatFraction(Math.abs(market), 0)}.`;
 }
 
-function LineupImpact({ lineup }: { lineup: TradeLineupImpact }) {
+export function LineupImpact({ lineup }: { lineup: TradeLineupImpact }) {
+  if (lineup.your_gain == null) return <p className="meta-line">{lineup.note ?? 'Lineup gains aren’t available for this trade.'}</p>;
+  const helpsBoth = lineup.your_gain > 0 && (lineup.their_gain ?? 0) > 0;
   return (
-    <p className="meta-line" data-testid="lineup-impact">
+    <p className="meta-line">
       On your league: your starting lineup {formatSigned(lineup.your_gain)} pts rest of season
       {lineup.their_gain != null && <>, {lineup.their_team ?? 'theirs'} {formatSigned(lineup.their_gain)}</>}.
-      {lineup.your_gain > 0 && (lineup.their_gain ?? 0) > 0 && <> Both lineups improve.</>}
+      {helpsBoth && <> Both lineups improve.</>}
+      {lineup.their_drop && <> They drop {lineup.their_drop.name} to make room.</>}
+      {lineup.your_add && <> You add {lineup.your_add.name} with the open spot.</>}
     </p>
   );
 }

@@ -96,7 +96,7 @@ describe('TradeFinder', () => {
     await user.click(screen.getByRole('button', { name: 'Find trades' }));
     expect(await screen.findByText('Fair trade')).toBeInTheDocument();
     expect(screen.getByText('~62% to accept')).toBeInTheDocument();
-    expect(screen.getByText('1 offers found.')).toBeInTheDocument();
+    expect(screen.getByText('1 offer found.')).toBeInTheDocument();
     expect(api.callsTo('/api/trade/find', 'POST')[0].body).toMatchObject({ my_players: [CHASE.id], want_position: 'RB' });
     expect(screen.getByRole('link', { name: `Load ${CHASE.name} for ${BIJAN.name} in calculator` })).toHaveAttribute('href', `#/trade?give=${CHASE.id}&get=${BIJAN.id}`);
   });
@@ -109,7 +109,7 @@ describe('TradeFinder', () => {
     await user.click(screen.getByRole('button', { name: 'Find trades' }));
     expect(await screen.findByText('Fair trade')).toBeInTheDocument();
     view.rerender(<AppProviders><TradeFinder giveIds={[CHASE.id, BIJAN.id]} /></AppProviders>);
-    expect(screen.getByText('Your trade changed. Search again for new offers.')).toBeInTheDocument();
+    expect(screen.getAllByText('Your trade changed. Search again for new offers.')).toHaveLength(2);   // hint + live region
     expect(screen.queryByText('Fair trade')).not.toBeInTheDocument();
   });
 

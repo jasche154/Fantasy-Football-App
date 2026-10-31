@@ -51,7 +51,7 @@ def market_value(player: PlayerValue, valuation: Valuation) -> PlayerValue:
         return player
     ppg = player.expert_ros_ppg * player.availability
     vorp = expected_vorp(ppg, player.availability, valuation.replacement.get(player.position or "", 0.0))
-    games = player.games_left or valuation.weeks_remaining
+    games = valuation.weeks_remaining if player.games_left is None else player.games_left
     return replace(player, ros_ppg=round(ppg, 2), vorp_per_game=round(vorp, 2), trade_value=round(vorp * games, 1))
 
 

@@ -66,15 +66,20 @@ function TradeEvaluation({ trade }: { trade: TradeState }) {
 /** Imported Yahoo leagues to score the trade on; hidden when there are none (or they fail to load). */
 function LeaguePicker({ trade }: { trade: TradeState }) {
   const leagues = useAsync((signal) => getMyLeagues(signal).catch(() => ({ leagues: [] })), []);
-  const options = leagues.data?.leagues ?? [];
-  if (options.length === 0) return null;
+  const imported = (leagues.data?.leagues ?? []).map((l) => ({ value: String(l.id), label: l.name }));
+  const selected = trade.ids.league === undefined ? '' : String(trade.ids.league);
+  // A league from an old or shared link that isn't imported here stays visible so it can be cleared.
+  const unknown = selected !== '' && !imported.some((o) => o.value === selected)
+    ? [{ value: selected, label: `League #${selected} (not imported)` }]
+    : [];
+  if (imported.length === 0 && selected === '') return null;
   return (
     <div className="inline-form">
       <SelectField
         label="Score on"
         isInline
-        value={trade.ids.league === undefined ? '' : String(trade.ids.league)}
-        options={[{ value: '', label: 'Any league (no rosters)' }, ...options.map((l) => ({ value: String(l.id), label: l.name }))]}
+        value={selected}
+        options={[{ value: '', label: 'Any league (no rosters)' }, ...imported, ...unknown]}
         onChange={(value) => trade.setLeague(value === '' ? undefined : Number(value))}
       />
     </div>
@@ -123,7 +128,7 @@ export function TradePage({ query }: { query: Readonly<Record<string, string>> }
       <Card title="Verdict" eyebrow="Projection (model)" className="card--verdict">
         <TradeEvaluation trade={trade} />
       </Card>
-      <TradeFinder giveIds={trade.ids.give} />
+      <TradeFinder giveIds={trade.ids.give} league={trade.ids.league} />
     </>
   );
 }
