@@ -18,7 +18,7 @@ venv/Scripts/python.exe -m alembic upgrade head                       # apply mi
 venv/Scripts/python.exe -m services.weekly_refresh [--week N] [--force]   # pull Yahoo/ESPN/props for a week
 venv/Scripts/python.exe -m services.backup                            # back up the SQLite DB
 ```
-Model/evaluation CLIs (all point-in-time, no look-ahead): `services.backtest`, `services.score_ranges --seasons 2021-2025` (refits floor/ceiling quantiles), `services.projection_factors`, `services.weight_learning --season 2026 [--dry-run]`, `services.history_backfill --season 2026 --weeks 1-6`, `services.projection_eval`, `services.agent_eval [--provider groq] [--split holdout] [--compare a.json b.json]` (live Ask AI eval, needs a provider key; reports go to `backend/eval_runs/`, git-ignored).
+Model/evaluation CLIs (all point-in-time, no look-ahead): `services.backtest`, `services.score_ranges --seasons 2021-2025` (refits floor/ceiling quantiles), `services.injury_recovery_fit --seasons 2021-2025` (refits the injury discount), `services.projection_factors`, `services.weight_learning --season 2026 [--dry-run]`, `services.history_backfill --season 2026 --weeks 1-6`, `services.projection_eval`, `services.agent_eval [--provider groq] [--split holdout] [--compare a.json b.json]` (live Ask AI eval, needs a provider key; reports go to `backend/eval_runs/`, git-ignored).
 
 Frontend (run from `frontend/`): `npm run dev` (:5173), `npm test` (vitest), `npx vitest run src/pages/team` (one folder), `npm run build` (runs `tsc` then Vite; the typecheck is the only static check, there is no ESLint config).
 

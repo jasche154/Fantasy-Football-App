@@ -117,7 +117,9 @@ def _ros_row(value, ecr: dict, rank: int) -> dict:
            "schedule": matchup_words(value.schedule_factor) if round(value.schedule_factor, 2) != 1 else None,
            "playoff_schedule": schedule_words(value.playoff_factor),
            "rookie": True if value.is_rookie else None,
-           "returning_starter": value.returning_starter}
+           "returning_starter": value.returning_starter,
+           "injury": value.injury_note,
+           "fill_in_played_well": label(value.fill_in) if value.fill_in else None}
     return {k: v for k, v in row.items() if v is not None}
 
 

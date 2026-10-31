@@ -30,7 +30,15 @@ export const PACKAGE_DISCOUNT_NOTE =
 export function playerContext(entry: TradeSidePlayer): string {
   const parts = [entry.pos_rank, `${formatNumber(entry.ros_ppg, 1)} PPG`];
   if (entry.games_left != null) parts.push(`${entry.games_left} game${entry.games_left === 1 ? '' : 's'} left`);
-  if (entry.availability != null && entry.availability < 0.95) parts.push(`plays ~${formatFraction(entry.availability, 0)}`);
+  const share = entry.availability;
+  const reduced = share != null && share < 0.95;
+  if (entry.injury_note) {
+    parts.push(entry.injury_note);
+    if (reduced && share > 0) parts.push(`worth about ${formatFraction(share, 0)} of healthy`);
+  } else if (reduced) {
+    parts.push(`plays about ${formatFraction(share, 0)}`);
+  }
+  if (entry.fill_in) parts.push(`may share work with ${entry.fill_in}, who played well while he was out`);
   if (entry.schedule_factor != null && Math.abs(entry.schedule_factor - 1) >= 0.05) {
     parts.push(entry.schedule_factor > 1 ? 'easy schedule' : 'hard schedule');
   }

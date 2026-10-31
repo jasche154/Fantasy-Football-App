@@ -101,10 +101,13 @@ def status_rows(players: dict, sleeper_to_player: dict[str, int]) -> list[dict]:
         if player_id is None or not isinstance(item, dict):
             continue
         order = item.get("depth_chart_order")
+        news = item.get("news_updated")
         rows.append({"player_id": player_id, "injury_status": item.get("injury_status") or None,
                      "injury_body_part": item.get("injury_body_part") or None, "team": item.get("team"),
                      "depth_position": item.get("depth_chart_position"),
-                     "depth_order": int(order) if isinstance(order, (int, float)) else None})
+                     "depth_order": int(order) if isinstance(order, (int, float)) else None,
+                     "injury_notes": str(item["injury_notes"])[:40] if item.get("injury_notes") else None,
+                     "news_updated": int(news) if isinstance(news, (int, float)) else None})
     return rows
 
 

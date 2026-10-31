@@ -52,31 +52,36 @@ def parse_news(rows: object) -> list[dict]:
             continue
         url = meta.get("url")
         published = row.get("published")
+        try:                            # a huge or infinite stamp raises OSError/OverflowError on Windows
+            when = (datetime.fromtimestamp(published / 1000, timezone.utc).isoformat()
+                    if isinstance(published, (int, float)) and published > 0 else None)
+        except (OverflowError, OSError, ValueError):
+            when = None
         items.append({
             "title": title, "summary": _text(meta.get("description")), "analysis": _text(meta.get("analysis")),
             "source": SOURCES.get(row.get("source"), str(row.get("source") or "Sleeper")),
             "url": url if isinstance(url, str) and url.startswith(SAFE_LINK_PREFIXES) else None,
-            "published": datetime.fromtimestamp(published / 1000, timezone.utc).isoformat()
-            if isinstance(published, (int, float)) and published > 0 else None,
+            "published": when,
         })
     items.sort(key=lambda i: i["published"] or "", reverse=True)
     return items[:MAX_ITEMS]
 
 
-def fetch_news(sleeper_id: str, client: httpx.Client | None = None) -> list[dict]:
+def fetch_news(sleeper_id: str, client: httpx.Client | None = None, fresh: bool = False) -> list[dict]:
+    """fresh skips the 30-minute cache (the injury-news refresh needs the headline that changed the stamp)."""
     if not sleeper_id.isdigit() and not sleeper_id.isalpha():
         raise ValueError("Invalid Sleeper player id.")
     with _lock:
         cached = _cache.get(sleeper_id)
-    if cached and time.monotonic() - cached[0] < CACHE_SECONDS:
+    if cached and not fresh and time.monotonic() - cached[0] < CACHE_SECONDS:
         return cached[1]
     url = NEWS_URL.format(sleeper_id=sleeper_id)
     try:
         if client is None:
             with httpx.Client(timeout=TIMEOUT_SECONDS) as own_client:
-                response = own_client.get(url, params={"limit": MAX_ITEMS})
+                response = own_client.get(url, params={"limit": MAX_ITEMS}, follow_redirects=False)
         else:
-            response = client.get(url, params={"limit": MAX_ITEMS})
+            response = client.get(url, params={"limit": MAX_ITEMS}, follow_redirects=False)
         response.raise_for_status()
         items = parse_news(response.json())
     except (httpx.HTTPError, ValueError) as exc:

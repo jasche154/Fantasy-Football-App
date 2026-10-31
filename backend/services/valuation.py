@@ -4,6 +4,9 @@ trade_value = availability x max(0, healthy_ppg - replacement_ppg) x games_left,
 rest-of-season fantasy points a player is expected to score above the best waiver-wire option:
 - healthy_ppg is his rate when he plays (ros_ppg / availability), so an injured star keeps his
   value for the games he will play instead of being averaged down to replacement level;
+- availability is the share of the remaining games' value he keeps (services/injury_recovery.py):
+  games expected to miss by body part and practice reports, shrinking a little each week he's
+  out, plus the slower first games after a return. Out for the season: 0;
 - games_left counts his team's remaining games, so a bye still ahead costs a week.
 
 ros_ppg includes strength of schedule: the player's rate is scaled by the average
@@ -27,8 +30,9 @@ from services.projections import (
     MIN_PRIOR_GAMES, PlayerSeason, current_rate, latest_season, latest_week,
     load_player_seasons, project_ros_ppg,
 )
+from services import injury_recovery
 from services.injuries import ros_role_losses
-from services.ros_consensus import RosInputs, ros_inputs, status_shares
+from services.ros_consensus import RosInputs, ros_inputs
 from services.ros_consensus import data_version as ros_data_version
 from services.schedule_strength import NEUTRAL, DefenseStrength, Schedule, defense_strength, load_schedule
 
@@ -64,6 +68,9 @@ class PlayerValue:
     availability: float = 1.0
     games_left: int | None = None      # his team's remaining games (byes excluded); None = not in the schedule
     role_share: float = 1.0            # a backup QB's share of starts, apart from his injury status
+    expected_missed: float = 0.0       # remaining games he's expected to miss (injury_recovery)
+    injury_note: str | None = None     # e.g. "Hamstring: out ~1.8 more games, practicing"
+    fill_in: str | None = None         # a returning RB's fill-in who played well while he was out
 
 
 @dataclass(frozen=True)
@@ -108,8 +115,13 @@ def value_players(current: Sequence[PlayerSeason], previous: Sequence[PlayerSeas
                   playoff_factors: Mapping[int, float] | None = None,
                   role_losses: Mapping[int, tuple[str, float]] | None = None,
                   games_left: Mapping[int, int] | None = None,
+                  recoveries: Mapping[int, "injury_recovery.Recovery"] | None = None,
+                  role_cuts: Mapping[int, tuple[str, float]] | None = None,
                   ) -> tuple[tuple[PlayerValue, ...], dict[str, float]]:
-    """Pure valuation step, separated from data loading so it can be tested directly."""
+    """Pure valuation step, separated from data loading so it can be tested directly.
+
+    role_cuts: {returning RB: (fill-in, share of his rate to take off)}; recoveries add the
+    injury fields (the shares themselves arrive through consensus availability)."""
     rates = {p.player_id: current_rate(p) for p in current}
     first_pass = replacement_levels(((p.position, rates[p.player_id]) for p in current), league)
     priors = _priors(previous)
@@ -124,6 +136,8 @@ def value_players(current: Sequence[PlayerSeason], previous: Sequence[PlayerSeas
     model = {pid: round(base[pid] * factors[pid], 2) for pid in base}
     consensus = consensus or {}
     projected = {pid: consensus[pid].blended() if pid in consensus else model[pid] for pid in base}
+    cuts = role_cuts or {}
+    projected = {pid: round(ppg * (1 - cuts[pid][1]), 2) if pid in cuts else ppg for pid, ppg in projected.items()}
     replacement = replacement_levels(((p.position, projected[p.player_id]) for p in current), league)
 
     values = []
@@ -142,7 +156,9 @@ def value_players(current: Sequence[PlayerSeason], previous: Sequence[PlayerSeas
             is_rookie=p.player_id in rookies,
             returning_starter=losses.get(p.player_id, (None, 0.0))[0],
             returning_loss=losses.get(p.player_id, ("", 0.0))[1],
+            fill_in=cuts.get(p.player_id, (None, 0.0))[0],
             **_consensus_fields(consensus.get(p.player_id)),
+            **_injury_fields((recoveries or {}).get(p.player_id), remaining),
         ))
     return _rank(values), replacement
 
@@ -160,6 +176,12 @@ def _consensus_fields(inputs: "RosInputs | None") -> dict:
     return {"expert_ros_rank": inputs.expert_rank, "expert_ros_ppg": inputs.experts,
             "weekly_ppg": None if inputs.weekly is None else round(inputs.weekly, 2),
             "availability": round(inputs.availability, 3), "role_share": round(inputs.role_share, 3)}
+
+
+def _injury_fields(recovery: "injury_recovery.Recovery | None", remaining: int) -> dict:
+    if recovery is None:
+        return {}
+    return {"expected_missed": recovery.expected_missed(remaining), "injury_note": recovery.note(remaining)}
 
 
 PLAYOFF_LENGTH = 3      # most leagues: weeks 15-17
@@ -206,18 +228,21 @@ def _compute(session: Session, league: LeagueSettings, season: int) -> Valuation
     playoff = {p.player_id: defense.schedule_factor(
         schedule.remaining_opponents(p.team, max(playoffs[0] - 1, through or 0), playoffs[1]), p.position)
         for p in current}
-    losses = ros_role_losses(current, (through or 0) + 1, schedule, status_shares(session, remaining))
+    states, absences = injury_recovery.recovery_states(session, current, schedule, season, (through or 0) + 1)
+    injury_shares = injury_recovery.shares(states, remaining)
+    losses = ros_role_losses(current, (through or 0) + 1, schedule, injury_shares)
     model_values, _ = value_players(current, previous, league, remaining, factors, role_losses=losses)
     consensus = ros_inputs(session, season, league.scoring, scoring,
                            {v.player_id: v.model_ros_ppg for v in model_values},
                            {v.player_id: v.position or "" for v in model_values}, remaining,
-                           lambda week: matchup_factors(current, schedule, defense, week))
+                           lambda week: matchup_factors(current, schedule, defense, week), injury_shares,
+                           injury_recovery.season_starters(current, states))
     scheduled = {team for game in schedule.games for team in (game.home_team, game.away_team)}
     games_left = ({p.player_id: len(schedule.remaining_opponents(p.team, through or 0, end_week))
                    for p in current if p.team in scheduled}       # unknown team: weeks_remaining
                   if any(g.week > (through or 0) for g in schedule.games) else None)     # no schedule loaded
     values, replacement = value_players(current, previous, league, remaining, factors, consensus, playoff, losses,
-                                        games_left)
+                                        games_left, states, injury_recovery.rb_role_cuts(current, states, absences))
     return Valuation(season=season, through_week=through, weeks_remaining=remaining, league=league,
                      replacement=MappingProxyType(replacement), values=values,
                      seasons=tuple(current), by_id=MappingProxyType({v.player_id: v for v in values}),

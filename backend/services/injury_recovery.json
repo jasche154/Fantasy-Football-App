@@ -1,0 +1,34 @@
+{
+  "seasons": [
+    2021,
+    2025
+  ],
+  "spells": 708,
+  "games_missed": {
+    "overall": 2.81,
+    "ankle": 2.61,
+    "back_ribs": 2.9,
+    "concussion": 2.22,
+    "foot": 2.85,
+    "hamstring": 2.62,
+    "knee": 3.0,
+    "non_injury": 2.38,
+    "other": 2.47,
+    "soft_tissue": 2.67,
+    "unknown": 3.48,
+    "upper_body": 2.8
+  },
+  "practice_factor": {
+    "dnp": 0.85,
+    "none": 1.223,
+    "practicing": 0.402
+  },
+  "rust": [
+    0.868,
+    0.925,
+    0.954
+  ],
+  "reinjury_excess": 0.08,
+  "rb_role_loss": 0.0,
+  "rb_role_cases": 37
+}

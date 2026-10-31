@@ -7,11 +7,13 @@
 Weights re-balance over the inputs a player has. Expert ranks become points through the
 position's model curve: ROS rank N gets the Nth best model ROS projection.
 
-Availability: a player on IR, PUP or suspended (Sleeper) is assumed to miss
-IR_WEEKS more games; one ruled Out or Doubtful this week misses one. A season-ending injury
-(IR with a torn ACL or Achilles, or notes saying so) misses every remaining game, so he has
-no rest-of-season value. His rest-of-season points per game are scaled by the share of
-remaining games he's expected to play.
+Availability: the valuation passes each injured player's share of remaining value from
+services/injury_recovery.py (games expected to miss by body part and practice reports, plus
+the slower games after a return). Without it (status_shares, the fallback), a player on IR,
+PUP or suspended misses IR_WEEKS more games and one ruled Out or Doubtful misses one. A
+season-ending injury (IR with a torn ACL or Achilles, or notes saying so) misses every
+remaining game, so he has no rest-of-season value. His rest-of-season points per game are
+scaled by that share.
 
 The model part is backtested (services/backtest.py). There's no stored history of
 expert ROS ranks to backtest the blend; it leans on the market because a single model is
@@ -145,12 +147,20 @@ def status_shares(session: Session, remaining_weeks: int) -> dict[int, float]:
 BACKUP_ROS_FLOOR = 0.03       # a backup QB still starts a game or two over a season, on average
 
 
-def backup_qb_shares(session: Session, shares: Mapping[int, float]) -> dict[int, float]:
-    """Share of remaining games a backup QB starts: the share his starter misses (nearly 0 when healthy)."""
+def backup_qb_shares(session: Session, shares: Mapping[int, float],
+                     starters: Mapping[str, int] | None = None) -> dict[int, float]:
+    """Share of remaining games a backup QB starts: the share his starter misses (nearly 0 when healthy).
+
+    starters: {team: the QB who started most of this season}. When he's hurt the depth chart lists
+    his fill-in first; he stays the starter (and the fill-in the backup) instead of dropping to 0.
+    """
     from services.injuries import qb_depth
 
     out = {}
-    for qbs in qb_depth(session).values():
+    for team, qbs in qb_depth(session).items():
+        starter = (starters or {}).get(team)
+        if starter in qbs[1:] and shares.get(starter, 1.0) < 1:
+            qbs = [starter, *(q for q in qbs if q != starter)]
         for backup in qbs[1:]:
             out[backup] = round(max(BACKUP_ROS_FLOOR, 1.0 - shares.get(qbs[0], 1.0)), 3)
     return out
@@ -164,10 +174,13 @@ def availability(session: Session, remaining_weeks: int) -> dict[int, float]:
     return _availability(session, remaining_weeks)[0]
 
 
-def _availability(session: Session, remaining_weeks: int) -> tuple[dict[int, float], dict[int, float]]:
-    """(availability as above, {backup QB: share of games his starter misses})."""
-    shares = status_shares(session, remaining_weeks)
-    backups = backup_qb_shares(session, shares)
+def _availability(session: Session, remaining_weeks: int, injury_shares: Mapping[int, float] | None = None,
+                  qb_starters: Mapping[str, int] | None = None) -> tuple[dict[int, float], dict[int, float]]:
+    """(availability as above, {backup QB: share of games his starter misses}).
+
+    injury_shares replaces status_shares (services.injury_recovery.shares)."""
+    shares = dict(injury_shares) if injury_shares is not None else status_shares(session, remaining_weeks)
+    backups = backup_qb_shares(session, shares, qb_starters)
     for pid, backup in backups.items():
         shares[pid] = min(shares.get(pid, 1.0), backup)
     return {pid: share for pid, share in shares.items() if share < 1}, backups
@@ -176,13 +189,15 @@ def _availability(session: Session, remaining_weeks: int) -> tuple[dict[int, flo
 def ros_inputs(session: Session, season: int, scoring_key: str, scoring: ScoringSettings,
                model_ppg: Mapping[int, float], positions: Mapping[int, str],
                remaining_weeks: int,
-               matchup_for: Callable[[int], Mapping[int, float]] | None = None) -> dict[int, RosInputs]:
+               matchup_for: Callable[[int], Mapping[int, float]] | None = None,
+               injury_shares: Mapping[int, float] | None = None,
+               qb_starters: Mapping[str, int] | None = None) -> dict[int, RosInputs]:
     """matchup_for(week): each player's matchup factor that week. The weekly piece is divided by the
     factor for the week it projects, so one easy or hard matchup doesn't move rest-of-season value."""
     ranks = expert_ranks(session, season, scoring_key)
     week, weekly = weekly_points(session, season, positions, scoring)
     matchup = matchup_for(week) if matchup_for and week is not None else {}
-    avail, backups = _availability(session, remaining_weeks)
+    avail, backups = _availability(session, remaining_weeks, injury_shares, qb_starters)
     curves: dict[str, list[float]] = defaultdict(list)
     for pid, ppg in model_ppg.items():
         curves[positions.get(pid, "")].append(ppg)
@@ -199,7 +214,10 @@ def ros_inputs(session: Session, season: int, scoring_key: str, scoring: Scoring
 
 
 def data_version(session: Session, season: int) -> tuple:
-    """Changes when expert ROS ranks, weekly sources or live status are refreshed."""
+    """Changes when expert ROS ranks, weekly sources, live status or injury news are refreshed."""
+    from database.models import InjuryNews
+
     return (session.scalar(select(func.max(WeeklySourceProjection.fetched_at)).where(
                 WeeklySourceProjection.season == season)),
-            session.scalar(select(func.max(PlayerStatus.fetched_at))))
+            session.scalar(select(func.max(PlayerStatus.fetched_at))),
+            session.scalar(select(func.max(InjuryNews.checked_at))))

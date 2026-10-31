@@ -103,7 +103,15 @@ def _refresh_status(session: Session, http: httpx.Client, force: bool) -> dict:
         record_call(session, sleeper.PLAYERS_SOURCE, ok=False)
         raise SourceError(str(exc)) from exc
     record_call(session, sleeper.PLAYERS_SOURCE, ok=True)
-    return _status("updated", rows=rows)
+    from services import injury_news
+
+    try:
+        news = injury_news.refresh(session, http)      # per-player failures are counted inside
+    except Exception as exc:  # noqa: BLE001 - statuses are saved; news is a bonus on top
+        session.rollback()
+        log.warning("Injury news refresh failed: %s", type(exc).__name__)
+        return _status("updated", "Injury news couldn't be re-read this time.", rows=rows)
+    return _status("updated", f"Injury news re-read for {news['fetched']} players.", rows=rows)
 
 
 def _props_budget_teams(session: Session, season: int) -> set[str] | None:

@@ -30,8 +30,19 @@ describe('trade result copy', () => {
 
   it('explains a value with rank, games left, chance to play and schedule', () => {
     expect(playerContext(entry({ pos_rank: 'WR3', games_left: 8, availability: 0.6, schedule_factor: 1.1 })))
-      .toBe('WR3 · 18.4 PPG · 8 games left · plays ~60% · easy schedule');
+      .toBe('WR3 · 18.4 PPG · 8 games left · plays about 60% · easy schedule');
     expect(playerContext(entry({ games_left: 1, availability: 1, schedule_factor: 1.01 }))).toBe('18.4 PPG · 1 game left');
+  });
+
+  it('explains an injury discount and a fill-in who played well', () => {
+    expect(playerContext(entry({ availability: 0.72, injury_note: 'Knee: likely out 2 more games', fill_in: 'Braelon Allen' })))
+      .toBe('18.4 PPG · Knee: likely out 2 more games · worth about 72% of healthy · may share work with Braelon Allen, who played well while he was out');
+    expect(playerContext(entry({ availability: 0.98, injury_note: '1 game back from injury' })))
+      .toBe('18.4 PPG · 1 game back from injury');
+    expect(playerContext(entry({ availability: 0, injury_note: 'Out for the season' }))).toBe('18.4 PPG · Out for the season');
+    expect(playerContext(entry({ injury_note: 'Knee: likely out 1 more game' }))).toBe('18.4 PPG · Knee: likely out 1 more game');
+    expect(playerContext(entry({ fill_in: 'Braelon Allen' })))
+      .toBe('18.4 PPG · may share work with Braelon Allen, who played well while he was out');
   });
 
   it('summarizes the market view', () => {

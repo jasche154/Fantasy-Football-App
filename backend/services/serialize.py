@@ -27,6 +27,7 @@ def ranked_player(value: PlayerValue, ecr: Mapping[int, float] | None = None) ->
         "schedule_factor": value.schedule_factor, "playoff_factor": value.playoff_factor,
         "is_rookie": value.is_rookie,
         "returning_starter": value.returning_starter, "returning_loss": value.returning_loss,
+        "injury_note": value.injury_note, "expected_missed": value.expected_missed, "fill_in": value.fill_in,
         "ros_sources": {"model": value.model_ros_ppg, "experts": value.expert_ros_ppg,
                         "expert_rank": value.expert_ros_rank, "weekly": value.weekly_ppg,
                         "availability": value.availability},
@@ -61,6 +62,7 @@ def _trade_side(side: TradeSide) -> dict:
                      "pos_rank": p.value.pos_rank, "availability": p.value.availability,
                      "games_left": p.value.games_left, "schedule_factor": p.value.schedule_factor,
                      "playoff_factor": p.value.playoff_factor, "expert_ros_ppg": p.value.expert_ros_ppg,
+                     "injury_note": p.value.injury_note, "fill_in": p.value.fill_in,
                      "weight": p.weight, "adjusted_value": p.adjusted_value} for p in side.players],
         "raw_total": side.raw_total, "adjusted_total": side.adjusted_total,
     }
