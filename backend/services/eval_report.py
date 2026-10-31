@@ -1,7 +1,8 @@
 """The Ask AI evaluation's JSON report: run metadata, per-case results, summary and before/after diff.
 
 Pure functions plus small file helpers; services/agent_eval.py runs the cases. The report never
-holds API keys or error messages (only exception types), so it can be pasted into a PR.
+holds API keys or error messages (only exception types), but the answer text in it can name your
+leagues, teams and league-mates: share a report made with --redact (or only the --compare output).
 """
 import hashlib
 import inspect

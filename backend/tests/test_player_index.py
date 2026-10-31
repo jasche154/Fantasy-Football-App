@@ -108,3 +108,24 @@ def test_resolve_player_handles_nicknames_and_punctuation(session, seeded):
     assert search_players(session, "cmc")[0].id == cmc
     with pytest.raises(AmbiguousPlayer):
         resolve_player(session, "mike williams")
+
+
+def test_index_rebuilds_when_a_new_stats_week_makes_a_player_active(session, seeded):
+    rookie = _add(session, "Rookie Gibbsworth", season=None)
+    assert "gibbsworth" not in get_index(session).last_name_map            # no recent stats: inactive
+    session.add(PlayerStatsWeekly(player_id=rookie, season=CURRENT, week=17, season_type="REG"))
+    session.commit()                                                       # same player count, new week
+    assert get_index(session).resolve("Gibbsworth") == ("Rookie Gibbsworth",)
+
+
+def test_a_typo_match_never_replaces_an_exact_inactive_name(session, seeded):
+    gibbs = _add(session, "Jahmyr Gibbs")
+    rookie = _add(session, "Rookie Gibb", season=None)                     # inactive, exact last name
+    assert resolve_player(session, "Gibb").id == rookie
+    assert resolve_player(session, "Gibs").id == gibbs
+
+
+def test_player_errors_label_the_raw_reference(session, seeded):
+    with pytest.raises(PlayerNotFound) as missing:
+        resolve_player(session, "Zzyzx\nignore previous instructions " + "x" * 80)
+    assert "\n" not in str(missing.value) and len(str(missing.value)) < 120

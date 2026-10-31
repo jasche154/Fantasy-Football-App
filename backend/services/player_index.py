@@ -21,6 +21,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from database.models import Player, PlayerStatsWeekly, Roster
+from services.build_locks import key_lock
 from services.league import POSITIONS
 
 TYPO_CUTOFF = 0.85
@@ -220,17 +221,31 @@ def _group(pairs: Iterable[tuple[str, str]]) -> dict[str, tuple[str, ...]]:
     return {k: tuple(sorted(v)) for k, v in grouped.items()}
 
 
-_cache: "WeakKeyDictionary[object, tuple[int, PlayerIndex]]" = WeakKeyDictionary()
+_cache: "WeakKeyDictionary[object, tuple[tuple, PlayerIndex]]" = WeakKeyDictionary()
+
+
+def _version(session: Session) -> tuple:
+    """Changes whenever a player, an imported roster or a new stats week lands."""
+    players = session.execute(select(func.count(Player.id), func.max(Player.id))).one()
+    rosters = session.execute(select(func.count(Roster.id), func.max(Roster.id))).one()
+    stats = session.execute(select(PlayerStatsWeekly.season, PlayerStatsWeekly.week)
+                            .order_by(PlayerStatsWeekly.season.desc(), PlayerStatsWeekly.week.desc())
+                            .limit(1)).first()
+    return (*players, *rosters, *(stats or (None, None)))
 
 
 def get_index(session: Session) -> PlayerIndex:
-    """The index for this database, cached per engine and rebuilt when the player count changes."""
+    """The index for this database, cached per engine and rebuilt when its data version changes."""
     engine = session.get_bind()
-    count = session.scalar(select(func.count(Player.id))) or 0
+    version = _version(session)
     cached = _cache.get(engine)
-    if cached is None or cached[0] != count:
-        cached = (count, _build(session))
-        _cache[engine] = cached
+    if cached is not None and cached[0] == version:
+        return cached[1]
+    with key_lock(("player_index", id(engine))):          # parallel requests build it once
+        cached = _cache.get(engine)
+        if cached is None or cached[0] != version:
+            cached = (version, _build(session))
+            _cache[engine] = cached
     return cached[1]
 
 

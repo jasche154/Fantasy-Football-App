@@ -140,8 +140,15 @@ def test_run_case_plays_every_turn_and_scores_the_last(session, seeded):
     assert [m["role"] for m in second_turn[1:4]] == ["user", "assistant", "user"]
 
 
+class ClosableLLM(ScriptedLLM):
+    closed = False
+
+    def close(self):
+        self.closed = True
+
+
 def test_live_run_writes_a_report_and_resumes(engine, seeded, monkeypatch, tmp_path):
-    clients = [ScriptedLLM(multi_turn_steps())]
+    clients = [ClosableLLM(multi_turn_steps())]
     monkeypatch.setattr(agent_eval, "_client", lambda provider: (clients[-1], provider or "groq"))
     monkeypatch.setattr(agent_eval, "_session_factory", lambda db: lambda: Session(engine))
     monkeypatch.setattr(agent_eval, "CASES", (MULTI,))
@@ -152,6 +159,7 @@ def test_live_run_writes_a_report_and_resumes(engine, seeded, monkeypatch, tmp_p
     report = json.loads(out.read_text())
     assert report["schema"] == 1 and report["summary"]["pass_rate"] == 1.0
     assert set(report["meta"]["hashes"]) == {"prompt", "tools", "routing"} and report["meta"]["provider"] == "groq"
+    assert report["cases"][0]["reply"].startswith("Start Buy Low Guy") and clients[0].closed
     clients.append(ScriptedLLM([]))           # nothing left to run: no requests
     assert agent_eval.run_live(agent_eval.parse_args(["--resume", str(out)])) == 0
     assert clients[-1].requests == [] and len(json.loads(out.read_text())["cases"]) == 1
@@ -163,3 +171,43 @@ def test_select_cases_filters_by_split_id_and_sample():
     assert all("trade" in c.id for c in agent_eval.select_cases("trade", "all", None, 0))
     sample = agent_eval.select_cases(None, "all", 5, 1)
     assert len(sample) == 5 and sample == agent_eval.select_cases(None, "all", 5, 1)
+
+
+def test_redacted_report_keeps_metrics_but_no_answer_text(engine, seeded, monkeypatch, tmp_path):
+    monkeypatch.setattr(agent_eval, "_client", lambda provider: (ScriptedLLM(multi_turn_steps()), "groq"))
+    monkeypatch.setattr(agent_eval, "_session_factory", lambda db: lambda: Session(engine))
+    monkeypatch.setattr(agent_eval, "CASES", (MULTI,))
+    monkeypatch.setattr(agent_eval, "PACE", {})
+    out = tmp_path / "run.json"
+    assert agent_eval.run_live(agent_eval.parse_args(["--out", str(out), "--redact"])) == 0
+    case = json.loads(out.read_text())["cases"][0]
+    assert case["reply"] == "" and case["passed"] and case["checks"]["decision"]
+    assert "Buy Low Guy" not in out.read_text()
+
+
+def test_freeze_copies_without_tokens_and_never_overwrites(tmp_path):
+    import sqlite3
+
+    source = tmp_path / "app.db"
+    with sqlite3.connect(source) as db:
+        db.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, hashed_password TEXT)")
+        db.execute("CREATE TABLE platform_connections (id INTEGER PRIMARY KEY, access_token TEXT, "
+                   "refresh_token TEXT, token_expires_at TEXT)")
+        db.execute("CREATE TABLE leagues (id INTEGER PRIMARY KEY, name TEXT)")
+        db.execute("INSERT INTO users VALUES (1, 'hash')")
+        db.execute("INSERT INTO platform_connections VALUES (1, 'secret-access', 'secret-refresh', '2026-11-01')")
+        db.execute("INSERT INTO leagues VALUES (1, 'Family League')")
+    target = tmp_path / "frozen.db"
+    agent_eval.freeze(target, source=str(source))
+    with sqlite3.connect(target) as db:
+        assert db.execute("SELECT access_token, refresh_token, token_expires_at FROM platform_connections"
+                          ).fetchall() == [(None, None, None)]
+        assert db.execute("SELECT name FROM leagues").fetchall() == [("Family League",)]
+    assert b"secret-access" not in target.read_bytes()
+    with pytest.raises(SystemExit, match="already exists"):
+        agent_eval.freeze(target, source=str(source))
+    agent_eval.freeze(target, force=True, source=str(source))
+    with pytest.raises(SystemExit, match="other than the app database"):
+        agent_eval.freeze(source, force=True, source=str(source))
+    with sqlite3.connect(source) as db:      # the original is untouched
+        assert db.execute("SELECT access_token FROM platform_connections").fetchone() == ("secret-access",)

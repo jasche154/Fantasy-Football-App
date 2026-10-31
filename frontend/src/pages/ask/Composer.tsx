@@ -8,12 +8,14 @@ const SHOW_COUNT_AFTER = 3500;
 interface ComposerProps {
   draft: string;
   isPending: boolean;
+  /** Seconds before the free-tier limit allows sending again. */
+  waitSeconds?: number;
   inputRef?: Ref<HTMLTextAreaElement>;
   onDraft: (value: string) => void;
   onSend: (text: string) => void;
 }
 
-export function Composer({ draft, isPending, inputRef, onDraft, onSend }: ComposerProps) {
+export function Composer({ draft, isPending, waitSeconds = 0, inputRef, onDraft, onSend }: ComposerProps) {
   const id = useId();
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
@@ -40,10 +42,13 @@ export function Composer({ draft, isPending, inputRef, onDraft, onSend }: Compos
           Enter to send · Shift+Enter for a new line
           {draft.length > SHOW_COUNT_AFTER && ` · ${draft.length} / ${MAX_QUESTION_CHARS}`}
         </span>
-        {/* aria-disabled (not disabled) keeps focus on the button while a reply is pending. */}
-        <button type="submit" className="btn btn--primary" aria-disabled={isPending || !draft.trim()}>
-          <Icon name="send" size={16} /> Send
-        </button>
+        <span className="composer__actions">
+          {waitSeconds > 0 && <span className="composer__wait">Wait {waitSeconds} s</span>}
+          {/* aria-disabled (not disabled) keeps focus on the button while a reply is pending. */}
+          <button type="submit" className="btn btn--primary" aria-disabled={isPending || waitSeconds > 0 || !draft.trim()}>
+            <Icon name="send" size={16} /> Send
+          </button>
+        </span>
       </div>
     </form>
   );

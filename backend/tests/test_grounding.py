@@ -161,3 +161,37 @@ def test_caveat_lists_unverified_items_and_failed_tools():
 ])
 def test_safe_fact_keeps_plain_statements_only(fact, ok):
     assert safe_fact(fact) is ok
+
+
+# ---- teams, coaches and experts are not players (probes from the real database) -------------------
+
+PROBE_NAMES = ["Parker Washington", "DeeJay Dallas", "Juwan Johnson", "Sean Tucker", "Andy Dalton", "Hayden Rucci",
+               "Josh Allen", "Puka Nacua", "Jahmyr Gibbs", "Mike Evans"]
+PROBE_INDEX = PlayerIndex(PROBE_NAMES)
+
+
+@pytest.mark.parametrize("answer", [
+    "Washington's defense gives up the most points to receivers.",
+    "Nacua gets a soft matchup vs Dallas this week.",
+    "Ben Johnson's offense feeds Gibbs near the goal line.",
+    "Sean Payton loves to scheme up screens.",
+    "Andy Reid trusts his veterans late in the season.",
+    "Josh & Hayden rank Nacua as a top-5 receiver.",
+    "Detroit's backfield is the best spot to look; the Lions run often.",
+    "Hayden thinks Nacua is a smash play.",
+])
+def test_teams_coaches_and_experts_are_not_ungrounded_players(answer):
+    evidence = collect_evidence(convo('{"players": ["Puka Nacua (WR, LA)", "Jahmyr Gibbs (RB, DET)"]}'))
+    assert check_answer(answer, evidence, PROBE_INDEX).players == ()
+
+
+@pytest.mark.parametrize("answer, stray", [
+    ("Start Mike Evans over Nacua.", "Mike Evans"),
+    ("Evans is the better play than Nacua.", "Mike Evans"),
+    ("Pick up Parker Washington.", "Parker Washington"),
+    ("Start Dalton in a superflex league.", "Andy Dalton"),
+    ("Tucker is a sneaky flex.", "Sean Tucker"),
+])
+def test_invented_real_players_are_still_flagged(answer, stray):
+    evidence = collect_evidence(convo('{"players": ["Puka Nacua (WR, LA)"]}'))
+    assert check_answer(answer, evidence, PROBE_INDEX).players == (stray,)

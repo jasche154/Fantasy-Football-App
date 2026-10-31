@@ -102,3 +102,16 @@ def test_tool_endpoint_status_codes_for_outages_and_bad_seasons(client, monkeypa
                              json={"arguments": {"player": "Buy Low Guy", "season": 2030}})
     assert bad_season.status_code == 422 and "2030" in bad_season.json()["detail"]
 
+
+
+def test_chat_closes_the_llm_client_even_on_failure(client, monkeypatch):
+    closed = []
+
+    class Closing(ScriptedLLM):
+        def close(self):
+            closed.append(True)
+
+    for steps in ([{"content": "ok", "tool_calls": []}], [agent_module.AgentUnavailable("down")]):
+        monkeypatch.setattr("api.agent_routes.build_llm_client", lambda _s, steps=steps: Closing(steps))
+        client.post("/api/agent/chat", json={"messages": [{"role": "user", "content": "hi"}]})
+    assert closed == [True, True]

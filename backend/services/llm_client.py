@@ -11,6 +11,7 @@ exception types, never response bodies or URLs.
 """
 import json
 import logging
+import re
 import threading
 import time
 from collections.abc import Callable, Sequence
@@ -27,6 +28,9 @@ DEFAULT_RETRY_AFTER = 60        # seconds, when a provider doesn't say
 MAX_RETRY_AFTER = 24 * 3600     # a daily cap resets within a day
 PROVIDER_DOWN_COOLDOWN = 30     # skip a failing provider this long before trying it again
 TOOL_CALL_KEYS = ("id", "type", "function")
+# The provider's own error text echoes model output, so only a tool name (an identifier) is kept.
+NOT_TOOL_NAMES = frozenset({"call", "calls", "choice", "use", "validation", "which", "that", "in", "with"})
+TOOL_NAME_IN_ERROR = re.compile(r"\btool\s+['\"`]?([A-Za-z_][A-Za-z0-9_]{0,63})\b")
 
 ErrorKind = Literal["rate_limit", "too_large", "provider"]
 
@@ -90,6 +94,13 @@ def _error_body(response: httpx.Response) -> dict:
     return error if isinstance(error, dict) else {}
 
 
+def _rejection(message: str) -> str:
+    names = [n for n in TOOL_NAME_IN_ERROR.findall(message) if n.lower() not in NOT_TOOL_NAMES]
+    target = f"the {names[0]} call" if names else "the tool call"
+    return (f"{target[0].upper()}{target[1:]} did not match the tool's schema (wrong argument names, "
+            "types, limits or missing required fields)")
+
+
 def _raise_for_status(name: str, response: httpx.Response) -> None:
     status = response.status_code
     if status < 400:
@@ -99,7 +110,7 @@ def _raise_for_status(name: str, response: httpx.Response) -> None:
     message = str(error.get("message") or "")
     if status == 400 and code == "tool_use_failed":     # Groq: the model's tool call broke the schema
         log.warning("%s rejected a tool call", name)
-        raise ToolCallRejected(message[:300] or "the tool call did not match the tool's schema")
+        raise ToolCallRejected(_rejection(message))
     if status == 413 or "request too large" in message.lower():
         log.warning("%s: request too large (HTTP %s)", name, status)
         raise AgentUnavailable("That question needed more data than the AI provider's free tier accepts in "
@@ -155,6 +166,12 @@ class OpenAICompatClient:
     def close(self) -> None:
         self._http.close()
 
+    def __enter__(self) -> "OpenAICompatClient":
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
     def _payload(self, messages: Sequence[dict], tools: list[dict] | None) -> dict[str, Any]:
         payload: dict[str, Any] = {"model": self.profile.model, "temperature": TEMPERATURE,
                                    "messages": _outgoing(messages, self.profile.keeps_extra)}
@@ -193,9 +210,9 @@ class GroqClient(OpenAICompatClient):
         super().__init__(replace(PROVIDERS["groq"], model=model), api_key, transport=transport)
 
 
-# Provider name -> monotonic time it may be tried again. Module-level so the next chat request
-# (which builds new clients) skips a provider that just ran out of quota.
-_cooldowns: dict[str, float] = {}
+# Provider name -> (monotonic time it may be tried again, why it is cooling down). Module-level so
+# the next chat request (which builds new clients) skips a provider that just ran out of quota.
+_cooldowns: dict[str, tuple[float, ErrorKind]] = {}
 _cooldown_lock = threading.Lock()
 
 
@@ -207,8 +224,8 @@ def clear_cooldowns() -> None:
 class FallbackClient:
     """Tries each client in order; a rate-limited or failing provider cools down and the next answers.
 
-    A rejected tool call (the model's own mistake) and a too-large request (smaller providers would
-    refuse it too, and the agent should shrink it instead) are raised straight away.
+    A rejected tool call (the model's own mistake) is raised straight away. A too-large request
+    only moves on to a provider that accepts longer requests than the one that refused it.
     """
 
     def __init__(self, clients: Sequence[OpenAICompatClient], clock: Callable[[], float] = time.monotonic):
@@ -229,35 +246,61 @@ class FallbackClient:
     def last_provider(self) -> str | None:
         return self._answered.profile.name if self._answered else None
 
-    def _ready_in(self, client: OpenAICompatClient) -> float:
-        with _cooldown_lock:
-            return max(0.0, _cooldowns.get(client.profile.name, 0.0) - self._clock())
+    def close(self) -> None:
+        for client in self._clients:
+            close = getattr(client, "close", None)
+            if close:
+                close()
 
-    def _cool_down(self, client: OpenAICompatClient, seconds: float) -> None:
+    def __enter__(self) -> "FallbackClient":
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
+    def _cooldown(self, client: OpenAICompatClient) -> tuple[float, ErrorKind]:
         with _cooldown_lock:
-            _cooldowns[client.profile.name] = self._clock() + seconds
+            until, kind = _cooldowns.get(client.profile.name, (0.0, "provider"))
+        return max(0.0, until - self._clock()), kind
+
+    def _ready_in(self, client: OpenAICompatClient) -> float:
+        return self._cooldown(client)[0]
+
+    def _cool_down(self, client: OpenAICompatClient, seconds: float, kind: ErrorKind) -> None:
+        with _cooldown_lock:
+            _cooldowns[client.profile.name] = (self._clock() + seconds, kind)
 
     def complete(self, messages: list[dict], tools: list[dict] | None) -> dict:
         last_error: AgentUnavailable | None = None
+        refused_at: int | None = None       # max_input_tokens of a provider that said "too large"
         for client in self._clients:
             if self._ready_in(client) > 0:
+                continue
+            if refused_at is not None and client.profile.max_input_tokens <= refused_at:
                 continue
             try:
                 response = client.complete(messages, tools)
             except AgentUnavailable as exc:
                 if exc.kind == "too_large":
-                    raise
-                self._cool_down(client, exc.retry_after or PROVIDER_DOWN_COOLDOWN)
+                    refused_at = max(refused_at or 0, client.profile.max_input_tokens)
+                else:
+                    self._cool_down(client, exc.retry_after or PROVIDER_DOWN_COOLDOWN, exc.kind)
                 last_error = exc
                 continue
             self._answered = client
             return response
-        wait = min(self._ready_in(c) for c in self._clients)
+        return self._exhausted(last_error)
+
+    def _exhausted(self, last_error: AgentUnavailable | None) -> dict:
         if last_error and last_error.kind != "rate_limit":
             raise last_error
+        wait, kind = min(self._cooldown(c) for c in self._clients)
+        seconds = max(1, round(wait))
+        if kind != "rate_limit":
+            raise AgentUnavailable(f"The AI providers are unreachable right now. Try again in about {seconds} "
+                                   "seconds.", kind="provider", retry_after=seconds)
         raise AgentUnavailable(f"Every configured AI provider is at its free-tier limit. Try again in about "
-                               f"{max(1, round(wait))} seconds.", kind="rate_limit",
-                               retry_after=max(1, round(wait)))
+                               f"{seconds} seconds.", kind="rate_limit", retry_after=seconds)
 
 
 LLMClientLike = OpenAICompatClient | FallbackClient

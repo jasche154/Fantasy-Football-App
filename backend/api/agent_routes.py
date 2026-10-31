@@ -91,6 +91,10 @@ def agent_chat(request: ChatRequest, session: Session = Depends(get_session)) ->
                            memory=request.memory, league_id=request.league_id)
     except AgentUnavailable as exc:
         raise _unavailable(exc) from exc
+    finally:
+        close = getattr(client, "close", None)    # releases the HTTP connection pool; test fakes have none
+        if callable(close):
+            close()
     season = latest_season(session)
     names = [t.name for t in result.tool_calls]
     return {"reply": result.reply,

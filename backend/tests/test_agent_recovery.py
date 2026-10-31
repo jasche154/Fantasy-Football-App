@@ -141,3 +141,40 @@ def test_find_trades_tool_is_compact_and_skips_unknown_names(session, seeded):
     assert result["skipped_players"] == ["Nobody At All"]
     assert result["results"] and set(result["results"][0]) == {
         "give", "get", "get_ros_ppg", "verdict", "your_gain_pct", "get_playoff_schedule"}
+
+
+def test_missing_tool_call_ids_get_unique_ones(session):
+    two = {"content": None, "tool_calls": [
+        {"id": "", "name": "list_leaderboard_metrics", "arguments": "{}"},
+        {"id": "", "name": "big", "arguments": "{}"}]}
+    registry = ToolRegistry([*big_registry(3), Tool("list_leaderboard_metrics", "m.", {"type": "object",
+                                                                                     "properties": {}},
+                                                    lambda _s, **_: {"metrics": ["a"]})])
+    client = Scripted([two, answer("Done.")])
+    agent.run_agent(session, client, [{"role": "user", "content": "q"}], registry=registry)
+    sent = client.requests[1]["messages"]
+    ids = [c["id"] for c in sent[-3]["tool_calls"]]
+    assert ids == ["call_1_0", "call_1_1"] and [m["tool_call_id"] for m in sent[-2:]] == ids
+
+
+def test_no_revision_on_the_last_round_just_a_caveat(session):
+    client = Scripted([answer("Pick up Mike Williams.")])
+    reply = agent.run_agent(session, client, [{"role": "user", "content": "who to add?"}], max_rounds=1)
+    assert len(client.requests) == 1 and reply.stop_reason == "answer"
+    assert reply.unverified == ("Mike Williams",) and "Not verified" in reply.reply
+
+
+class SwitchingClient(Scripted):
+    """A fallback chain whose second provider (smaller budget) answers the first request."""
+
+    def complete(self, messages, tools):
+        response = super().complete(messages, tools)
+        self.profile = SimpleNamespace(max_tool_chars=2_000, max_input_tokens=50_000)
+        return response
+
+
+def test_tool_budget_comes_from_the_provider_that_answered(session):
+    client = SwitchingClient([call("big", {}), answer("Done.")],
+                             SimpleNamespace(max_tool_chars=50_000, max_input_tokens=50_000))
+    agent.run_agent(session, client, [{"role": "user", "content": "q"}], registry=big_registry())
+    assert len(client.requests[1]["messages"][-1]["content"]) <= 2_000

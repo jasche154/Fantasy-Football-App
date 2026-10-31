@@ -66,7 +66,7 @@ def _roster_rows(session: Session, spots, valuation) -> list[dict]:
     rows = []
     for spot in spots:
         value = valuation.by_id.get(spot.player_id)
-        name = value.name if value else mt.player_name(session, spot.player_id)
+        name = value.name if value else label(mt.player_name(session, spot.player_id))
         rows.append({"player": player_str(name, value.position, value.team) if value else name, "slot": spot.slot,
                      "ros_ppg": value.ros_ppg if value else None, "pos_rank_ros": value.pos_rank if value else None})
     return sorted(rows, key=lambda r: -(r["ros_ppg"] or 0))
@@ -101,7 +101,7 @@ def _my_team_row(session: Session, team, spot, weekly) -> dict:
     """One roster spot, kickers and defenses included (they have no rest-of-season value)."""
     value = team.valuation.by_id.get(spot.player_id)
     source = weekly or value
-    name = source.name if source else mt.player_name(session, spot.player_id)
+    name = source.name if source else label(mt.player_name(session, spot.player_id))
     row = {"player": player_str(name, source.position, source.team) if source else name, "slot": spot.slot,
            "proj": round(weekly.projection, 1) if weekly else 0.0,
            "range": range_str(weekly.floor, weekly.ceiling) if weekly else None,
@@ -131,9 +131,9 @@ def my_team(session: Session, league: str | None = None) -> dict:
     return {"league": label(team.league.name), "team": label(team.team.name), "scoring": team.settings.scoring,
             "teams": team.settings.teams, "week": team.rankings.week,
             "roster": [_my_team_row(session, team, spot, by_id.get(spot.player_id)) for spot in team.spots],
-            "best_lineup": {slot: [names.get(pid) or mt.player_name(session, pid) for pid in ids]
+            "best_lineup": {slot: [names.get(pid) or label(mt.player_name(session, pid)) for pid in ids]
                             for slot, ids in team.best.items()},
-            "locked": [names.get(pid) or mt.player_name(session, pid) for pid in sorted(team.locked)],
+            "locked": [names.get(pid) or label(mt.player_name(session, pid)) for pid in sorted(team.locked)],
             "alerts": list(team.alerts),
             "note": ("proj already accounts for each player's chance to play (play_prob), so a questionable player "
                      "can still be the better start; range assumes he plays. Locked players' games have started "

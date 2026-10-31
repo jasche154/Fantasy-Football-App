@@ -12,6 +12,8 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from services.player_index import COMMON_WORDS
+
 CAVEAT_PREFIX = "Not verified against the app's data:"
 APP_CHECK_PREFIX = "[app check]"
 MAX_FACT_CHARS = 200
@@ -30,6 +32,25 @@ _SUFFIXES = {"jr", "sr", "ii", "iii", "iv", "v"}
 _META_FACT = re.compile(
     r"\b(?:ignore|disregard|always|never\s+say|instructions?|prompt|tools?|assistant|you\s+must|"
     r"you\s+should|from\s+now\s+on|pretend|act\s+as|respond|reply\s+with|https?)\b|<\|", re.IGNORECASE)
+
+# Single words that look like a player's last name in an answer but name a team, place, coach or
+# expert. Coaches who share a last name with notable players (Johnson, Moore, Taylor, Campbell) are
+# left out: "Ben Johnson" is handled by the first-name rule instead.
+_NOT_PLAYERS = frozenset("""
+arizona atlanta baltimore buffalo carolina chicago cincinnati cleveland dallas denver detroit green bay houston
+indianapolis indy jacksonville kansas city vegas las los angeles miami minnesota england orleans york philadelphia
+philly pittsburgh francisco seattle tampa tennessee washington
+cardinals falcons ravens bills panthers bears bengals browns cowboys broncos lions packers texans colts jaguars
+jags chiefs raiders chargers rams dolphins vikings patriots pats saints giants jets eagles steelers niners
+seahawks buccaneers bucs titans commanders
+reid payton mcvay shanahan harbaugh tomlin mcdermott sirianni stefanski morris canales callahan coen gannon
+carroll macdonald vrabel schottenheimer daboll quinn oconnell lafleur steichen bowles mcdaniel ryans glenn
+josh hayden norris winks
+""".split())
+# Words after a name that make it a team or unit, not a player: "Washington's defense", "Dallas D".
+_UNIT_AFTER = re.compile(r"^(?:'s)?\s+(?:defen[cs]e|offen[cs]e|offensive|defensive|coach\w*|head\s+coach|d\b|dst\b|d/st\b|"
+                         r"secondary|front|o-?line|pass\s+rush|run\s+game|backfield|wrs|receivers)", re.IGNORECASE)
+_WORD_BEFORE = re.compile(r"([A-Z][\w'.-]*)\s+$")
 
 
 class Mention(Protocol):
@@ -113,6 +134,33 @@ def _spelled_out(mention: Mention) -> bool:
     return bool(words) and any(words <= set(name_key(n).split()) for n in mention.names)
 
 
+def _another_person(word_before: str, mention_text: str, full_keys: frozenset[str]) -> bool:
+    """'Ben Johnson' or 'Sean Payton': a capitalized first word that isn't a known player's full name."""
+    return (word_before.lower() not in COMMON_WORDS
+            and name_key(f"{word_before} {mention_text}") not in full_keys)
+
+
+def _not_a_player(mention: Mention, answer: str, full_keys: frozenset[str]) -> bool:
+    """True when every use of the mention reads as a team, place, coach or someone else's first name."""
+    key = name_key(mention.text)
+    if " " not in key:
+        if key in _NOT_PLAYERS:
+            return True
+        if not any(name_key(n).split()[-1:] == [key] for n in mention.names):
+            return True   # a first name alone ("Andy", "Sean") never rejects an answer
+    uses = list(re.finditer(rf"(?<![\w']){re.escape(mention.text)}(?![\w])", answer))
+    if not uses:
+        return False
+
+    def harmless(use: re.Match) -> bool:
+        if _UNIT_AFTER.match(answer[use.end():]):
+            return True
+        before = _WORD_BEFORE.search(answer[:use.start()])
+        return bool(before) and " " not in key and _another_person(before.group(1), mention.text, full_keys)
+
+    return all(harmless(use) for use in uses)
+
+
 def _unknown_players(answer: str, evidence: Evidence, index: NameIndex) -> list[str]:
     said = f" {name_key(evidence.text)} "
 
@@ -120,11 +168,15 @@ def _unknown_players(answer: str, evidence: Evidence, index: NameIndex) -> list[
         return bool(key) and f" {key} " in said
 
     answer_key = f" {name_key(answer)} "
+    full_keys = frozenset(name_key(name) for name in index.full_names)
     stray = [name for name in sorted(index.full_names)
              if (key := name_key(name)) and f" {key} " in answer_key and not present(key)]
-    for mention in index.mentions(fold(answer)):
+    folded = fold(answer)
+    for mention in index.mentions(folded):
         if not mention.names or not _spelled_out(mention):
             continue   # typo guesses and nicknames are routing aids, too loose to reject an answer on
+        if _not_a_player(mention, folded, full_keys):
+            continue
         if present(name_key(mention.text)) or any(present(name_key(n)) for n in mention.names):
             continue   # an ambiguous last name is fine if any of its players was in the evidence
         label = mention.names[0] if len(mention.names) == 1 else mention.text

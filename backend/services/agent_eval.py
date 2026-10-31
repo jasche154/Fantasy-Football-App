@@ -15,6 +15,7 @@ Two levels:
     python -m services.agent_eval --freeze eval_runs/week9.db  # copy the DB once ...
     python -m services.agent_eval --db eval_runs/week9.db      # ... so before/after runs see the same data
     python -m services.agent_eval --resume eval_runs/<file>.json
+    python -m services.agent_eval --redact                     # report without answer text (safe to share)
     python -m services.agent_eval --compare before.json after.json   # exit 1 if holdout got worse
 
 Judge a change on the holdout split, against a baseline run made on the same frozen DB.
@@ -122,18 +123,39 @@ def _session_factory(db: Path | None):
     return sessionmaker(bind=make_engine(f"sqlite:///{Path(db).resolve()}"), expire_on_commit=False)
 
 
-def freeze(target: Path) -> None:
-    """Copies the app database (a consistent snapshot, even while the app runs) for repeatable runs."""
+# The copy keeps leagues and rosters (the eval needs them) but none of the Yahoo credentials.
+SCRUB_SQL = ("UPDATE platform_connections SET access_token = NULL, refresh_token = NULL, token_expires_at = NULL",
+             "UPDATE users SET hashed_password = ''")
+
+
+def freeze(target: Path, force: bool = False, source: str | None = None) -> None:
+    """Copies the app database (a consistent snapshot, even while the app runs) for repeatable runs,
+    with Yahoo tokens and passwords removed. Never overwrites the app database itself."""
     import sqlite3
 
-    from database.db import engine
+    if source is None:
+        from database.db import engine
+        source = engine.url.database
+    target = Path(target)
+    if not source or target.resolve() == Path(source).resolve():
+        raise SystemExit("--freeze needs a path other than the app database.")
+    if target.exists() and not force:
+        raise SystemExit(f"{target} already exists; pass --force to replace it.")
     target.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(engine.url.database) as source, sqlite3.connect(target) as copy:
-        source.backup(copy)
-    log.info("Froze the database to %s", target)
+    original, copy = sqlite3.connect(source), sqlite3.connect(target)
+    try:
+        original.backup(copy)
+        for statement in SCRUB_SQL:
+            copy.execute(statement)
+        copy.commit()
+        copy.execute("VACUUM")          # drop the old token bytes from free pages
+    finally:
+        original.close()
+        copy.close()
+    log.info("Froze the database to %s (Yahoo tokens removed)", target)
 
 
-def run_case(session: Any, client: UsageMeter, case: Case) -> dict[str, Any]:
+def run_case(session: Any, client: UsageMeter, case: Case, redact: bool = False) -> dict[str, Any]:
     """Asks the case's turns in one chat and scores the last answer. Raises AgentUnavailable."""
     from services.agent import run_agent
     from services.agent_prompt import league_context
@@ -159,7 +181,7 @@ def run_case(session: Any, client: UsageMeter, case: Case) -> dict[str, Any]:
             "stop_reason": reply.stop_reason, "provider": reply.provider, "unverified": list(reply.unverified),
             "eval_unverified": list(result.unverified), "tokens": {"prompt": prompt, "completion": completion},
             "requests": requests, "seconds": round(time.monotonic() - started, 1),
-            "reply": reply.reply[:REPORT_REPLY_CHARS]}
+            "reply": "" if redact else reply.reply[:REPORT_REPLY_CHARS]}
 
 
 def _failed(error: str, client: UsageMeter, before: tuple[int, int, int], started: float) -> dict[str, Any]:
@@ -196,16 +218,25 @@ def _meta(args: argparse.Namespace, chain: str, client: Any, session: Any) -> di
             "provider": chain, "model": getattr(profile, "model", None), "hashes": eval_report.code_hashes(),
             "data": {"season": season, "stats_week": stats_week, "lineup_week": lineup_week,
                      "db": Path(args.db).name if args.db else "app database"},
-            "args": {k: v for k, v in vars(args).items() if k not in ("compare", "freeze")}}
+            "args": {k: v for k, v in vars(args).items() if k not in ("compare", "freeze", "force")}}
 
 
 def run_live(args: argparse.Namespace) -> int:
-    from services.llm_client import AgentUnavailable
-
     llm, chain = _client(args.provider)
     if llm is None:
         log.error("No AI provider is configured for %r (set its API key in backend/.env).", chain)
         return 2
+    try:
+        return _run_cases(args, llm, chain)
+    finally:
+        close = getattr(llm, "close", None)
+        if callable(close):
+            close()
+
+
+def _run_cases(args: argparse.Namespace, llm: Any, chain: str) -> int:
+    from services.llm_client import AgentUnavailable
+
     client, sessions = UsageMeter(llm), _session_factory(args.db)
     cases = select_cases(args.only, args.split, args.sample, args.seed)
     if args.resume:
@@ -225,7 +256,7 @@ def run_live(args: argparse.Namespace) -> int:
             if (case.id, repeat) in done:
                 continue
             pacer.wait()
-            outcome = _run_with_retry(sessions, client, case, AgentUnavailable)
+            outcome = _run_with_retry(sessions, client, case, AgentUnavailable, args.redact)
             if outcome is None:
                 log.error("Provider quota exhausted; saved %s. Continue later with --resume %s", out, out)
                 eval_report.save(out, meta, results)
@@ -240,13 +271,14 @@ def run_live(args: argparse.Namespace) -> int:
     return 0 if all(r["passed"] for r in results) else 1
 
 
-def _run_with_retry(sessions, client: UsageMeter, case: Case, unavailable: type) -> dict[str, Any] | None:
+def _run_with_retry(sessions, client: UsageMeter, case: Case, unavailable: type,
+                    redact: bool = False) -> dict[str, Any] | None:
     """One case; a short rate limit is waited out once. None: a long (daily) limit, stop the run."""
     for attempt in range(2):
         before, started = client.snapshot(), time.monotonic()
         with sessions() as session:
             try:
-                return run_case(session, client, case)
+                return run_case(session, client, case, redact)
             except unavailable as exc:
                 wait = exc.retry_after or 60
                 if exc.kind != "rate_limit":
@@ -274,7 +306,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--db", help="a frozen database copy (see --freeze)")
     parser.add_argument("--out", help="report path (default backend/eval_runs/<time>-<provider>.json)")
     parser.add_argument("--resume", help="continue an earlier report, skipping the cases it has")
-    parser.add_argument("--freeze", help="copy the app database to this path and exit")
+    parser.add_argument("--freeze", help="copy the app database (without Yahoo tokens) to this path and exit")
+    parser.add_argument("--force", action="store_true", help="let --freeze replace an existing file")
+    parser.add_argument("--redact", action="store_true",
+                        help="leave answer text out of the report (it can name your leagues, teams and managers)")
     parser.add_argument("--compare", nargs=2, metavar=("BEFORE", "AFTER"), help="diff two reports and exit")
     return parser.parse_args(argv)
 
@@ -288,7 +323,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         log.info("\n".join(lines))
         raise SystemExit(1 if regressed else 0)
     if args.freeze:
-        freeze(Path(args.freeze))
+        freeze(Path(args.freeze), args.force)
         raise SystemExit(0)
     raise SystemExit(run_live(args))
 

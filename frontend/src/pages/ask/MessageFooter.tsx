@@ -50,10 +50,12 @@ function CopyButton({ text }: { text: string }) {
   };
   const label = { idle: 'Copy', copied: 'Copied', failed: 'Copy failed' }[status];
   return (
-    <button type="button" className="btn btn--ghost btn--sm message__copy" onClick={() => void handleCopy()}>
-      {label}
+    <>
+      <button type="button" className="btn btn--ghost btn--sm message__copy" onClick={() => void handleCopy()}>
+        {label}
+      </button>
       <span className="sr-only" role="status">{status === 'idle' ? '' : label}</span>
-    </button>
+    </>
   );
 }
 

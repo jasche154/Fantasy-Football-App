@@ -129,8 +129,18 @@ def test_league_scope_is_the_default_and_covers_the_roster(session, week_ids):
 def test_without_a_league_the_tool_asks_for_a_player_or_team(session, week_ids):
     with pytest.raises(ToolError, match="Try: player="):
         injury_report(session)
-    with pytest.raises(ToolError, match="only one"):
+    with pytest.raises(ToolError, match="not both"):
         injury_report(session, player="RB Player 01", team="AAA")
+
+
+def test_league_focus_does_not_block_player_or_team_questions(session, week_ids):
+    ids = {p.full_name: p.id for p in session.query(Player).all()}
+    _seed_league(session, ids, MINE, THEIRS)
+    player = injury_report(session, player="WR Player 01", league="Family League")
+    assert player["players"][0]["play_prob"] == 0.0 and "league" not in player
+    team = injury_report(session, team="AAA", league="Family League")
+    assert team["team"] == "AAA" and team["players"]
+    assert injury_report(session, player="WR Player 01", league="nope")["players"][0]["status"] == "Out"
 
 
 def test_injected_injury_text_is_neutralized(session, week_ids):

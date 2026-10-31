@@ -310,3 +310,15 @@
   font-size: var(--text-2xs);
   color: var(--color-text-subtle);
 }
+
+.league-picker__hint,
+.composer__wait {
+  font-size: var(--text-2xs);
+  color: var(--color-text-subtle);
+}
+
+.composer__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}

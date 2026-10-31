@@ -13,13 +13,23 @@ REMOVED = "[text removed]"
 
 _ZERO_WIDTH = re.compile("[­᠎​-‏‪-‮⁠-⁯﻿]")
 # Chat-template tokens (<|im_start|>, <|eot_id|>) and role tags (<system>, </tool>).
-_SPECIAL_TOKENS = re.compile(r"<\|[^>]{0,40}?\|?>|</?\s*(?:system|assistant|user|developer|tool|im_start|im_end)\b[^>]{0,30}>",
-                             re.IGNORECASE)
+_SPECIAL_TOKENS = re.compile(
+    r"<\|[^>]{0,40}?\|?>|</?\s*(?:system|assistant|user|developer|tool|im_start|im_end)\b[^>]{0,30}>", re.IGNORECASE)
+# Cyrillic and Greek letters that look like Latin ones ("іgnоrе"), folded so the patterns still match.
+_CONFUSABLES = str.maketrans(dict(zip(
+    "аеорсухіјѕһԁ"
+    "АВЕКМНОРСТХІЈЅ"
+    "οαερικντ"
+    "ΑΒΕΗΙΚΜΝΟΡΤΧ",
+    "aeopcyxijshd" "ABEKMHOPCTXIJS" "oaepiknt" "ABEHIKMNOPTX", strict=True)))
 _ROLE_MARKER = re.compile(r"\b(system|assistant|developer|user|tool)\s*:", re.IGNORECASE)
 _MARKUP = re.compile(r"`+|#{2,}")
 # Sentences that address the model rather than report news; the rest of the sentence goes too.
 _INSTRUCTION = re.compile(
-    r"(?:\b(?:ignore|disregard|forget|override)\b[^.!?]{0,40}?\b(?:instructions?|rules|prompts?|messages|context|above)\b"
+    r"(?:\b(?:ignore|disregard|forget|override)\b[^.!?]{0,40}?"
+    r"\b(?:instructions?|rules|prompts?|messages|context|above|prior|previous|earlier)\b"
+    r"|\b(?:ignore|disregard|forget)\s+(?:everything|all|what)\b"
+    r"|\btell\s+(?:him|her|them|the\s+user)\s+to\b"
     r"|\byou\s+are\s+now\b|\bfrom\s+now\s+on\b|\bact\s+as\b|\bpretend\s+(?:to\s+be|you)\b"
     r"|\b(?:system|developer)\s+(?:prompt|message|instructions?)\b|\bnew\s+instructions?\b"
     r"|\b(?:call|use|invoke|run)\s+the\s+\w+\s+tool\b|\bremember\s+(?:that|this)\b"
@@ -35,7 +45,7 @@ def label(text: str | None) -> str:
 
 def untrusted(text: str | None, limit: int = MAX_UNTRUSTED) -> str:
     """Outside free text as one clean line of at most `limit` characters (plus an ellipsis when cut)."""
-    cleaned = _ZERO_WIDTH.sub("", unicodedata.normalize("NFKC", text or ""))
+    cleaned = _ZERO_WIDTH.sub("", unicodedata.normalize("NFKC", text or "")).translate(_CONFUSABLES)
     cleaned = "".join(ch if ch.isprintable() else " " for ch in cleaned)
     cleaned = _SPECIAL_TOKENS.sub(" ", cleaned)
     cleaned = _INSTRUCTION.sub(f" {REMOVED} ", cleaned)

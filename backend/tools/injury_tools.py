@@ -1,7 +1,8 @@
 """Agent tool `get_injury_report`: status, chance to play, inactives timing and injury fallout.
 
-Pass one of `player`, `team` (NFL abbreviation) or `league` (the user's roster); with none, the
-user's only imported league is used. Reads the stored weekly rankings only (never fetches).
+Pass `player` or `team` (NFL abbreviation) for them, or only `league` for the user's roster; with
+none, the user's only imported league is used. With a player or team, `league` just sets the scoring.
+Reads the stored weekly rankings only (never fetches).
 """
 import json
 from datetime import datetime, timezone
@@ -92,8 +93,8 @@ def _fit(result: dict) -> dict:
 
 def injury_report(session: Session, player: str | None = None, team: str | None = None,
                   league: str | None = None, week: int | None = None, now: datetime | None = None) -> dict:
-    if sum(x is not None for x in (player, team, league)) > 1:
-        raise ToolError("Pass only one of player, team or league. Try: player='Jahmyr Gibbs'.")
+    if player is not None and team is not None:
+        raise ToolError("Pass player or team, not both. Try: player='Jahmyr Gibbs'.")
     now = now or datetime.now(timezone.utc)
     league_row = mine = None
     if player is None and team is None:
@@ -101,6 +102,12 @@ def injury_report(session: Session, player: str | None = None, team: str | None 
             league_row, mine = mt.find_league(session, league)
         except mt.LeagueNotFound as exc:
             raise ToolError(f"{exc} Try: player='<name>' or team='DET'.") from exc
+    elif league is not None:
+        # With a player or team, league (often added by the chat's league focus) only picks the scoring.
+        try:
+            league_row, _ = mt.find_league(session, league)
+        except mt.LeagueNotFound:
+            league_row = None
     settings = _settings(session, league_row)
     valuation = build_valuation(session, settings)
     rankings = build_weekly_rankings(session, settings, week)

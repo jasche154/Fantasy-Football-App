@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { loadChat, MAX_STORED_ENTRIES, saveChat, STORAGE_KEY } from './chatStorage';
+import { loadChat, MAX_STORED_ENTRIES, MAX_TEXT, saveChat, STORAGE_KEY } from './chatStorage';
 import { MAX_ASSISTANT_CHARS, toMessage } from './useChat';
 
 describe('chatStorage', () => {
@@ -30,6 +30,17 @@ describe('chatStorage', () => {
     expect(loaded.entries[0].toolCalls).toEqual([{ name: 'get_my_team', ok: true, arguments: {} }]);
     expect(loaded.memory).toEqual(['fine']);
     expect(loaded.leagueId).toBeNull();
+  });
+
+  it('cuts long text on reload instead of dropping it, by role', () => {
+    saveChat({ leagueId: null, memory: [], entries: [
+      { id: 'q', role: 'user', content: 'u'.repeat(4100), toolCalls: [] },
+      { id: 'a', role: 'assistant', content: 'a'.repeat(12100), toolCalls: [] },
+      { id: 'q2', role: 'user', content: 'And?', toolCalls: [] },
+    ] });
+    const loaded = loadChat();
+    expect(loaded.entries.map((entry) => [entry.role, entry.content.length])).toEqual([
+      ['user', MAX_TEXT.user], ['assistant', MAX_TEXT.assistant], ['user', 4]]);
   });
 
   it('keeps only the latest entries', () => {

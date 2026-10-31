@@ -1,4 +1,5 @@
 """Player search, name resolution, and the player profile."""
+from collections.abc import Iterable
 from dataclasses import dataclass
 from difflib import SequenceMatcher, get_close_matches
 from statistics import mean
@@ -11,6 +12,7 @@ from database.models import (
     PlayerStatsWeekly,
 )
 from services.insights import player_signals
+from services.labels import label
 from services.league import POSITIONS, LeagueSettings
 from services.player_index import TYPO_CUTOFF, get_index, normalize
 from services.projections import GameLine, PlayerSeason, load_game_lines
@@ -48,7 +50,7 @@ class PlayerNotFound(LookupError):
 
 class AmbiguousPlayer(LookupError):
     def __init__(self, query: str, candidates: list[PlayerRef]):
-        super().__init__(f"'{query}' matches several players: "
+        super().__init__(f"'{label(query)}' matches several players: "
                          + ", ".join(f"{c.name} ({c.position}, {c.team}, id {c.id})" for c in candidates))
         self.candidates = candidates
 
@@ -106,6 +108,9 @@ def resolve_player(session: Session, reference: str | int) -> PlayerRef:
         return PlayerRef(player.id, player.full_name, player.position, player.nfl_team)
     text = str(reference).strip()
     indexed = get_index(session).resolve(text)     # exact, nickname, unique active last name, typo
+    if indexed and not _whole_words(text, indexed) and any(
+            _whole_words(text, (m.name,)) for m in search_players(session, text, limit=5)):
+        indexed = ()      # a typo match never beats a player whose name really contains these words
     if indexed:
         refs = _refs(session.execute(select(Player.id, Player.full_name, Player.position, Player.nfl_team)
                                      .where(Player.full_name.in_(indexed), Player.position.in_(POSITIONS))
@@ -116,18 +121,27 @@ def resolve_player(session: Session, reference: str | int) -> PlayerRef:
             raise AmbiguousPlayer(text, refs)
     matches = search_players(session, text, limit=5)
     if not matches:
-        raise PlayerNotFound(f"No QB/RB/WR/TE found matching '{reference}'.")
+        raise PlayerNotFound(f"No QB/RB/WR/TE found matching '{label(text)}'.")
     exact = [m for m in matches if normalize(m.name) == normalize(text)]
     if len(exact) == 1:
         return exact[0]
+    words = [m for m in matches if _whole_words(text, (m.name,))]
+    if len(words) == 1 and not exact:
+        return words[0]
     if len(matches) == 1 and not exact:
         if _close_enough(text, matches[0].name):
             return matches[0]
         # A lone partial hit ("Gibs" inside "Antonio Gibson") is a guess: ask instead of answering.
         only = matches[0]
-        raise PlayerNotFound(f"No player named '{text}'. Closest: {only.name} ({only.position}, {only.team}, "
+        raise PlayerNotFound(f"No player named '{label(text)}'. Closest: {only.name} ({only.position}, {only.team}, "
                              f"id {only.id}). Pass that full name or id if that's who you mean.")
     raise AmbiguousPlayer(text, exact or matches)
+
+
+def _whole_words(query: str, names: Iterable[str]) -> bool:
+    """Every word of the query is a whole word of one of the names ("gibb" in "Rookie Gibb")."""
+    wanted = normalize(query).split()
+    return bool(wanted) and any(all(w in normalize(n).split() for w in wanted) for n in names)
 
 
 def _close_enough(query: str, name: str) -> bool:

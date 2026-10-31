@@ -22,7 +22,7 @@ function MemoryNote({ memory }: { memory: readonly string[] }) {
     <section className="chat-memory" aria-label="Keeping in mind">
       <p className="chat-memory__label">Keeping in mind for this chat</p>
       <ul className="chat-memory__list">
-        {memory.map((fact) => <li key={fact} className="chip">{fact}</li>)}
+        {memory.map((fact, index) => <li key={`${index}-${fact}`} className="chip">{fact}</li>)}
       </ul>
     </section>
   );
@@ -47,7 +47,7 @@ export function AskPage() {
   }, [leaguesState.status, leagues, leagueId, setLeagueId]);
 
   const handleSend = async (text: string) => {
-    if (!text.trim() || chat.isPending) return;
+    if (!text.trim() || chat.isPending || chat.waitSeconds > 0) return;
     setDraft('');
     const outcome = await chat.send(text);
     if (outcome === 'failed') setDraft((current) => current || text);
@@ -56,7 +56,8 @@ export function AskPage() {
 
   const latest = chat.entries[chat.entries.length - 1];
   const followUps = !chat.isPending && latest?.role === 'assistant' ? latest.suggestions ?? [] : [];
-  const retryText = chat.lastFailed ?? draft;
+  // The draft holds the failed question (restored on failure), plus any edits the user made since.
+  const retryText = draft.trim() ? draft : chat.lastFailed ?? '';
 
   return (
     <div className="ask">
@@ -69,7 +70,8 @@ export function AskPage() {
       />
       {isLlmMissing && <p className="notice" role="note">{LLM_SETUP_MESSAGE}</p>}
       <div className="chat">
-        <LeaguePicker leagues={leagues} value={leagueId} isDisabled={chat.isPending} onChange={setLeagueId} />
+        <LeaguePicker leagues={leagues} value={leagueId} isDisabled={chat.isPending}
+          isLocked={chat.entries.length > 0} onChange={setLeagueId} />
         <MemoryNote memory={chat.memory} />
         <ChatMessages entries={chat.entries} isPending={chat.isPending} />
         {chat.entries.length === 0 && !chat.isPending && (
@@ -79,9 +81,9 @@ export function AskPage() {
         <PromptChips label="Ask next" prompts={followUps} isDisabled={chat.isPending}
           onPick={(prompt) => void handleSend(prompt)} />
         {chat.error && (
-          <ChatError error={chat.error} onRetry={retryText.trim() ? () => void handleSend(retryText) : undefined} />
+          <ChatError error={chat.error} waitSeconds={chat.waitSeconds} onRetry={retryText.trim() ? () => void handleSend(retryText) : undefined} />
         )}
-        <Composer draft={draft} isPending={chat.isPending} inputRef={inputRef} onDraft={setDraft}
+        <Composer draft={draft} isPending={chat.isPending} waitSeconds={chat.waitSeconds} inputRef={inputRef} onDraft={setDraft}
           onSend={(text) => void handleSend(text)} />
       </div>
     </div>

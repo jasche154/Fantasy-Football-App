@@ -39,9 +39,12 @@ interface ChatMessagesProps {
   isPending: boolean;
 }
 
+/**
+ * The log itself is silent (aria-live="off"); one hidden status announces each new reply, so
+ * nothing is read twice. Replies restored from storage aren't announced.
+ */
 export function ChatMessages({ entries, isPending }: ChatMessagesProps) {
   const endRef = useRef<HTMLDivElement>(null);
-  // Replies restored from storage aren't announced; only ones that arrive while the page is open.
   const [restoredId] = useState(() => lastAssistant(entries)?.id);
   const elapsed = useElapsedSeconds(isPending);
   const latest = lastAssistant(entries);
@@ -52,21 +55,23 @@ export function ChatMessages({ entries, isPending }: ChatMessagesProps) {
   }, [entries.length, isPending]);
 
   return (
-    <div className="chat-log" role="log" aria-label="Conversation">
-      <ol className="chat-log__list">
-        {entries.map((entry) => (
-          <MessageBubble key={entry.id} entry={entry} />
-        ))}
-      </ol>
+    <>
+      <div className="chat-log" role="log" aria-live="off" aria-label="Conversation">
+        <ol className="chat-log__list">
+          {entries.map((entry) => (
+            <MessageBubble key={entry.id} entry={entry} />
+          ))}
+        </ol>
+      </div>
       {isPending && (
-        <p className="message message--assistant message--pending" role="status">
+        <div className="message message--assistant message--pending">
           <span className="typing" aria-hidden="true"><span /><span /><span /></span>
-          <span>Looking up the data…</span>
+          <span role="status">Looking up the data…</span>
           {elapsed >= SHOW_ELAPSED_AFTER_S && <span className="message__elapsed">{elapsed} s · answers can take up to 30 s</span>}
-        </p>
+        </div>
       )}
       <p className="sr-only" role="status" aria-live="polite">{announcement}</p>
       <div ref={endRef} />
-    </div>
+    </>
   );
 }

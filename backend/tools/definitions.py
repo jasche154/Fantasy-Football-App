@@ -15,6 +15,7 @@ from services.experts import expert_rankings
 from services.flags import player_flags
 from services.game_locks import kickoffs
 from services.insights import find_insights
+from services.labels import label
 from services.leaderboards import catalog, leaderboard
 from services.players import AmbiguousPlayer, PlayerNotFound, player_profile, resolve_player, search_players
 from services.projections import available_seasons, latest_season
@@ -24,10 +25,10 @@ from services.waivers import waiver_candidates
 from services.weekly_rankings import build_weekly_rankings, default_week
 from services import serialize
 from tools import league_tools, trade_tools
+from tools.injury_tools import INJURY_REPORT
 from tools.league_tools import TRADE_PERSPECTIVE, settings_for
 from tools.registry import Tool, ToolError, ToolRegistry, ToolUnavailable
 from tools.rows import header, matchup_words, player_str, schedule_words, weekly_row
-from tools.injury_tools import INJURY_REPORT
 from tools.start_sit_tool import START_SIT
 from tools.tool_specs import TOOL_SPECS
 
@@ -265,7 +266,7 @@ def _schedule_strength(session: Session, position: str = "WR", week: int | None 
     if team:
         offenses = [o for o in offenses if o["team"] == team.strip().upper()]
         if not offenses:
-            raise ToolError(f"No schedule for team '{team}'. Try: an NFL abbreviation like team='DET'.")
+            raise ToolError(f"No schedule for team '{label(team)}'. Try: an NFL abbreviation like team='DET'.")
     elif len(offenses) > 2 * SCHEDULE_TEAMS_SHOWN:
         offenses = offenses[:SCHEDULE_TEAMS_SHOWN] + offenses[-SCHEDULE_TEAMS_SHOWN:]
     return {"season": data["season"], "week": data["week"], "position": position,

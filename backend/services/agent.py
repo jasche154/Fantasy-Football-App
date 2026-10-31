@@ -241,7 +241,6 @@ def run_agent(session: Session, client: LLMClient, history: Sequence[Mapping[str
     while rounds < max_rounds:
         # A fallback chain may switch providers between requests, so read the budgets each round.
         input_tokens = _profile_value(client, "max_input_tokens", INPUT_TOKENS)
-        tool_chars = _profile_value(client, "max_tool_chars", TOOL_CHARS)
         try:
             requests += 1
             response = client.complete(_fit_request(messages, schemas, turn, input_tokens), schemas)
@@ -255,11 +254,13 @@ def run_agent(session: Session, client: LLMClient, history: Sequence[Mapping[str
                 "the tool's schema (for example, split a long player list across several calls) and try again.")})
             continue
         rounds += 1
-        calls = response.get("tool_calls") or []
+        # Providers may leave ids empty; they must be unique to pair each call with its result.
+        calls = [{**c, "id": c.get("id") or f"call_{rounds}_{i}"}
+                 for i, c in enumerate(response.get("tool_calls") or [])]
         if not calls:
             answer = response.get("content") or ""
             report = _ground(answer, messages, turn)
-            if not report.ok and not revised:
+            if not report.ok and not revised and rounds < max_rounds:
                 # One combined revision for stray names and numbers (the model's memory is stale).
                 revised = True
                 messages += [{"role": "assistant", "content": answer},
@@ -267,7 +268,8 @@ def run_agent(session: Session, client: LLMClient, history: Sequence[Mapping[str
                 continue
             return _finish(answer, report, turn, client, "answer", requests)
         messages.append(_assistant_message(response.get("content"), calls))
-        budget = max(MIN_CALL_CHARS, tool_chars // len(calls))
+        # The budget of the provider that just answered (a fallback chain may have switched).
+        budget = max(MIN_CALL_CHARS, _profile_value(client, "max_tool_chars", TOOL_CHARS) // len(calls))
         for call in calls:
             messages.append({"role": "tool", "tool_call_id": call["id"], "content": _run_tool(turn, call, budget)})
     messages.append({"role": "system", "content": OUT_OF_ROUNDS})
