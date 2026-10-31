@@ -1,11 +1,10 @@
 import json
-from types import SimpleNamespace
 
 import pytest
 
 from config import get_settings
-from services import agent as agent_module
 from services.agent import AgentReply, run_agent
+from tests.agent_fakes import ScriptedLLM, call
 from tools.definitions import TOOLS, sanitize_for_agent
 from tools.registry import Tool, ToolError, ToolRegistry, validate_arguments
 
@@ -108,7 +107,7 @@ def test_trade_tool_rejects_ambiguous_names_and_players_without_current_value(se
         TOOLS.call(session, "evaluate_trade", {"give": ["Mike Williams"], "get": ["Buy Low Guy"]})
     session.add(Player(full_name="Retired Receiver", position="WR", gsis_id="00-retired"))
     session.commit()
-    with pytest.raises(ValueError, match="no 2026 regular-season games"):
+    with pytest.raises(ToolError, match="no 2026 regular-season games"):
         TOOLS.call(session, "evaluate_trade", {"give": ["Retired Receiver"], "get": ["Buy Low Guy"]})
 
 
@@ -118,23 +117,6 @@ def test_sanitize_drops_pfr_snap_data_unless_opted_in(monkeypatch):
     monkeypatch.setenv("AGENT_SHARE_PFR_DATA", "true")
     get_settings.cache_clear()
     assert sanitize_for_agent(payload) == payload
-
-
-class ScriptedLLM:
-    """Replays canned responses and records what the agent sent."""
-
-    def __init__(self, responses):
-        self.responses = list(responses)
-        self.calls = []
-
-    def complete(self, messages, tools):
-        self.calls.append({"messages": [dict(m) for m in messages], "tools": tools})
-        return self.responses.pop(0)
-
-
-def call(name: str, arguments, call_id: str = "c1") -> dict:
-    raw = arguments if isinstance(arguments, str) else json.dumps(arguments)
-    return {"content": None, "tool_calls": [{"id": call_id, "name": name, "arguments": raw}]}
 
 
 def test_agent_answers_directly_without_tools(session):
@@ -177,44 +159,6 @@ def test_agent_stops_after_max_rounds_and_asks_for_a_final_answer(session):
     reply = run_agent(session, llm, [{"role": "user", "content": "q"}], max_rounds=2)
     assert reply.reply == "Final." and len(reply.tool_calls) == 2
     assert llm.calls[-1]["tools"] is None
-
-
-def test_groq_client_translates_sdk_responses(monkeypatch):
-    sent = {}
-    tool_call = SimpleNamespace(id="t1", function=SimpleNamespace(name="search_players", arguments='{"query":"x"}'))
-    message = SimpleNamespace(content=None, tool_calls=[tool_call])
-
-    class FakeCompletions:
-        def create(self, **options):
-            sent.update(options)
-            return SimpleNamespace(choices=[SimpleNamespace(message=message)])
-
-    class FakeGroq:
-        def __init__(self, api_key, **options):
-            self.chat = SimpleNamespace(completions=FakeCompletions())
-
-    monkeypatch.setattr("groq.Groq", FakeGroq)
-    client = agent_module.GroqClient("key", "model-x")
-    result = client.complete([{"role": "user", "content": "hi"}], [{"type": "function"}])
-    assert result == {"content": None, "tool_calls": [{"id": "t1", "name": "search_players",
-                                                       "arguments": '{"query":"x"}'}]}
-    assert sent["model"] == "model-x" and sent["tool_choice"] == "auto"
-    sent.clear()
-    client.complete([], None)
-    assert "tools" not in sent and "tool_choice" not in sent
-
-
-def test_groq_client_wraps_failures(monkeypatch):
-    class Exploding:
-        def __init__(self, api_key, **options):
-            self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
-
-        def create(self, **_):
-            raise ConnectionError("down")
-
-    monkeypatch.setattr("groq.Groq", Exploding)
-    with pytest.raises(agent_module.AgentUnavailable, match="ConnectionError"):
-        agent_module.GroqClient("key", "m").complete([], None)
 
 
 def test_agent_survives_unexpected_tool_failures(session):

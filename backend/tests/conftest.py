@@ -150,16 +150,22 @@ def engine():
 
 
 SECRET_ENV_VARS = ("GROQ_API_KEY", "FANTASYPROS_API_KEY", "ODDS_API_KEY", "YAHOO_CLIENT_ID", "YAHOO_CLIENT_SECRET",
-                   "YAHOO_REDIRECT_URI", "TOKEN_ENCRYPTION_KEY", "AGENT_SHARE_PFR_DATA", "API_TOKEN")
+                   "YAHOO_REDIRECT_URI", "TOKEN_ENCRYPTION_KEY", "AGENT_SHARE_PFR_DATA", "API_TOKEN",
+                   "GROQ_MODEL", "LLM_CHAIN", "GEMINI_API_KEY", "GEMINI_MODEL", "OPENROUTER_API_KEY",
+                   "OPENROUTER_MODEL", "OLLAMA_MODEL", "OLLAMA_BASE_URL")
 
 
 def _clear_caches() -> None:
-    from services import league_insights, matchup
+    from services import league_insights, matchup, player_index
 
     valuation_module._cache.clear()
     matchup._cache.clear()
     league_insights._cache.clear()
     league_insights._schedule.clear()
+    player_index.clear_index_cache()
+    from services import llm_client
+
+    llm_client.clear_cooldowns()
 
 
 @pytest.fixture(autouse=True)

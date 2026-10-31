@@ -1,6 +1,6 @@
 """Player search, name resolution, and the player profile."""
 from dataclasses import dataclass
-from difflib import get_close_matches
+from difflib import SequenceMatcher, get_close_matches
 from statistics import mean
 
 from sqlalchemy import func, select
@@ -12,6 +12,7 @@ from database.models import (
 )
 from services.insights import player_signals
 from services.league import POSITIONS, LeagueSettings
+from services.player_index import TYPO_CUTOFF, get_index, normalize
 from services.projections import GameLine, PlayerSeason, load_game_lines
 from services.valuation import build_valuation
 
@@ -79,6 +80,9 @@ def search_players(session: Session, query: str, position: str | None = None,
         Player.position.in_(positions))
     name_matches = func.lower(Player.full_name).contains(text, autoescape=True)   # "%" / "_" are literal
     candidates = _refs(session.execute(base.where(name_matches)))
+    if not candidates:      # nicknames, last names, "AJ Brown" for "A.J. Brown"
+        indexed = get_index(session).resolve(query)
+        candidates = _refs(session.execute(base.where(Player.full_name.in_(indexed)))) if indexed else []
     if not candidates:
         names = {r.full_name: r for r in session.execute(base)}
         close = get_close_matches(query.strip(), list(names), n=limit, cutoff=FUZZY_CUTOFF)
@@ -100,15 +104,41 @@ def resolve_player(session: Session, reference: str | int) -> PlayerRef:
         if player is None:
             raise PlayerNotFound(f"No player with id {reference}.")
         return PlayerRef(player.id, player.full_name, player.position, player.nfl_team)
-    matches = search_players(session, str(reference), limit=5)
+    text = str(reference).strip()
+    indexed = get_index(session).resolve(text)     # exact, nickname, unique active last name, typo
+    if indexed:
+        refs = _refs(session.execute(select(Player.id, Player.full_name, Player.position, Player.nfl_team)
+                                     .where(Player.full_name.in_(indexed), Player.position.in_(POSITIONS))
+                                     .order_by(Player.id)))
+        if len(refs) == 1:
+            return refs[0]
+        if refs:
+            raise AmbiguousPlayer(text, refs)
+    matches = search_players(session, text, limit=5)
     if not matches:
         raise PlayerNotFound(f"No QB/RB/WR/TE found matching '{reference}'.")
-    exact = [m for m in matches if m.name.lower() == str(reference).strip().lower()]
+    exact = [m for m in matches if normalize(m.name) == normalize(text)]
     if len(exact) == 1:
         return exact[0]
-    if len(matches) == 1:
-        return matches[0]
-    raise AmbiguousPlayer(str(reference), exact or matches)
+    if len(matches) == 1 and not exact:
+        if _close_enough(text, matches[0].name):
+            return matches[0]
+        # A lone partial hit ("Gibs" inside "Antonio Gibson") is a guess: ask instead of answering.
+        only = matches[0]
+        raise PlayerNotFound(f"No player named '{text}'. Closest: {only.name} ({only.position}, {only.team}, "
+                             f"id {only.id}). Pass that full name or id if that's who you mean.")
+    raise AmbiguousPlayer(text, exact or matches)
+
+
+def _close_enough(query: str, name: str) -> bool:
+    """A unique hit we can trust: a prefix, whole words of the name, or a near-exact spelling."""
+    wanted, full = normalize(query), normalize(name)
+    if not wanted:
+        return False
+    words = full.split()
+    if full.startswith(wanted) or all(w in words for w in wanted.split()):
+        return True
+    return SequenceMatcher(None, wanted, full).ratio() >= TYPO_CUTOFF
 
 
 def _game_log_row(line: GameLine) -> dict:

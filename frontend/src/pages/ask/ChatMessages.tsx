@@ -1,30 +1,10 @@
-import { useEffect, useRef } from 'react';
-import type { ToolCallTrace } from '../../api/types';
-import { Icon } from '../../components/Icon';
-import type { ChatEntry } from './useChat';
-import { summarizeArguments } from './toolCalls';
+import { useEffect, useRef, useState } from 'react';
+import type { ChatEntry } from './chatStorage';
+import { MessageFooter } from './MessageFooter';
+import { MessageText } from './MessageText';
 
-function ToolCallChips({ calls }: { calls: readonly ToolCallTrace[] }) {
-  if (calls.length === 0) return null;
-  return (
-    <div className="tool-calls">
-      <p className="tool-calls__label">Data used</p>
-      <ul className="tool-calls__list">
-        {calls.map((call, index) => {
-          const args = summarizeArguments(call.arguments ?? {});
-          return (
-            <li key={`${call.name}-${index}`} className={call.ok ? 'tool-chip' : 'tool-chip tool-chip--failed'}>
-              <Icon name={call.ok ? 'check' : 'alert'} size={14} />
-              <code className="tool-chip__name">{call.name}</code>
-              {args && <span className="tool-chip__args">{args}</span>}
-              <span className={call.ok ? 'sr-only' : 'tool-chip__status'}>{call.ok ? 'succeeded' : 'failed'}</span>
-            </li>
-          );
-        })}
-      </ul>
-    </div>
-  );
-}
+/** After this long, the pending row also shows how long the assistant has been working. */
+const SHOW_ELAPSED_AFTER_S = 5;
 
 function MessageBubble({ entry }: { entry: ChatEntry }) {
   const isUser = entry.role === 'user';
@@ -32,11 +12,26 @@ function MessageBubble({ entry }: { entry: ChatEntry }) {
     <li className={isUser ? 'message message--user' : 'message message--assistant'}>
       <p className="message__author">{isUser ? 'You' : 'Assistant'}</p>
       <div className="message__bubble">
-        <p className="message__text">{entry.content}</p>
+        {isUser ? <p className="message__text">{entry.content}</p> : <MessageText text={entry.content} />}
       </div>
-      {!isUser && <ToolCallChips calls={entry.toolCalls} />}
+      {!isUser && <MessageFooter entry={entry} />}
     </li>
   );
+}
+
+function useElapsedSeconds(isRunning: boolean): number {
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    setSeconds(0);
+    if (!isRunning) return undefined;
+    const timer = window.setInterval(() => setSeconds((value) => value + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [isRunning]);
+  return seconds;
+}
+
+function lastAssistant(entries: readonly ChatEntry[]): ChatEntry | undefined {
+  return [...entries].reverse().find((entry) => entry.role === 'assistant');
 }
 
 interface ChatMessagesProps {
@@ -46,11 +41,18 @@ interface ChatMessagesProps {
 
 export function ChatMessages({ entries, isPending }: ChatMessagesProps) {
   const endRef = useRef<HTMLDivElement>(null);
+  // Replies restored from storage aren't announced; only ones that arrive while the page is open.
+  const [restoredId] = useState(() => lastAssistant(entries)?.id);
+  const elapsed = useElapsedSeconds(isPending);
+  const latest = lastAssistant(entries);
+  const announcement = latest && latest.id !== restoredId ? `Assistant replied: ${latest.content}` : '';
+
   useEffect(() => {
     endRef.current?.scrollIntoView?.({ block: 'end', behavior: 'smooth' });
   }, [entries.length, isPending]);
+
   return (
-    <div className="chat-log" role="log" aria-live="polite" aria-label="Conversation">
+    <div className="chat-log" role="log" aria-label="Conversation">
       <ol className="chat-log__list">
         {entries.map((entry) => (
           <MessageBubble key={entry.id} entry={entry} />
@@ -59,9 +61,11 @@ export function ChatMessages({ entries, isPending }: ChatMessagesProps) {
       {isPending && (
         <p className="message message--assistant message--pending" role="status">
           <span className="typing" aria-hidden="true"><span /><span /><span /></span>
-          Looking up the data…
+          <span>Looking up the data…</span>
+          {elapsed >= SHOW_ELAPSED_AFTER_S && <span className="message__elapsed">{elapsed} s · answers can take up to 30 s</span>}
         </p>
       )}
+      <p className="sr-only" role="status" aria-live="polite">{announcement}</p>
       <div ref={endRef} />
     </div>
   );

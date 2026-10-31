@@ -31,6 +31,8 @@ class Tool:
     description: str
     parameters: Mapping[str, Any]
     handler: Callable[..., Any]
+    # Lists the agent may shorten first when a result is over budget (tools.shaping.fit), in order.
+    trim_keys: tuple[str, ...] = ()
 
     def definition(self) -> dict:
         return {"name": self.name, "description": self.description, "parameters": dict(self.parameters)}

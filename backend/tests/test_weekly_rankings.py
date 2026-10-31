@@ -274,7 +274,7 @@ def test_agent_tools_for_week_and_schedule(session, seeded):
 
     seed_week(session)
     weekly = TOOLS.call(session, "get_weekly_rankings", {"position": "WR", "limit": 1})
-    assert weekly["week"] == WEEK and weekly["refresh"] is None and len(weekly["results"]) == 1
+    assert weekly["week"] == WEEK and len(weekly["results"]) == 1
     strength = TOOLS.call(session, "get_schedule_strength", {"position": "WR"})
     assert strength["defenses"][0]["team"] == "OPP"
 

@@ -12,6 +12,7 @@ export interface MockReply {
   /** Raw response text (e.g. invalid JSON); overrides `body`. */
   raw?: string;
   statusText?: string;
+  headers?: Record<string, string>;
 }
 
 type Handler = (request: MockRequest) => MockReply | Promise<MockReply>;
@@ -72,7 +73,7 @@ export function mockFetch(routes: readonly MockRoute[]) {
     return new Response(text, {
       status: reply.status ?? 200,
       statusText: reply.statusText,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...reply.headers },
     });
   });
   vi.stubGlobal('fetch', fn);

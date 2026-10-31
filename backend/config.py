@@ -22,6 +22,16 @@ class Settings(BaseSettings):
     groq_api_key: str | None = None
     # The 120b model hallucinates far fewer players than 20b, on the same free tier.
     groq_model: str = "openai/gpt-oss-120b"
+    # AI providers to try in order when one is rate-limited or down (services/llm_client.py),
+    # e.g. "groq,gemini,openrouter". Providers without a key are skipped. Gemini's and
+    # OpenRouter's free tiers may use prompts (your league's rosters) for training.
+    llm_chain: str = "groq"
+    gemini_api_key: str | None = None
+    gemini_model: str | None = None        # default: services.llm_client.PROVIDERS["gemini"].model
+    openrouter_api_key: str | None = None
+    openrouter_model: str | None = None
+    ollama_model: str | None = None
+    ollama_base_url: str | None = None     # default http://localhost:11434/v1
     # Snap counts reach nflverse from Pro Football Reference, whose terms restrict using
     # their content to prompt AI models. Keep them out of tool results unless opted in.
     agent_share_pfr_data: bool = False

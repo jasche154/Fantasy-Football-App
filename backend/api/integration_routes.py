@@ -14,6 +14,7 @@ from integrations.sleeper import SleeperError, trending_players
 from integrations.token_crypto import TokenCryptoError
 from integrations.yahoo import YahooAuthError, YahooError
 from services import yahoo_sync
+from services.llm_client import has_llm_provider
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
@@ -31,7 +32,7 @@ def integration_status(session: Session) -> dict:
     return {"fantasypros": bool(settings.fantasypros_api_key), "odds_api": bool(settings.odds_api_key),
             "yahoo_configured": bool(settings.yahoo_client_id and settings.yahoo_client_secret),
             "yahoo_connected": bool(connection and connection.access_token),
-            "llm": bool(settings.groq_api_key)}
+            "llm": has_llm_provider(settings)}
 
 
 @router.get("/integrations/status")

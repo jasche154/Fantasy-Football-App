@@ -11,3 +11,4 @@ backend/data/
 .coverage
 backend/database/backups/
 backend/.snapshot_key
+backend/eval_runs/

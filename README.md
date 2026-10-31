@@ -679,24 +679,64 @@ With a Yahoo league imported, more tools answer from your real league:
 - `get_playoff_outlook`: your players across your league's playoff weeks, with planner fixes;
 - `get_power_rankings`: every team's strength, record, playoff odds and manager tendencies;
 - `get_player_news`: a player's latest headlines (any player, league or not);
-- `get_league_waivers`: players free in your league;
+- `get_league_waivers`: players free in your league, each with the action, FAAB bid, market
+  price, value to you, the drop (and why), and only players who actually improve your lineup;
 - `find_league_trades`: offers with real teams (optionally only for players you name).
 
-The assistant's instructions include each imported league and **your current roster**, so it
-never asks which players you have. `find_trades` with no players uses your roster.
+Two decision tools answer the most common questions in one call:
+- `start_sit` (2–4 players): projection, range, chance to play, matchup, Vegas total, kickoff
+  and lock status, plus a verdict built in code: toss-up (under 1.5 points apart), lean (under 3)
+  or clear, and how often one outscores the other in 10,000 correlated simulations (fixed seed).
+  A player whose game has started is never the pick.
+- `get_injury_report` (a player, an NFL team, or your roster): status, injury, practice, chance to
+  play, when inactives come out, and **who inherits the work** if he sits. Ruled-out players get a
+  row instead of an error.
+
+The assistant's instructions include each imported league with **its own scoring, team count
+and superflex setting**, your current roster, today's date, and "lineups are for week N; stats
+through week M", so it never asks which players you have and doesn't mix PPR and standard
+numbers. The general tools (`get_weekly_rankings`, `get_fantasy_rankings`, `explain_projection`,
+`compare_players`, `evaluate_trade`, `get_player_profile`) take an optional `league` and then use
+that league's scoring; every ranking result says which scoring and week it is. `evaluate_trade` in
+a league also scores both real lineups (`your_lineup_gain`, `their_lineup_gain`) and only suggests
+balancing players from the two rosters involved. Pick a league above the chat box (shown with 2+
+leagues) to make it the default.
+
+**Tool results always fit and stay valid JSON** (`tools/shaping.py`): tools return compact rows
+(about 230 characters per weekly row instead of 800), and anything still over the provider's
+budget loses rows from the end with a `"truncated": {"shown", "total", "hint"}` note, never a
+cut in the middle of the JSON. Earlier rounds' results shrink to short digests when a request
+would exceed the provider's per-request budget.
 
 **Intent routing** (`services/agent_routing.py`): each question gets only the tools it's likely
-to need (keywords from your last two messages, plus player tools when you name a player),
-usually 6–12 of the 23. That saves tokens on Groq's free tier and cuts wrong tool picks.
+to need, at most 10. Intents are scored by weighted keywords, follow-ups carry the previous topic
+and players, and greetings get almost no tools. Player names are found by
+`services/player_index.py`: punctuation-insensitive full names ("AJ Brown"), about 40 nicknames
+("CMC", "JSN", "ARSB"), unique last names of active players, and typos ("Gibs" → Jahmyr Gibbs).
+An ambiguous name is flagged with its candidates, never guessed; a lone partial match on a
+retired player is no longer silently returned.
 
 **Chat memory:** when you state your record, goals or players you won't trade, the assistant
 calls `remember`. Those facts show under "Keeping in mind" and go back with every message,
-so they survive even though only the last 20 messages are sent. New chat clears them.
+so they survive even though only the last 20 messages are sent. Facts sent back by the browser
+are filtered again (length, printable, no instruction-like text). The chat, memory and league
+choice are saved in this browser (localStorage) and survive a reload; New chat clears them.
 
-**Evaluation set** (`services/agent_eval.py`): 26 saved questions with the tools each should
-use. The test suite checks that routing sends those tools; with `GROQ_API_KEY`,
-`python -m services.agent_eval` runs them through the real model and checks tool choice,
-grounding and that it never asks for your roster.
+**Chat page:** starter questions are built from your leagues and the week, follow-up chips come
+from fixed templates keyed on the tools used (never model or Yahoo text), a "Sources" list shows
+which data was used and for which week, a note appears when an answer was partial or had
+unverified details, and a free-tier rate limit shows a countdown with Retry.
+
+**Evaluation set** (`services/eval_cases.py`, runner `services/agent_eval.py`): 63 saved
+questions across 18 intents, including multi-turn follow-ups and out-of-scope questions; 22 are
+held out for scoring only. The test suite checks offline that routing sends every case's tools,
+plus the loop, grounding, truncation, fallback and injection cases with a scripted fake model.
+With a provider key, `python -m services.agent_eval` runs them through the real model and checks
+tools (required, allowed and forbidden), grounded players and numbers, that a decision question
+gets a decision, banned phrases, and that it never asks for your roster. It writes a JSON report
+(git SHA, prompt and schema hashes, tokens, rounds) to `backend/eval_runs/`; `--compare a.json
+b.json` shows the changes and fails on a holdout regression, `--provider`, `--split`, `--repeat`
+and `--resume` (after a daily limit) are available. Live runs are manual, never in CI.
 
 The same general tools are exposed three ways: `search_players`, `get_player_profile`,
 `get_player_game_log`, `compare_players`, `get_fantasy_rankings`,
@@ -710,15 +750,47 @@ Arguments are validated against each tool's JSON Schema, and players can be pass
 If a tool fails unexpectedly, the error is logged on the server and the model only sees a
 generic message.
 
-**Grounding:** before a chat answer is shown, every player name in it is checked against
-the player database. If it names players that no tool returned and you didn't mention
-(stale knowledge such as last year's rosters), the model gets one round to remove them or
-look them up. Tool fields say what they are (`this_week_proj`, playoff schedule as "6%
-harder than average") so the model can't mislabel a projection as an actual score.
+**Grounding** (`services/grounding.py`): before a chat answer is shown, its player names (full
+names and unique last names) and its numbers (decimals, percents, FAAB dollars, "N points") are
+checked against the evidence: tool results, your messages, the league rosters in the
+instructions, and earlier answers. Numbers match within rounding, as a percent of a fraction
+(58% = 0.58), or as a gap or total of two numbers the answer already backs up. If anything is
+unverified, the model gets one combined round to fix it or look it up; if it still can't, the
+answer ships with a "Not verified against the app's data: …" line and the chat shows a note.
+The out-of-rounds answer is checked the same way. Tool fields say what they are (`proj`,
+matchups and schedules in words like "6% harder than average") so the model can't mislabel a
+projection as an actual score.
+
+**Untrusted text:** news headlines and summaries pass through `labels.untrusted()` (one line,
+no control or zero-width characters, role markers and instruction-like sentences replaced
+with "[text removed]"), and the instructions say such fields are quotes, never instructions.
+Every tool except `remember` is read-only, and a test fails if a new tool isn't on that list.
+Unexpected tool errors (including library `ValueError` text) reach the model only as a generic
+message.
+
+**Free LLM providers** (`services/llm_client.py`, one OpenAI-compatible client on `httpx`):
+`LLM_CHAIN` lists providers in order; on a rate limit or outage the next one answers and the
+limited one cools down (honoring `Retry-After`). A request that is too large for the provider
+returns "ask a narrower question" instead of "wait a minute". Each provider has its own
+tool-result and request budgets.
+
+| Provider | Default model | Free limits (checked 2026-10-30) | Data use |
+|---|---|---|---|
+| `groq` (default) | `openai/gpt-oss-120b` | 30 requests/min, 1,000/day, 8,000 tokens/min | Not retained by default |
+| `gemini` | `gemini-3.8-flash` | Not published outside AI Studio; reports range from 20 to 1,500 requests/day | **Free-tier prompts and answers may be used to train Google's models and read by human reviewers.** Prompts include your rosters and league-mates' team names |
+| `openrouter` | `google/gemma-4-31b-it:free` | 20 requests/min, 50/day (1,000/day after buying $10 of credits once) | Depends on the upstream provider; many free models require allowing training |
+| `ollama` | `gpt-oss:20b` | None (your hardware) | Never leaves your machine |
+
+Gemini and OpenRouter are opt-in for that reason, e.g. `LLM_CHAIN=groq,ollama`. Mistral's free
+tier trains on inputs by default, Cerebras is trial credit only, and GitHub Models shut down
+on 2026-07-30, so none of them is offered. Known limit: on Groq, a chat that needs two tool
+rounds can pass the 8,000 tokens/minute cap, so back-to-back questions may hit the countdown.
 
 1. **REST:** `GET /api/agent/tools` lists them, `POST /api/agent/tools/{name}` runs one.
-2. **Built-in chat:** `POST /api/agent/chat` runs a multi-round tool-calling loop on Groq
-   (set `GROQ_API_KEY`). Try it from the command line:
+2. **Built-in chat:** `POST /api/agent/chat` runs a multi-round tool-calling loop on the
+   providers in `LLM_CHAIN` (set `GROQ_API_KEY` for the default). Rate limits return 429 with
+   `Retry-After`; the reply includes `stop_reason`, `unverified`, `provider`, `data_as_of` and
+   `suggestions`. Try it from the command line:
    `python -m testing.groq_test "Is trading Bijan Robinson for Ja'Marr Chase fair?"`
 3. **MCP server** for Claude Desktop, Claude Code, or any MCP client:
    ```bash
@@ -821,8 +893,12 @@ Settings come from environment variables or `backend/.env` (never commit it; see
 | `WEEKLY_SOURCES` | `["sleeper_status","yahoo_experts","espn","vegas_props"]` | JSON list of outside weekly sources to fetch |
 | `WEEKLY_AUTO_REFRESH` | `true` | Let `/api/rankings/weekly` refresh the current week's stale sources before answering (never for cross-site requests) |
 | `AUTO_UPDATE` | `true` | While the API runs, load each finished week's stats (updating the learned weights) and save the current week's pre-game projections, checked every 6 hours |
-| `GROQ_API_KEY` | — | Enables the AI chat |
+| `LLM_CHAIN` | `groq` | Comma-separated free providers for the AI chat, tried in order (`groq`, `gemini`, `openrouter`, `ollama`). Providers without a key are skipped |
+| `GROQ_API_KEY` | — | Enables Groq (the default provider) |
 | `GROQ_MODEL` | `openai/gpt-oss-120b` | Groq model for the chat (free tier). `openai/gpt-oss-20b` is faster but invents players far more often |
+| `GEMINI_API_KEY` / `GEMINI_MODEL` | — / `gemini-3.8-flash` | Optional Google Gemini free tier (see the training caveat under AI assistant) |
+| `OPENROUTER_API_KEY` / `OPENROUTER_MODEL` | — / `google/gemma-4-31b-it:free` | Optional OpenRouter free model |
+| `OLLAMA_MODEL` / `OLLAMA_BASE_URL` | `gpt-oss:20b` / `http://localhost:11434/v1` | Optional local model through Ollama (no key; nothing leaves your machine) |
 | `AGENT_SHARE_PFR_DATA` | `false` | Include PFR-sourced snap counts in AI tool results |
 
 ## Data sources
