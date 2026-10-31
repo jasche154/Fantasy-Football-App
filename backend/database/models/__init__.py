@@ -9,7 +9,8 @@ from database.models.stats import (  # noqa: F401
     PlayerStatsWeekly, PlayerPassingAdvancedWeekly, PlayerReceivingAdvancedWeekly, PlayerRushingAdvancedWeekly, Recommendation, PlayerExpectedPointsWeekly, PlayerSnapCountsWeekly,
 )
 from database.models.sources import (  # noqa: F401
-    ExpertRanking, DataLoad, NflGame, WeeklySourceProjection, InjuryReport, DepthChartEntry, PlayerStatus, ExternalApiCall,
+    ExpertRanking, DataLoad, NflGame, WeeklySourceProjection, InjuryReport, DepthChartEntry, PlayerStatus, InjuryNews,
+    ExternalApiCall,
 )
 from database.models.app_state import (  # noqa: F401
     RankingsSnapshot, ProjectionHistory, LearnedWeights, TeamGameStats, KickerGame, PlayerRedZone, GameForecast, AppState,

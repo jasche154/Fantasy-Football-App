@@ -103,7 +103,10 @@ def _refresh_status(session: Session, http: httpx.Client, force: bool) -> dict:
         record_call(session, sleeper.PLAYERS_SOURCE, ok=False)
         raise SourceError(str(exc)) from exc
     record_call(session, sleeper.PLAYERS_SOURCE, ok=True)
-    return _status("updated", rows=rows)
+    from services import injury_news
+
+    news = injury_news.refresh(session, http)      # per-player failures are counted, not raised
+    return _status("updated", f"Injury news re-read for {news['fetched']} players.", rows=rows)
 
 
 def _props_budget_teams(session: Session, season: int) -> set[str] | None:

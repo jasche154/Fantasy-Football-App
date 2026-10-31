@@ -624,7 +624,25 @@ on 708 injury spells (a fantasy-relevant player missing a team game right after 
 plays again; numbers in `injury_recovery.json`).
 - **At the injury** the discount comes from the body part: on average a concussion costs 2.2
   games, an ankle or hamstring 2.6, a knee 3.0 (shrunk toward the 2.8 average). Injured reserve
-  is at least 4 games from placement. **Out for the season (torn ACL or Achilles): 0.**
+  is at least 4 games from placement. **Out for the season: 0** (a torn ACL or Achilles tag, or the
+  news says so, below).
+- **Sleeper news overrides the averages** (`services/injury_news.py`). Each hourly status refresh
+  re-reads the news of injured QB/RB/WR/TE players whose Sleeper news stamp changed and keeps
+  only parsed signals, never the text:
+  - "out for the season", "season-ending", "done for 2026", "miss the remainder of the season"
+    → value 0 (Jalen Hurts, Jaxson Dart, Terry McLaurin). Negated, partial or speculative wording
+    doesn't count ("avoids a season-ending injury", "a significant stretch of the remainder of the
+    season", "could miss the rest of the season"), and neither does a sentence about a teammate
+    (Sleeper writes every player as "Name (injury)"; the nearest one must be his).
+  - a return timeline ("out 6-10 weeks", "3-to-4-month absence", "at least four weeks") replaces
+    the body-part average, counted down from the day it was published. The return date is the
+    median over his headlines, since later articles restate the first diagnosis. Davante Adams
+    (6-10 weeks from Oct 19) keeps about 31% of his value.
+  - only news since his last game counts, and backward-looking counts ("fourth game in the past
+    five weeks") are skipped.
+  - Sleeper's "Surgery" note without a timeline means at least 6 games (a product default; too
+    rare in the injury reports to fit). Its notes also refine the body part ("Achilles" +
+    "Tendinitis" is a soft-tissue injury, not a tear).
 - **While he's out, the evidence moves it.** This week's practice report scales the games still to
   miss: practicing (limited or full) ×0.40, not practicing ×0.85, no report at all (mostly IR) ×1.22.
   Time alone doesn't predict a return in the data (31% of players are back after one missed game,

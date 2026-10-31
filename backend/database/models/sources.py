@@ -141,7 +141,24 @@ class PlayerStatus(Base):
     team: Mapped[str | None]
     depth_position: Mapped[str | None]
     depth_order: Mapped[int | None]
+    injury_notes: Mapped[str | None]           # Sleeper's short note, e.g. "Surgery", "Sprain"
+    news_updated: Mapped[int | None]           # Sleeper's news timestamp (ms); news is re-read when it changes
     fetched_at: Mapped[datetime] = mapped_column(default=utc_now)
+
+
+class InjuryNews(Base):
+    """Injury signals parsed from a player's Sleeper news (services/injury_news.py).
+
+    signals is JSON: [{"published": iso, "season_ending": bool, "weeks": [low, high] | null}], only
+    for headlines that carry one. No news text is stored.
+    """
+
+    __tablename__ = "injury_news"
+
+    player_id: Mapped[int] = mapped_column(ForeignKey("players.id"), primary_key=True)
+    news_updated: Mapped[int | None]
+    signals: Mapped[str] = mapped_column(default="[]")
+    checked_at: Mapped[datetime] = mapped_column(default=utc_now)
 
 
 class ExternalApiCall(Base):

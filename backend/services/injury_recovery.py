@@ -11,7 +11,12 @@ Measured on 2021-25 injury spells (services/injury_recovery_fit.py writes injury
   news, so the discount (measured against the season left when he got hurt) also shrinks by
   WEEKLY_RECOVERY per game missed. That's a product rule, not a fitted number. Injured reserve
   keeps its IR_MIN_GAMES minimum.
-- **Out for the season** (a torn ACL or Achilles, or notes saying so): no rest-of-season value.
+- **Sleeper news** (services/injury_news.py) overrides the averages when it has something:
+  "out for the season" means no rest-of-season value, and a reported timeline ("12-to-16 weeks")
+  replaces the body-part average, counted down from the day it was published. Sleeper's
+  "Surgery" note without a timeline sets at least SURGERY_GAMES (a product default, not fitted:
+  surgeries are too rare in the injury reports to measure).
+- **Out for the season** (a torn ACL or Achilles, or the news says so): no rest-of-season value.
 - **After he returns**, players score less for a few games (fitted: the first game back is about
   87% of his rate, the next two about 93% and 95%, relative to healthy players) and are re-injured more
   often; both count as "rust" in games, then he's back to normal.
@@ -28,6 +33,7 @@ import json
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from statistics import mean
@@ -36,6 +42,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from database.models import InjuryReport, PlayerStatus
+from services import injury_news
 from services.availability import team_weeks
 from services.injuries import team_games
 from services.projections import PlayerSeason
@@ -45,6 +52,7 @@ from services.schedule_strength import Schedule
 PARAMS_PATH = Path(__file__).with_name("injury_recovery.json")
 WEEKLY_RECOVERY = 0.10        # the injury discount shrinks 10% per game missed (product rule, not fitted)
 IR_MIN_GAMES = 4              # injured reserve: at least four games from placement
+SURGERY_GAMES = 6             # Sleeper's "Surgery" note with no reported timeline (product default, not fitted)
 FILL_IN_RATIO = 0.5           # a fill-in who scored half the starter's rate "played well"
 MIN_FILL_IN_GAMES = 2
 RELEVANT_PPG = 8.0            # role changes only for real starters
@@ -53,6 +61,7 @@ DEFAULT_PARAMS = {             # used only if injury_recovery.json is missing
     "rust": [0.87, 0.93, 0.95], "reinjury_excess": 0.08, "rb_role_loss": 0.0,
 }
 GROUP_WORDS = (               # first match wins
+    ("soft_tissue", ("tendinitis", "tendonitis", "soreness")),    # Achilles tendinitis isn't a tear
     ("acl_achilles", ("acl", "achilles")),
     ("non_injury", ("not injury", "personal", "illness", "rest")),
     ("concussion", ("concussion", "head")),
@@ -98,6 +107,9 @@ class Recovery:
     games_out: int                  # team games missed in a row, up to now
     games_back: int | None          # games played since returning from a missed stretch (None: no recent absence)
     season_ending: bool = False
+    news_weeks: float | None = None  # weeks still out per the newest reported timeline (injury_news)
+    surgery: bool = False           # Sleeper's injury note says surgery
+    from_news: bool = False         # season_ending came from the news
 
     @property
     def out_now(self) -> bool:
@@ -111,8 +123,15 @@ class Recovery:
         if not self.out_now:
             return 0.0
         fitted = params()
-        onset = fitted["games_missed"].get(self.group, fitted["games_missed"]["overall"])
         ir = self.status in IR_STATUSES
+        if self.news_weeks is not None:
+            # A reported timeline already counts time passed; a practice report is newer evidence.
+            factor = fitted["practice_factor"].get(self.practice, 1.0) if self.practice in ("dnp", "practicing") else 1.0
+            missed = 1 + max(0.0, self.news_weeks - 1) * factor
+            return round(min(max(missed, IR_MIN_GAMES - self.games_out) if ir else missed, remaining), 2)
+        onset = fitted["games_missed"].get(self.group, fitted["games_missed"]["overall"])
+        if self.surgery:
+            onset = max(onset, SURGERY_GAMES)
         factor = fitted["practice_factor"].get(self.practice or ("none" if ir else ""), 1.0)
         missed = 1 + max(0.0, onset - 1) * factor
         if ir:
@@ -142,7 +161,10 @@ class Recovery:
         if self.season_ending:
             return 1.0
         lost = self.evidence_missed(remaining) + self.rust_games(remaining)
-        discount = lost / max(remaining + self.games_out, 1) * (1 - WEEKLY_RECOVERY) ** self.games_out
+        if self.news_weeks is not None:                  # the timeline already counts down
+            discount = lost / max(remaining, 1)
+        else:
+            discount = lost / max(remaining + self.games_out, 1) * (1 - WEEKLY_RECOVERY) ** self.games_out
         if self.status in IR_STATUSES:
             discount = max(discount, (IR_MIN_GAMES - self.games_out) / max(remaining, 1))
         return round(min(1.0, max(0.0, discount)), 3)
@@ -164,10 +186,11 @@ class Recovery:
     def note(self, remaining: int) -> str | None:
         label = GROUP_LABELS.get(self.group, self.group.capitalize()) if self.group not in ("unknown", "other") else None
         if self.season_ending:
-            return "Out for the season"
+            return "Out for the season (per news)" if self.from_news else "Out for the season"
         if self.out_now:
             practiced = {"practicing": ", practicing", "dnp": ", not practicing"}.get(self.practice or "", "")
-            return f"{label or 'Injured'}: out ~{self.expected_missed(remaining):.1f} more games{practiced}"
+            source = " (reported timeline)" if self.news_weeks is not None else " (surgery)" if self.surgery else ""
+            return f"{label or 'Injured'}: out ~{self.expected_missed(remaining):.1f} more games{source}{practiced}"
         if self.games_out:
             return f"Returning from {(label or 'an injury').lower()}: first games back usually run a bit low"
         if self.games_back is not None and self.games_back < len(params()["rust"]):
@@ -207,15 +230,30 @@ def _reports(session: Session, season: int) -> dict[int, dict[int, InjuryReport]
     return out
 
 
+def _last_game(player: PlayerSeason, schedule: Schedule) -> datetime | None:
+    """The day of his last game (news from before it is about an earlier injury)."""
+    if not player.games or not player.team:
+        return None
+    week = player.games[-1].week
+    game = next((g for g in schedule.games if g.week == week and player.team in (g.home_team, g.away_team)), None)
+    try:
+        return datetime.fromisoformat(game.gameday).replace(tzinfo=timezone.utc) if game and game.gameday else None
+    except ValueError:
+        return None
+
+
 def recovery_states(session: Session, seasons: Iterable[PlayerSeason], schedule: Schedule,
-                    season: int, week: int) -> tuple[dict[int, Recovery], dict[int, tuple[int, ...]]]:
+                    season: int, week: int, now: datetime | None = None,
+                    ) -> tuple[dict[int, Recovery], dict[int, tuple[int, ...]]]:
     """({player: Recovery} for players hurt now or back lately, {player: weeks of his last absence}).
 
     week is the upcoming week. A stretch of missed games without a live tag or an injury report in
-    it (a healthy scratch) doesn't count.
+    it (a healthy scratch) doesn't count. News evidence only applies while he's out.
     """
+    now = now or datetime.now(timezone.utc)
     statuses = {s.player_id: s for s in session.scalars(select(PlayerStatus).where(PlayerStatus.injury_status.is_not(None)))}
     reports = _reports(session, season)
+    news = injury_news.load(session)
     states, absences = {}, {}
     for player in seasons:
         games_out, games_back, absent = history(player, schedule, week)
@@ -225,13 +263,22 @@ def recovery_states(session: Session, seasons: Iterable[PlayerSeason], schedule:
         if status is None and not reported:
             continue
         current = mine.get(week)
-        injury = (status.injury_body_part if status else None) or next(
-            (mine[w].injury for w in sorted(mine, reverse=True) if mine[w].injury), None)
+        # Sleeper splits "Achilles" (body part) from "Tendinitis" (note); both decide the group.
+        sleeper_text = " ".join(t for t in ((status.injury_body_part, status.injury_notes) if status else ()) if t)
+        injury = sleeper_text or next((mine[w].injury for w in sorted(mine, reverse=True) if mine[w].injury), None)
         tag = (status.injury_status or "").upper() if status else None
+        out_now = (tag or "") in IR_STATUSES | SHORT_OUT
+        evidence = (injury_news.evidence(news.get(player.player_id, ()), _last_game(player, schedule), now)
+                    if out_now else None)
+        tagged_ending = bool(status) and season_ending(tag or "", status.injury_body_part)
+        news_ending = bool(evidence and evidence.season_ending)
         states[player.player_id] = Recovery(
             status=tag, group=body_group(injury), practice=practice_key(current.practice_status) if current else None,
             games_out=games_out, games_back=games_back,
-            season_ending=bool(status) and season_ending(tag or "", status.injury_body_part))
+            season_ending=tagged_ending or news_ending,
+            news_weeks=evidence.weeks_left if evidence and not news_ending else None,
+            surgery=out_now and "surgery" in ((status.injury_notes if status else None) or "").lower(),
+            from_news=news_ending and not tagged_ending)
         absences[player.player_id] = absent
     return states, absences
 

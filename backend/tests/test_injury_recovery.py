@@ -26,6 +26,7 @@ def test_body_parts_and_practice_reports_map_to_groups():
     assert ir.body_group("Concussion") == "concussion" and ir.body_group("Groin") == "soft_tissue"
     assert ir.body_group(None) == ir.body_group("Undisclosed") == "unknown"
     assert ir.body_group("Spleen") == "other"
+    assert ir.body_group("Achilles Tendinitis") == "soft_tissue"            # Sleeper body part + note: not a tear
     assert [ir.practice_key(p) for p in (None, "DNP", "LP", "FP")] == ["none", "dnp", "practicing", "practicing"]
 
 
