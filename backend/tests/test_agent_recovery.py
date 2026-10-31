@@ -83,6 +83,6 @@ def test_replies_are_plain_text_and_schedules_read_in_words():
     from tools.definitions import schedule_words
 
     assert agent.plain_text("## Trades\n- **Give** Bryce Young") == "Trades\n- Give Bryce Young"
-    assert schedule_words(0.94) == "6% harder than average (weeks 15-17)"
-    assert schedule_words(1.052) == "5% easier than average (weeks 15-17)"
-    assert schedule_words(1.001) == "average (weeks 15-17)"
+    assert schedule_words(0.94) == "6% harder than average (fantasy playoff weeks)"
+    assert schedule_words(1.052) == "5% easier than average (fantasy playoff weeks)"
+    assert schedule_words(1.001) == "average (fantasy playoff weeks)"

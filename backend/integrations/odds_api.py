@@ -1,9 +1,12 @@
 """Vegas player props from The Odds API (https://the-odds-api.com, needs ODDS_API_KEY).
 
 The free plan gives 500 credits a month. Listing events is free; each game's props cost
-(markets x regions) = 7 credits. To fit a season in the free plan, each game's props are
-bought ONCE, inside PROPS_WINDOW_HOURS (72) before kickoff (about 16 x 7 = ~112 credits a week).
-Lines move a little after that; buying again needs an explicit force (CLI --force-props).
+(markets x regions) = 7 credits. Each game's props are bought ONCE, inside PROPS_WINDOW_HOURS
+(2) before kickoff, after Sunday-morning injury news and close to inactives (the auto-update
+checks every 15 minutes on game days). That is about 16 x 7 = ~112 credits a week; when the
+month's remaining credits can't cover every game left, only games with a player on one of
+your rosters (and every Thursday, Saturday and Monday game) are bought. Buying a game again needs
+an explicit force (CLI --force-props).
 
 - Every purchase is logged per event in external_api_calls, so the budget survives
   restarts. A game that came back with no props posted yet is retried at most every
@@ -32,7 +35,8 @@ BASE_URL = "https://api.the-odds-api.com/v4/sports/americanfootball_nfl"
 SOURCE = "vegas_props"
 CALL_LOG_SOURCE = "odds_api"
 REGIONS = "us"
-PROPS_WINDOW_HOURS = 72          # books post most player props 2-3 days out
+PROPS_WINDOW_HOURS = 2           # close to kickoff: the lines know Sunday's news and inactives
+STANDALONE_DAYS = (0, 3, 5)      # Monday, Thursday, Saturday (datetime.weekday): small slates, always bought
 EMPTY_RETRY_HOURS = 6
 CREDIT_RESERVE = 10
 PARSE_ERRORS = (KeyError, TypeError, ValueError, AttributeError)
@@ -201,6 +205,23 @@ def _due_games(session: Session, events: list[dict], games: dict, season: int, w
     return due
 
 
+def _always_buy(game: NflGame) -> bool:
+    try:
+        return datetime.strptime(game.gameday or "", "%Y-%m-%d").weekday() in STANDALONE_DAYS
+    except ValueError:
+        return False
+
+
+def credits_needed(session: Session, season: int, now: datetime | None = None) -> int:
+    """Credits to buy every unplayed game left this calendar month."""
+    now = now or datetime.now(timezone.utc)
+    month_end = (now.replace(day=28) + timedelta(days=4)).replace(day=1).strftime("%Y-%m-%d")
+    games = session.scalar(select(func.count(NflGame.game_id)).where(
+        NflGame.season == season, NflGame.home_score.is_(None), NflGame.gameday >= now.strftime("%Y-%m-%d"),
+        NflGame.gameday < month_end))
+    return (games or 0) * CREDITS_PER_GAME
+
+
 def _store_game(session: Session, rows: list[dict], game: NflGame, season: int, week: int) -> None:
     session.execute(delete(WeeklySourceProjection).where(
         WeeklySourceProjection.season == season, WeeklySourceProjection.week == week,
@@ -223,7 +244,8 @@ def _buy_game(session: Session, client: OddsApiClient, event_id: str, game: NflG
     return len(rows)
 
 
-def refresh(session: Session, client: OddsApiClient, season: int, week: int, force: bool = False) -> int:
+def refresh(session: Session, client: OddsApiClient, season: int, week: int, force: bool = False,
+            only_teams: set[str] | None = None) -> int:
     """Buy props for the week's games that are due (see module docstring). Returns games bought.
 
     Raises SourceError (keeping every game already stored) on API errors, when credits
@@ -238,6 +260,8 @@ def refresh(session: Session, client: OddsApiClient, season: int, week: int, for
     bought = 0
     try:
         for event_id, game in _due_games(session, client.events(), games, season, week, force):
+            if only_teams is not None and not _always_buy(game) and not {game.home_team, game.away_team} & only_teams:
+                continue                               # credits are short: rostered games only
             if client.remaining is not None and client.remaining < CREDITS_PER_GAME + CREDIT_RESERVE:
                 raise SourceError(f"Odds API credits are nearly used up ({client.remaining} left); "
                                   "remaining games wait for the monthly reset")

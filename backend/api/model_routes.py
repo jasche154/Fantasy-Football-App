@@ -10,7 +10,7 @@ from database.models import LearnedWeights
 from services import projection_eval, rankings_store
 from services.projection_factors import FACTORS_PATH
 from services.projections import latest_season
-from services.weight_learning import BY_POSITION, DEFAULT_WEIGHTS
+from services.weight_learning import DEFAULT_WEIGHTS
 
 router = APIRouter(prefix="/api/model")
 
@@ -31,7 +31,7 @@ def accuracy(scoring: str = Query("ppr", pattern="^(ppr|half|std)$"), session: S
         weights = json.loads(row.weights)
         history.append({"season": row.season, "week": row.week, "rows": row.rows,
                         "weights": {k: weights.get(k) for k in DEFAULT_WEIGHTS},
-                        "by_position": weights.get(BY_POSITION) or {},
+                        "by_position": weights.get("_by_position") or {},
                         "mae_before": row.mae_before, "mae_after": row.mae_after})
     return {"season": season, "scoring": scoring, "live": live, "backtest": backtest,
             "starting_weights": DEFAULT_WEIGHTS, "weight_history": history}

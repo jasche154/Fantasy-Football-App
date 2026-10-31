@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState, type RefObject } from 'react';
+import { Fragment, useCallback, useEffect, useId, useRef, useState, type RefObject } from 'react';
 import { Icon } from '../components/Icon';
 import { buildHash } from '../router/routes';
 import type { Route } from '../router/routes';
@@ -103,10 +103,15 @@ export function MainNav({ active }: { active: Route['name'] }) {
   return (
     <nav className="main-nav" aria-label="Main">
       <ul className="main-nav__list">
-        {NAV_ITEMS.map((item) => (
-          <li key={item.route} className={item.isPrimary ? 'main-nav__item' : 'main-nav__item main-nav__item--secondary'}>
-            <NavLink item={item} isActive={item.route === active} className="nav-link nav-link--tab" />
-          </li>
+        {NAV_ITEMS.map((item, index) => (
+          <Fragment key={item.route}>
+            {item.group === 'research' && NAV_ITEMS[index - 1]?.group !== 'research' && (
+              <li className="main-nav__heading" role="presentation"><span className="sr-only">Section: </span>Research</li>
+            )}
+            <li className={item.isPrimary ? 'main-nav__item' : 'main-nav__item main-nav__item--secondary'}>
+              <NavLink item={item} isActive={item.route === active} className="nav-link nav-link--tab" />
+            </li>
+          </Fragment>
         ))}
         <MoreMenu active={active} />
       </ul>

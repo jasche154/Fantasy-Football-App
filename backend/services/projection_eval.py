@@ -27,7 +27,7 @@ from statistics import mean
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from database.models import PlayerStatsWeekly, ProjectionHistory
+from database.models import PlayerStatsWeekly, ProjectionHistory, PlayerSnapCountsWeekly
 from services import rankings_store
 from services.scoring import POINTS_PER_RECEPTION
 
@@ -42,7 +42,14 @@ def actual_points(session: Session, season: int, scoring: str) -> dict[tuple[int
         PlayerStatsWeekly.player_id, PlayerStatsWeekly.week, PlayerStatsWeekly.fantasy_points,
         PlayerStatsWeekly.receptions).where(
         PlayerStatsWeekly.season == season, PlayerStatsWeekly.season_type == "REG"))
-    return {(pid, week): (points or 0.0) + per_catch * (catches or 0) for pid, week, points, catches in rows}
+    actual = {(pid, week): (points or 0.0) + per_catch * (catches or 0) for pid, week, points, catches in rows}
+    # Took offensive snaps but no stat line: he played and scored 0 (leaving these out hides busts).
+    snaps = session.execute(select(PlayerSnapCountsWeekly.player_id, PlayerSnapCountsWeekly.week).where(
+        PlayerSnapCountsWeekly.season == season, PlayerSnapCountsWeekly.offense_snaps > 0,
+        PlayerSnapCountsWeekly.player_id.is_not(None)))
+    for pid, week in snaps:
+        actual.setdefault((pid, week), 0.0)
+    return actual
 
 
 def evaluate(rows: Iterable[ProjectionHistory], actuals: Mapping[tuple[int, int], float]) -> dict:

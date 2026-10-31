@@ -14,7 +14,7 @@ const MATCHUP: MatchupResponse = {
   me: { team: 'My Squad', starters: [starter('Blake Corum', 9.3)], projected: 100.4, yahoo_points: 8.6, yahoo_projected: 102.6 },
   opponent: { team: 'Rival', starters: [starter('Rival Back', 12)], projected: 107.4, yahoo_points: 0, yahoo_projected: 107 },
   win_probability: 0.408, yahoo_win_probability: 0.32,
-  strategies: { expected: { projected: 111, win_probability: 0.545 }, upside: { projected: 110, win_probability: 0.53 },
+  strategies: { expected: { projected: 111, win_probability: 0.545 }, upside: { projected: 110, win_probability: 0.56 },
     safe: { projected: 109, win_probability: 0.523 } },
   recommended: 'expected', changes: { start: ['Jahmyr Gibbs'], sit: ['Blake Corum'] }, simulations: 20000,
   updated: { mode: 'expected', starters: [{ ...starter('Jahmyr Gibbs', 19.7), slot: 'FLEX' }], projected: 114, win_probability: 0.579 },
@@ -30,6 +30,7 @@ describe('MatchupPage', () => {
     expect(strategy).toHaveTextContent('Your current lineup wins 41%');
     expect(strategy).toHaveTextContent('Yahoo says 32%');
     expect(within(strategy).getByText('Recommended').closest('li')).toHaveTextContent('Most points lineup: 111.0 projected, wins 55%');
+    expect(within(strategy).getByText('Marginal').closest('li')).toHaveTextContent('Upside');
     expect(strategy).toHaveTextContent('start Jahmyr Gibbs; sit Blake Corum');
     expect(screen.getByRole('region', { name: 'My Squad (you)' })).toHaveTextContent('Blake Corum');
     expect(screen.getByRole('region', { name: 'Rival' })).toHaveTextContent('Rival Back');

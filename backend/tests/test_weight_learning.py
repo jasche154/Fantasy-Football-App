@@ -1,4 +1,4 @@
-"""Conservative learning of the Week X source weights from actual results."""
+"""Pooled, shrunk learning of the Week X source weights from actual results."""
 import json
 
 import pytest
@@ -8,40 +8,31 @@ from services import weight_learning as wl
 from services.weight_learning import DEFAULT_WEIGHTS, Sample
 
 
-def test_fit_puts_weight_on_the_source_that_predicted_best():
-    samples = [Sample({"model": a, "espn": a + (6 if i % 2 else -6)}, a) for i, a in enumerate(range(5, 25))]
-    fitted = wl.fit_weights(samples, ["model", "espn"])
-    assert fitted["model"] > 0.9 and sum(fitted.values()) == pytest.approx(1.0, abs=0.001)
-
-
-def test_a_source_missing_that_week_keeps_its_weight():
-    # No props rows this week (e.g. a backfilled week): props neither gain nor lose weight.
-    samples = [Sample({"model": a, "espn": a + (6 if i % 2 else -6)}, a) for i, a in enumerate(range(5, 45))]
-    current = dict(DEFAULT_WEIGHTS)
-    optimal = wl.week_optimal(samples, current)
-    assert optimal["vegas_props"] == current["vegas_props"] and optimal["josh_hayden"] == current["josh_hayden"]
-    assert optimal["model"] > optimal["espn"]
-    assert sum(optimal.values()) == pytest.approx(1.0, abs=0.001)
-    assert wl.week_optimal([], current) == current
-
-
-def test_blend_rebalances_over_the_sources_a_player_has():
-    assert wl.blend({"model": 0.2, "espn": 0.6}, {"model": 10.0}) == 10.0
+def test_experts_are_one_group_and_shares_split_a_groups_weight():
+    assert wl.grouped({"josh_hayden": 10.0, "yahoo_consensus": 14.0, "model": 9.0}) == {"experts": 12.0, "model": 9.0}
+    shares = wl.source_shares(["josh_hayden", "yahoo_consensus", "model"], {"experts": 0.6, "model": 0.4,
+                                                                           "vegas_props": 0.3, "espn": 0.1})
+    assert shares == pytest.approx({"josh_hayden": 0.3, "yahoo_consensus": 0.3, "model": 0.4})
     assert wl.blend({"model": 0.25, "espn": 0.75}, {"model": 10.0, "espn": 20.0}) == 17.5
+    assert wl.blend({"model": 0.2, "espn": 0.6}, {"model": 10.0}) == 10.0
 
 
-def test_conservative_step_is_capped_floored_and_scaled_by_evidence():
-    current = dict(DEFAULT_WEIGHTS)
-    extreme = {"vegas_props": 0.0, "josh_hayden": 0.0, "model": 1.0, "yahoo_consensus": 0.0, "espn": 0.0}
-    small = wl.conservative_step(current, extreme, rows=300)
-    assert all(abs(small[k] - current[k]) <= wl.MAX_STEP + 0.01 for k in current)
-    assert min(small.values()) >= wl.MIN_WEIGHT - 0.001 and sum(small.values()) == pytest.approx(1.0, abs=0.001)
-    tiny = wl.conservative_step(current, extreme, rows=10)
-    assert abs(tiny["model"] - current["model"]) < abs(small["model"] - current["model"])
-    many = current
-    for _ in range(40):                                  # many weeks of the same evidence still respect the floor
-        many = wl.conservative_step(many, extreme, rows=3000)
-    assert many["model"] > 0.7 and min(many.values()) >= wl.MIN_WEIGHT - 0.001
+def test_limits_keep_props_and_every_group_in_the_blend():
+    out = wl.constrain({"vegas_props": 0.0, "experts": 0.9, "espn": -0.2, "model": 0.3})
+    assert out["vegas_props"] == wl.PROPS_FLOOR and out["espn"] == wl.MIN_WEIGHT
+    assert sum(out.values()) == pytest.approx(1.0, abs=0.001) and min(out.values()) >= 0
+
+
+def test_pooled_fit_moves_toward_the_accurate_source_but_stays_near_the_prior(monkeypatch):
+    monkeypatch.setattr(wl, "MIN_POOLED_ROWS", 10)
+    samples = [Sample({"model": a, "espn": a + (6 if i % 2 else -6), "experts": a + 3, "vegas_props": a - 2}, a)
+               for i, a in enumerate([5.0 + i % 20 for i in range(400)])]
+    weak = wl.fit_pooled(samples)
+    strong = wl.fit_pooled(samples, pseudo_rows=1)
+    assert strong["model"] > weak["model"] > DEFAULT_WEIGHTS["model"]        # more evidence, bigger move
+    assert abs(weak["experts"] - DEFAULT_WEIGHTS["experts"]) < 0.15            # the prior still anchors it
+    monkeypatch.setattr(wl, "MIN_POOLED_ROWS", 1000)
+    assert wl.fit_pooled(samples) == DEFAULT_WEIGHTS                            # too few rows: the prior
 
 
 def _seed_history(session, seeded, week, final=True, players=120):
@@ -62,7 +53,15 @@ def _seed_history(session, seeded, week, final=True, players=120):
     return pids
 
 
-def test_learn_updates_once_per_completed_week_and_rankings_use_it(session, seeded):
+def test_only_fantasy_relevant_players_are_learned_from(session, seeded):
+    _seed_history(session, seeded, week=9)
+    samples = wl.samples_for_week(session, 2026, 9)
+    assert len(samples) == wl.RELEVANT_RANKS["WR"] and all(s.week == 9 for s in samples)
+    assert len(wl.samples_for_week(session, 2026, 9, relevant_only=False)) > len(samples)
+
+
+def test_learn_refits_after_each_completed_week_and_rankings_use_it(session, seeded, monkeypatch):
+    monkeypatch.setattr(wl, "MIN_POOLED_ROWS", 30)
     _seed_history(session, seeded, week=9)
     _seed_history(session, seeded, week=10, final=False)            # not finished: skipped
     updates = wl.learn(session, 2026)
@@ -82,27 +81,26 @@ def test_dry_run_saves_nothing_and_defaults_apply_without_history(session, seede
     assert session.query(LearnedWeights).count() == 0
 
 
-def test_too_few_rows_are_not_learned_from(session, seeded):
+def test_too_few_rows_keep_the_prior(session, seeded):
     _seed_history(session, seeded, week=9, players=20)
-    assert wl.learn(session, 2026) == []
+    (update,) = wl.learn(session, 2026)
+    assert update.after == DEFAULT_WEIGHTS
 
 
-def test_past_weeks_use_only_weights_learned_before_them(session, seeded):
+def test_past_weeks_use_only_weights_learned_before_them(session, seeded, monkeypatch):
+    monkeypatch.setattr(wl, "MIN_POOLED_ROWS", 30)
     _seed_history(session, seeded, week=9)
     wl.learn(session, 2026)
     assert wl.effective_weights(session, 2026, 9) == (dict(DEFAULT_WEIGHTS), None)     # week 9 itself: no hindsight
     weights, row = wl.effective_weights(session, 2026, 10)
     assert row.week == 9 and weights != DEFAULT_WEIGHTS
     assert wl.effective_weights(session, 2027, 1)[1].week == 9                         # carries into next season
+    assert wl.position_weights(session, 2026, 10) == {}
 
 
-def test_each_position_takes_its_own_small_step(session, seeded):
-    _seed_history(session, seeded, week=9)
-    wl.learn(session, 2026)
-    by_position = wl.position_weights(session, 2026, 10)
-    global_weights, _ = wl.effective_weights(session, 2026, 10)
-    assert set(by_position) == set(wl.POSITIONS)
-    wr = by_position["WR"]                                   # every seeded row is a WR: it moves further
-    assert wr["model"] >= global_weights["model"] and abs(sum(wr.values()) - 1) < 0.01
-    assert by_position["QB"] == global_weights               # no QB rows: follows the global step
-    assert wl.position_weights(session, 2026, 9) == {}       # nothing learned before week 9
+def test_weights_learned_under_the_old_five_source_blend_are_ignored(session):
+    session.add(LearnedWeights(season=2026, week=3, rows=100, optimal="{}", mae_before=1, mae_after=1,
+                               weights=json.dumps({"vegas_props": 0.3, "josh_hayden": 0.3, "model": 0.2,
+                                                   "yahoo_consensus": 0.1, "espn": 0.1})))
+    session.commit()
+    assert wl.effective_weights(session) == (dict(DEFAULT_WEIGHTS), None)

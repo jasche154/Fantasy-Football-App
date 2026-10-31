@@ -12,6 +12,9 @@ import { useMyLeague } from '../../state/useMyLeague';
 
 const MODE_LABELS: Record<string, string> = { expected: 'Most points', upside: 'Upside', safe: 'Safe' };
 const pct = (v: number | null | undefined) => (v == null ? '—' : `${Math.round(v * 100)}%`);
+/** Upside or safe is only recommended with this much more win chance than expected (else "marginal"). */
+const MODE_EDGE = 0.03;
+const EDGE_POINTS = Math.round(MODE_EDGE * 100);
 
 function Lineup({ title, rows, total, slotLabel = 'Slot' }: {
   title: string; rows: readonly MatchupStarter[]; total?: number; slotLabel?: string;
@@ -51,13 +54,17 @@ function Strategy({ data }: { data: MatchupResponse }) {
           <li key={mode} className={mode === rec ? 'is-recommended' : undefined}>
             <strong>{MODE_LABELS[mode] ?? mode}</strong> lineup: {formatNumber(s.projected)} projected, wins {pct(s.win_probability)}
             {mode === rec && <span className="status-badge status-badge--ok">Recommended</span>}
+            {mode !== 'expected' && mode !== rec && s.win_probability > (data.strategies.expected?.win_probability ?? 1)
+              && s.win_probability - (data.strategies.expected?.win_probability ?? 0) < MODE_EDGE && (
+              <span className="status-badge" title={`Wins slightly more often, but by less than ${EDGE_POINTS} points of win chance: within the model's error`}>Marginal</span>
+            )}
           </li>
         ))}
       </ul>
       {data.changes.start.length > 0 ? (
         <p>To use it: start {data.changes.start.join(', ')}; sit {data.changes.sit.join(', ') || 'nobody'}.</p>
       ) : <p>Your current lineup already is the recommended one.</p>}
-      <p className="hint">Underdogs usually win more often with high-ceiling starts, favorites with high floors. Each lineup is simulated against the opponent's.</p>
+      <p className="hint">Underdogs usually win more often with high-ceiling starts, favorites with high floors. Each lineup is simulated against the opponent's; upside or safe is only recommended when it wins at least {EDGE_POINTS} points more often. Win chances carry a few points of model error.</p>
     </section>
   );
 }

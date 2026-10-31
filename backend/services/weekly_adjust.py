@@ -15,10 +15,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from services.injuries import Availability, Boost, InjuryContext
+from services import score_ranges
+from services.weight_learning import source_shares
 from services.weekly_model import Matchup, projection_ranges, range_for
 
 PRICED_IN = 0.1            # teammates below this chance to play are already priced in by outside sources
-MAY_SIT = 0.9              # below this, the floor is 0
+
 
 
 @dataclass(frozen=True)
@@ -45,10 +47,12 @@ class Adjusted:
     boost_points: float
     scenarios: tuple[Scenario, ...]
     availability: Availability
+    quantiles: tuple[float, ...] | None = None       # points if he plays, at score_ranges.LEVELS
 
 
 def adjust(position: str, blended: float, tilt: float, matchup: Matchup, model_share: float,
-           player_id: int, context: InjuryContext) -> Adjusted:
+           player_id: int, context: InjuryContext,
+           shape: tuple[float | None, float | None] = (None, None)) -> Adjusted:
     availability = context.of(player_id)
     base = blended * tilt
     contributions = []
@@ -66,14 +70,18 @@ def adjust(position: str, blended: float, tilt: float, matchup: Matchup, model_s
         Scenario(b.from_name, b.from_status, round(b.full_points * matchup.multiplier * share - c, 2),
                  round((if_active - c + b.full_points * matchup.multiplier * share) * availability.play_prob, 2))
         for b, c, share in contributions if b.full_points * matchup.multiplier * share - c >= 0.5)
-    ranges = range_for(position, if_active)
+    # Floor and ceiling are the 10th / 90th percentile if he plays; the chance he sits is
+    # separate (play_prob), so it isn't counted twice in the matchup simulation.
+    quantiles = score_ranges.player_quantiles(position, if_active, *shape)
     floor = ceiling = None
-    if ranges:
-        floor = 0.0 if availability.play_prob < MAY_SIT else round(if_active * ranges["floor"], 1)
-        ceiling = round(if_active * ranges["ceiling"], 1)
+    if quantiles:
+        floor = round(quantiles[score_ranges.FLOOR_INDEX], 1)
+        ceiling = round(quantiles[score_ranges.CEILING_INDEX], 1)
+    elif (ranges := range_for(position, if_active)):
+        floor, ceiling = round(if_active * ranges["floor"], 1), round(if_active * ranges["ceiling"], 1)
     return Adjusted(if_active=round(if_active, 2), projection=round(if_active * availability.play_prob, 2),
                     floor=floor, ceiling=ceiling, boost_points=round(boost_total, 2),
-                    scenarios=scenarios, availability=availability)
+                    scenarios=scenarios, availability=availability, quantiles=quantiles)
 
 
 def explain(name: str, position: str, rate: float | None, prior: float | None, matchup: Matchup,
@@ -95,13 +103,13 @@ def explain(name: str, position: str, rate: float | None, prior: float | None, m
                       f"the offenses it faced{rank_text}. "
                       + (f"Vegas implies {matchup.implied_total:.1f} team points vs a {matchup.team_ppg:.1f} average."
                          if matchup.implied_total and matchup.team_ppg else "No Vegas line yet.")))
-    total_weight = sum(weights[k] for k in sources) or 1.0
+    shares = source_shares(list(sources), weights)
     parts = []
     for key, value in sources.items():
         points = getattr(value, "points", 0.0)
         rank = getattr(value, "rank", None)
         rank_text = f" (rank {position}{rank:g})" if rank is not None else ""
-        parts.append(f"{labels[key]} {points:.1f}{rank_text} x {weights[key] / total_weight:.0%}")
+        parts.append(f"{labels[key]} {points:.1f}{rank_text} x {shares.get(key, 0.0):.0%}")
     steps.append(Step("Source blend", f"{blended:.1f}", "; ".join(parts) + "."))
     steps.append(Step("Schedule tilt", f"x{tilt:.3f}",
                       "An extra lean on opponent-adjusted schedule strength, on top of what sources already price in."))

@@ -190,7 +190,7 @@ def test_groq_client_translates_sdk_responses(monkeypatch):
             return SimpleNamespace(choices=[SimpleNamespace(message=message)])
 
     class FakeGroq:
-        def __init__(self, api_key):
+        def __init__(self, api_key, **options):
             self.chat = SimpleNamespace(completions=FakeCompletions())
 
     monkeypatch.setattr("groq.Groq", FakeGroq)
@@ -206,7 +206,7 @@ def test_groq_client_translates_sdk_responses(monkeypatch):
 
 def test_groq_client_wraps_failures(monkeypatch):
     class Exploding:
-        def __init__(self, api_key):
+        def __init__(self, api_key, **options):
             self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
 
         def create(self, **_):

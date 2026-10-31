@@ -6,6 +6,7 @@ import { BIJAN, CHASE } from '../../test/fixtures';
 import { json, mockFetch } from '../../test/mockFetch';
 import { META_ROUTE, renderWithProviders } from '../../test/render';
 import { MyTeamPage } from './MyTeamPage';
+import { deadlineText } from './TradesView';
 
 const LEAGUE: MyLeague = { id: 1, key: '470.l.1', name: 'Family League', season: 2026, team: 'My Squad',
   scoring: 'half', teams: 12, starters: { QB: 1, RB: 2, WR: 2, TE: 1, FLEX: 1 }, week: 8 };
@@ -38,6 +39,19 @@ describe('MyTeamPage', () => {
     expect(within(advice).getByText('+13.5')).toBeInTheDocument();
     expect(within(screen.getByRole('table', { name: 'Starters' })).getByText('Sit')).toBeInTheDocument();
     expect(within(screen.getByRole('table', { name: 'Bench and injured reserve' })).getByText('Start')).toBeInTheDocument();
+  });
+
+  it('shows game-day warnings, locked players and how close each lineup call is', async () => {
+    const team = { ...TEAM, alerts: ['Bijan Robinson (Questionable, 70% to play) kicks off Sun 4:25 PM ET'],
+      roster: [{ ...TEAM.roster[0], locked: true }, TEAM.roster[1]],
+      lineup: { ...TEAM.lineup, changes: [{ ...TEAM.lineup.changes[0], gain: 1.2, confidence: 'toss_up' as const }] } };
+    mockFetch([META_ROUTE, { path: '/api/my-team/leagues', reply: json({ leagues: [LEAGUE] }) },
+      { path: '/api/my-team/1', reply: json(team) }, { path: '/api/my-team/1/news', reply: json({ items: [] }) }]);
+    renderWithProviders(<MyTeamPage />);
+    const warnings = await screen.findByRole('region', { name: 'Game-day warnings' });
+    expect(warnings).toHaveTextContent('kicks off Sun 4:25 PM ET');
+    expect(within(screen.getByRole('table', { name: 'Starters' })).getByText('Locked')).toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'Lineup advice' })).getByText('Toss-up')).toBeInTheDocument();
   });
 
   it('lists league trades by team with their needs', async () => {
@@ -148,5 +162,14 @@ describe('MyTeamPage', () => {
     mockFetch([META_ROUTE, { path: '/api/my-team/leagues', reply: json({ leagues: [] }) }]);
     renderWithProviders(<MyTeamPage />);
     expect(await screen.findByText('No Yahoo league imported yet.')).toBeInTheDocument();
+  });
+
+  it('counts down to the trade deadline without a negative zero', () => {
+    const noon = (d: string) => new Date(`${d}T12:00:00`).getTime();
+    expect(deadlineText('2026-11-28', noon('2026-11-26'))).toBe('Trade deadline 2026-11-28 (3 days left).');
+    expect(deadlineText('2026-11-28', noon('2026-11-28'))).toBe('Trade deadline 2026-11-28 (1 day left).');
+    expect(deadlineText('2026-11-28', noon('2026-11-29'))).toBe('The trade deadline has passed.');
+    expect(deadlineText('not a date')).toBeNull();
+    expect(deadlineText(null)).toBeNull();
   });
 });

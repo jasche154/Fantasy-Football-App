@@ -23,6 +23,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 
 import httpx
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from config import Settings, get_settings
@@ -105,12 +106,39 @@ def _refresh_status(session: Session, http: httpx.Client, force: bool) -> dict:
     return _status("updated", rows=rows)
 
 
+def _props_budget_teams(session: Session, season: int) -> set[str] | None:
+    """None when credits cover every game left this month; else the NFL teams on your rosters."""
+    from database.models import Player
+    from services import system_status
+    from services.my_team import my_leagues, rosters
+
+    credits = (system_status.read(session, "odds_credits") or {}).get("remaining")
+    if credits is None or credits >= odds_api.credits_needed(session, season):
+        return None
+    mine = {s.player_id for league, team in my_leagues(session) for s in rosters(session, league).get(team.id, [])}
+    teams = set(session.scalars(select(Player.nfl_team).where(Player.id.in_(mine), Player.nfl_team.is_not(None))))
+    return teams or None
+
+
+def refresh_props_only(session: Session, season: int, week: int) -> dict:
+    """The game-day props check (every 15 minutes from the auto-update): buys games that just entered
+    the window before kickoff, nothing else."""
+    settings = get_settings()
+    if not settings.odds_api_key or "vegas_props" not in settings.weekly_sources:
+        return _disabled()
+    with httpx.Client(timeout=TIMEOUT_SECONDS) as http:
+        try:
+            return _refresh_props(session, http, settings, season, week, False)
+        except SourceError as exc:
+            return _status("error", str(exc))
+
+
 def _refresh_props(session: Session, http: httpx.Client, settings: Settings, season: int,
                    week: int, force_props: bool) -> dict:
     if not settings.odds_api_key:
         return _status("not_configured", "Add ODDS_API_KEY to backend/.env to include Vegas player props.")
     client = odds_api.OddsApiClient(settings.odds_api_key, http)
-    bought = odds_api.refresh(session, client, season, week, force_props)
+    bought = odds_api.refresh(session, client, season, week, force_props, _props_budget_teams(session, season))
     if bought == 0:
         return _status("fresh", f"Each game's props are bought once, within {odds_api.PROPS_WINDOW_HOURS} h "
                                 "of kickoff; nothing is due right now.")

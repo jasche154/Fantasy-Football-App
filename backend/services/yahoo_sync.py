@@ -100,16 +100,28 @@ def connect(session: Session, settings: Settings, http: httpx.Client, code: str,
     save_token(session, settings, token)
 
 
+_refresh_lock = threading.Lock()
+
+
 def fresh_token(session: Session, settings: Settings, http: httpx.Client) -> yahoo.YahooToken:
-    connection = get_connection(session)
-    if connection is None or connection.access_token is None:
-        raise yahoo.YahooAuthError("Yahoo isn't connected yet.")
-    token = load_token(connection, settings)
-    if token.is_expired():
-        token = yahoo.refresh_token(http, settings.yahoo_client_id, settings.yahoo_client_secret,
-                                    settings.yahoo_redirect_uri, token)
-        save_token(session, settings, token)
-    return token
+    """The stored token, refreshed first when expired.
+
+    One refresh at a time (the background update, a page and the assistant can all ask at
+    once): Yahoo may rotate the refresh token, so a second concurrent refresh would save a
+    token that no longer works. The row is re-read inside the lock to pick up the winner's.
+    """
+    with _refresh_lock:
+        connection = get_connection(session)
+        if connection is not None:
+            session.refresh(connection)            # pick up a token another thread just saved
+        if connection is None or connection.access_token is None:
+            raise yahoo.YahooAuthError("Yahoo isn't connected yet.")
+        token = load_token(connection, settings)
+        if token.is_expired():
+            token = yahoo.refresh_token(http, settings.yahoo_client_id, settings.yahoo_client_secret,
+                                        settings.yahoo_redirect_uri, token)
+            save_token(session, settings, token)
+        return token
 
 
 def list_leagues(session: Session, settings: Settings, http: httpx.Client) -> list[dict]:

@@ -11,6 +11,7 @@
 .source--vegas_props { --source-color: var(--source-props); }
 .source--josh_hayden { --source-color: var(--source-josh-hayden); }
 .source--yahoo_consensus { --source-color: var(--source-consensus); }
+.source--experts { --source-color: var(--source-consensus); }
 .source--espn { --source-color: var(--source-espn); }
 .source--model { --source-color: var(--source-model); }
 

@@ -264,6 +264,14 @@ def parse_settings(content: dict) -> dict:
         rounds = max(1, (max(teams, 2) - 1).bit_length())          # 4 teams: 2 rounds, 6 or 8: 3
         rules["playoff_weeks"] = [w for w in range(start, start + rounds) if w <= 18]
         rules["playoff_teams"] = teams
+    # Waivers: FAAB, a rolling priority list, or free agency only (see services/waiver_advice.py).
+    rules["uses_faab"] = str(settings.get("uses_faab", "0")) == "1"
+    rules["waiver_type"] = settings.get("waiver_type") or None
+    rules["waiver_rule"] = settings.get("waiver_rule") or None
+    budget = _number(settings.get("faab_budget"), int)
+    rules["faab_budget"] = budget or (100 if rules["uses_faab"] else None)
+    if settings.get("trade_end_date"):
+        rules["trade_end_date"] = str(settings.get("trade_end_date"))
     return rules
 
 
@@ -319,7 +327,8 @@ def parse_standings(content: dict) -> list[dict]:
                     "points_against": _float(record.get("points_against")) or 0.0,
                     "moves": _number(info.get("number_of_moves"), int),
                     "trades": _number(info.get("number_of_trades"), int),
-                    "faab_balance": _float(info.get("faab_balance"))})
+                    "faab_balance": _float(info.get("faab_balance")),
+                    "waiver_priority": _number(info.get("waiver_priority"), int) or None})
     return out
 
 

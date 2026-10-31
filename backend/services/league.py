@@ -20,6 +20,8 @@ class LeagueSettings:
     te_premium: float = 0.0
     # Excluded from the hash (mappings aren't hashable) but still compared for equality.
     starters: Mapping[str, int] = field(default_factory=lambda: DEFAULT_STARTERS, hash=False)
+    # The league's fantasy-playoff weeks (from Yahoo); None = the last 3 weeks of the season.
+    playoff_weeks: tuple[int, ...] | None = None
     bench: int = 6
 
     def scoring_settings(self) -> ScoringSettings:

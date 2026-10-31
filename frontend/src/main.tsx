@@ -13,6 +13,7 @@ import './styles/trade.css';
 import './styles/player.css';
 import './styles/chat.css';
 import './styles/settings.css';
+import './styles/team.css';
 
 const container = document.getElementById('root');
 if (!container) {

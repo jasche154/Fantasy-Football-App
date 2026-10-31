@@ -16,6 +16,7 @@ import json
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from datetime import datetime
 from types import MappingProxyType
 
 from sqlalchemy import func, select
@@ -25,6 +26,7 @@ from database.models import League, Roster, Team
 from integrations.weekly_sources import normalize_name
 from services.league import DEFAULT_STARTERS, LeagueSettings
 from services.trade_finder import TradeOffer, find_trades
+from services import game_locks
 from services.valuation import Valuation, build_valuation
 from services.kdst_rankings import weekly_players
 from services.waivers import WaiverCandidate, waiver_candidates
@@ -60,6 +62,16 @@ class LineupChange:
     slot: str
     gain: float
 
+    @property
+    def toss_up(self) -> bool:
+        """Projections this close pick the better player only about half the time."""
+        return self.gain < TOSS_UP_POINTS
+
+    @property
+    def confidence(self) -> str:
+        """'toss_up' (under 1.5 points), 'lean' (1.5-3) or 'clear'."""
+        return "toss_up" if self.toss_up else "lean" if self.gain < LEAN_POINTS else "clear"
+
 
 @dataclass(frozen=True)
 class TeamOffers:
@@ -79,6 +91,9 @@ class MyTeam:
     best: dict[str, list[int]] = field(default_factory=dict)
     changes: list[LineupChange] = field(default_factory=list)
     extra: dict[int, WeeklyPlayer] = field(default_factory=dict)     # rostered kickers and defenses
+    locked: set[int] = field(default_factory=set)                    # games already kicked off
+    kickoff: dict[int, datetime] = field(default_factory=dict)
+    alerts: list[str] = field(default_factory=list)                  # risky starters: inactives timing, backups
 
     def weekly(self) -> dict[int, WeeklyPlayer]:
         """Every rostered player's projection this week, kickers and defenses included."""
@@ -87,6 +102,9 @@ class MyTeam:
 
 SCORING_PRESETS = ("ppr", "half", "std")
 MAX_SLOTS = 10                     # per position; anything larger is corrupt data
+# Start/sit accuracy by projection gap (2021-26): 51% under 1 point, 56% at 1-2, 58% at 2-3, 75% over 5.
+TOSS_UP_POINTS = 1.5
+LEAN_POINTS = 3.0                  # 1.5-3 points apart: lean (58%), not a lock
 
 
 def league_rules(league: League) -> dict:
@@ -114,9 +132,11 @@ def league_settings(league: League) -> LeagueSettings:
         raw_starters = dict(DEFAULT_STARTERS)
     starters = {str(k): _int(v, 0, 0, MAX_SLOTS) for k, v in raw_starters.items()}
     scoring = rules.get("scoring") if rules.get("scoring") in SCORING_PRESETS else "ppr"
+    weeks = rules.get("playoff_weeks")
+    playoff = tuple(w for w in weeks if isinstance(w, int) and 1 <= w <= 18) if isinstance(weeks, list) else ()
     return LeagueSettings(scoring=scoring, teams=_int(rules.get("num_teams"), 12, 2, 32),
                           superflex=rules.get("superflex") is True, bench=_int(rules.get("bench"), 6, 0, 30),
-                          starters=MappingProxyType(starters))
+                          starters=MappingProxyType(starters), playoff_weeks=playoff or None)
 
 
 def my_leagues(session: Session) -> list[tuple[League, Team]]:
@@ -226,12 +246,21 @@ def build_my_team(session: Session, reference: int | str | None) -> MyTeam:
     extra = weekly_players(session, rankings.season, rankings.week, [s.player_id for s in spots],
                            rules.get("k_scoring"), rules.get("dst_scoring"))
     by_id = {**{p.player_id: p for p in rankings.players}, **extra}
-    available = {s.player_id for s in spots if s.slot not in ("IR", "IR+", "NA")}
-    best = best_lineup([by_id[s.player_id] for s in spots if s.player_id in by_id], settings, available)
+    mine = [by_id[s.player_id] for s in spots if s.player_id in by_id]
+    kickoff = game_locks.kickoffs(mine, valuation.schedule, rankings.week)
+    locked = game_locks.locked_ids(mine, kickoff)
+    starting = {s.player_id for s in spots if s.starting}
+    # Locked bench players can't come in; locked starters stay in.
+    available = {s.player_id for s in spots if s.slot not in ("IR", "IR+", "NA")} - (locked - starting)
+    best = best_lineup(mine, settings, available, key=game_locks.lock_key(locked & starting))
+    best = game_locks.prefer_late_flex(best, {p.player_id: p.position for p in mine}, kickoff, locked)
     names = {v.player_id: v.name for v in valuation.values}
     names.update({pid: p.name for pid, p in extra.items()})
+    best_ids = {pid for ids in best.values() for pid in ids}
+    warnings = game_locks.alerts([by_id[pid] for pid in best_ids if pid in by_id],
+                                 [p for p in mine if p.player_id not in best_ids], kickoff, locked)
     return MyTeam(league, team, settings, rankings, valuation, spots, best, lineup_changes(spots, best, by_id, names),
-                  extra)
+                  extra, locked=locked, kickoff=kickoff, alerts=warnings)
 
 
 def player_name(session: Session, player_id: int) -> str:

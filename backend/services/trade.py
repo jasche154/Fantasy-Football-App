@@ -10,8 +10,6 @@ from dataclasses import dataclass
 
 from services.valuation import PlayerValue
 
-DEPTH_WEIGHT_STEP = 0.1
-MIN_DEPTH_WEIGHT = 0.5
 FAIR_THRESHOLD = 0.05        # within 5% -> fair
 SLIGHT_THRESHOLD = 0.15      # within 15% -> slight edge
 MAX_SUGGESTIONS = 5
@@ -49,8 +47,13 @@ class TradeEvaluation:
     balance_suggestions: tuple[BalanceSuggestion, ...]
 
 
+# The calculator has no rosters, so extra players in a package are discounted: depth is worth
+# little in real leagues (league trades on My Team use lineup gain instead).
+DEPTH_WEIGHTS = (1.0, 0.7, 0.5, 0.4)
+
+
 def depth_weight(index: int) -> float:
-    return max(MIN_DEPTH_WEIGHT, round(1.0 - DEPTH_WEIGHT_STEP * index, 2))
+    return DEPTH_WEIGHTS[min(index, len(DEPTH_WEIGHTS) - 1)]
 
 
 def package(players: Sequence[PlayerValue]) -> TradeSide:

@@ -15,6 +15,8 @@ from typing import Mapping
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from services.build_locks import key_lock
+
 from config import get_settings
 from database.models import DataLoad, PlayerStatsWeekly
 from services.league import LeagueSettings, replacement_levels
@@ -150,6 +152,23 @@ PLAYOFF_LENGTH = 3      # most leagues: weeks 15-17
 ROOKIE_GROWTH = 1.03
 
 
+def matchup_factors(players, schedule, defense, week: int) -> dict[int, float]:
+    """{player_id: this week's matchup factor} (defense^0.5 x Vegas^0.5), to take the matchup back out
+    of a this-week projection before it counts toward rest-of-season value."""
+    out = {}
+    for p in players:
+        game = schedule.game(p.team, week) if p.team else None
+        if game is None:
+            continue
+        opponent = game.away_team if game.home_team == p.team else game.home_team
+        factor = defense.factor(opponent, p.position) ** 0.5
+        implied, ppg = game.implied_points(p.team), schedule.points_per_game(p.team)
+        if implied and ppg:
+            factor *= max(0.75, min(1.25, implied / ppg)) ** 0.5
+        out[p.player_id] = factor
+    return out
+
+
 def playoff_weeks(end_week: int) -> tuple[int, int]:
     """The fantasy playoffs: the last PLAYOFF_LENGTH weeks of the fantasy season."""
     return end_week - PLAYOFF_LENGTH + 1, end_week
@@ -166,7 +185,7 @@ def _compute(session: Session, league: LeagueSettings, season: int) -> Valuation
     defense = defense_strength(current, schedule)
     factors = {p.player_id: defense.schedule_factor(
         schedule.remaining_opponents(p.team, through or 0, end_week), p.position) for p in current}
-    playoffs = playoff_weeks(end_week)
+    playoffs = (min(league.playoff_weeks), max(league.playoff_weeks)) if league.playoff_weeks else playoff_weeks(end_week)
     playoff = {p.player_id: defense.schedule_factor(
         schedule.remaining_opponents(p.team, max(playoffs[0] - 1, through or 0), playoffs[1]), p.position)
         for p in current}
@@ -174,7 +193,8 @@ def _compute(session: Session, league: LeagueSettings, season: int) -> Valuation
     model_values, _ = value_players(current, previous, league, remaining, factors, role_losses=losses)
     consensus = ros_inputs(session, season, league.scoring, scoring,
                            {v.player_id: v.model_ros_ppg for v in model_values},
-                           {v.player_id: v.position or "" for v in model_values}, remaining)
+                           {v.player_id: v.position or "" for v in model_values}, remaining,
+                           lambda week: matchup_factors(current, schedule, defense, week))
     values, replacement = value_players(current, previous, league, remaining, factors, consensus, playoff, losses)
     return Valuation(season=season, through_week=through, weeks_remaining=remaining, league=league,
                      replacement=MappingProxyType(replacement), values=values,
@@ -213,9 +233,14 @@ def build_valuation(session: Session, league: LeagueSettings, season: int | None
         cached = _cache.get(key)
     if cached is not None:
         return cached
-    valuation = _compute(session, league, season)
-    with _cache_lock:
-        if len(_cache) >= CACHE_SIZE:
-            _cache.pop(next(iter(_cache)))
-        _cache[key] = valuation
+    with key_lock(("valuation", key)):
+        with _cache_lock:
+            cached = _cache.get(key)              # built by a request we waited for
+        if cached is not None:
+            return cached
+        valuation = _compute(session, league, season)
+        with _cache_lock:
+            if len(_cache) >= CACHE_SIZE:
+                _cache.pop(next(iter(_cache)))
+            _cache[key] = valuation
     return valuation

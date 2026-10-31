@@ -5,6 +5,7 @@ app uses Groq. The model only ever sees numbers that came back from tools.
 """
 import json
 import logging
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -28,6 +29,8 @@ log = logging.getLogger(__name__)
 MAX_ROUNDS = 6
 MAX_MEMORY = 10                # facts the user asked the assistant to keep in mind
 MAX_FACT_CHARS = 200
+GROQ_TIMEOUT_SECONDS = 20
+FACT_OVERLAP = 0.6             # share of a remembered fact's words that must come from the user's messages
 MAX_TOOL_RESULT_CHARS = 6_000   # Groq's free tier allows ~8k tokens per minute in total
 SYSTEM_PROMPT = """You are a fantasy football analyst inside a FantasyPros-style app.
 
@@ -112,7 +115,8 @@ class GroqClient:
     def __init__(self, api_key: str, model: str):
         from groq import Groq   # imported lazily so the app runs without the package
 
-        self._client = Groq(api_key=api_key)
+        # One chat can make several calls; don't let a slow provider hold a worker for minutes.
+        self._client = Groq(api_key=api_key, timeout=GROQ_TIMEOUT_SECONDS, max_retries=1)
         self._model = model
 
     def complete(self, messages: list[dict], tools: list[dict] | None) -> dict:
@@ -185,6 +189,16 @@ def memory_context(memory: Sequence[str]) -> str:
             f"{json.dumps(list(memory))}")
 
 
+def user_said(fact: str, history: Sequence[Mapping[str, str]]) -> bool:
+    """A fact may be remembered only if it restates the user's own words, so text from a tool
+    result (a news headline, a team name) can't plant instructions that persist in the prompt."""
+    words = {w for w in re.findall(r"[a-z0-9'-]{3,}", fact.lower())}
+    if not words:
+        return False
+    said = " ".join(m["content"].lower() for m in history if m.get("role") == "user")
+    return sum(w in said for w in words) / len(words) >= FACT_OVERLAP
+
+
 def clean_memory(facts: Iterable[str]) -> tuple[str, ...]:
     """Trimmed, de-duplicated, newest MAX_MEMORY facts."""
     unique = list(dict.fromkeys(f.strip()[:MAX_FACT_CHARS] for f in facts if f and f.strip()))
@@ -247,8 +261,9 @@ def run_agent(session: Session, client: LLMClient, history: Sequence[Mapping[str
         for call in calls:
             result, record = _run_tool(session, registry, call)
             trace.append(record)
-            if record.ok and record.name == "remember":
-                memory.append(str(record.arguments.get("fact", "")))
+            fact = str(record.arguments.get("fact", "")) if record.name == "remember" else ""
+            if record.ok and fact and user_said(fact, history):
+                memory.append(fact)
             messages.append({"role": "tool", "tool_call_id": call["id"],
                              "content": json.dumps(result, default=str)[:MAX_TOOL_RESULT_CHARS]})
     final = client.complete(messages, None)   # out of rounds: answer with what was gathered

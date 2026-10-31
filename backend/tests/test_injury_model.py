@@ -200,7 +200,9 @@ def _matchup():
 def test_adjust_applies_availability_boosts_scenarios_and_range(monkeypatch):
     import services.weekly_adjust as wa
 
-    monkeypatch.setattr(wa, "range_for", lambda position, if_active: {"floor": 0.3, "ceiling": 2.0})
+    monkeypatch.setattr(wa.score_ranges, "player_quantiles",
+                        lambda position, if_active, *shape: tuple(round(if_active * r, 2)
+                                                                  for r in (0.1, 0.3, 0.6, 1.0, 1.5, 2.0, 2.4)))
     boost = Boost(2, 1, "Starter", "Questionable", full_points=8.0, expected_points=4.0, method="x")
     out_boost = Boost(2, 3, "Other", "Out", full_points=4.0, expected_points=4.0, method="x")
     context = InjuryContext(availability={1: Availability(1, 0.5, "Questionable", "LP", None, "sleeper"),
@@ -212,8 +214,10 @@ def test_adjust_applies_availability_boosts_scenarios_and_range(monkeypatch):
     assert (result.floor, result.ceiling) == (4.5, 30.0)
     (scenario,) = result.scenarios                                        # Out teammate is already priced in
     assert (scenario.teammate, scenario.extra_points, scenario.projection) == ("Starter", 4.0, 19.0)
+    assert result.quantiles[3] == pytest.approx(15.0)
     hurt = adjust("RB", 10.0, 1.0, _matchup(), 0.25, 1, context)
-    assert hurt.projection == 5.0 and hurt.floor == 0.0                   # may sit: floor 0
+    # The floor is "if he plays"; the chance he sits is play_prob, kept separate (not counted twice).
+    assert hurt.projection == 5.0 and hurt.floor == 3.0 and hurt.availability.play_prob == 0.5
 
 
 # ---------- flags ----------

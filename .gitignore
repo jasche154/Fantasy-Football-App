@@ -10,3 +10,4 @@ frontend/node_modules/
 backend/data/
 .coverage
 backend/database/backups/
+backend/.snapshot_key

@@ -1,12 +1,13 @@
 """Week-X rankings: one projected score per player, blended from every source that covers them.
 
-    projection = sum(weight * source points) / sum(weights of the sources that cover the player)
+    projection = sum(weight * group points) / sum(weights of the groups that cover the player)
                  * sos_factor ** FINAL_SOS_TILT
 
-Weights (WEIGHTS) put Vegas player props first and Josh Norris + Hayden Winks second.
-Expert sources publish ranks, not points; a rank N is converted to the points of the Nth
-best numeric projection (props / ESPN / model blend) at that position, so a ranker's
-opinion moves a player exactly as far as their rank implies. Sources are read from the
+Sources blend in four groups (services/weight_learning.py): Vegas props, the experts (Josh &
+Hayden and Yahoo's consensus, averaged), ESPN and the app's model; their weights are learned.
+Expert sources publish ranks, not points; each expert's rank N is converted to the points of
+the Nth best numeric projection (props / ESPN / model blend) at that position before any
+averaging, so a ranker's opinion moves a player exactly as far as their rank implies. Sources are read from the
 weekly_source_projections snapshot (see services.weekly_refresh), so this module never
 touches the network.
 """
@@ -23,11 +24,12 @@ from sqlalchemy.orm import Session
 
 from database.models import DataLoad, GameForecast, InjuryReport, NflGame, PlayerStatus, WeeklySourceProjection
 from integrations import espn, odds_api, yahoo_experts
-from services import projection_factors, rankings_store
+from services import projection_factors, rankings_store, score_ranges
 from services.game_features import conditions_for, team_profiles
 from services.projection_factors import inputs_for
 from services.weather import forecasts
-from services.weight_learning import DEFAULT_WEIGHTS, effective_weights, position_weights
+from services.build_locks import key_lock
+from services.weight_learning import DEFAULT_WEIGHTS, effective_weights, grouped, position_weights, source_shares
 from services.league import POSITIONS, LeagueSettings
 from services.projections import PlayerSeason
 from services.injuries import InjuryContext, build_context
@@ -44,7 +46,8 @@ ANCHOR_SOURCES = ("vegas_props", "espn", "model")
 FINAL_SOS_TILT = 0.25
 FIRST_WEEK, LAST_WEEK = 1, 18
 SOURCE_LABELS = {"vegas_props": "Vegas player props", "josh_hayden": "Josh & Hayden (Yahoo)",
-                 "model": "Matchup model", "yahoo_consensus": "Yahoo expert consensus", "espn": "ESPN"}
+                 "model": "Matchup model", "yahoo_consensus": "Yahoo expert consensus", "espn": "ESPN",
+                 "experts": "Experts (Yahoo consensus, Josh & Hayden)"}
 
 
 @dataclass(frozen=True)
@@ -75,6 +78,7 @@ class WeeklyPlayer:
     explanation: tuple[Step, ...] = ()
     pct_rostered: float | None = None
     actual: float | None = None        # points scored that week (league scoring), once the game is final
+    quantiles: tuple[float, ...] | None = None   # points if he plays, at score_ranges.LEVELS
 
 
 @dataclass(frozen=True)
@@ -136,8 +140,10 @@ def _add_model_players(candidates: dict[int, _Candidate], valuation: Valuation) 
 
 
 def _weighted(values: Mapping[str, float], weights: Mapping[str, float] = WEIGHTS) -> float | None:
-    total = sum(weights[k] for k in values)
-    return sum(weights[k] * v for k, v in values.items()) / total if total else None
+    """Weighted mean over the groups present (per-source values are grouped first)."""
+    groups = grouped(values)
+    total = sum(weights.get(k, 0.0) for k in groups)
+    return sum(weights.get(k, 0.0) * v for k, v in groups.items()) / total if total else None
 
 
 def model_factors(session: Session, season: int, week: int) -> Callable[[str, str | None, str], tuple[float, str]]:
@@ -192,8 +198,10 @@ def _expert_sources(candidate: _Candidate, curve: list[float]) -> dict[str, Sour
     sources = {}
     josh_hayden = [candidate.expert_ranks[e] for e in yahoo_experts.JOSH_AND_HAYDEN if e in candidate.expert_ranks]
     if josh_hayden:
-        rank = sum(josh_hayden) / len(josh_hayden)
-        sources["josh_hayden"] = SourceValue(round(_rank_to_points(curve, rank), 2), rank)
+        # Each expert's rank becomes points first, then the points are averaged: averaging ranks
+        # first would understate a player the two disagree on (the points curve is convex).
+        points = sum(_rank_to_points(curve, rank) for rank in josh_hayden) / len(josh_hayden)
+        sources["josh_hayden"] = SourceValue(round(points, 2), sum(josh_hayden) / len(josh_hayden))
     consensus = candidate.expert_ranks.get(yahoo_experts.CONSENSUS)
     if consensus is not None:
         sources["yahoo_consensus"] = SourceValue(round(_rank_to_points(curve, consensus), 2), consensus)
@@ -221,7 +229,8 @@ def blend(candidates: Mapping[int, _Candidate], valuation: Valuation, week: int,
           context: InjuryContext | None = None, rates: Mapping[int, float] | None = None,
           weights: Mapping[str, float] = WEIGHTS,
           factor_for: Callable[[str, str | None, str], tuple[float, str]] | None = None,
-          weights_by_position: Mapping[str, Mapping[str, float]] | None = None) -> tuple[WeeklyPlayer, ...]:
+          weights_by_position: Mapping[str, Mapping[str, float]] | None = None,
+          shapes: Mapping[int, tuple[float | None, float | None]] | None = None) -> tuple[WeeklyPlayer, ...]:
     """Pure blending step over already-loaded sources.
 
     With require_outside_source, players that no outside source projects or ranks are left
@@ -261,9 +270,9 @@ def blend(candidates: Mapping[int, _Candidate], valuation: Valuation, week: int,
             continue
         expert_names = {**yahoo_experts.TRACKED_EXPERTS, yahoo_experts.CONSENSUS: "Yahoo consensus"}
         tilt = matchup.sos_factor ** FINAL_SOS_TILT
-        model_share = own_weights["model"] / sum(own_weights[k] for k in sources) if "model" in sources else 0.0
+        model_share = source_shares(list(sources), own_weights).get("model", 0.0)
         adjusted: Adjusted = adjust(candidate.position, combined, tilt, matchup, model_share,
-                                    candidate.player_id, context)
+                                    candidate.player_id, context, (shapes or {}).get(candidate.player_id, (None, None)))
         if adjusted.projection <= 0:
             continue                                   # ruled out
         steps = explain(candidate.name, candidate.position, rates.get(candidate.player_id),
@@ -281,6 +290,7 @@ def blend(candidates: Mapping[int, _Candidate], valuation: Valuation, week: int,
             status=None if adjusted.availability.play_prob >= 1 and adjusted.availability.status is None
             else adjusted.availability.label,
             floor=adjusted.floor, ceiling=adjusted.ceiling, boost_points=adjusted.boost_points,
+            quantiles=adjusted.quantiles,
             scenarios=adjusted.scenarios, explanation=steps, pct_rostered=candidate.pct_rostered,
             actual=_actual(seasons.get(candidate.player_id), week)))
     return _ranked(players)
@@ -323,15 +333,19 @@ def build_weekly_rankings(session: Session, league: LeagueSettings, week: int | 
         if key in _cache:
             return _cache[key]
     stored_key = rankings_store.cache_key(*key)
-    rankings = rankings_store.load(session, stored_key)
-    if not isinstance(rankings, WeeklyRankings):
-        rankings = _build(session, league, valuation, week)
-        rankings_store.save(session, stored_key, valuation.season, week, rankings)
-        rankings_store.record_history(session, rankings)
-    with _cache_lock:
-        if len(_cache) >= CACHE_SIZE:
-            _cache.pop(next(iter(_cache)))
-        _cache[key] = rankings
+    with key_lock(("weekly", stored_key)):
+        with _cache_lock:
+            if key in _cache:
+                return _cache[key]                 # built by a request we waited for
+        rankings = rankings_store.load(session, stored_key)
+        if not isinstance(rankings, WeeklyRankings):
+            rankings = _build(session, league, valuation, week)
+            rankings_store.save(session, stored_key, valuation.season, week, rankings)
+            rankings_store.record_history(session, rankings)
+        with _cache_lock:
+            if len(_cache) >= CACHE_SIZE:
+                _cache.pop(next(iter(_cache)))
+            _cache[key] = rankings
     return rankings
 
 
@@ -349,8 +363,10 @@ def _build(session: Session, league: LeagueSettings, valuation: Valuation, week:
     players = blend(candidates, valuation, week, league, require_outside_source=has_outside_sources,
                     context=context, rates=rates, weights=weights,
                     factor_for=model_factors(session, valuation.season, week),
-                    weights_by_position=position_weights(session, valuation.season, week))
-    counts = {key: sum(1 for p in players if key in p.sources) for key in weights}
+                    weights_by_position=position_weights(session, valuation.season, week),
+                    shapes=score_ranges.shape_inputs(session, valuation.season, candidates, before_week=week))
+    counts = {key: sum(1 for p in players if key in grouped({k: v.points for k, v in p.sources.items()}))
+              for key in weights}
     return WeeklyRankings(season=valuation.season, week=week, scoring=league.scoring,
                           players=players, source_counts=counts, context=context, weights=weights,
                           weights_learned_through=learned.week if learned else None)

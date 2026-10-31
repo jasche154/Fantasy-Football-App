@@ -1,19 +1,21 @@
 """This week's head-to-head matchup: both lineups, win probability, upside vs safe.
 
 - Opponent and live scores come from the Yahoo scoreboard; both rosters from the last import.
-- Each starter's score is simulated SIMULATIONS times: a normal draw around the projection,
-  with spread from his floor / ceiling (10th / 90th percentile, so sd = (ceiling - floor) / 2.56),
-  a 0 when he sits (his chance to play), and his actual points once his game is final.
-  Win probability = the share of simulated weeks your total beats the opponent's.
+- Each starter's score is simulated SIMULATIONS times (services/matchup_sim.py): drawn from
+  his own skewed range, a 0 when he sits (his chance to play), and his actual points once his
+  game is final. Players in the same game are correlated (a QB and his receivers, a defense
+  and the offense it faces). Win probability = the share of simulated weeks you win.
 - Upside vs safe: three lineups that fill your slots by a different score each
       expected  = projection
       upside    = projection + UPSIDE_WEIGHT x (ceiling - projection)
       safe      = projection - SAFE_WEIGHT x (projection - floor)
-  are each simulated against the opponent's lineup, and the one that wins most often is
-  recommended. A big underdog usually wins more with upside; a big favorite with safe floors.
+  are each simulated against the opponent's lineup. Upside or safe is recommended only when it
+  wins at least MODE_EDGE more often than expected (smaller edges are within the model's error).
 """
+import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from threading import Lock
 
 import httpx
 import numpy as np
@@ -22,14 +24,17 @@ from sqlalchemy.orm import Session
 from config import Settings
 from integrations import yahoo
 from services import my_team as mt
+from services import game_locks, matchup_sim
+from services.build_locks import key_lock
 from services import yahoo_sync
 from services.weekly_rankings import WeeklyPlayer
 
 SIMULATIONS = 20_000
 UPSIDE_WEIGHT = 0.5
 SAFE_WEIGHT = 0.5
-Z90 = 1.2816                      # the 90th percentile of a standard normal
 MODES = ("expected", "upside", "safe")
+MODE_EDGE = 0.03                  # win-probability edge needed to recommend upside/safe over expected
+CACHE_SECONDS = 300               # Yahoo's scoreboard + 20,000-run simulations: reuse for 5 minutes
 
 
 @dataclass(frozen=True)
@@ -58,28 +63,12 @@ def _score(mode: str) -> Callable[[WeeklyPlayer], float]:
 
 
 def simulate_totals(players: Sequence[WeeklyPlayer], rng: np.random.Generator, n: int = SIMULATIONS) -> np.ndarray:
-    """n simulated weekly totals for a lineup."""
-    totals = np.zeros(n)
-    for p in players:
-        if p.actual is not None:
-            totals += p.actual                          # already played
-            continue
-        mean = p.if_active or p.projection
-        floor = p.floor if p.floor is not None else mean * 0.5
-        ceiling = p.ceiling if p.ceiling is not None else mean * 1.5
-        sd = max(0.5, (ceiling - floor) / (2 * Z90))
-        draws = rng.normal(mean, sd, n)
-        if p.position not in ("DST",):
-            draws = np.maximum(draws, 0.0)
-        plays = rng.random(n) < (p.play_prob if p.play_prob is not None else 1.0)
-        totals += np.where(plays, draws, 0.0)
-    return totals
+    """n simulated weekly totals for one lineup."""
+    return matchup_sim.simulate_scores(players, rng, n).sum(axis=1)
 
 
 def win_probability(mine: Sequence[WeeklyPlayer], theirs: Sequence[WeeklyPlayer], seed: int = 7) -> float:
-    rng = np.random.default_rng(seed)
-    a, b = simulate_totals(mine, rng), simulate_totals(theirs, rng)
-    return float(np.mean(a > b) + 0.5 * np.mean(a == b))
+    return matchup_sim.win_probability(mine, theirs, seed, SIMULATIONS)
 
 
 def _side(session: Session, league, team_meta: dict, rosters: Mapping[int, Sequence[mt.RosterSpot]],
@@ -93,7 +82,25 @@ def _side(session: Session, league, team_meta: dict, rosters: Mapping[int, Seque
                 yahoo_win_probability=team_meta.get("win_probability"))
 
 
+_cache: dict[int, tuple[float, dict]] = {}
+_cache_lock = Lock()
+
+
 def build_matchup(session: Session, settings: Settings, http: httpx.Client, reference: int | str | None) -> dict:
+    """The matchup (see the module docstring), cached per league for CACHE_SECONDS."""
+    league, _ = mt.find_league(session, reference)
+    with key_lock(("matchup", league.id)):
+        with _cache_lock:
+            cached = _cache.get(league.id)
+        if cached and time.time() - cached[0] < CACHE_SECONDS:
+            return cached[1]
+        result = _build_matchup(session, settings, http, reference)
+        with _cache_lock:
+            _cache[league.id] = (time.time(), result)
+        return result
+
+
+def _build_matchup(session: Session, settings: Settings, http: httpx.Client, reference: int | str | None) -> dict:
     from sqlalchemy import select
 
     from database.models import Team
@@ -126,15 +133,20 @@ def build_matchup(session: Session, settings: Settings, http: httpx.Client, refe
 
     their_lineup = lineup([pid for _, pid in theirs.starters])
     current = lineup([pid for _, pid in mine.starters])
-    available = {s.player_id for s in team.spots if s.slot not in ("IR", "IR+", "NA")}
+    starting = {s.player_id for s in team.spots if s.starting}
+    available = {s.player_id for s in team.spots if s.slot not in ("IR", "IR+", "NA")} - (team.locked - starting)
     my_players = [weekly[s.player_id] for s in team.spots if s.player_id in weekly]
     options = {}
     for mode in MODES:
-        slots = mt.best_lineup(my_players, team.settings, available, key=_score(mode))
+        slots = mt.best_lineup(my_players, team.settings, available,
+                               key=game_locks.lock_key(team.locked & starting, _score(mode)))
         ids = [pid for slot_ids in slots.values() for pid in slot_ids]
         options[mode] = {"lineup": slots, "projected": round(sum(weekly[pid].projection for pid in ids), 1),
                          "win_probability": round(win_probability(lineup(ids), their_lineup), 3)}
-    recommended = max(MODES, key=lambda m: (options[m]["win_probability"], m == "expected"))
+    # Upside or safe only when it wins clearly more often; small edges are model noise.
+    challenger = max(("upside", "safe"), key=lambda m: options[m]["win_probability"])
+    recommended = challenger if (options[challenger]["win_probability"] - options["expected"]["win_probability"]
+                                 >= MODE_EDGE) else "expected"
     current_ids = {pid for _, pid in mine.starters}
     rec_ids = {pid for ids in options[recommended]["lineup"].values() for pid in ids}
     names = {pid: p.name for pid, p in weekly.items()}

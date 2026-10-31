@@ -13,7 +13,7 @@ can't produce extreme matchups. Without a loaded schedule every factor is 1.0 (n
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from types import MappingProxyType
 
 from sqlalchemy import select
@@ -29,6 +29,14 @@ MIN_FACTOR, MAX_FACTOR = 0.7, 1.35
 STALE_GAME_DAYS = 3
 
 
+def _eastern_dst(local: datetime) -> bool:
+    """US daylight time: 2 a.m. on the second Sunday of March to 2 a.m. on the first Sunday of November."""
+    def nth_sunday(month: int, n: int) -> datetime:
+        first = datetime(local.year, month, 1)
+        return first + timedelta(days=(6 - first.weekday()) % 7 + 7 * (n - 1), hours=2)
+    return nth_sunday(3, 2) <= local < nth_sunday(11, 1)
+
+
 @dataclass(frozen=True)
 class Game:
     week: int
@@ -39,6 +47,18 @@ class Game:
     spread_line: float | None     # home team's expected margin
     total_line: float | None
     gameday: str | None = None    # "YYYY-MM-DD"
+    gametime: str | None = None   # "13:00", US Eastern
+
+    @property
+    def kickoff(self) -> datetime | None:
+        """Kickoff in UTC (nflverse lists US Eastern times)."""
+        if not self.gameday or not self.gametime:
+            return None
+        try:
+            local = datetime.strptime(f"{self.gameday} {self.gametime}", "%Y-%m-%d %H:%M")
+        except ValueError:
+            return None
+        return (local + timedelta(hours=4 if _eastern_dst(local) else 5)).replace(tzinfo=timezone.utc)
 
     @property
     def is_final(self) -> bool:
@@ -90,7 +110,8 @@ class Schedule:
 def load_schedule(session: Session, season: int) -> Schedule:
     games = tuple(Game(week=g.week, home_team=g.home_team, away_team=g.away_team,
                        home_score=g.home_score, away_score=g.away_score,
-                       spread_line=g.spread_line, total_line=g.total_line, gameday=g.gameday)
+                       spread_line=g.spread_line, total_line=g.total_line, gameday=g.gameday,
+                       gametime=g.gametime)
                   for g in session.scalars(select(NflGame).where(
                       NflGame.season == season, NflGame.game_type == REGULAR_SEASON).order_by(NflGame.week)))
     opponents = {}

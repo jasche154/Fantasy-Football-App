@@ -36,7 +36,7 @@ from sqlalchemy.orm import Session
 from database.models import LearnedWeights, ProjectionHistory
 from integrations import espn, yahoo_experts
 from integrations.weekly_sources import SourceError
-from services import weight_learning
+from services import score_ranges, weight_learning
 from services.backtest import truncate
 from services.injuries import build_context
 from services.league import LeagueSettings
@@ -89,7 +89,8 @@ def project_week(session: Session, league: LeagueSettings, week: int):
     return blend(candidates, valuation, week, league, require_outside_source=has_outside_sources,
                  context=context, rates=rates, weights=weights,
                  factor_for=model_factors(session, valuation.season, week),
-                 weights_by_position=position_weights(session, valuation.season, week))
+                 weights_by_position=position_weights(session, valuation.season, week),
+                 shapes=score_ranges.shape_inputs(session, valuation.season, candidates, before_week=week))
 
 
 def record_week(session: Session, season: int, week: int, scoring: str, players) -> int:
