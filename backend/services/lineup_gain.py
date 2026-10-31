@@ -7,8 +7,10 @@
 - Each player's week: his healthy rest-of-season rate x that week's opponent factor, 0 on a
   bye. This week uses the actual weekly projection. Later weeks:
     * Questionable/Doubtful/low snaps now: healthy from next week, x (1 - weekly injury hazard);
-    * Out now: plays week k with probability 1 - OUT_PERSIST^k;
-    * IR / PUP / suspended: out for IR_WEEKS;
+    * Out or on IR now: out for his expected games missed (services/injury_recovery.py: body part,
+      practice reports, a little shorter each week he's been out), playing the fractional week in
+      part; his first games back keep the measured post-injury dip. Out for the season: 0.
+      Without that estimate: Out plays week k with probability 1 - OUT_PERSIST^k, IR waits IR_WEEKS;
     * healthy: x his long-run share of weeks played, from the weekly injury hazard (QB 8.8%,
       WR 5.4%, RB/TE 4.3%, 2021-25 starters) and the 60% chance an injured player is still out
       the next week: 1 - hazard / (1 - 0.6 + hazard), e.g. a receiver misses about 12% of weeks.
@@ -18,6 +20,7 @@
 
 Used for waiver pickups (with the named drop), trade offers on real rosters, and the playoff planner.
 """
+import math
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from types import SimpleNamespace
@@ -34,6 +37,16 @@ REGULAR_DECAY = 0.95
 PLAYOFF_MIN = 0.1
 DEFAULT_PLAYOFF_ODDS = 0.6
 HANDCUFF_MULTIPLE = 2.0           # drop your own starter's handcuff only for an add worth 2x as much
+
+
+def _after_injury(weeks_ahead: int, missed: float) -> float:
+    """His share of week `weeks_ahead` (0 = this week) when he's expected to miss `missed` games from now."""
+    from services.injury_recovery import params
+
+    played = min(1.0, max(0.0, weeks_ahead + 1 - missed))
+    back = weeks_ahead - math.ceil(missed - 1e-9)      # full games back, 0-based (negative: not back yet)
+    rust = params()["rust"]
+    return played * (rust[back] if 0 <= back < len(rust) else 1.0)
 
 
 @dataclass(frozen=True)
@@ -78,6 +91,9 @@ class Projector:
     def available(self, value, weeks_ahead: int) -> float:
         status = (getattr(self.availability.get(value.player_id), "status", None) or "").upper()
         share = healthy_share(value.position)
+        missed = getattr(value, "expected_missed", 0.0) or 0.0
+        if missed > 0:
+            return share * _after_injury(weeks_ahead, missed)
         if status in IR_STATUSES:
             return 0.0 if weeks_ahead < IR_WEEKS else share
         if status in OUT_STATUSES:

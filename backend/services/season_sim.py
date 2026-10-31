@@ -15,7 +15,8 @@ Power rankings
       by about this much, and the miss lasts all season (it doesn't average out week to week);
     * every starter can get hurt: each week he misses with his position's hazard (QB 8.8%,
       WR 5.4%, RB/TE 4.3%), and once out stays out the next week 60% of the time; a player
-      already Out starts out, one on IR misses IR_WEEKS. His spot goes to the best free agent;
+      already hurt starts out for his expected games missed (services/injury_recovery.py). His
+      spot goes to the best free agent;
     * each game a team scores Normal(that week's projection + offset - injury losses, WEEKLY_SD).
   Wins and points for are added to the current standings, and the top playoff_teams (wins,
   then points for) make it. Projections use healthy rates, since injuries are simulated.
@@ -25,8 +26,6 @@ from collections.abc import Callable, Mapping, Sequence
 from types import SimpleNamespace
 
 import numpy as np
-from sqlalchemy import select
-from sqlalchemy.orm import Session
 
 from services import my_team as mt
 from services.valuation import ROS_SCHEDULE_WEIGHT
@@ -88,19 +87,9 @@ def weekly_lineups(rosters: Mapping[str, Sequence], free_agents: Sequence, weeks
     return out
 
 
-def _start_out(session: Session) -> dict[int, int]:
-    """{player id: weeks certainly out}: IR-type tags IR_WEEKS, Out now 1 (Sleeper's live status)."""
-    from database.models import PlayerStatus
-    from services.lineup_gain import IR_STATUSES, IR_WEEKS
-
-    out = {}
-    for status in session.scalars(select(PlayerStatus).where(PlayerStatus.injury_status.is_not(None))):
-        tag = (status.injury_status or "").upper()
-        if tag in IR_STATUSES:
-            out[status.player_id] = IR_WEEKS
-        elif tag == "OUT":
-            out[status.player_id] = 1
-    return out
+def _start_out(valuation) -> dict[int, int]:
+    """{player id: weeks certainly out}: his expected games missed (services/injury_recovery.py), rounded."""
+    return {v.player_id: round(v.expected_missed) for v in valuation.values if round(v.expected_missed) > 0}
 
 
 def _active_values(valuation, spots: Sequence[mt.RosterSpot]) -> list:

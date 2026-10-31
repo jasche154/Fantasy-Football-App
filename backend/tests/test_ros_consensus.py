@@ -4,7 +4,7 @@ import json
 import pytest
 
 from database.models import Player, PlayerStatus, WeeklySourceProjection
-from services import ros_consensus
+from services import injury_recovery, ros_consensus
 from services import valuation as valuation_module
 from services.league import LeagueSettings
 from services.ros_consensus import RosInputs
@@ -38,7 +38,9 @@ def test_valuation_blends_expert_ros_ranks_weekly_points_and_injuries(session, s
     assert by_id[low].ros_ppg > by_id[low].model_ros_ppg            # experts and this week lift him
     assert by_id[top].ros_ppg < by_id[top].model_ros_ppg            # experts rank him RB30
     remaining = build_valuation(session, LeagueSettings()).weeks_remaining
-    assert by_id[hurt].availability == pytest.approx((remaining - ros_consensus.IR_WEEKS) / remaining, abs=0.001)
+    # IR: at least four games out, plus the slower first games back (services/injury_recovery.py)
+    assert by_id[hurt].expected_missed >= injury_recovery.IR_MIN_GAMES
+    assert (remaining - 7) / remaining < by_id[hurt].availability < (remaining - injury_recovery.IR_MIN_GAMES) / remaining
     assert by_id[hurt].ros_ppg == pytest.approx(by_id[hurt].model_ros_ppg * by_id[hurt].availability, abs=0.02)
 
 

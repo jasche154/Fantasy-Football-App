@@ -227,8 +227,9 @@ For each QB/RB/WR/TE this season:
    re-weighted when an input is missing.
    - Expert ROS ranks (Yahoo's 40+ expert consensus and Josh & Hayden) become points:
      ROS rank N gets the Nth best model projection at the position.
-   - Players on IR, PUP or suspended lose 4 games; Out or Doubtful lose 1. **IR with a torn
-     ACL or Achilles is season-ending: no rest-of-season value** (De'Von Achane drops to 0).
+   - Injured players are scaled by the share of value they keep (see **Injury discount** below).
+     **IR with a torn ACL or Achilles is season-ending: no rest-of-season value** (De'Von Achane
+     drops to 0).
    - Yahoo publishes each week's ranks gradually. Each player uses his newest rank from the
      last two weeks, in your scoring format or the nearest one, so a half-published week
      doesn't erase everyone else's expert input.
@@ -368,8 +369,9 @@ and the scoreboard for every remaining regular-season week), cached for an hour:
 - **Playoff odds:** the rest of the regular season is simulated 10,000 times. Each simulated
   season gives every team one strength offset (sd 9 points: rest-of-season estimates miss by
   about that much, and the miss lasts all season), and every starter can get hurt each week
-  (QB 8.8%, WR 5.4%, RB/TE 4.3%; once out, he stays out the next week 60% of the time; IR
-  players miss 4 weeks), his spot going to the best free agent. Each game a team scores
+  (QB 8.8%, WR 5.4%, RB/TE 4.3%; once out, he stays out the next week 60% of the time; a player
+  hurt now starts out for his expected games missed, see **Injury discount**), his spot going to
+  the best free agent. Each game a team scores
   Normal(that week's projection + offset − injuries, 21 points). Wins and points for are added
   to the real standings; the top `playoff_teams` (Yahoo's setting) make it.
 - **Tendencies:** "Active trader" (2+ trades), "Waiver regular" (1.5× the league's median
@@ -425,9 +427,10 @@ only when it wins at least 3 points more often; smaller edges show as **Marginal
 **Lineup gain** (`services/lineup_gain.py`). Moves are scored by how many points they add to
 your best lineup over the rest of the season: each week's best QB/RB/WR/TE lineup before and
 after, weighted 0.95 per week ahead in the regular season and by your playoff odds in the
-playoff weeks. Each player's week is his healthy rate × that opponent (0 on a bye); Out players
-come back with a 60%-a-week chance of staying out, IR players miss 4 weeks, and healthy weeks
-carry the weekly injury risk (QB 8.8%, WR 5.4%, RB/TE 4.3%).
+playoff weeks. Each player's week is his healthy rate × that opponent (0 on a bye); a player
+hurt now sits out his expected games missed and his first games back carry the post-injury dip
+(see **Injury discount**), and healthy weeks carry the weekly injury risk (QB 8.8%, WR 5.4%,
+RB/TE 4.3%).
 
 **Waivers** (`services/waiver_advice.py`, My Team → Waivers). Every free agent is scored by
 lineup gain after dropping your least useful player (never your starter's handcuff unless the
@@ -604,13 +607,46 @@ moving players on matchup.
   The next player down is the "waiver-wire" baseline.
 - **`trade_value = availability × max(0, healthy_ppg − replacement_ppg) × games_left`**:
   rest-of-season fantasy points above what you'd get from waivers.
-  - `availability` is the share of remaining games he's expected to play (injury status; for a
+  - `availability` is the share of remaining value he keeps (the injury discount below; for a
     backup QB, the games his starter is expected to miss) and `healthy_ppg = ros_ppg / availability`
     is his rate when he plays. An injured star keeps value for the games he will play: 18 ppg
     healthy, out half of 8 games, replacement 9 is worth 0.5 × 9 × 8 = 36, not 0.
+  - An injured starting QB stays the starter even when the depth chart lists his fill-in first
+    (the QB with the most 100-yard games this season is the team's starter); before, Jalen Hurts
+    on IR read as a backup worth 0.
   - `games_left` counts his team's remaining games through the fantasy end week (week 18 by
     default), so a bye still ahead costs a week. Lineup gain keeps a backup's small share
     instead of projecting him as a starter.
+
+### Injury discount
+`services/injury_recovery.py`, fitted by `python -m services.injury_recovery_fit --seasons 2021-2025`
+on 708 injury spells (a fantasy-relevant player missing a team game right after playing, until he
+plays again; numbers in `injury_recovery.json`).
+- **At the injury** the discount comes from the body part: on average a concussion costs 2.2
+  games, an ankle or hamstring 2.6, a knee 3.0 (shrunk toward the 2.8 average). Injured reserve
+  is at least 4 games from placement. **Out for the season (torn ACL or Achilles): 0.**
+- **While he's out, the evidence moves it.** This week's practice report scales the games still to
+  miss: practicing (limited or full) ×0.40, not practicing ×0.85, no report at all (mostly IR) ×1.22.
+  Time alone doesn't predict a return in the data (31% of players are back after one missed game,
+  only 17% after four or five: the long absences are the bad injuries), but long injuries often go
+  weeks without news. So, as a product rule rather than a fitted number, the discount (measured
+  against the season left when he got hurt) shrinks **10% for each game he's missed**: his value
+  creeps back up week by week even without news.
+- **After he returns**, players run low for a few games: the first game back about 87% of his rate,
+  the next two 93% and 95% (relative to healthy players, which removes regression to the mean), and
+  8 percentage points more of them are hurt again within five weeks. That counts as about half a
+  game of lost value, then he's back to normal.
+- Example, a knee injury with 10 games left and no news: worth 65% of his healthy value the week
+  he's hurt, then 69%, 72%, 75%, 77%; a limited practice in week 2 jumps him to 82%; after he
+  returns, 90%, 95%, 98%, then 100%.
+- **Role on return.** A returning RB whose fill-in scored at least half his rate over 2+ games is
+  flagged with the fill-in's name (Breece Hall with Braelon Allen). The value cut is the fitted
+  `rb_role_loss`, which is **0** on 2021-25: returning RBs got their snaps and scoring back even
+  after a strong fill-in (37 cases; WR and TE showed no effect either). A real role change shows up
+  through the expert ROS ranks in the blend.
+- The trade calculator shows the note ("Knee: out ~1.8 more games · worth ~72% of healthy"), the
+  same expected absence drives lineup gain (waivers, league trades) and the season simulation, and
+  Ask AI's rankings rows carry it.
 
 ### Trade calculator
 Each side is sorted by value and weighted **1.0, 0.7, 0.5, then 0.4** for every further player.

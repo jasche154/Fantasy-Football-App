@@ -61,6 +61,12 @@ export interface RankedPlayer {
   is_rookie?: boolean;
   /** A starter whose return takes work back from this fill-in, and the ppg taken off the model. */
   returning_starter?: string | null;
+  /** e.g. "Hamstring: out ~1.8 more games, practicing" or "1 game back from injury". */
+  injury_note?: string | null;
+  /** Remaining games he's expected to miss. */
+  expected_missed?: number;
+  /** A returning RB's fill-in who played well while he was out. */
+  fill_in?: string | null;
   returning_loss?: number;
   /** Inputs to the blended ros_ppg. */
   ros_sources?: {
@@ -197,6 +203,8 @@ export interface TradeSidePlayer {
   schedule_factor?: number;
   playoff_factor?: number;
   expert_ros_ppg?: number | null;
+  injury_note?: string | null;
+  fill_in?: string | null;
   weight: number;
   adjusted_value: number;
 }

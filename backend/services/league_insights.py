@@ -148,7 +148,7 @@ def _build(session: Session, settings: Settings, http: httpx.Client, reference: 
         _free_agents(valuation, rosters), remaining_weeks, league_settings, _projector(valuation))
     weekly = {team: {week: round(sum(points for _, _, points, _ in starters), 1) for week, starters in by_week.items()}
               for team, by_week in lineups.items()}
-    start_out = _start_out(session)
+    start_out = _start_out(valuation)
     rng = np.random.default_rng(23)
     losses = {team: injury_losses(by_week, start_out, rng, SIMULATIONS) for team, by_week in lineups.items()}
     wins = {s["team_key"]: s["wins"] + 0.5 * s["ties"] for s in standings}

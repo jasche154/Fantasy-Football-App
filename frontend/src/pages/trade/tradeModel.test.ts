@@ -34,6 +34,13 @@ describe('trade result copy', () => {
     expect(playerContext(entry({ games_left: 1, availability: 1, schedule_factor: 1.01 }))).toBe('18.4 PPG · 1 game left');
   });
 
+  it('explains an injury discount and a fill-in who played well', () => {
+    expect(playerContext(entry({ availability: 0.72, injury_note: 'Knee: out ~1.8 more games', fill_in: 'Braelon Allen' })))
+      .toBe('18.4 PPG · Knee: out ~1.8 more games · worth ~72% of healthy · Braelon Allen played well while he was out');
+    expect(playerContext(entry({ availability: 0.98, injury_note: '1 game back from injury' })))
+      .toBe('18.4 PPG · 1 game back from injury');
+  });
+
   it('summarizes the market view', () => {
     expect(marketText(null)).toBeNull();
     expect(marketText(0.03)).toBe('Expert consensus also sees this as about even.');
