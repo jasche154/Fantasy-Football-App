@@ -10,7 +10,8 @@ Measured on 2021-25 injury spells (services/injury_recovery_fit.py writes injury
   missed several weeks is usually on a longer injury), but long injuries often go weeks without
   news, so the discount (measured against the season left when he got hurt) also shrinks by
   WEEKLY_RECOVERY per game missed. That's a product rule, not a fitted number. Injured reserve
-  keeps its IR_MIN_GAMES minimum.
+  keeps its IR_MIN_GAMES minimum, counted from when his absence began (the placement week isn't
+  stored, so a player Out for two weeks before IR gets a two-game floor).
 - **Sleeper news** (services/injury_news.py) overrides the averages when it has something:
   "out for the season" means no rest-of-season value, and a reported timeline ("12-to-16 weeks")
   replaces the body-part average, counted down from the day it was published. Sleeper's
@@ -30,6 +31,7 @@ The shares feed services/valuation.py (availability), services/lineup_gain.py an
 simulation, so the trade calculator, league trades and waivers agree.
 """
 import json
+import math
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
@@ -51,7 +53,7 @@ from services.schedule_strength import Schedule
 
 PARAMS_PATH = Path(__file__).with_name("injury_recovery.json")
 WEEKLY_RECOVERY = 0.10        # the injury discount shrinks 10% per game missed (product rule, not fitted)
-IR_MIN_GAMES = 4              # injured reserve: at least four games from placement
+IR_MIN_GAMES = 4              # injured reserve: at least four games, counted from when his absence began
 SURGERY_GAMES = 6             # Sleeper's "Surgery" note with no reported timeline (product default, not fitted)
 FILL_IN_RATIO = 0.5           # a fill-in who scored half the starter's rate "played well"
 MIN_FILL_IN_GAMES = 2
@@ -76,6 +78,10 @@ GROUP_WORDS = (               # first match wins
 )
 GROUP_LABELS = {"soft_tissue": "Soft-tissue", "upper_body": "Upper-body", "back_ribs": "Back/ribs",
                 "acl_achilles": "ACL/Achilles", "non_injury": "Non-injury"}
+
+
+def _article(word: str) -> str:
+    return "an" if word[:1].lower() in "aeiou" else "a"
 
 
 def body_group(injury: str | None) -> str:
@@ -107,7 +113,7 @@ class Recovery:
     games_out: int                  # team games missed in a row, up to now
     games_back: int | None          # games played since returning from a missed stretch (None: no recent absence)
     season_ending: bool = False
-    news_weeks: float | None = None  # weeks still out per the newest reported timeline (injury_news)
+    news_weeks: float | None = None  # games still out per the reported timelines (injury_news; byes removed)
     surgery: bool = False           # Sleeper's injury note says surgery
     from_news: bool = False         # season_ending came from the news
 
@@ -184,15 +190,20 @@ class Recovery:
         return round(min(float(remaining), max(floor, games)), 2)
 
     def note(self, remaining: int) -> str | None:
+        """Plain words for the UI and Ask AI: whole games ("likely out 2 more games"), not decimals."""
         label = GROUP_LABELS.get(self.group, self.group.capitalize()) if self.group not in ("unknown", "other") else None
         if self.season_ending:
             return "Out for the season (per news)" if self.from_news else "Out for the season"
         if self.out_now:
+            games = max(1, math.floor(self.expected_missed(remaining) + 0.5))
             practiced = {"practicing": ", practicing", "dnp": ", not practicing"}.get(self.practice or "", "")
             source = " (reported timeline)" if self.news_weeks is not None else " (surgery)" if self.surgery else ""
-            return f"{label or 'Injured'}: out ~{self.expected_missed(remaining):.1f} more games{source}{practiced}"
+            subject = "Not injury-related" if self.group == "non_injury" else f"{label} injury" if label else "Injured"
+            return f"{subject}: likely out {games} more game{'' if games == 1 else 's'}{source}{practiced}"
         if self.games_out:
-            return f"Returning from {(label or 'an injury').lower()}: first games back usually run a bit low"
+            word = label if self.group == "acl_achilles" else (label or "").lower()
+            injury = "an injury" if not label or self.group == "non_injury" else f"{_article(word)} {word} injury"
+            return f"Returning from {injury}: first games back usually run a bit low"
         if self.games_back is not None and self.games_back < len(params()["rust"]):
             return f"{self.games_back} game{'' if self.games_back == 1 else 's'} back from injury"
         return None
@@ -231,15 +242,27 @@ def _reports(session: Session, season: int) -> dict[int, dict[int, InjuryReport]
 
 
 def _last_game(player: PlayerSeason, schedule: Schedule) -> datetime | None:
-    """The day of his last game (news from before it is about an earlier injury)."""
+    """His last kickoff (news from before it is about an earlier injury); the game day if no time is listed."""
     if not player.games or not player.team:
         return None
     week = player.games[-1].week
     game = next((g for g in schedule.games if g.week == week and player.team in (g.home_team, g.away_team)), None)
+    if game is None:
+        return None
+    if game.kickoff is not None:
+        return game.kickoff
     try:
-        return datetime.fromisoformat(game.gameday).replace(tzinfo=timezone.utc) if game and game.gameday else None
+        return datetime.fromisoformat(game.gameday).replace(tzinfo=timezone.utc) if game.gameday else None
     except ValueError:
         return None
+
+
+def news_games(weeks: float, team: str | None, schedule: Schedule, week: int) -> float:
+    """Calendar weeks out (a reported timeline) as games: a bye inside the window isn't a missed game."""
+    if not team:
+        return weeks
+    byes = sum(1 for w in range(week, week + int(weeks)) if schedule.opponent(team, w) is None)
+    return max(0.0, weeks - byes)
 
 
 def recovery_states(session: Session, seasons: Iterable[PlayerSeason], schedule: Schedule,
@@ -276,7 +299,8 @@ def recovery_states(session: Session, seasons: Iterable[PlayerSeason], schedule:
             status=tag, group=body_group(injury), practice=practice_key(current.practice_status) if current else None,
             games_out=games_out, games_back=games_back,
             season_ending=tagged_ending or news_ending,
-            news_weeks=evidence.weeks_left if evidence and not news_ending else None,
+            news_weeks=(news_games(evidence.weeks_left, player.team, schedule, week)
+                        if evidence and not news_ending and evidence.weeks_left is not None else None),
             surgery=out_now and "surgery" in ((status.injury_notes if status else None) or "").lower(),
             from_news=news_ending and not tagged_ending)
         absences[player.player_id] = absent
@@ -287,8 +311,11 @@ QB_START_YARDS = 100           # a game with 100+ passing yards counts as a star
 MIN_STARTS = 2
 
 
-def season_starters(seasons: Iterable[PlayerSeason]) -> dict[str, int]:
-    """{team: the QB with the most starts this season}, so an injured starter isn't read as a backup."""
+def season_starters(seasons: Iterable[PlayerSeason], states: Mapping[int, "Recovery"] | None = None) -> dict[str, int]:
+    """{team: the QB with the most starts this season}, so an injured starter isn't read as a backup.
+
+    With states, only starters out now (IR or Out) count: a veteran benched mid-season who picks up
+    a Questionable tag stays the backup."""
     best: dict[str, tuple[int, int]] = {}
     for p in seasons:
         if p.position != "QB" or not p.team:
@@ -296,7 +323,8 @@ def season_starters(seasons: Iterable[PlayerSeason]) -> dict[str, int]:
         starts = sum(1 for g in p.games if g.passing_yards >= QB_START_YARDS)
         if starts >= MIN_STARTS and starts > best.get(p.team, (0, 0))[0]:
             best[p.team] = (starts, p.player_id)
-    return {team: pid for team, (_, pid) in best.items()}
+    return {team: pid for team, (_, pid) in best.items()
+            if states is None or (pid in states and states[pid].out_now)}
 
 
 def shares(states: Mapping[int, Recovery], remaining: int) -> dict[int, float]:

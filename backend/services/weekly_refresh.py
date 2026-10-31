@@ -105,7 +105,12 @@ def _refresh_status(session: Session, http: httpx.Client, force: bool) -> dict:
     record_call(session, sleeper.PLAYERS_SOURCE, ok=True)
     from services import injury_news
 
-    news = injury_news.refresh(session, http)      # per-player failures are counted, not raised
+    try:
+        news = injury_news.refresh(session, http)      # per-player failures are counted inside
+    except Exception as exc:  # noqa: BLE001 - statuses are saved; news is a bonus on top
+        session.rollback()
+        log.warning("Injury news refresh failed: %s", type(exc).__name__)
+        return _status("updated", "Injury news couldn't be re-read this time.", rows=rows)
     return _status("updated", f"Injury news re-read for {news['fetched']} players.", rows=rows)
 
 

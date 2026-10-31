@@ -214,7 +214,10 @@ def ros_inputs(session: Session, season: int, scoring_key: str, scoring: Scoring
 
 
 def data_version(session: Session, season: int) -> tuple:
-    """Changes when expert ROS ranks, weekly sources or live status are refreshed."""
+    """Changes when expert ROS ranks, weekly sources, live status or injury news are refreshed."""
+    from database.models import InjuryNews
+
     return (session.scalar(select(func.max(WeeklySourceProjection.fetched_at)).where(
                 WeeklySourceProjection.season == season)),
-            session.scalar(select(func.max(PlayerStatus.fetched_at))))
+            session.scalar(select(func.max(PlayerStatus.fetched_at))),
+            session.scalar(select(func.max(InjuryNews.checked_at))))

@@ -632,14 +632,20 @@ plays again; numbers in `injury_recovery.json`).
   - "out for the season", "season-ending", "done for 2026", "miss the remainder of the season"
     → value 0 (Jalen Hurts, Jaxson Dart, Terry McLaurin). Negated, partial or speculative wording
     doesn't count ("avoids a season-ending injury", "a significant stretch of the remainder of the
-    season", "could miss the rest of the season"), and neither does a sentence about a teammate
-    (Sleeper writes every player as "Name (injury)"; the nearest one must be his).
+    season", "could miss the rest of the season"), nor does "out for the season opener", nor a
+    sentence about a teammate (Sleeper writes every player as "Name (injury)"; the nearest one must
+    be his, and a ", who ..." clause must hang off his name).
   - a return timeline ("out 6-10 weeks", "3-to-4-month absence", "at least four weeks") replaces
     the body-part average, counted down from the day it was published. The return date is the
-    median over his headlines, since later articles restate the first diagnosis. Davante Adams
-    (6-10 weeks from Oct 19) keeps about 31% of his value.
-  - only news since his last game counts, and backward-looking counts ("fourth game in the past
-    five weeks") are skipped.
+    median over his headlines, since later articles restate the first diagnosis, and a bye inside
+    the window isn't a missed game. Davante Adams (6-10 weeks from Oct 19) keeps about 40% of his
+    value.
+  - only news since his last kickoff counts. Time already missed isn't a timeline ("after a
+    three-week absence", "injured two weeks ago", "fourth missed game in five weeks"), and numbers
+    must be whole words (not "26" in "2026").
+  - new signals are merged into the stored ones (Sleeper returns only the newest ten headlines, and
+    the first diagnosis matters); a failed player is skipped without stopping the others or the
+    status refresh, and a news update invalidates cached values.
   - Sleeper's "Surgery" note without a timeline means at least 6 games (a product default; too
     rare in the injury reports to fit). Its notes also refine the body part ("Achilles" +
     "Tendinitis" is a soft-tissue injury, not a tear).
@@ -662,7 +668,8 @@ plays again; numbers in `injury_recovery.json`).
   `rb_role_loss`, which is **0** on 2021-25: returning RBs got their snaps and scoring back even
   after a strong fill-in (37 cases; WR and TE showed no effect either). A real role change shows up
   through the expert ROS ranks in the blend.
-- The trade calculator shows the note ("Knee: out ~1.8 more games · worth ~72% of healthy"), the
+- The trade calculator shows the note ("Knee injury: likely out 2 more games · worth about 72% of
+  healthy"; a returning RB: "may share work with Braelon Allen, who played well while he was out"), the
   same expected absence drives lineup gain (waivers, league trades) and the season simulation, and
   Ask AI's rankings rows carry it.
 

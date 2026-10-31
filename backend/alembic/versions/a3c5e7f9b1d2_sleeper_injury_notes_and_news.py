@@ -25,7 +25,7 @@ def upgrade() -> None:
     with op.batch_alter_table("player_status") as batch:
         if "injury_notes" not in columns:
             batch.add_column(sa.Column("injury_notes", sa.String(), nullable=True))
-        if "news_updated" not in columns:
+        if "news_updated" not in columns:      # milliseconds since 1970; SQLite INTEGER holds 64 bits
             batch.add_column(sa.Column("news_updated", sa.Integer(), nullable=True))
     if not inspector.has_table("injury_news"):
         op.create_table(
@@ -39,7 +39,11 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Downgrade schema."""
-    op.drop_table("injury_news")
+    inspector = sa.inspect(op.get_bind())
+    if inspector.has_table("injury_news"):
+        op.drop_table("injury_news")
+    columns = {c["name"] for c in inspector.get_columns("player_status")}
     with op.batch_alter_table("player_status") as batch:
-        batch.drop_column("news_updated")
-        batch.drop_column("injury_notes")
+        for name in ("news_updated", "injury_notes"):
+            if name in columns:
+                batch.drop_column(name)

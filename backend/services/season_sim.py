@@ -21,6 +21,7 @@ Power rankings
   Wins and points for are added to the current standings, and the top playoff_teams (wins,
   then points for) make it. Projections use healthy rates, since injuries are simulated.
 """
+import math
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from types import SimpleNamespace
@@ -89,7 +90,8 @@ def weekly_lineups(rosters: Mapping[str, Sequence], free_agents: Sequence, weeks
 
 def _start_out(valuation) -> dict[int, int]:
     """{player id: weeks certainly out}: his expected games missed (services/injury_recovery.py), rounded."""
-    return {v.player_id: round(v.expected_missed) for v in valuation.values if round(v.expected_missed) > 0}
+    out = {v.player_id: math.floor(v.expected_missed + 0.5) for v in valuation.values}     # half-up, not to even
+    return {pid: weeks for pid, weeks in out.items() if weeks > 0}
 
 
 def _active_values(valuation, spots: Sequence[mt.RosterSpot]) -> list:

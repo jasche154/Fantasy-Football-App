@@ -119,7 +119,7 @@ def _ros_row(value, ecr: dict, rank: int) -> dict:
            "rookie": True if value.is_rookie else None,
            "returning_starter": value.returning_starter,
            "injury": value.injury_note,
-           "fill_in_played_well": value.fill_in}
+           "fill_in_played_well": label(value.fill_in) if value.fill_in else None}
     return {k: v for k, v in row.items() if v is not None}
 
 

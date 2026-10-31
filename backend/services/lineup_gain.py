@@ -9,7 +9,9 @@
     * Questionable/Doubtful/low snaps now: healthy from next week, x (1 - weekly injury hazard);
     * Out or on IR now: out for his expected games missed (services/injury_recovery.py: body part,
       practice reports, a little shorter each week he's been out), playing the fractional week in
-      part; his first games back keep the measured post-injury dip. Out for the season: 0.
+      part; his first games back keep the measured post-injury dip (a player already back isn't
+      discounted here, only in trade value). Weeks are calendar weeks, so a bye inside the absence
+      counts toward it. Out for the season: 0.
       Without that estimate: Out plays week k with probability 1 - OUT_PERSIST^k, IR waits IR_WEEKS;
     * healthy: x his long-run share of weeks played, from the weekly injury hazard (QB 8.8%,
       WR 5.4%, RB/TE 4.3%, 2021-25 starters) and the 60% chance an injured player is still out

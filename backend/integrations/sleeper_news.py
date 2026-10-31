@@ -63,12 +63,13 @@ def parse_news(rows: object) -> list[dict]:
     return items[:MAX_ITEMS]
 
 
-def fetch_news(sleeper_id: str, client: httpx.Client | None = None) -> list[dict]:
+def fetch_news(sleeper_id: str, client: httpx.Client | None = None, fresh: bool = False) -> list[dict]:
+    """fresh skips the 30-minute cache (the injury-news refresh needs the headline that changed the stamp)."""
     if not sleeper_id.isdigit() and not sleeper_id.isalpha():
         raise ValueError("Invalid Sleeper player id.")
     with _lock:
         cached = _cache.get(sleeper_id)
-    if cached and time.monotonic() - cached[0] < CACHE_SECONDS:
+    if cached and not fresh and time.monotonic() - cached[0] < CACHE_SECONDS:
         return cached[1]
     url = NEWS_URL.format(sleeper_id=sleeper_id)
     try:

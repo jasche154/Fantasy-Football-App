@@ -26,7 +26,7 @@ export function NewsList({ items, showPlayer = false, showAnalysis = false, isNe
         return (
         <li key={`${player?.id ?? ''}-${item.published}-${item.title}`} className={`news-item${fresh ? ' news-item--new' : ''}`}>
           <p className="news-item__title">
-            {fresh && <span className="news-item__tag">New</span>}
+            {fresh && <><span className="news-item__tag">New</span>{' '}</>}
             {showPlayer && player && (onPlayer
               ? <><button type="button" className="news-item__player linklike" onClick={() => onPlayer(player)}>{player.name}</button>: </>
               : <span className="news-item__player">{player.name}: </span>)}

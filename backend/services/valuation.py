@@ -236,7 +236,7 @@ def _compute(session: Session, league: LeagueSettings, season: int) -> Valuation
                            {v.player_id: v.model_ros_ppg for v in model_values},
                            {v.player_id: v.position or "" for v in model_values}, remaining,
                            lambda week: matchup_factors(current, schedule, defense, week), injury_shares,
-                           injury_recovery.season_starters(current))
+                           injury_recovery.season_starters(current, states))
     scheduled = {team for game in schedule.games for team in (game.home_team, game.away_team)}
     games_left = ({p.player_id: len(schedule.remaining_opponents(p.team, through or 0, end_week))
                    for p in current if p.team in scheduled}       # unknown team: weeks_remaining
