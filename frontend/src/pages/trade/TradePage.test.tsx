@@ -161,3 +161,31 @@ describe('TradePage', () => {
     expect(box).toHaveValue('');
   });
 });
+
+describe('TradePage league scoring', () => {
+  const LEAGUES: MockRoute = { path: '/api/my-team/leagues', reply: json({ leagues: [{ id: 4, name: 'Family League' }] }) };
+
+  it('scores the trade on a picked league and shows both lineups', async () => {
+    const user = userEvent.setup();
+    const lineup = { your_gain: 6.5, their_gain: 2.1, their_team: 'Rival', their_drop: null, your_add: null, note: null };
+    const api = mockFetch([META_ROUTE, LEAGUES, {
+      method: 'POST', path: '/api/trade/evaluate', reply: json(tradeResult({ lineup, market_percent_difference: 0.02 })),
+    }]);
+    renderTrade(`#/trade?give=${BIJAN.id}&get=${CHASE.id}`);
+    await user.selectOptions(await screen.findByRole('combobox', { name: 'Score on' }), '4');
+    await waitFor(() => expect(evaluateBodies(api).at(-1)?.league_id).toBe(4));
+    expect(window.location.hash).toContain('league=4');
+    expect(await screen.findByText(/Both lineups improve/)).toBeInTheDocument();
+    expect(screen.getByText(/Expert consensus also sees this as about even/)).toBeInTheDocument();
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Score on' }), '');
+    await waitFor(() => expect(evaluateBodies(api).at(-1)?.league_id).toBeUndefined());
+  });
+
+  it('keeps an unknown league from a link visible so it can be cleared, and shows why gains are missing', async () => {
+    const lineup = { your_gain: null, their_gain: null, their_team: null, note: 'Some players you give aren’t on your roster.' };
+    mockFetch([META_ROUTE, LEAGUES, { method: 'POST', path: '/api/trade/evaluate', reply: json(tradeResult({ lineup })) }]);
+    renderTrade(`#/trade?give=${BIJAN.id}&get=${CHASE.id}&league=9`);
+    expect(await screen.findByRole('option', { name: 'League #9 (not imported)' })).toBeInTheDocument();
+    expect(await screen.findByText('Some players you give aren’t on your roster.')).toBeInTheDocument();
+  });
+});

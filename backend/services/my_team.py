@@ -37,6 +37,8 @@ FLEX_POSITIONS = ("RB", "WR", "TE")
 SLOT_ORDER = ("QB", "RB", "WR", "TE", "FLEX", "SUPERFLEX", "K", "DST")
 NEED_SHARE = 1 / 3                 # bottom third of the league at a position = a need
 OFFERS_PER_TEAM = 3
+CANDIDATES_PER_TEAM = 15          # value-fair offers per team handed to lineup-gain scoring
+INACTIVE_SLOTS = ("IR", "IR+", "NA")
 
 
 class LeagueNotFound(LookupError):
@@ -308,24 +310,29 @@ def team_needs(valuation: Valuation, settings: LeagueSettings,
 
 def league_trades(session: Session, reference: int | str | None, want_position: str | None = None,
                   give_ids: Sequence[int] | None = None) -> tuple[League, list[TeamOffers]]:
-    """Offers with each real team in the league, best fits for their needs first."""
+    """Candidate offers with each real team (up to CANDIDATES_PER_TEAM, best fits for their needs first).
+
+    Not cut to OFFERS_PER_TEAM here: services/league_trades.score_trades scores every candidate by
+    both lineups' gains and keeps the best, so a strong deal isn't lost to a closer-to-fair one.
+    Players in IR/NA slots aren't offered or targeted: they aren't in either lineup's gain.
+    """
     league, mine = find_league(session, reference)
     settings = league_settings(league)
     valuation = build_valuation(session, settings)
     team_rosters = rosters(session, league)
     my_ids = list(give_ids) if give_ids else [s.player_id for s in team_rosters.get(mine.id, [])
-                                              if s.slot not in ("IR", "IR+", "NA")]
+                                              if s.slot not in INACTIVE_SLOTS]
     needs = team_needs(valuation, settings, team_rosters)
     teams = {t.id: t for t in session.scalars(select(Team).where(Team.league_id == league.id))}
     results = []
     for team_id, spots in team_rosters.items():
         if team_id == mine.id or team_id not in teams:
             continue
-        offers = find_trades(valuation, my_ids, want_position, limit=10,
-                             target_ids={s.player_id for s in spots})
+        offers = find_trades(valuation, my_ids, want_position, limit=CANDIDATES_PER_TEAM,
+                             target_ids={s.player_id for s in spots if s.slot not in INACTIVE_SLOTS})
         their_needs = needs.get(team_id, ())
         offers.sort(key=lambda o: -sum(p.position in their_needs for p in o.give))
         if offers:
-            results.append(TeamOffers(teams[team_id], their_needs, tuple(offers[:OFFERS_PER_TEAM])))
+            results.append(TeamOffers(teams[team_id], their_needs, tuple(offers)))
     results.sort(key=lambda r: -max(sum(p.position in r.needs for p in o.give) for o in r.offers))
     return league, results

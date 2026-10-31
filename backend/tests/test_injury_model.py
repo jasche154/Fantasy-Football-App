@@ -465,13 +465,11 @@ def test_trade_finder_keeps_offers_fair_by_market_value(session, seeded):
     rated = trade_finder.market_value(dc_replace(player, expert_ros_ppg=30.0, availability=0.5), valuation)
     assert rated.ros_ppg == 15.0
 
-    mine = valuation.by_id[valuation.values[3].player_id]
-    offers = trade_finder.find_trades(valuation, [mine.player_id])
-    assert offers
+    offers = next(o for v in valuation.values if (o := trade_finder.find_trades(valuation, [v.player_id])))
     for offer in offers:
-        edge = trade_finder._market_percent(offer.give, offer.get, valuation)
-        assert trade_finder.MIN_MARKET_EDGE <= edge <= trade_finder.MAX_MARKET_EDGE
-        assert offer.evaluation.percent_difference <= trade_finder.MAX_PERCENT_GAIN
+        edge = trade_finder.market_percent(offer.give, [offer.get], valuation)
+        assert trade_finder.MIN_MARKET_EDGE <= edge <= trade_finder.MAX_MARKET_EDGE and edge == offer.market_percent
+        assert edge <= offer.evaluation.percent_difference <= trade_finder.MAX_PERCENT_GAIN   # the edge is the model's
 
 
 def test_past_week_rankings_carry_actual_points(session, seeded, client):

@@ -1,9 +1,13 @@
 """Trade evaluation built on rest-of-season trade values.
 
 Packages are discounted: within each side, players are sorted by value and weighted
-1.0, 0.9, 0.8, ... (never below 0.5). Lineup spots are limited, so two mid-tier players
-are worth less than their raw sum. Both sides get the same treatment, so an even
+1.0, 0.7, 0.5, then 0.4 for every further player. Lineup spots are limited, so two mid-tier
+players are worth less than their raw sum. Both sides get the same treatment, so an even
 2-for-2 stays even.
+
+The verdict uses the percent gap, except that a gap smaller than FAIR_POINTS_PER_WEEK x weeks
+left is called fair (and SLIGHT_POINTS_PER_WEEK x weeks at most slight): between low-value
+players a few points is projection noise, even when it is a large percent.
 """
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -12,6 +16,8 @@ from services.valuation import PlayerValue
 
 FAIR_THRESHOLD = 0.05        # within 5% -> fair
 SLIGHT_THRESHOLD = 0.15      # within 15% -> slight edge
+FAIR_POINTS_PER_WEEK = 0.4    # a gap under 0.4 points a week left is noise -> fair
+SLIGHT_POINTS_PER_WEEK = 1.2  # and under 1.2 a week is at most a slight edge
 MAX_SUGGESTIONS = 5
 
 
@@ -70,16 +76,18 @@ def percent_difference(give_total: float, get_total: float) -> float:
     return round((get_total - give_total) / largest, 4) if largest > 0 else 0.0
 
 
-def verdict_for(percent: float) -> str:
-    size = abs(percent)
-    if size <= FAIR_THRESHOLD:
+def verdict_for(percent: float, difference: float = 0.0, weeks_remaining: int = 0) -> str:
+    """Verdict from the percent gap; with weeks_remaining, small point gaps count as noise."""
+    size, points = abs(percent), abs(difference)
+    if size <= FAIR_THRESHOLD or (weeks_remaining and points <= FAIR_POINTS_PER_WEEK * weeks_remaining):
         return "fair"
     direction = "win" if percent > 0 else "loss"
-    return f"slight_{direction}" if size <= SLIGHT_THRESHOLD else f"big_{direction}"
+    slight = size <= SLIGHT_THRESHOLD or (weeks_remaining and points <= SLIGHT_POINTS_PER_WEEK * weeks_remaining)
+    return f"slight_{direction}" if slight else f"big_{direction}"
 
 
 def summarize(verdict: str, difference: float, percent: float, weeks_remaining: int) -> str:
-    gap = f"{abs(difference):.1f} rest-of-season points ({abs(percent):.0%})"
+    gap = f"{abs(difference):.1f} rest-of-season points above replacement ({abs(percent):.0%})"
     horizon = f"over the remaining {weeks_remaining} weeks"
     if verdict == "fair":
         return f"Fair trade: the sides are within {gap} {horizon}."
@@ -90,9 +98,10 @@ def summarize(verdict: str, difference: float, percent: float, weeks_remaining: 
 
 
 def suggest_balance(give: Sequence[PlayerValue], get: Sequence[PlayerValue],
-                    pool: Sequence[PlayerValue], percent: float) -> tuple[BalanceSuggestion, ...]:
+                    pool: Sequence[PlayerValue], percent: float, verdict: str | None = None,
+                    ) -> tuple[BalanceSuggestion, ...]:
     """Players whose addition to the short side brings the trade closest to even."""
-    if verdict_for(percent) == "fair":
+    if (verdict or verdict_for(percent)) == "fair":
         return ()
     add_to = "get" if percent < 0 else "give"
     in_trade = {p.player_id for p in (*give, *get)}
@@ -123,9 +132,9 @@ def evaluate_trade(give: Sequence[PlayerValue], get: Sequence[PlayerValue],
     give_side, get_side = package(give), package(get)
     difference = round(get_side.adjusted_total - give_side.adjusted_total, 1)
     percent = percent_difference(give_side.adjusted_total, get_side.adjusted_total)
-    verdict = verdict_for(percent)
+    verdict = verdict_for(percent, difference, weeks_remaining)
     return TradeEvaluation(
         give=give_side, get=get_side, difference=difference, percent_difference=percent,
         verdict=verdict, summary=summarize(verdict, difference, percent, weeks_remaining),
-        balance_suggestions=suggest_balance(give, get, pool, percent),
+        balance_suggestions=suggest_balance(give, get, pool, percent, verdict),
     )

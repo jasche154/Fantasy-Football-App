@@ -1,6 +1,7 @@
 import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
+import { AppProviders } from '../../App';
 import type { WeeklyPlayer } from '../../api/types';
 import { BIJAN, CHASE, tradeResult } from '../../test/fixtures';
 import { json, mockFetch } from '../../test/mockFetch';
@@ -89,13 +90,27 @@ describe('TradeFinder', () => {
   it('finds offers for the give side and links them into the calculator', async () => {
     const user = userEvent.setup();
     const api = mockFetch([META_ROUTE, { method: 'POST', path: '/api/trade/find', reply: json({ weeks_remaining: 10, results: [
-      { give: [CHASE], get: BIJAN, get_ros_ppg: 19.2, evaluation: tradeResult({ verdict: 'fair' }) }] }) }]);
+      { give: [CHASE], get: BIJAN, get_ros_ppg: 19.2, accept_chance: 0.62, evaluation: tradeResult({ verdict: 'fair' }) }] }) }]);
     renderWithProviders(<TradeFinder giveIds={[CHASE.id]} />);
     await user.selectOptions(screen.getByRole('combobox', { name: 'I want' }), 'RB');
     await user.click(screen.getByRole('button', { name: 'Find trades' }));
-    expect(await screen.findByText('Fair')).toBeInTheDocument();
+    expect(await screen.findByText('Fair trade')).toBeInTheDocument();
+    expect(screen.getByText('~62% to accept')).toBeInTheDocument();
+    expect(screen.getByText('1 offer found.')).toBeInTheDocument();
     expect(api.callsTo('/api/trade/find', 'POST')[0].body).toMatchObject({ my_players: [CHASE.id], want_position: 'RB' });
-    expect(screen.getByRole('link', { name: 'Load in calculator' })).toHaveAttribute('href', `#/trade?give=${CHASE.id}&get=${BIJAN.id}`);
+    expect(screen.getByRole('link', { name: `Load ${CHASE.name} for ${BIJAN.name} in calculator` })).toHaveAttribute('href', `#/trade?give=${CHASE.id}&get=${BIJAN.id}`);
+  });
+
+  it('marks results stale once the give side changes', async () => {
+    const user = userEvent.setup();
+    mockFetch([META_ROUTE, { method: 'POST', path: '/api/trade/find', reply: json({ weeks_remaining: 10, results: [
+      { give: [CHASE], get: BIJAN, get_ros_ppg: 19.2, evaluation: tradeResult({ verdict: 'fair' }) }] }) }]);
+    const view = renderWithProviders(<TradeFinder giveIds={[CHASE.id]} />);
+    await user.click(screen.getByRole('button', { name: 'Find trades' }));
+    expect(await screen.findByText('Fair trade')).toBeInTheDocument();
+    view.rerender(<AppProviders><TradeFinder giveIds={[CHASE.id, BIJAN.id]} /></AppProviders>);
+    expect(screen.getAllByText('Your trade changed. Search again for new offers.')).toHaveLength(2);   // hint + live region
+    expect(screen.queryByText('Fair trade')).not.toBeInTheDocument();
   });
 
   it('is disabled with nobody to give', () => {

@@ -89,13 +89,15 @@ export interface LeagueTeamOffers {
   team: string | null;
   owner: string | null;
   needs: Position[];
-  offers: (TradeOffer & { fills_their_need: Position[]; your_gain?: number; their_gain?: number })[];
+  offers: (TradeOffer & { fills_their_need: Position[]; your_gain?: number; their_gain?: number; helps_both?: boolean })[];
 }
 
 export interface LeagueTradesResponse {
   league: string;
   perspective: string;
   trade_end_date?: string | null;
+  deadline_passed?: boolean;
+  note?: string;
   teams: LeagueTeamOffers[];
 }
 

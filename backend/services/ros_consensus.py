@@ -49,6 +49,7 @@ class RosInputs:
     expert_rank: float | None = None
     weekly: float | None = None
     availability: float = 1.0          # share of remaining games expected to play
+    role_share: float = 1.0            # a backup QB's share (the games his starter misses), apart from injury
 
     def blended(self) -> float:
         parts = {"model": self.model, "experts": self.experts, "weekly": self.weekly}
@@ -160,10 +161,16 @@ def availability(session: Session, remaining_weeks: int) -> dict[int, float]:
 
     Backup QBs count as missing every game their starter plays.
     """
+    return _availability(session, remaining_weeks)[0]
+
+
+def _availability(session: Session, remaining_weeks: int) -> tuple[dict[int, float], dict[int, float]]:
+    """(availability as above, {backup QB: share of games his starter misses})."""
     shares = status_shares(session, remaining_weeks)
-    for pid, backup in backup_qb_shares(session, shares).items():
+    backups = backup_qb_shares(session, shares)
+    for pid, backup in backups.items():
         shares[pid] = min(shares.get(pid, 1.0), backup)
-    return {pid: share for pid, share in shares.items() if share < 1}
+    return {pid: share for pid, share in shares.items() if share < 1}, backups
 
 
 def ros_inputs(session: Session, season: int, scoring_key: str, scoring: ScoringSettings,
@@ -175,7 +182,7 @@ def ros_inputs(session: Session, season: int, scoring_key: str, scoring: Scoring
     ranks = expert_ranks(session, season, scoring_key)
     week, weekly = weekly_points(session, season, positions, scoring)
     matchup = matchup_for(week) if matchup_for and week is not None else {}
-    avail = availability(session, remaining_weeks)
+    avail, backups = _availability(session, remaining_weeks)
     curves: dict[str, list[float]] = defaultdict(list)
     for pid, ppg in model_ppg.items():
         curves[positions.get(pid, "")].append(ppg)
@@ -186,7 +193,7 @@ def ros_inputs(session: Session, season: int, scoring_key: str, scoring: Scoring
         rank = ranks.get(pid)
         curve = curves[positions.get(pid, "")]
         out[pid] = RosInputs(model=ppg, experts=round(_rank_points(curve, rank), 2) if rank and curve else None,
-                             expert_rank=rank, availability=avail.get(pid, 1.0),
+                             expert_rank=rank, availability=avail.get(pid, 1.0), role_share=backups.get(pid, 1.0),
                              weekly=weekly[pid] / matchup.get(pid, 1.0) if pid in weekly else None)
     return out
 

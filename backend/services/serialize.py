@@ -58,13 +58,17 @@ def _trade_side(side: TradeSide) -> dict:
     return {
         "players": [{"player": player_ref(p.value), "trade_value": p.value.trade_value,
                      "ros_ppg": p.value.ros_ppg, "vorp_per_game": p.value.vorp_per_game,
+                     "pos_rank": p.value.pos_rank, "availability": p.value.availability,
+                     "games_left": p.value.games_left, "schedule_factor": p.value.schedule_factor,
+                     "playoff_factor": p.value.playoff_factor, "expert_ros_ppg": p.value.expert_ros_ppg,
                      "weight": p.weight, "adjusted_value": p.adjusted_value} for p in side.players],
         "raw_total": side.raw_total, "adjusted_total": side.adjusted_total,
     }
 
 
-def trade(evaluation: TradeEvaluation, weeks_remaining: int) -> dict:
+def trade(evaluation: TradeEvaluation, weeks_remaining: int, market_percent: float | None = None) -> dict:
     return {
+        "market_percent_difference": market_percent,
         "give": _trade_side(evaluation.give), "get": _trade_side(evaluation.get),
         "difference": evaluation.difference, "percent_difference": evaluation.percent_difference,
         "verdict": evaluation.verdict, "summary": evaluation.summary,
@@ -169,4 +173,8 @@ def waiver(candidate) -> dict:
 
 def trade_offer(offer, weeks_remaining: int) -> dict:
     return {"give": [player_ref(p) for p in offer.give], "get": player_ref(offer.get),
-            "get_ros_ppg": offer.get.ros_ppg, "evaluation": trade(offer.evaluation, weeks_remaining)}
+            "get_ros_ppg": offer.get.ros_ppg, "market_percent_difference": offer.market_percent,
+            "accept_chance": offer.accept_chance,
+            "their_drop": player_ref(offer.their_drop) if offer.their_drop else None,
+            "your_add": player_ref(offer.my_add) if offer.my_add else None,
+            "evaluation": trade(offer.evaluation, weeks_remaining, offer.market_percent)}

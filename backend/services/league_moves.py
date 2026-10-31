@@ -1,9 +1,8 @@
 """Roster moves in YOUR league, scored by lineup gain: waiver claims with a named drop and the right
 advice for the league's waiver type (services/waiver_advice.py), and trade offers that must help
-your lineup without gutting theirs.
+your lineup without gutting theirs (scored in services/league_trades.py).
 """
 import logging
-from collections.abc import Sequence
 
 import httpx
 from sqlalchemy import select
@@ -14,11 +13,12 @@ from database.models import Team
 from services import league_insights, lineup_gain
 from services import my_team as mt
 from services import waiver_advice as wa
-from services.playoffs import playoff_weeks
+from services.league_trades import (  # noqa: F401  (re-exported: league trades live in their own module)
+    TRADE_GIVE_LIMIT, active_spots, capacity, offer_score, score_trades, trade_impact,
+)
 
 CANDIDATE_POOL = 30               # waiver candidates scored by lineup gain (from the value-ranked list)
 MAX_SHOWN = CANDIDATE_POOL
-TRADE_GIVE_LIMIT = 0.5            # their lineup may lose at most this x weeks left
 LOOKAHEAD_WEEKS = 4
 HTTP_TIMEOUT_SECONDS = 15.0
 log = logging.getLogger(__name__)
@@ -39,8 +39,7 @@ def _insights(session: Session, league_id: int) -> dict | None:
 
 
 def _roster_full(team) -> bool:
-    capacity = sum(team.settings.starters.values()) + team.settings.bench
-    return sum(1 for s in team.spots if s.slot not in ("IR", "IR+", "NA")) >= capacity
+    return active_spots(team.spots) >= capacity(team.settings)
 
 
 def waiver_plan(session: Session, league_id: int, position: str | None = None, limit: int = 15) -> dict:
@@ -97,29 +96,3 @@ def waiver_plan(session: Session, league_id: int, position: str | None = None, l
             "my_priority": me.get("waiver_priority"), "my_balance": me.get("faab_balance"),
             "faab_budget": rules.get("faab_budget"), "trade_end_date": rules.get("trade_end_date"),
             "rows": rows[:limit]}
-
-
-def score_trades(session: Session, league_id: int, by_team: Sequence) -> list[tuple]:
-    """[(team offers, [(offer, my_gain, their_gain)])]: offers that help you (my_gain > 0) without costing
-    them more than TRADE_GIVE_LIMIT x weeks left, best for you first."""
-    team = mt.build_my_team(session, league_id)
-    horizon, projector = lineup_gain.context_for(team)
-    # Their gain uses neutral playoff weights: we don't know their playoff odds the way we know yours.
-    neutral = lineup_gain.horizon(horizon.current_week, max(horizon.weeks), playoff_weeks(mt.league_rules(team.league)),
-                                  None)
-    mine = lineup_gain.roster_values(team)
-    rosters = mt.rosters(session, team.league)
-    floor = -TRADE_GIVE_LIMIT * len(horizon.weeks)
-    out = []
-    for team_offers in by_team:
-        theirs = lineup_gain.roster_values(team, rosters.get(team_offers.team.id, []))
-        scored = []
-        for offer in team_offers.offers:
-            my_gain = lineup_gain.gain(mine, horizon, projector, team.settings, add=[offer.get], drop=list(offer.give))
-            their_gain = lineup_gain.gain(theirs, neutral, projector, team.settings, add=list(offer.give),
-                                          drop=[offer.get])
-            if my_gain > 0 and their_gain >= floor:
-                scored.append((offer, my_gain, their_gain))
-        if scored:
-            out.append((team_offers, sorted(scored, key=lambda s: -s[1])))
-    return sorted(out, key=lambda t: -t[1][0][1])
