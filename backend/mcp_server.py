@@ -17,12 +17,17 @@ from mcp.server.stdio import stdio_server
 
 from database.db import SessionLocal
 from tools.definitions import TOOL_ERRORS, TOOLS, sanitize_for_agent
+from tools.shaping import fit
 
 log = logging.getLogger("mcp_server")
 
+# MCP clients (Claude Desktop/Code) have large contexts; this only stops runaway results.
+MCP_RESULT_CHARS = 24_000
+
 INSTRUCTIONS = ("Fantasy football data tools backed by nflverse stats. Use them for every number; "
                 "players can be referenced by name or id. Projections and trade values come from this "
-                "app's model; expected points come from nflverse's usage model.")
+                "app's model; expected points come from nflverse's usage model. With more than one "
+                "imported Yahoo league, pass `league` to league tools.")
 
 
 def run_tool(name: str, arguments: dict[str, Any] | None) -> tuple[str, bool]:
@@ -35,7 +40,7 @@ def run_tool(name: str, arguments: dict[str, Any] | None) -> tuple[str, bool]:
         except Exception:   # a bug or DB error: details stay in the server log (stderr)
             log.exception("Tool %s failed", name)
             return json.dumps({"error": "The tool failed unexpectedly."}), True
-    return json.dumps(result, default=str), False
+    return fit(result, MCP_RESULT_CHARS, TOOLS.get(name).trim_keys), False
 
 
 async def list_tools(_ctx, _params) -> types.ListToolsResult:

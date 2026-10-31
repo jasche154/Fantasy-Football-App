@@ -1,4 +1,4 @@
-"""Expert consensus rankings (FantasyPros ECR) stored in the expert_rankings table."""
+"""Expert consensus rankings (ECR) stored in the expert_rankings table."""
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -19,13 +19,25 @@ def weekly_ecr_by_player(session: Session) -> dict[int, float]:
     return {r.player_id: r.ecr for r in rows}
 
 
+def _top_per_position(rows: list, limit: int) -> list:
+    """The first `limit` rows of each position (rows arrive sorted by position, then rank)."""
+    kept, counts = [], {}
+    for row in rows:
+        position = row[0].position
+        counts[position] = counts.get(position, 0) + 1
+        if counts[position] <= limit:
+            kept.append(row)
+    return kept
+
+
 def expert_rankings(session: Session, position: str | None = None, limit: int = 50,
                     source: str | None = None) -> dict:
     """ECR rows from the preferred stored source.
 
     The free nflverse snapshot only has per-position pages, so its ranks are positional
     (every position has a rank 1). Unfiltered, it's grouped by position, never interleaved
-    as if it were an overall ranking.
+    as if it were an overall ranking, and `limit` applies per position (so one position
+    can't fill the whole list).
     """
     source = source or latest_source(session)
     if source is None:
@@ -40,7 +52,10 @@ def expert_rankings(session: Session, position: str | None = None, limit: int = 
         query = query.order_by(ExpertRanking.position, ExpertRanking.rank)
     else:
         query = query.order_by(ExpertRanking.rank, ExpertRanking.ecr)
-    rows = session.execute(query.limit(limit)).all()
+    per_position = scope == "positional" and not position
+    rows = session.execute(query if per_position else query.limit(limit)).all()
+    if per_position:
+        rows = _top_per_position(rows, limit)
     first = rows[0][0] if rows else None
     return {
         "source": source,

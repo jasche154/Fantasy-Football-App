@@ -34,12 +34,15 @@ export function setApiToken(token: string | null): void {
 export class ApiError extends Error {
   readonly status: number;
   readonly detail: unknown;
+  /** Seconds from the response's Retry-After header (429 rate limits), when it sent one. */
+  readonly retryAfter: number | null;
 
-  constructor(message: string, status: number, detail: unknown = null) {
+  constructor(message: string, status: number, detail: unknown = null, retryAfter: number | null = null) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.detail = detail;
+    this.retryAfter = retryAfter;
   }
 
   get isNetworkError(): boolean {
@@ -140,6 +143,12 @@ async function send(url: string, options: RequestOptions): Promise<Response> {
   }
 }
 
+/** Retry-After in seconds; the HTTP-date form isn't used by this backend. */
+function retryAfterSeconds(response: Response): number | null {
+  const seconds = Number(response.headers.get('Retry-After'));
+  return Number.isFinite(seconds) && seconds > 0 ? Math.ceil(seconds) : null;
+}
+
 function errorFromResponse(response: Response, body: ParsedBody): ApiError {
   const detail =
     body.ok && body.value && typeof body.value === 'object'
@@ -148,7 +157,7 @@ function errorFromResponse(response: Response, body: ParsedBody): ApiError {
   const statusText = response.statusText ? ` ${response.statusText}` : '';
   const message =
     detailToMessage(detail) ?? `Request failed (HTTP ${response.status}${statusText}).`;
-  return new ApiError(message, response.status, detail ?? null);
+  return new ApiError(message, response.status, detail ?? null, retryAfterSeconds(response));
 }
 
 /** Performs a JSON request against the backend and returns the parsed body. */

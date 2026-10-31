@@ -76,7 +76,7 @@ describe('action endpoints', () => {
     await evaluateTrade({ give: [1], get: [2, 3], settings: SETTINGS });
     await getAgentTools();
     await callAgentTool('get_player_profile', { player: 'Bijan Robinson' });
-    await sendChat([{ role: 'user', content: 'hi' }]);
+    await sendChat({ messages: [{ role: 'user', content: 'hi' }], memory: [] });
     await getIntegrationsStatus();
     await getYahooAuthUrl();
     await exchangeYahooCode('abc');

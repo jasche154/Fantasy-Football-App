@@ -1,66 +1,20 @@
-import { useId, useState, type KeyboardEvent } from 'react';
-import { ApiError } from '../../api/client';
+import { useEffect, useRef, useState } from 'react';
+import { getMyLeagues } from '../../api/data';
+import type { MyLeague } from '../../api/types';
 import { PageHeader } from '../../components/Card';
-import { Icon } from '../../components/Icon';
-import { ErrorState } from '../../components/StatusViews';
+import { useAsync } from '../../hooks/useAsync';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { useMeta } from '../../state/MetaContext';
+import { ChatError } from './ChatError';
 import { ChatMessages } from './ChatMessages';
-import { EXAMPLE_PROMPTS, LLM_SETUP_MESSAGE } from './toolCalls';
+import { Composer } from './Composer';
+import { LeaguePicker } from './LeaguePicker';
+import { PromptChips } from './PromptChips';
+import { buildStarterPrompts } from './starterPrompts';
+import { LLM_SETUP_MESSAGE } from './toolCalls';
 import { useChat } from './useChat';
 
-interface ComposerProps {
-  draft: string;
-  isPending: boolean;
-  onDraft: (value: string) => void;
-  onSend: (text: string) => void;
-}
-
-function Composer({ draft, isPending, onDraft, onSend }: ComposerProps) {
-  const id = useId();
-  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
-    event.preventDefault();
-    onSend(draft);
-  };
-  return (
-    <form className="composer" onSubmit={(event) => { event.preventDefault(); onSend(draft); }}>
-      <label htmlFor={id} className="sr-only">Ask a fantasy football question</label>
-      <textarea
-        id={id}
-        className="composer__input"
-        rows={2}
-        placeholder="Ask about players, trades or matchups…"
-        value={draft}
-        aria-describedby={`${id}-hint`}
-        onChange={(event) => onDraft(event.target.value)}
-        onKeyDown={handleKeyDown}
-      />
-      <div className="composer__footer">
-        <span id={`${id}-hint`} className="composer__hint">Enter to send · Shift+Enter for a new line</span>
-        {/* aria-disabled (not disabled) keeps focus on the button while a reply is pending. */}
-        <button type="submit" className="btn btn--primary" aria-disabled={isPending || !draft.trim()}>
-          <Icon name="send" size={16} /> Send
-        </button>
-      </div>
-    </form>
-  );
-}
-
-function ExamplePrompts({ onPick, isDisabled }: { onPick: (text: string) => void; isDisabled: boolean }) {
-  return (
-    <div className="examples">
-      <p className="examples__label">Try one of these</p>
-      <ul className="examples__list">
-        {EXAMPLE_PROMPTS.map((prompt) => (
-          <li key={prompt}>
-            <button type="button" className="chip-btn" disabled={isDisabled} onClick={() => onPick(prompt)}>{prompt}</button>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
+const NO_LEAGUES: readonly MyLeague[] = [];
 
 function MemoryNote({ memory }: { memory: readonly string[] }) {
   if (memory.length === 0) return null;
@@ -68,29 +22,42 @@ function MemoryNote({ memory }: { memory: readonly string[] }) {
     <section className="chat-memory" aria-label="Keeping in mind">
       <p className="chat-memory__label">Keeping in mind for this chat</p>
       <ul className="chat-memory__list">
-        {memory.map((fact) => <li key={fact} className="chip">{fact}</li>)}
+        {memory.map((fact, index) => <li key={`${index}-${fact}`} className="chip">{fact}</li>)}
       </ul>
     </section>
   );
-}
-
-function chatErrorMessage(error: Error): string | undefined {
-  return error instanceof ApiError && error.status === 503 ? LLM_SETUP_MESSAGE : undefined;
 }
 
 export function AskPage() {
   useDocumentTitle('Ask AI');
   const chat = useChat();
   const meta = useMeta();
+  const leaguesState = useAsync((signal) => getMyLeagues(signal), []);
   const [draft, setDraft] = useState('');
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const isLlmMissing = meta.data?.integrations.llm === false;
+  const leagues = leaguesState.data?.leagues ?? NO_LEAGUES;
+  const { leagueId, setLeagueId } = chat;
+
+  // A saved focus on a league that's no longer imported would make every request fail.
+  useEffect(() => {
+    if (leaguesState.status === 'success' && leagueId !== null && !leagues.some((league) => league.id === leagueId)) {
+      setLeagueId(null);
+    }
+  }, [leaguesState.status, leagues, leagueId, setLeagueId]);
 
   const handleSend = async (text: string) => {
-    if (!text.trim() || chat.isPending) return;
+    if (!text.trim() || chat.isPending || chat.waitSeconds > 0) return;
     setDraft('');
     const outcome = await chat.send(text);
     if (outcome === 'failed') setDraft((current) => current || text);
+    if (outcome === 'ok') inputRef.current?.focus();
   };
+
+  const latest = chat.entries[chat.entries.length - 1];
+  const followUps = !chat.isPending && latest?.role === 'assistant' ? latest.suggestions ?? [] : [];
+  // The draft holds the failed question (restored on failure), plus any edits the user made since.
+  const retryText = draft.trim() ? draft : chat.lastFailed ?? '';
 
   return (
     <div className="ask">
@@ -103,20 +70,21 @@ export function AskPage() {
       />
       {isLlmMissing && <p className="notice" role="note">{LLM_SETUP_MESSAGE}</p>}
       <div className="chat">
+        <LeaguePicker leagues={leagues} value={leagueId} isDisabled={chat.isPending}
+          isLocked={chat.entries.length > 0} onChange={setLeagueId} />
         <MemoryNote memory={chat.memory} />
         <ChatMessages entries={chat.entries} isPending={chat.isPending} />
         {chat.entries.length === 0 && !chat.isPending && (
-          <ExamplePrompts onPick={(prompt) => void handleSend(prompt)} isDisabled={chat.isPending} />
+          <PromptChips label="Try one of these" prompts={buildStarterPrompts(leagues, leagueId)}
+            isDisabled={chat.isPending} onPick={(prompt) => void handleSend(prompt)} />
         )}
+        <PromptChips label="Ask next" prompts={followUps} isDisabled={chat.isPending}
+          onPick={(prompt) => void handleSend(prompt)} />
         {chat.error && (
-          <ErrorState
-            error={chat.error}
-            title={chat.error instanceof ApiError && chat.error.status === 503 ? 'AI assistant not configured' : 'The assistant couldn’t answer'}
-            message={chatErrorMessage(chat.error)}
-            onRetry={draft.trim() ? () => void handleSend(draft) : undefined}
-          />
+          <ChatError error={chat.error} waitSeconds={chat.waitSeconds} onRetry={retryText.trim() ? () => void handleSend(retryText) : undefined} />
         )}
-        <Composer draft={draft} isPending={chat.isPending} onDraft={setDraft} onSend={(text) => void handleSend(text)} />
+        <Composer draft={draft} isPending={chat.isPending} waitSeconds={chat.waitSeconds} inputRef={inputRef} onDraft={setDraft}
+          onSend={(text) => void handleSend(text)} />
       </div>
     </div>
   );

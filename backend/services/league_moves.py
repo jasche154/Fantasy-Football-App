@@ -95,4 +95,4 @@ def waiver_plan(session: Session, league_id: int, position: str | None = None, l
     return {"league": league, "rankings": rankings, "league_type": kind, "weeks_left": weeks_left,
             "my_priority": me.get("waiver_priority"), "my_balance": me.get("faab_balance"),
             "faab_budget": rules.get("faab_budget"), "trade_end_date": rules.get("trade_end_date"),
-            "rows": rows[:limit]}
+            "roster_full": bool(droppable), "protected": frozenset(protected), "rows": rows[:limit]}

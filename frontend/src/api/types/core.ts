@@ -324,6 +324,7 @@ export interface ToolCallTrace {
   name: string;
   arguments: Record<string, unknown>;
   ok: boolean;
+  cached?: boolean;
 }
 
 export interface ChatResponse {
@@ -331,6 +332,22 @@ export interface ChatResponse {
   tool_calls: ToolCallTrace[];
   /** Facts the assistant was asked to keep in mind; send them back with the next message. */
   memory?: string[];
+  /** "out_of_rounds" means the assistant answered with what it had gathered so far. */
+  stop_reason?: 'answer' | 'out_of_rounds';
+  /** Names or numbers in the reply the app couldn't match to its own data. */
+  unverified?: string[];
+  /** Which AI provider answered (e.g. "groq"). */
+  provider?: string | null;
+  data_as_of?: { season: number | null; week: number | null };
+  /** Follow-up questions built from fixed templates on the server. */
+  suggestions?: string[];
+}
+
+export interface ChatRequest {
+  messages: ChatMessage[];
+  memory: readonly string[];
+  /** Optional league focus for the whole chat; omitted means all imported leagues. */
+  league_id?: number;
 }
 
 export interface SystemStatus {

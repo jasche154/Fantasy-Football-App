@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from database.models import Player
 from integrations.sleeper import SleeperError
+from services.labels import untrusted
 
 NEWS_URL = "https://api.sleeper.app/players/nfl/{sleeper_id}/news"
 TIMEOUT_SECONDS = 10.0
@@ -33,10 +34,10 @@ _lock = Lock()
 
 
 def _text(value: object) -> str | None:
-    if not isinstance(value, str) or not value.strip():
+    """News is outside text: one clean line, instruction-shaped sentences blanked (it can reach the AI)."""
+    if not isinstance(value, str):
         return None
-    text = " ".join(value.split())
-    return text if len(text) <= MAX_TEXT else text[:MAX_TEXT].rsplit(" ", 1)[0] + "…"
+    return untrusted(value, MAX_TEXT) or None
 
 
 def parse_news(rows: object) -> list[dict]:

@@ -50,7 +50,8 @@ describe('AskPage', () => {
     await user.click(screen.getByRole('button', { name: 'Who are the best buy-low RBs right now?' }));
 
     expect(await screen.findByText('Bijan Robinson is the top buy-low RB.')).toBeInTheDocument();
-    expect(screen.getByText('get_buy_low_candidates')).toBeInTheDocument();
+    expect(screen.getByText('Sources: 2 sources')).toBeInTheDocument();
+    expect(screen.getByText('Buy-low candidates')).toHaveAttribute('title', 'get_buy_low_candidates');
     expect(screen.getByText('position: RB, limit: 5')).toBeInTheDocument();
     expect(screen.getByText('failed')).toBeInTheDocument();
     expect(api.callsTo('/api/agent/chat', 'POST')[0].body).toEqual({
