@@ -37,7 +37,7 @@ CI (`.github/workflows`) runs `pytest -q --cov` and `npm test && npm run build` 
 
 **User's Yahoo leagues** (`services/my_team.py` is the hub: `find_league`, `league_settings`, `rosters`, `build_my_team`):
 - `matchup.py` + `matchup_sim.py`: correlated (Gaussian copula) head-to-head simulation; upside/safe only recommended with a 3-point win-probability edge.
-- `lineup_gain.py`: the shared "points added to your best lineup over the rest of the season" engine used by `league_moves.py` (waiver plan with named drop, trade scoring on both rosters), with `waiver_advice.py` branching on league type (FAAB / rolling priority / free agency).
+- `lineup_gain.py`: the shared "points added to your best lineup over the rest of the season" engine used by `league_moves.py` (waiver plan with named drop) and `league_trades.py` (`TradeScorer`: trades scored on both real rosters with forced drops and open-spot adds, shared by the league trade list, the calculator's `league_id` and the agent's `evaluate_trade`), with `waiver_advice.py` branching on league type (FAAB / rolling priority / free agency).
 - `league_insights.py` (standings, tendencies, bid history from Yahoo; cached 1 h) and `season_sim.py` (playoff odds: team offsets + starter injury chain).
 - `playoffs.py`, `streaming.py`, `game_locks.py` (kickoff locks, late FLEX, warnings; kickoffs are US Eastern in nflverse, converted in `schedule_strength.Game.kickoff`).
 

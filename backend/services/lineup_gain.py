@@ -13,6 +13,7 @@
       WR 5.4%, RB/TE 4.3%, 2021-25 starters) and the 60% chance an injured player is still out
       the next week: 1 - hazard / (1 - 0.6 + hazard), e.g. a receiver misses about 12% of weeks.
       The season simulation (services/league_insights.py) runs the same chain week by week.
+      A backup (a QB2, whose share is the games his starter misses) keeps that smaller share.
 - Best lineup: QB/RB/WR/TE slots and FLEX (kickers and defenses aren't projected that far out).
 
 Used for waiver pickups (with the named drop), trade offers on real rosters, and the playoff planner.
@@ -22,7 +23,7 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 
 from services import my_team as mt
-from services.valuation import ROS_SCHEDULE_WEIGHT
+from services.valuation import MIN_SHARE, ROS_SCHEDULE_WEIGHT
 
 HAZARD = {"QB": 0.088, "WR": 0.054, "RB": 0.043, "TE": 0.043}
 OUT_PERSIST = 0.60
@@ -65,9 +66,14 @@ class Projector:
         self.valuation, self.availability, self.weekly, self.current_week = valuation, availability, weekly, current_week
         self._cache: dict[tuple[int, int], float] = {}
 
+    @staticmethod
+    def expected_share(value) -> float:
+        share = getattr(value, "availability", None)
+        return 1.0 if share is None else share
+
     def healthy_rate(self, value) -> float:
-        share = getattr(value, "availability", 1.0) or 1.0
-        return value.ros_ppg / share if share > 0.05 else value.ros_ppg
+        share = self.expected_share(value)
+        return value.ros_ppg / share if share > MIN_SHARE else value.ros_ppg
 
     def available(self, value, weeks_ahead: int) -> float:
         status = (getattr(self.availability.get(value.player_id), "status", None) or "").upper()
@@ -76,7 +82,17 @@ class Projector:
             return 0.0 if weeks_ahead < IR_WEEKS else share
         if status in OUT_STATUSES:
             return (1 - OUT_PERSIST ** weeks_ahead) * share
-        return share
+        # At a tiny share the rate wasn't divided back out (healthy_rate), so don't discount it twice.
+        expected = self.expected_share(value)
+        if expected <= MIN_SHARE:
+            return share
+        if status:
+            # Questionable/Doubtful: healthy from next week (this week is projected), but a backup QB
+            # still plays only the games his starter misses.
+            return min(share, getattr(value, "role_share", 1.0))
+        # A healthy player expected to miss more than his injury chain says is a backup (a QB2 plays
+        # only the games his starter misses): keep that share instead of treating him as a starter.
+        return min(share, expected)
 
     def points(self, value, week: int) -> float:
         key = (value.player_id, week)

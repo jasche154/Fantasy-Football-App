@@ -5,9 +5,7 @@ import json
 import pytest
 
 from database.models import Roster, Team
-from services import league_insights, league_moves
-from services import lineup_gain as lg
-from services import my_team as mt
+from services import league_insights, league_trades
 from tests.test_my_team import MINE, RULES, THEIRS, league  # noqa: F401  (fixture)
 from tools.definitions import TOOLS
 from tools.registry import ToolError
@@ -23,12 +21,10 @@ def test_league_trade_scores_both_lineups(session, league):
     assert isinstance(result["your_lineup_gain"], float) and isinstance(result["their_lineup_gain"], float)
     assert isinstance(result["acceptable_to_them"], bool)
 
-    team = mt.build_my_team(session, row.id)
-    horizon, projector = lg.context_for(team)
-    by_id = team.valuation.by_id
-    expected = lg.gain(lg.roster_values(team), horizon, projector, team.settings,
-                       add=[by_id[ids["WR Player 02"]]], drop=[by_id[ids["WR Player 05"]]])
-    assert result["your_lineup_gain"] == pytest.approx(expected)
+    # Same scorer as the trade calculator, so both show the same gains.
+    calculator = league_trades.trade_impact(session, row.id, [ids["WR Player 05"]], [ids["WR Player 02"]])
+    assert result["your_lineup_gain"] == calculator["your_gain"]
+    assert result["their_lineup_gain"] == calculator["their_gain"]
 
 
 def test_league_balance_players_come_from_the_two_rosters_only(session, league):
@@ -57,8 +53,9 @@ def test_league_trade_errors_and_partial_cases(session, league):
         TOOLS.call(session, "evaluate_trade", {"give": ["WR Player 05"], "get": ["WR Player 02", "QB Player 03"]})
     not_mine = TOOLS.call(session, "evaluate_trade", {"give": ["WR Player 04"], "get": ["WR Player 02"]})
     assert "your_lineup_gain" not in not_mine and "isn't on your roster" in not_mine["lineup_note"]
-    free_agent = league_moves.score_trade(session, row.id, [ids["WR Player 05"]], [ids["WR Player 04"]])
-    assert free_agent.your_lineup_gain is None and free_agent.partner is None
+    free_agent = TOOLS.call(session, "evaluate_trade", {"give": ["WR Player 05"], "get": ["WR Player 04"]})
+    assert "your_lineup_gain" not in free_agent and "partner" not in free_agent
+    assert "aren't on a team" in free_agent["lineup_note"]
 
 
 def test_waiver_rows_are_structured_and_fit_the_budget(session, league):

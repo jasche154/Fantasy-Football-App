@@ -15,6 +15,7 @@ import {
   removeFromSide,
   swapSides,
   tradeQueryParams,
+  withLeague,
   type KnownPlayers,
   type TradeIds,
 } from './tradeQuery';
@@ -36,6 +37,8 @@ export interface TradeState {
   remove: (side: TradeSideKey, id: number) => void;
   swap: () => void;
   clear: () => void;
+  /** Score on an imported league (undefined: the rosterless calculator). */
+  setLeague: (league: number | undefined) => void;
 }
 
 function commit(ids: TradeIds): void {
@@ -47,7 +50,7 @@ function toSummary(player: PlayerSummary): PlayerSummary {
 }
 
 export function tradeKeyOf(ids: TradeIds): string {
-  return `${ids.give.join(',')}|${ids.get.join(',')}`;
+  return `${ids.give.join(',')}|${ids.get.join(',')}|${ids.league ?? ''}`;
 }
 
 /**
@@ -89,12 +92,12 @@ export function useTradeState(query: Readonly<Record<string, string>>, settings:
   const evaluation = useAsync(
     isReady
       ? async (signal) => {
-          const result = await evaluateTrade({ give: [...ids.give], get: [...ids.get], settings }, signal);
+          const result = await evaluateTrade({ give: [...ids.give], get: [...ids.get], settings, league_id: ids.league }, signal);
           remember(playersInResult(result));
           return { key: tradeKey, result };
         }
       : null,
-    [tradeKey, settings],
+    [tradeKey, ids.league === undefined ? settings : null],   // a league brings its own settings
   );
   useResolveMissing(ids, known, settings, remember, evaluation.status === 'error');
   const isCurrent = evaluation.status === 'success' && evaluation.data.key === tradeKey;
@@ -111,6 +114,7 @@ export function useTradeState(query: Readonly<Record<string, string>>, settings:
     },
     remove: (side, id) => commit(removeFromSide(ids, side, id)),
     swap: () => commit(swapSides(ids)),
-    clear: () => commit(EMPTY_TRADE),
+    clear: () => commit(withLeague(EMPTY_TRADE, ids.league)),
+    setLeague: (league) => commit(withLeague(ids, league)),
   };
 }

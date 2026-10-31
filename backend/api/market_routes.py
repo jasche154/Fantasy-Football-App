@@ -9,7 +9,7 @@ from services import serialize
 from services.insights import find_insights
 from services.league import LeagueSettings
 from services.trade import evaluate_trade
-from services.trade_finder import find_trades
+from services.trade_finder import find_trades, market_percent
 
 router = APIRouter(prefix="/api")
 
@@ -18,6 +18,7 @@ class TradeRequest(BaseModel):
     give: list[int] = Field(..., min_length=1, max_length=10)
     get: list[int] = Field(..., min_length=1, max_length=10)
     settings: LeagueBody = LeagueBody()
+    league_id: int | None = Field(None, ge=1)   # score it on your real league's rosters and settings
 
     @field_validator("give", "get")
     @classmethod
@@ -29,18 +30,45 @@ class TradeRequest(BaseModel):
 
 @router.post("/trade/evaluate")
 def trade_evaluate(request: TradeRequest, session: Session = Depends(get_session)) -> dict:
-    valuation = valuation_or_503(session, request.settings.to_settings())
+    """Value verdict for a trade; with league_id, also both real lineups' gains in that league."""
+    settings = request.settings.to_settings()
+    if request.league_id is not None:
+        settings = _league_settings_or_404(session, request.league_id)
+    valuation = valuation_or_503(session, settings)
     unknown = [pid for pid in (*request.give, *request.get) if pid not in valuation.by_id]
     if unknown:
         raise HTTPException(422, f"No {valuation.season} value for player id(s) {unknown}; "
                                  "only QB/RB/WR/TE with games this season can be traded.")
+    impact, pool = None, valuation.values
+    if request.league_id is not None:
+        from services.league_trades import trade_impact
+        from services.valuation import NoDataError
+
+        try:
+            impact = trade_impact(session, request.league_id, request.give, request.get)
+        except NoDataError as exc:
+            raise HTTPException(503, str(exc)) from exc
+        pool_ids = impact.pop("pool_ids")
+        pool = [v for v in valuation.values if v.player_id in pool_ids]      # only the two rosters
+        impact = {**impact, **{key: serialize.player_ref(impact[key]) if impact[key] else None
+                               for key in ("their_drop", "your_add", "your_drop")}}
+    give, get = [valuation.by_id[p] for p in request.give], [valuation.by_id[p] for p in request.get]
     try:
-        evaluation = evaluate_trade([valuation.by_id[p] for p in request.give],
-                                    [valuation.by_id[p] for p in request.get],
-                                    valuation.values, valuation.weeks_remaining)
+        evaluation = evaluate_trade(give, get, pool, valuation.weeks_remaining)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    return serialize.trade(evaluation, valuation.weeks_remaining)
+    return {**serialize.trade(evaluation, valuation.weeks_remaining, market_percent(give, get, valuation)),
+            "lineup": impact}
+
+
+def _league_settings_or_404(session: Session, league_id: int) -> LeagueSettings:
+    from services import my_team as mt
+
+    try:
+        league, _ = mt.find_league(session, league_id)
+    except mt.LeagueNotFound as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return mt.league_settings(league)
 
 
 @router.get("/insights/buy-low")

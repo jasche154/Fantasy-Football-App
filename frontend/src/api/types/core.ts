@@ -189,6 +189,14 @@ export interface TradeSidePlayer {
   trade_value: number;
   ros_ppg: number;
   vorp_per_game: number;
+  pos_rank?: string;
+  /** Share of remaining games he is expected to play (injury, or a backup role). */
+  availability?: number;
+  /** Null when his team isn't in the loaded schedule. */
+  games_left?: number | null;
+  schedule_factor?: number;
+  playoff_factor?: number;
+  expert_ros_ppg?: number | null;
   weight: number;
   adjusted_value: number;
 }
@@ -220,12 +228,32 @@ export interface TradeResult {
   summary: string;
   balance_suggestions: BalanceSuggestion[];
   weeks_remaining: number;
+  /** The same trade by expert-consensus (market) values, -1..1; positive favours the user. */
+  market_percent_difference?: number | null;
+  /** Only when the trade was scored on an imported league (`league_id`). */
+  lineup?: TradeLineupImpact | null;
+}
+
+/** Points each real starting lineup gains over the rest of the season. */
+export interface TradeLineupImpact {
+  /** Null when the trade can't be scored on this league (see `note`). */
+  your_gain: number | null;
+  their_gain: number | null;
+  their_team: string | null;
+  /** Who they drop to fit the extra player, and the free agent for a spot you open. */
+  their_drop?: PlayerSummary | null;
+  your_add?: PlayerSummary | null;
+  /** Who you drop when you take on more players than you send with a full roster. */
+  your_drop?: PlayerSummary | null;
+  note?: string | null;
 }
 
 export interface TradeRequest {
   give: number[];
   get: number[];
   settings?: LeagueSettings;
+  /** Score on this imported league: its settings, both rosters and lineup gains. */
+  league_id?: number;
 }
 
 export interface Insight {

@@ -5,6 +5,8 @@ import { parsePositiveInt } from '../../router/routes';
 export interface TradeIds {
   give: readonly number[];
   get: readonly number[];
+  /** Imported league to score the trade on (its rosters, settings and lineup gains). */
+  league?: number;
 }
 
 export const EMPTY_TRADE: TradeIds = { give: [], get: [] };
@@ -26,14 +28,20 @@ export function parseIdList(raw: string | undefined): number[] {
 export function parseTradeQuery(query: Readonly<Record<string, string>>): TradeIds {
   const give = parseIdList(query.give);
   const get = parseIdList(query.get).filter((id) => !give.includes(id));
-  return { give, get };
+  const league = parsePositiveInt(query.league ?? '');
+  return league === null ? { give, get } : { give, get, league };
 }
 
 export function tradeQueryParams(ids: TradeIds): QueryParams {
   return {
     give: ids.give.length > 0 ? ids.give.join(',') : undefined,
     get: ids.get.length > 0 ? ids.get.join(',') : undefined,
+    league: ids.league !== undefined ? String(ids.league) : undefined,
   };
+}
+
+export function withLeague(ids: TradeIds, league: number | undefined): TradeIds {
+  return league === undefined ? { give: ids.give, get: ids.get } : { ...ids, league };
 }
 
 export function hasPlayer(ids: TradeIds, id: number): boolean {
@@ -50,7 +58,7 @@ export function removeFromSide(ids: TradeIds, side: TradeSideKey, id: number): T
 }
 
 export function swapSides(ids: TradeIds): TradeIds {
-  return { give: ids.get, get: ids.give };
+  return { ...ids, give: ids.get, get: ids.give };
 }
 
 export function canEvaluate(ids: TradeIds): boolean {

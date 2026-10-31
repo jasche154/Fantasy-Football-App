@@ -1,10 +1,8 @@
 """Roster moves in YOUR league, scored by lineup gain: waiver claims with a named drop and the right
 advice for the league's waiver type (services/waiver_advice.py), and trade offers that must help
-your lineup without gutting theirs.
+your lineup without gutting theirs (scored in services/league_trades.py).
 """
 import logging
-from collections.abc import Sequence
-from dataclasses import dataclass, replace
 
 import httpx
 from sqlalchemy import select
@@ -15,11 +13,12 @@ from database.models import Team
 from services import league_insights, lineup_gain
 from services import my_team as mt
 from services import waiver_advice as wa
-from services.playoffs import playoff_weeks
+from services.league_trades import (  # noqa: F401  (re-exported: league trades live in their own module)
+    TRADE_GIVE_LIMIT, active_spots, capacity, offer_score, score_trades, trade_impact,
+)
 
 CANDIDATE_POOL = 30               # waiver candidates scored by lineup gain (from the value-ranked list)
 MAX_SHOWN = CANDIDATE_POOL
-TRADE_GIVE_LIMIT = 0.5            # their lineup may lose at most this x weeks left
 LOOKAHEAD_WEEKS = 4
 HTTP_TIMEOUT_SECONDS = 15.0
 log = logging.getLogger(__name__)
@@ -40,8 +39,7 @@ def _insights(session: Session, league_id: int) -> dict | None:
 
 
 def _roster_full(team) -> bool:
-    capacity = sum(team.settings.starters.values()) + team.settings.bench
-    return sum(1 for s in team.spots if s.slot not in ("IR", "IR+", "NA")) >= capacity
+    return active_spots(team.spots) >= capacity(team.settings)
 
 
 def waiver_plan(session: Session, league_id: int, position: str | None = None, limit: int = 15) -> dict:
@@ -98,77 +96,3 @@ def waiver_plan(session: Session, league_id: int, position: str | None = None, l
             "my_priority": me.get("waiver_priority"), "my_balance": me.get("faab_balance"),
             "faab_budget": rules.get("faab_budget"), "trade_end_date": rules.get("trade_end_date"),
             "roster_full": bool(droppable), "protected": frozenset(protected), "rows": rows[:limit]}
-
-
-def _trade_context(session: Session, team) -> tuple:
-    """(your horizon, a neutral horizon for the other team, projector, your roster values, rosters, floor)."""
-    horizon, projector = lineup_gain.context_for(team)
-    # Their gain uses neutral playoff weights: we don't know their playoff odds the way we know yours.
-    neutral = lineup_gain.horizon(horizon.current_week, max(horizon.weeks), playoff_weeks(mt.league_rules(team.league)),
-                                  None)
-    return (horizon, neutral, projector, lineup_gain.roster_values(team), mt.rosters(session, team.league),
-            -TRADE_GIVE_LIMIT * len(horizon.weeks))
-
-
-def score_trades(session: Session, league_id: int, by_team: Sequence) -> list[tuple]:
-    """[(team offers, [(offer, my_gain, their_gain)])]: offers that help you (my_gain > 0) without costing
-    them more than TRADE_GIVE_LIMIT x weeks left, best for you first."""
-    team = mt.build_my_team(session, league_id)
-    horizon, neutral, projector, mine, rosters, floor = _trade_context(session, team)
-    out = []
-    for team_offers in by_team:
-        theirs = lineup_gain.roster_values(team, rosters.get(team_offers.team.id, []))
-        scored = []
-        for offer in team_offers.offers:
-            my_gain = lineup_gain.gain(mine, horizon, projector, team.settings, add=[offer.get], drop=list(offer.give))
-            their_gain = lineup_gain.gain(theirs, neutral, projector, team.settings, add=list(offer.give),
-                                          drop=[offer.get])
-            if my_gain > 0 and their_gain >= floor:
-                scored.append((offer, my_gain, their_gain))
-        if scored:
-            out.append((team_offers, sorted(scored, key=lambda s: -s[1])))
-    return sorted(out, key=lambda t: -t[1][0][1])
-
-
-@dataclass(frozen=True)
-class TradeScore:
-    """One specific trade on the real rosters. Gains are None when they can't be computed (a player you'd
-    send isn't on your roster, or the players you'd get aren't on any team)."""
-    your_lineup_gain: float | None
-    their_lineup_gain: float | None
-    acceptable_to_them: bool | None          # their lineup loses no more than TRADE_GIVE_LIMIT x weeks left
-    partner: str | None                      # the other team's name (a manager-chosen label)
-    my_ids: frozenset[int]
-    partner_ids: frozenset[int]
-    note: str | None = None
-
-
-def score_trade(session: Session, league_id: int, give_ids: Sequence[int], get_ids: Sequence[int]) -> TradeScore:
-    """Lineup gain for both sides of one trade; the partner is the team rostering the `get` players.
-
-    Raises ValueError when a `get` player is already yours or the `get` players are on different teams."""
-    team = mt.build_my_team(session, league_id)
-    horizon, neutral, projector, mine, rosters, floor = _trade_context(session, team)
-    owner = {s.player_id: team_id for team_id, spots in rosters.items() for s in spots}
-    my_ids = frozenset(s.player_id for s in rosters.get(team.team.id, []))
-    if any(owner.get(pid) == team.team.id for pid in get_ids):
-        raise ValueError("A player you'd receive is already on your roster. Try: put him in `give` instead.")
-    partners = {owner[pid] for pid in get_ids if pid in owner}
-    if len(partners) > 1:
-        raise ValueError("The players you'd receive are on different teams. Try: one trade per team.")
-    partner_id = next(iter(partners), None)
-    partner_ids = frozenset(s.player_id for s in rosters.get(partner_id, [])) if partner_id else frozenset()
-    names = {t.id: t.name for t in session.scalars(select(Team).where(Team.league_id == team.league.id))}
-    base = TradeScore(None, None, None, names.get(partner_id), my_ids, partner_ids)
-    if partner_id is None or any(pid not in owner for pid in get_ids):
-        return replace(base, note="the players you'd receive aren't on a team in this league, so lineup gains "
-                                  "aren't computed")
-    if any(pid not in my_ids for pid in give_ids):
-        return replace(base, note="a player you'd send isn't on your roster, so lineup gains aren't computed")
-    values = team.valuation.by_id
-    give = [values[pid] for pid in give_ids if pid in values]
-    get = [values[pid] for pid in get_ids if pid in values]
-    theirs = lineup_gain.roster_values(team, rosters.get(partner_id, []))
-    yours = lineup_gain.gain(mine, horizon, projector, team.settings, add=get, drop=give)
-    their = lineup_gain.gain(theirs, neutral, projector, team.settings, add=give, drop=get)
-    return replace(base, your_lineup_gain=yours, their_lineup_gain=their, acceptable_to_them=their >= floor)

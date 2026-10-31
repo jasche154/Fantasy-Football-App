@@ -246,3 +246,9 @@
   font-size: var(--text-sm);
   margin-bottom: var(--space-2);
 }
+
+.breakdown__context {
+  display: block;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}

@@ -1,8 +1,17 @@
 import { useId } from 'react';
-import type { BalanceSuggestion, PlayerSummary, TradeResult, TradeSide, TradeSideKey, TradeVerdict } from '../../api/types';
+import type {
+  BalanceSuggestion,
+  PlayerSummary,
+  TradeLineupImpact,
+  TradeResult,
+  TradeSide,
+  TradeSideKey,
+  TradeSidePlayer,
+  TradeVerdict,
+} from '../../api/types';
 import { Icon } from '../../components/Icon';
 import { PlayerLink } from '../../components/PlayerLink';
-import { formatFraction, formatNumber, formatSignedFraction } from '../../lib/format';
+import { formatFraction, formatNumber, formatSigned, formatSignedFraction } from '../../lib/format';
 import { BalanceMeter } from './BalanceMeter';
 import { SIDE_TITLES } from './TradeSidePanel';
 
@@ -15,7 +24,41 @@ export const VERDICT_COPY: Readonly<Record<TradeVerdict, { label: string; symbol
 };
 
 export const PACKAGE_DISCOUNT_NOTE =
-  'Package discount: each side is sorted by value — the best player counts 100%, the next 90%, then 80% and so on (never below 50%) — so two mid players don’t automatically equal one stud.';
+  'Package discount: each side is sorted by value — the best player counts 100%, the next 70%, then 50%, and every player after that 40% — so two mid players don’t automatically equal one stud.';
+
+/** "WR12 · 9 games · 60% to play": why a player is worth what he is. */
+export function playerContext(entry: TradeSidePlayer): string {
+  const parts = [entry.pos_rank, `${formatNumber(entry.ros_ppg, 1)} PPG`];
+  if (entry.games_left != null) parts.push(`${entry.games_left} game${entry.games_left === 1 ? '' : 's'} left`);
+  if (entry.availability != null && entry.availability < 0.95) parts.push(`plays ~${formatFraction(entry.availability, 0)}`);
+  if (entry.schedule_factor != null && Math.abs(entry.schedule_factor - 1) >= 0.05) {
+    parts.push(entry.schedule_factor > 1 ? 'easy schedule' : 'hard schedule');
+  }
+  return parts.filter(Boolean).join(' · ');
+}
+
+/** How expert consensus (the market most managers trade by) sees the same deal. */
+export function marketText(market: number | null | undefined): string | null {
+  if (market == null) return null;
+  if (Math.abs(market) <= 0.05) return 'Expert consensus also sees this as about even.';
+  const side = market > 0 ? 'you' : 'the other side';
+  return `By expert consensus it favours ${side} by ${formatFraction(Math.abs(market), 0)}.`;
+}
+
+export function LineupImpact({ lineup }: { lineup: TradeLineupImpact }) {
+  if (lineup.your_gain == null) return <p className="meta-line">{lineup.note ?? 'Lineup gains aren’t available for this trade.'}</p>;
+  const helpsBoth = lineup.your_gain > 0 && (lineup.their_gain ?? 0) > 0;
+  return (
+    <p className="meta-line">
+      On your league: your starting lineup {formatSigned(lineup.your_gain)} pts rest of season
+      {lineup.their_gain != null && <>, {lineup.their_team ?? 'theirs'} {formatSigned(lineup.their_gain)}</>}.
+      {helpsBoth && <> Both lineups improve.</>}
+      {lineup.their_drop && <> They drop {lineup.their_drop.name} to make room.</>}
+      {lineup.your_add && <> You add {lineup.your_add.name} with the open spot.</>}
+      {lineup.your_drop && <> You drop {lineup.your_drop.name} to make room.</>}
+    </p>
+  );
+}
 
 function SideBreakdown({ side, data }: { side: TradeSideKey; data: TradeSide }) {
   return (
@@ -34,7 +77,10 @@ function SideBreakdown({ side, data }: { side: TradeSideKey; data: TradeSide }) 
           <tbody>
             {data.players.map((entry) => (
               <tr key={entry.player.id}>
-                <td className="td--player"><PlayerLink player={entry.player} /></td>
+                <td className="td--player">
+                  <PlayerLink player={entry.player} />
+                  <span className="breakdown__context">{playerContext(entry)}</span>
+                </td>
                 <td className="num">{formatNumber(entry.trade_value, 1)}</td>
                 <td className="num">× {formatFraction(entry.weight, 0)}</td>
                 <td className="num num--strong">{formatNumber(entry.adjusted_value, 1)}</td>
@@ -107,8 +153,11 @@ export function TradeResultView({ result, onAdd }: TradeResultViewProps) {
       <BalanceMeter percentDifference={result.percent_difference} />
       <p className="meta-line">
         Values are rest-of-season fantasy points above replacement (model) over {result.weeks_remaining} remaining weeks.
-        Difference: <span className="num">{formatNumber(result.difference, 1)}</span> adjusted points.
+        Difference: <span className="num">{formatNumber(result.difference, 1)}</span> adjusted points
+        (about <span className="num">{formatNumber(result.difference / Math.max(result.weeks_remaining, 1), 1)}</span> a week).
+        {' '}{marketText(result.market_percent_difference)}
       </p>
+      {result.lineup && <LineupImpact lineup={result.lineup} />}
       <BalanceSuggestions suggestions={result.balance_suggestions} onAdd={onAdd} />
       <details className="breakdowns" open>
         <summary>Per-player breakdown</summary>
