@@ -55,6 +55,7 @@ export function LineupImpact({ lineup }: { lineup: TradeLineupImpact }) {
       {helpsBoth && <> Both lineups improve.</>}
       {lineup.their_drop && <> They drop {lineup.their_drop.name} to make room.</>}
       {lineup.your_add && <> You add {lineup.your_add.name} with the open spot.</>}
+      {lineup.your_drop && <> You drop {lineup.your_drop.name} to make room.</>}
     </p>
   );
 }

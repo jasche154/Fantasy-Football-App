@@ -51,7 +51,7 @@ def trade_evaluate(request: TradeRequest, session: Session = Depends(get_session
         pool_ids = impact.pop("pool_ids")
         pool = [v for v in valuation.values if v.player_id in pool_ids]      # only the two rosters
         impact = {**impact, **{key: serialize.player_ref(impact[key]) if impact[key] else None
-                               for key in ("their_drop", "your_add")}}
+                               for key in ("their_drop", "your_add", "your_drop")}}
     give, get = [valuation.by_id[p] for p in request.give], [valuation.by_id[p] for p in request.get]
     try:
         evaluation = evaluate_trade(give, get, pool, valuation.weeks_remaining)

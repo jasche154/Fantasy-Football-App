@@ -6,7 +6,8 @@ trade shows the same gains in both places:
 - roster spots count: when a side gets more players than it sends and its roster would be over
   capacity, it drops the player it misses least (one of its DROP_CANDIDATES lowest-rated); when
   you send more than you get and your roster was full, the spot you open is filled by the best
-  of the top FREE_AGENT_POOL free agents. Both are named on the offer and included in the gains.
+  of the top FREE_AGENT_POOL free agents. Drops and adds are named and included in the gains.
+  (Their open spot isn't filled: their gain only feeds the floor and the ranking penalty.)
 """
 from collections.abc import Sequence
 from dataclasses import replace
@@ -124,8 +125,11 @@ class TradeScorer:
         give_ids, get_ids = {p.player_id for p in give}, {p.player_id for p in get}
         my_after = [v for v in self.mine if v.player_id not in give_ids] + list(get)
         after = self._points(my_after, self.horizon)
-        my_gain, my_add = after - self.my_base, None
-        if len(give) > len(get) and self.my_full:
+        my_gain, my_add, my_drop = after - self.my_base, None, None
+        if len(get) > len(give) and active_spots(self.team.spots) + len(get) - len(give) > self.capacity:
+            my_after, my_drop = _forced_drop(my_after, self.horizon, self.projector, self.settings, True)
+            my_gain = self._points(my_after, self.horizon) - self.my_base
+        elif len(give) > len(get) and self.my_full:
             bonus, my_add = self._open_spot_add(my_after, after)
             my_gain += bonus
         their_gain, their_drop = None, None
@@ -135,7 +139,8 @@ class TradeScorer:
             is_over = len(give) > len(get) and spots + len(give) - len(get) > self.capacity
             their_after, their_drop = _forced_drop(their_after, self.neutral, self.projector, self.settings, is_over)
             their_gain = round(self._points(their_after, self.neutral) - base, 2)
-        return {"your_gain": round(my_gain, 2), "their_gain": their_gain, "their_drop": their_drop, "my_add": my_add}
+        return {"your_gain": round(my_gain, 2), "their_gain": their_gain, "their_drop": their_drop, "my_add": my_add,
+                "my_drop": my_drop}
 
 
 def score_trades(session: Session, league_id: int, by_team: Sequence) -> list[tuple]:
@@ -180,10 +185,11 @@ def trade_impact(session: Session, league_id: int, give_ids: Sequence[int], get_
         note = "Some players you get are already on your roster, so lineup gains aren't scored."
     if note:
         return {"your_gain": None, "their_gain": None, "their_team": None, "their_drop": None,
-                "your_add": None, "note": note, "pool_ids": pool}
+                "your_add": None, "your_drop": None, "note": note, "pool_ids": pool}
     by_id = scorer.team.valuation.by_id
     result = scorer.score([by_id[p] for p in give_ids if p in by_id], [by_id[p] for p in get_ids if p in by_id], owner)
     their_team = session.get(Team, owner) if owner is not None else None
     return {"your_gain": result["your_gain"], "their_gain": result["their_gain"],
             "their_team": their_team.name if their_team else None,
-            "their_drop": result["their_drop"], "your_add": result["my_add"], "note": None, "pool_ids": pool}
+            "their_drop": result["their_drop"], "your_add": result["my_add"], "your_drop": result["my_drop"],
+            "note": None, "pool_ids": pool}

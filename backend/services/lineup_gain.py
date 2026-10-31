@@ -82,13 +82,17 @@ class Projector:
             return 0.0 if weeks_ahead < IR_WEEKS else share
         if status in OUT_STATUSES:
             return (1 - OUT_PERSIST ** weeks_ahead) * share
-        if status:
-            return share              # Questionable/Doubtful: healthy from next week (this week is projected)
-        # A healthy player expected to miss more than his injury chain says is a backup (a QB2 plays
-        # only the games his starter misses): keep that share instead of treating him as a starter.
         # At a tiny share the rate wasn't divided back out (healthy_rate), so don't discount it twice.
         expected = self.expected_share(value)
-        return share if expected <= MIN_SHARE else min(share, expected)
+        if expected <= MIN_SHARE:
+            return share
+        if status:
+            # Questionable/Doubtful: healthy from next week (this week is projected), but a backup QB
+            # still plays only the games his starter misses.
+            return min(share, getattr(value, "role_share", 1.0))
+        # A healthy player expected to miss more than his injury chain says is a backup (a QB2 plays
+        # only the games his starter misses): keep that share instead of treating him as a starter.
+        return min(share, expected)
 
     def points(self, value, week: int) -> float:
         key = (value.player_id, week)

@@ -312,7 +312,7 @@ def league_trades(session: Session, reference: int | str | None, want_position: 
                   give_ids: Sequence[int] | None = None) -> tuple[League, list[TeamOffers]]:
     """Candidate offers with each real team (up to CANDIDATES_PER_TEAM, best fits for their needs first).
 
-    Not cut to OFFERS_PER_TEAM here: services/league_moves.score_trades scores every candidate by
+    Not cut to OFFERS_PER_TEAM here: services/league_trades.score_trades scores every candidate by
     both lineups' gains and keeps the best, so a strong deal isn't lost to a closer-to-fair one.
     Players in IR/NA slots aren't offered or targeted: they aren't in either lineup's gain.
     """

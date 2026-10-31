@@ -63,6 +63,7 @@ class PlayerValue:
     weekly_ppg: float | None = None
     availability: float = 1.0
     games_left: int | None = None      # his team's remaining games (byes excluded); None = not in the schedule
+    role_share: float = 1.0            # a backup QB's share of starts, apart from his injury status
 
 
 @dataclass(frozen=True)
@@ -158,7 +159,7 @@ def _consensus_fields(inputs: "RosInputs | None") -> dict:
         return {}
     return {"expert_ros_rank": inputs.expert_rank, "expert_ros_ppg": inputs.experts,
             "weekly_ppg": None if inputs.weekly is None else round(inputs.weekly, 2),
-            "availability": round(inputs.availability, 3)}
+            "availability": round(inputs.availability, 3), "role_share": round(inputs.role_share, 3)}
 
 
 PLAYOFF_LENGTH = 3      # most leagues: weeks 15-17

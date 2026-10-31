@@ -243,6 +243,8 @@ export interface TradeLineupImpact {
   /** Who they drop to fit the extra player, and the free agent for a spot you open. */
   their_drop?: PlayerSummary | null;
   your_add?: PlayerSummary | null;
+  /** Who you drop when you take on more players than you send with a full roster. */
+  your_drop?: PlayerSummary | null;
   note?: string | null;
 }
 

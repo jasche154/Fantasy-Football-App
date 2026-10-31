@@ -95,6 +95,11 @@ def test_backup_qb_keeps_his_small_share_in_lineup_gain():
     # Doubtful now: this week is in the weekly projection, so later weeks are healthy, not x 0.67 again.
     assert projector.available(hurt, 2) == pytest.approx(lg.healthy_share("WR"))
     assert projector.healthy_rate(benched) == 0.0
+    # A Questionable backup QB still plays only the games his starter misses, not like a starter.
+    tagged = lg.Projector(None, {6: SimpleNamespace(status="QUESTIONABLE")}, {}, 8)
+    q_backup = SimpleNamespace(player_id=6, position="QB", availability=0.2, role_share=0.2, ros_ppg=3.0)
+    assert tagged.available(q_backup, 2) == pytest.approx(0.2)
+    assert tagged.healthy_rate(q_backup) * tagged.available(q_backup, 2) == pytest.approx(3.0)
 
 
 def test_offer_score_penalizes_offers_that_hurt_them():
@@ -174,6 +179,9 @@ def test_uneven_trades_count_roster_spots(session, league):  # noqa: F811
     scorer._free_agents = []
     assert scorer._open_spot_add(scorer.mine, scorer.my_base) == (0.0, None)
     assert mt.OFFERS_PER_TEAM == 3
+    scorer.capacity = lm.active_spots(scorer.team.spots)                    # your roster is full too
+    one_for_two = scorer.score(mine[:1], [theirs, by_id[ids["RB Player 03"]]], rival)
+    assert one_for_two["my_drop"] is not None                               # you drop someone to fit two
 
 
 def test_calculator_scores_a_trade_on_your_league(client, league):  # noqa: F811
