@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../api/client';
-import { ChatError } from './ChatError';
+import { ChatError, formatWait } from './ChatError';
 
 const RATE_LIMIT = new ApiError('limit', 429, 'limit', 3);
 
@@ -42,5 +42,20 @@ describe('ChatError', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('AI assistant not configured');
     expect(screen.getByRole('alert')).toHaveTextContent('Add GROQ_API_KEY to backend/.env');
     expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+  });
+});
+
+describe('ChatError daily cap', () => {
+  it('names a long wait as the daily allowance and shows it in hours and minutes', () => {
+    render(<ChatError error={new ApiError('limit', 429, 'limit', 7500)} waitSeconds={7500} onRetry={() => undefined} />);
+    expect(screen.getByRole('alert')).toHaveTextContent('Daily free-tier limit reached');
+    expect(screen.getByRole('alert')).toHaveTextContent('LLM_CHAIN');
+    expect(screen.getByText('You can try again in 2 h 5 min.')).toBeInTheDocument();
+  });
+
+  it('formats waits', () => {
+    expect(formatWait(45)).toBe('45 s');
+    expect(formatWait(600)).toBe('10 min');
+    expect(formatWait(3600)).toBe('1 h');
   });
 });

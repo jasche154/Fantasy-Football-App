@@ -70,8 +70,8 @@ TOOL_SPECS: tuple[tuple[str, str, dict, tuple[str, ...]], ...] = (
     ("evaluate_trade", "Evaluate a specific trade from the user's side: `give` is what they send, `get` what they "
      "receive. Returns rest-of-season values, a verdict and players that would balance it; in an imported league also "
      "each side's lineup gain and whether it's acceptable to the other team, with balance players only from the two "
-     "rosters. To FIND trades use "
-     "find_league_trades (imported league) or find_trades.",
+     "rosters. Players to receive from different teams come back as one trade per team (alternatives). To FIND "
+     "trades use find_league_trades (imported league) or find_trades.",
      _schema({"give": PLAYERS, "get": PLAYERS, **LEAGUE}, ["give", "get"]), ("balance_suggestions",)),
     ("get_buy_low_candidates", "Players scoring below what their usage predicts (expected fantasy points), with "
      "valuable roles and stable usage: likely to rebound. Opposite: get_sell_high_candidates.",

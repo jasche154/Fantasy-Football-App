@@ -49,8 +49,6 @@ def test_league_trade_errors_and_partial_cases(session, league):
     session.flush()
     session.add(Roster(team_id=third.id, player_id=ids["QB Player 03"], week=7, roster_slot="QB"))
     session.commit()
-    with pytest.raises(ToolError, match="different teams"):
-        TOOLS.call(session, "evaluate_trade", {"give": ["WR Player 05"], "get": ["WR Player 02", "QB Player 03"]})
     not_mine = TOOLS.call(session, "evaluate_trade", {"give": ["WR Player 04"], "get": ["WR Player 02"]})
     assert "your_lineup_gain" not in not_mine and "isn't on your roster" in not_mine["lineup_note"]
     free_agent = TOOLS.call(session, "evaluate_trade", {"give": ["WR Player 05"], "get": ["WR Player 04"]})
@@ -92,3 +90,38 @@ def test_power_rankings_show_balances_priority_and_habits(session, league, monke
     row = TOOLS.call(session, "get_power_rankings", {})["teams"][0]
     assert (row["faab_balance"], row["waiver_priority"]) == (42, 3)
     assert (row["trades_away"], row["picks_up"], row["trades_for"]) == (["WR"], ["TE"], ["RB"])
+
+
+def test_players_from_different_teams_become_one_trade_per_team(session, league):
+    """'Trade X for Bijan or Walker': the model may send both as `get`; each team gets its own evaluation."""
+    row, ids = league
+    third = Team(league_id=row.id, platform_team_id="third", name="Third", owner_display_name="T", is_users_team=False)
+    session.add(third)
+    session.flush()
+    session.add(Roster(team_id=third.id, player_id=ids["QB Player 03"], week=7, roster_slot="QB"))
+    session.commit()
+    result = TOOLS.call(session, "evaluate_trade", {"give": ["WR Player 05"], "get": ["WR Player 02", "QB Player 03"]})
+    assert "different teams" in result["note"]
+    partners = [trade["partner"] for trade in result["trades"]]
+    assert partners == ["Rival", "Third"]
+    for trade, name in zip(result["trades"], ["WR Player 02", "QB Player 03"]):
+        assert [p["player"]["name"] for p in trade["get"]["players"]] == [name] and "your_lineup_gain" in trade
+    single = TOOLS.call(session, "evaluate_trade", {"give": ["WR Player 05"], "get": ["WR Player 02"]})
+    assert result["trades"][0]["your_lineup_gain"] == single["your_lineup_gain"]
+    json.dumps(result)
+
+
+def test_a_free_agent_named_with_a_rostered_player_is_its_own_trade(session, league):
+    result = TOOLS.call(session, "evaluate_trade", {"give": ["WR Player 05"], "get": ["WR Player 02", "WR Player 04"]})
+    first, free_agent = result["trades"]
+    assert first["partner"] == "Rival" and "aren't on a team" in free_agent["lineup_note"]
+
+
+def test_an_empty_trade_list_says_why(session, league, monkeypatch):
+    from services import league_moves
+
+    full = TOOLS.call(session, "find_league_trades", {})
+    assert full["teams"] and "no_offers" not in full
+    monkeypatch.setattr(league_moves, "score_trades", lambda *_args: [])
+    result = TOOLS.call(session, "find_league_trades", {"want_position": "RB"})
+    assert result["teams"] == [] and "evaluate_trade" in result["no_offers"]
