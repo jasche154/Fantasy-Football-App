@@ -8,6 +8,7 @@ from database.models import Roster, Team
 from services import league_insights, league_trades
 from tests.test_my_team import MINE, RULES, THEIRS, league  # noqa: F401  (fixture)
 from tools.definitions import TOOLS
+from tools.shaping import fit
 from tools.registry import ToolError
 
 MINE_NAMES = {name for name, _ in MINE}
@@ -108,7 +109,17 @@ def test_players_from_different_teams_become_one_trade_per_team(session, league)
         assert [p["player"]["name"] for p in trade["get"]["players"]] == [name] and "your_lineup_gain" in trade
     single = TOOLS.call(session, "evaluate_trade", {"give": ["WR Player 05"], "get": ["WR Player 02"]})
     assert result["trades"][0]["your_lineup_gain"] == single["your_lineup_gain"]
-    json.dumps(result)
+    assert "give" in result and all("give" not in t and "balance_suggestions" not in t for t in result["trades"])
+    # Half of Groq's round budget (two calls in one round) still shows every alternative.
+    trimmed = json.loads(fit(result, 3_000, TOOLS.get("evaluate_trade").trim_keys))
+    assert [t["partner"] for t in trimmed["trades"]] == ["Rival", "Third"]
+
+
+def test_a_player_already_on_your_roster_in_get_is_still_a_clear_error(session, league):
+    with pytest.raises(ToolError, match="already on your roster"):
+        TOOLS.call(session, "evaluate_trade", {"give": ["WR Player 05"], "get": ["WR Player 02", "RB Player 01"]})
+
+
 
 
 def test_a_free_agent_named_with_a_rostered_player_is_its_own_trade(session, league):

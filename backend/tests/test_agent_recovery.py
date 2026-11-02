@@ -209,7 +209,8 @@ def test_long_chat_history_is_shrunk_then_dropped_to_fit_the_budget(session):
     budget = SimpleNamespace(max_input_tokens=3_000, max_tool_chars=6_000)
     history = []
     for i in range(10):
-        history += [{"role": "user", "content": f"question {i}"}, {"role": "assistant", "content": f"{i} " + "x" * 5_000}]
+        history += [{"role": "user", "content": f"question {i}"},
+                    {"role": "assistant", "content": f"{i} " + "x" * 5_000}]
     history.append({"role": "user", "content": "the latest question"})
     client = Scripted([answer("Short answer.")], profile=budget)
     agent.run_agent(session, client, history)
@@ -226,3 +227,38 @@ def test_a_short_chat_is_sent_unchanged(session):
     client = Scripted([answer("Ok.")])
     agent.run_agent(session, client, history)
     assert [m["content"] for m in client.requests[0]["messages"][1:]] == [m["content"] for m in history]
+
+
+def test_a_waited_out_limit_works_through_a_fallback_chain_cooldown(session):
+    """The chain cools Groq down on a 429; after the wait it is ready again and answers."""
+    from services.llm_client import PROVIDERS, FallbackClient
+
+    now = [0.0]
+    groq = Scripted([limit(5), answer("After the wait.")], profile=PROVIDERS["groq"])
+
+    def sleep(seconds):
+        now[0] += seconds
+
+    reply = agent.run_agent(session, FallbackClient([groq], clock=lambda: now[0]), [{"role": "user", "content": "q"}],
+                            sleep=sleep)
+    assert reply.reply == "After the wait." and now[0] == 5 + agent.RATE_WAIT_MARGIN and len(groq.requests) == 2
+
+
+class SwitchingLLM(Scripted):
+    """Its budget shrinks after the first try, like a chain moving to a smaller provider."""
+
+    def complete(self, messages, tools):
+        try:
+            return super().complete(messages, tools)
+        finally:
+            self.profile = SimpleNamespace(max_input_tokens=3_000, max_tool_chars=6_000)
+
+
+def test_the_retried_request_is_refit_for_the_provider_that_answers(session):
+    history = [{"role": "user", "content": "q"}, {"role": "assistant", "content": "y" * 20_000},
+               {"role": "user", "content": "and now?"}]
+    client = SwitchingLLM([limit(5), answer("Fits.")], profile=SimpleNamespace(max_input_tokens=60_000,
+                                                                               max_tool_chars=24_000))
+    agent.run_agent(session, client, history, sleep=lambda _s: None)
+    first, retry = (agent._estimate_tokens(r["messages"], r["tools"]) for r in client.requests)
+    assert first > 3_000 >= retry

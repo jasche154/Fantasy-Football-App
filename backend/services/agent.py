@@ -216,10 +216,11 @@ class _RateWait:
     sleep: Callable[[float], None]
     waited: float = 0.0
 
-    def complete(self, client: LLMClient, messages: list[dict], tools: list[dict] | None) -> dict:
+    def complete(self, client: LLMClient, request: Callable[[], list[dict]], tools: list[dict] | None) -> dict:
+        """`request` builds the messages each try: after a wait another provider (budget) may answer."""
         while True:
             try:
-                return client.complete(messages, tools)
+                return client.complete(request(), tools)
             except AgentUnavailable as exc:
                 pause = (exc.retry_after or 0) + RATE_WAIT_MARGIN
                 if (exc.kind != "rate_limit" or not exc.retry_after or exc.retry_after > MAX_RATE_WAIT
@@ -289,16 +290,17 @@ def run_agent(session: Session, client: LLMClient, history: Sequence[Mapping[str
     schemas = registry.openai_schemas(tools)
     history_end = len(messages)
     waiter = _RateWait(sleep or _sleep)
-    input_tokens = INPUT_TOKENS
+
+    def fitted(offered: list[dict] | None) -> Callable[[], list[dict]]:
+        # A fallback chain may switch providers between requests, so read the budget each time.
+        return lambda: _fit_request(messages, offered, turn, _profile_value(client, "max_input_tokens", INPUT_TOKENS),
+                                    history_end)
     requests = rounds = rejections = 0
     revised = False
     while rounds < max_rounds:
-        # A fallback chain may switch providers between requests, so read the budgets each round.
-        input_tokens = _profile_value(client, "max_input_tokens", INPUT_TOKENS)
         try:
             requests += 1
-            response = waiter.complete(client, _fit_request(messages, schemas, turn, input_tokens, history_end),
-                                       schemas)
+            response = waiter.complete(client, fitted(schemas), schemas)
         except ToolCallRejected as exc:
             rejections += 1
             if rejections > MAX_REJECTIONS:
@@ -329,7 +331,7 @@ def run_agent(session: Session, client: LLMClient, history: Sequence[Mapping[str
             messages.append({"role": "tool", "tool_call_id": call["id"], "content": _run_tool(turn, call, budget)})
     messages.append({"role": "system", "content": OUT_OF_ROUNDS})
     requests += 1
-    final = waiter.complete(client, _fit_request(messages, None, turn, input_tokens, history_end), None)
+    final = waiter.complete(client, fitted(None), None)
     answer = final.get("content") or ""
     return _finish(answer, _ground(answer, messages, turn), turn, client, "out_of_rounds", requests)
 

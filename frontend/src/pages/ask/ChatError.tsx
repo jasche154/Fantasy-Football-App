@@ -18,7 +18,8 @@ interface ChatErrorProps {
  * The alert holds only fixed text, so it's announced once. The ticking seconds sit outside any
  * live region, and a polite status says once when asking again is possible.
  */
-/** Waits longer than this are a daily (not per-minute) cap; the server waits out shorter ones itself. */
+/** A wait this long is most likely the provider's daily cap, not its per-minute one (the server already
+ * waits out per-minute limits of up to 45 s itself). */
 export const DAILY_CAP_SECONDS = 120;
 
 /** "45 s", "12 min", "3 h 5 min". */
@@ -34,6 +35,7 @@ function RateLimited({ waitSeconds = 0, onRetry }: Omit<ChatErrorProps, 'error'>
   const isWaiting = waitSeconds > 0;
   // Fixed when the error appears, so the alert text doesn't change as the countdown ticks.
   const [isDaily] = useState(waitSeconds >= DAILY_CAP_SECONDS);
+  const [resetsIn] = useState(() => formatWait(waitSeconds));
   return (
     <div className="state state--error">
       <div className="state__body">
@@ -41,7 +43,7 @@ function RateLimited({ waitSeconds = 0, onRetry }: Omit<ChatErrorProps, 'error'>
           <p className="state__title">{isDaily ? 'Daily free-tier limit reached' : 'Free-tier limit reached'}</p>
           <p className="state__text">
             {isDaily
-              ? 'The AI provider’s free allowance for today is used up. Add a second provider to LLM_CHAIN in backend/.env (for example gemini) to keep asking.'
+              ? `The AI provider’s free allowance is used up; it resets in about ${resetsIn}. Add a second provider to LLM_CHAIN in backend/.env (for example gemini) to keep asking.`
               : 'The free AI tier allows a limited amount of text per minute, and the last question used it up.'}
           </p>
         </div>

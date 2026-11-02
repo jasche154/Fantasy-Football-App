@@ -50,12 +50,29 @@ describe('ChatError daily cap', () => {
     render(<ChatError error={new ApiError('limit', 429, 'limit', 7500)} waitSeconds={7500} onRetry={() => undefined} />);
     expect(screen.getByRole('alert')).toHaveTextContent('Daily free-tier limit reached');
     expect(screen.getByRole('alert')).toHaveTextContent('LLM_CHAIN');
+    expect(screen.getByRole('alert')).toHaveTextContent('resets in about 2 h 5 min');
     expect(screen.getByText('You can try again in 2 h 5 min.')).toBeInTheDocument();
+  });
+
+  it('keeps the daily label while the countdown runs out', () => {
+    const error = new ApiError('limit', 429, 'limit', 7500);
+    const view = render(<ChatError error={error} waitSeconds={7500} onRetry={() => undefined} />);
+    view.rerender(<ChatError error={error} waitSeconds={0} onRetry={() => undefined} />);
+    expect(screen.getByRole('alert')).toHaveTextContent('Daily free-tier limit reached');
+    expect(screen.getByRole('status')).toHaveTextContent('You can ask again now.');
+  });
+
+  it('keeps the per-minute wording for a short wait', () => {
+    render(<ChatError error={new ApiError('limit', 429, 'limit', 60)} waitSeconds={60} onRetry={() => undefined} />);
+    expect(screen.getByRole('alert')).toHaveTextContent(/^Free-tier limit reached/);
   });
 
   it('formats waits', () => {
     expect(formatWait(45)).toBe('45 s');
+    expect(formatWait(119)).toBe('119 s');
+    expect(formatWait(120)).toBe('2 min');
     expect(formatWait(600)).toBe('10 min');
     expect(formatWait(3600)).toBe('1 h');
+    expect(formatWait(3660)).toBe('1 h 1 min');
   });
 });

@@ -22,7 +22,9 @@ from tools.registry import ToolError
 from tools.rows import player_str
 
 SPLIT_NOTE = ("The players you'd receive are on different teams in this league, so each team's players are "
-              "evaluated as a separate trade for what you give. Treat them as alternatives, not one deal.")
+              "evaluated as a separate trade for what you give. Treat them as alternatives, not one deal; "
+              "evaluate one of them alone for balance players.")
+SPLIT_DROPS = ("give", "balance_suggestions", "summary", "league")
 LINEUP_NOTE = ("your_lineup_gain / their_lineup_gain: points each team's best starting lineup gains over the rest "
                "of the season (this app's projections). acceptable_to_them = their lineup doesn't lose much; it is "
                "not a promise the other manager accepts.")
@@ -119,5 +121,12 @@ def evaluate_trade(session: Session, give: list[str], get: list[str], league: st
     if len(groups) == 1:
         return {**head, **_one_trade(session, scorer, row, valuation, give_values, get_values)}
     # "Bijan or Walker?": players from different teams can't be one trade, so each team gets its own.
-    return {**head, "note": SPLIT_NOTE,
-            "trades": [_one_trade(session, scorer, row, valuation, give_values, group) for group in groups]}
+    trades = [_one_trade(session, scorer, row, valuation, give_values, group) for group in groups]
+    # `give` and the league are the same in each; balance players and summaries sit inside list items
+    # the budget trim can't reach, so they go: a round's budget must never cut a whole alternative.
+    def short(trade: dict) -> dict:
+        return {k: v for k, v in trade.items()
+                if k not in SPLIT_DROPS and not (k == "lineup_note" and v == LINEUP_NOTE)}
+    league_name = {"league": trades[0]["league"]} if "league" in trades[0] else {}
+    return {**head, **league_name, "note": SPLIT_NOTE, "lineup_note": LINEUP_NOTE, "give": trades[0]["give"],
+            "trades": [short(t) for t in trades]}
