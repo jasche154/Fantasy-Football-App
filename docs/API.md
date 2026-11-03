@@ -167,6 +167,8 @@ interface ScheduleStrengthResponse {
 | GET | `/api/meta` | | `Meta` |
 | GET | `/api/players/search` | `q` (≥1 char), `position?`, `limit=10` | `{results: PlayerSummary[]}` (QB/RB/WR/TE only, best match first) |
 | GET | `/api/players/{id}` | `season?` (default current), league params | `PlayerProfile` (404 if unknown) |
+| GET | `/api/players/{id}/usage` | `season?`, league params | `PlayerUsageResponse` (see `frontend/src/api/types/usage.ts`; 404 if unknown player or season) |
+| GET | `/api/odds` | `season?` (default latest schedule), `week?` (1-18, default current) | `OddsResponse` (see `frontend/src/api/types/odds.ts`; 503 without a schedule). Read-only: never calls The Odds API |
 | GET | `/api/rankings` | `position?`, `limit=100`, league params | `RankingsResponse` |
 | GET | `/api/rankings/weekly` | `week?` (1-18, default current), `position?`, `limit=150`, `refresh=true`, league params | `WeeklyRankingsResponse`. For the current week only, stale outside sources are refreshed first unless `refresh=false`, `WEEKLY_AUTO_REFRESH=false`, or the request is cross-site (`refresh` is then `null`) |
 | POST | `/api/rankings/weekly/refresh` | `week?`, `force=false` (query; re-fetches Yahoo and ESPN, never re-buys props) | `{season, week, sources: Record<source, SourceRefreshStatus>}` |

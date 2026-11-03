@@ -31,6 +31,8 @@ import type {
   KdstResponse,
   MatchupResponse,
   ModelAccuracyResponse,
+  OddsResponse,
+  PlayerUsageResponse,
 } from './types';
 
 export function getHealth(signal?: AbortSignal): Promise<{ status: string }> {
@@ -281,6 +283,23 @@ export function getRosterNews(leagueId: number, signal?: AbortSignal): Promise<N
 
 export function getPlayerNews(playerId: number, signal?: AbortSignal): Promise<NewsResponse> {
   return apiRequest(`/api/players/${encodeURIComponent(String(playerId))}/news`, { signal });
+}
+
+export function getPlayerUsage(
+  playerId: number,
+  settings: LeagueSettings,
+  season?: number,
+  signal?: AbortSignal,
+): Promise<PlayerUsageResponse> {
+  return apiRequest(`/api/players/${encodeURIComponent(String(playerId))}/usage`, {
+    query: { season, ...settingsToParams(settings) },
+    signal,
+  });
+}
+
+/** Stored lines and props only: the backend never buys props for this page. */
+export function getOdds(season?: number, week?: number, signal?: AbortSignal): Promise<OddsResponse> {
+  return apiRequest('/api/odds', { query: { season, week }, signal });
 }
 
 export function getComparison(

@@ -1,0 +1,74 @@
+/* Odds page and the player page's percentile / "what changed" cards. */
+.odds-note {
+  margin-block-end: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-warn-soft);
+}
+
+.data-table tbody tr.odds-props-row,
+.data-table tbody tr.odds-props-row:hover {
+  background: var(--color-surface-2);
+}
+
+.odds-props {
+  padding-block: var(--space-2);
+}
+
+.percentile-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.percentile-row {
+  display: grid;
+  grid-template-columns: minmax(9rem, 1.2fr) minmax(4rem, auto) minmax(6rem, 2fr) 3.5rem;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.percentile-row dt {
+  color: var(--color-text-muted);
+}
+
+.percentile-row dd {
+  margin: 0;
+}
+
+.percentile-bar {
+  position: relative;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-3);
+  overflow: hidden;
+}
+
+.percentile-bar__fill {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  border-radius: inherit;
+  background: var(--color-text-subtle);
+}
+
+.percentile-bar__fill--good { background: var(--color-pos); }
+.percentile-bar__fill--bad { background: var(--color-neg); }
+
+.percentile-row__pct {
+  text-align: end;
+  font-weight: 700;
+}
+
+.change-flag {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-2xs);
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.change-flag--up { background: var(--color-pos-soft); color: var(--color-pos); }
+.change-flag--down { background: var(--color-neg-soft); color: var(--color-neg); }

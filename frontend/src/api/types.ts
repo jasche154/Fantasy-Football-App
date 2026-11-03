@@ -3,3 +3,5 @@ export * from './types/core';
 export * from './types/weekly';
 export * from './types/team';
 export * from './types/insights';
+export * from './types/usage';
+export * from './types/odds';
