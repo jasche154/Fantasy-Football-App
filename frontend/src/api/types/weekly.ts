@@ -1,5 +1,6 @@
 /** Week X rankings and schedule strength. */
-import type { PlayerSummary, Position, Scoring, TradeResult } from './core';
+import type { PlayerSummary, Position, Scoring } from './core';
+import type { TradeResult } from './trade';
 
 /* ---------- Week X rankings & schedule strength ---------- */
 
