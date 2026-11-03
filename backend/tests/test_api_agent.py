@@ -57,7 +57,7 @@ def test_chat_with_fake_llm(client, monkeypatch):
 
 @pytest.mark.parametrize("error, status", [
     (agent_module.AgentUnavailable("down"), 502),
-    (agent_module.AgentUnavailable("slow down", kind="rate_limit", retry_after=3600), 429),   # a daily cap: not waited out
+    (agent_module.AgentUnavailable("slow down", kind="rate_limit", retry_after=3600), 429),   # daily cap: no wait
     (agent_module.AgentUnavailable("too big", kind="too_large"), 413),
 ])
 def test_chat_provider_failures_map_to_status_codes(client, monkeypatch, error, status):
