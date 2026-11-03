@@ -55,7 +55,9 @@ describe('PlayerUsage', () => {
     expect(await within(percentiles).findByText('Yards / carry')).toBeInTheDocument();
     expect(within(percentiles).getByText('81')).toHaveClass('num--pos');
     expect(within(percentiles).getByText('12')).toHaveClass('num--neg');
-    expect(within(percentiles).getByText('Small sample')).toHaveAttribute('title', '2 of 3 games needed');
+    expect(within(percentiles).getByText('(2 of 3 games needed)')).toBeInTheDocument();
+    expect(within(percentiles).getByText(/Small sample/)).toBeInTheDocument();
+    expect(screen.getByText('Last 3 games vs before')).toBeInTheDocument();
     expect(within(percentiles).getByText(/Percentile among 52 RBs with 4\+ games/)).toBeInTheDocument();
 
     const changes = screen.getByRole('region', { name: 'What changed' });

@@ -57,6 +57,14 @@ def test_player_below_the_games_threshold_has_no_percentiles():
     assert rows and all(r["percentile"] is None and r["small_sample"] for r in rows)
 
 
+def test_per_game_stats_relax_early_in_the_season():
+    week_three = {pid: [game(w, targets=4 + pid, points=8.0 + pid) for w in range(1, 4)] for pid in range(1, 6)}
+    rows = by_key(player_percentiles(5, "WR", week_three))
+    for key in ("ppg", "targets_pg"):
+        assert not rows[key]["small_sample"] and rows[key]["percentile"] == 90
+        assert rows[key]["min_sample"] == 1 and rows[key]["pool_size"] == 5
+
+
 def test_what_changed_flags_big_moves():
     games = [game(w, snap=60.0, targets=5, carries=1) for w in range(1, 5)]
     games += [game(w, snap=60.0 + SNAP_SHARE_FLAG + 5, targets=6, carries=1) for w in range(5, 5 + RECENT_GAMES)]
