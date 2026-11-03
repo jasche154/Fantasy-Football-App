@@ -105,6 +105,7 @@ def weekly_player(player: WeeklyPlayer, flags: Sequence = ()) -> dict:
         "projection": player.projection, "if_active": player.if_active, "play_prob": player.play_prob,
         "status": player.status, "floor": player.floor, "ceiling": player.ceiling,
         "boost_points": player.boost_points, "pct_rostered": player.pct_rostered,
+        "threshold_odds": [{"points": points, "probability": probability} for points, probability in player.threshold_odds],
         "scenarios": [{"teammate": s.teammate, "teammate_status": s.teammate_status,
                        "extra_points": s.extra_points, "projection": s.projection} for s in player.scenarios],
         "matchup": matchup(player.matchup),

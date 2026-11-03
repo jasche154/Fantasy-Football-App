@@ -533,6 +533,42 @@ starting weights; they're refit after every completed week (see **Learning the w
   When the month's Odds API credits can't cover every game left, only games with one of
   your rostered players are bought, plus every one-game Thursday and Monday slate.
 
+**Chance of N+ points** (`services/threshold_odds.py`). Each row carries `threshold_odds`,
+the chance of at least each of three totals: QB 15/20/25, RB and WR 10/15/20, TE 8/12/16
+(kickers and defenses have none). The Proj column shows the highest one ("20+ pts: 31%",
+the rest in its tooltip) and **Why?** lists all three.
+- **Math:** `chance to play × P(points ≥ N if he plays)`. The second part reads the same
+  7 quantiles (5th–95th percentile) behind the floor and ceiling as one piecewise-linear
+  distribution, the one the matchup simulation draws from (tails down to 0 and past the
+  95th). So a healthy player's ceiling is always a 10% shot, and the odds, the range and the
+  simulation agree.
+- **Calibration** (`python -m services.threshold_calibration --season 2026`): saved
+  pre-kickoff projections for weeks 1–7 of 2026 (8,262 player-week thresholds, PPR; the
+  ranges were fit on 2021–2025, a player who sat counts as 0). Predicted 15.3% on average,
+  hit 15.4%; Brier score 0.092 vs 0.130 for always guessing the base rate.
+
+  | Predicted | 0–10% | 10–20% | 20–30% | 30–40% | 40–50% | 50–60% | 60–70% | 70–80% | 80–90% |
+  |---|---|---|---|---|---|---|---|---|---|
+  | Happened | 2.3% | 15.3% | 22.4% | 39.2% | 42.1% | 55.4% | 61.4% | 76.4% | 90.2% |
+  | Rows | 4,741 | 1,134 | 769 | 429 | 480 | 314 | 228 | 123 | 41 |
+
+  By position the average prediction is within 0.4 points of the hit rate (QB 17.2 vs 16.9%,
+  RB 18.2 vs 18.3%, WR 15.4 vs 15.4%, TE 11.8 vs 12.2%).
+
+**Grading the props** (`services/props_calibration.py`). Stored prop-derived stats are
+compared with the box score (players who sat are skipped: their props were void), and each
+stat (pass yds, pass TDs, INTs, rush yds, receptions, rec yds, TDs) gets a factor
+`1 + n / (n + 150) × (actual ÷ expected − 1)`, capped at 0.8–1.2, and 1.0 under 30 pairs.
+Each week's factors only use earlier weeks. `python -m services.props_calibration --season 2026`
+reports the error of prop-implied points (on the stats the props cover) with and without
+the correction, on weeks the factors never saw.
+- **Status: off** (`ENABLED = False`). Props are stored for weeks 7–8 of 2026 only (289
+  player-weeks with a box score, 23 of them in week 8 at the time of the check). Week 8 with
+  factors learned from week 7: RMSE 4.13 → 4.07 points, too few rows to tell from noise.
+- So far the props ran short on yardage (rush yds +6.1 per player, rec yds +3.1) and about
+  right on TDs and receptions, as expected when a median line stands in for a right-skewed
+  mean. Turn it on once a few more weeks show the gain holds.
+
 **Saved locally.** Two tables in the local SQLite database (never committed) store the results:
 - **`rankings_snapshots`:** the computed week, keyed by league settings, week, every data input
   and a hash of the model code. A change to any of them recomputes; otherwise a load (even

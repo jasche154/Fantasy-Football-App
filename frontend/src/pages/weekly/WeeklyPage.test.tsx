@@ -205,6 +205,37 @@ describe('WeeklyPage', () => {
     }
   });
 
+  it('shows the chance of a big week in the table and the full ladder under Why?', async () => {
+    const odds = [{ points: 10, probability: 0.82 }, { points: 15, probability: 0.55 }, { points: 20, probability: 0.31 }];
+    const chase = weeklyPlayer(1, { threshold_odds: odds });
+    const longShot = { ...weekly(7).results[1], threshold_odds: [{ points: 20, probability: 0.004 }] };
+    mockFetch([
+      META_ROUTE,
+      { path: '/api/rankings/weekly', reply: json(weekly(7, { results: [chase, longShot] })) },
+      { path: `/api/rankings/weekly/${CHASE.id}/explain`, reply: json({ ...chase, season: 2026, week: 7, steps: [
+        { label: 'Projection', value: '18.4', detail: 'If active: 18.4.' }] }) },
+    ]);
+    const user = userEvent.setup();
+    renderWithProviders(<WeeklyPage />);
+    const table = await screen.findByRole('table');
+    const [, chaseRow, bijanRow] = within(table).getAllByRole('row');
+    const top = within(chaseRow).getByText('20+ pts: 31%');
+    expect(top).toHaveAttribute('title', expect.stringContaining('10+ pts: 82%, 15+ pts: 55%, 20+ pts: 31%'));
+    expect(within(bijanRow).getByText('20+ pts: <1%')).toBeInTheDocument();
+
+    await user.click(within(chaseRow).getByRole('button', { name: /^Why/ }));
+    const ladder = await screen.findByRole('list', { name: `${CHASE.name}'s chance to score` });
+    expect(within(ladder).getAllByRole('listitem').map((li) => li.textContent)).toEqual(
+      ['10+ pts: 82%', '15+ pts: 55%', '20+ pts: 31%']);
+  });
+
+  it('leaves the odds out for rows without them', async () => {
+    mockFetch(routes());
+    renderWithProviders(<WeeklyPage />);
+    await screen.findByRole('table');
+    expect(screen.queryByText(/\+ pts:/)).not.toBeInTheDocument();
+  });
+
   it('shows an empty state when nothing is projected', async () => {
     mockFetch([META_ROUTE, { path: '/api/rankings/weekly', reply: json(weekly(7, { results: [], refresh: null })) }]);
     renderWithProviders(<WeeklyPage />);

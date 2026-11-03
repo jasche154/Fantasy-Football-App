@@ -244,6 +244,10 @@
 .explain-step__value { color: var(--color-accent-strong); }
 .explain-step__detail { color: var(--color-text-muted); }
 @media (max-width: 760px) { .explain-step { grid-template-columns: 1fr; gap: 2px; } }
+.threshold-odds { display: block; font-size: var(--text-2xs); color: var(--color-text-muted); white-space: nowrap; }
+.threshold-ladder { display: grid; grid-template-columns: 11rem auto 1fr; gap: var(--space-3); align-items: baseline; padding-block-end: var(--space-2); font-size: var(--text-sm); white-space: normal; }
+.threshold-ladder ul { display: flex; flex-wrap: wrap; gap: var(--space-3); margin: 0; padding: 0; list-style: none; font-weight: 700; color: var(--color-accent-strong); }
+@media (max-width: 760px) { .threshold-ladder { grid-template-columns: 1fr; gap: 2px; } }
 
 .start-sit__controls { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-end; margin-block: var(--space-4); }
 .start-sit__advice { margin-block-end: var(--space-3); padding: var(--space-3) var(--space-4); border-inline-start: 3px solid var(--color-accent); background: var(--color-accent-soft); border-radius: var(--radius-sm); }
