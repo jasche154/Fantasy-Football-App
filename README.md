@@ -573,7 +573,8 @@ the rest in its tooltip) and **Why?** lists all three.
   simulation agree.
 - **Calibration** (`python -m services.threshold_calibration --season 2026`): saved
   pre-kickoff projections for weeks 1–7 of 2026 (8,262 player-week thresholds, PPR; the
-  ranges were fit on 2021–2025, a player who sat counts as 0). Predicted 15.3% on average,
+  ranges were fit on 2021–2025, so those seasons are refused as in-sample; a player who sat
+  counts as 0, and players already ruled out are left out of the scores). Predicted 15.3% on average,
   hit 15.4%; Brier score 0.092 vs 0.130 for always guessing the base rate.
 
   | Predicted | 0–10% | 10–20% | 20–30% | 30–40% | 40–50% | 50–60% | 60–70% | 70–80% | 80–90% |
@@ -585,16 +586,17 @@ the rest in its tooltip) and **Why?** lists all three.
   RB 18.2 vs 18.3%, WR 15.4 vs 15.4%, TE 11.8 vs 12.2%).
 
 **Grading the props** (`services/props_calibration.py`). Stored prop-derived stats are
-compared with the box score (players who sat are skipped: their props were void), and each
+compared with the box score (players who sat are skipped: their props were void; a player
+with offensive snaps but no box score played and counts as all zeros), and each
 stat (pass yds, pass TDs, INTs, rush yds, receptions, rec yds, TDs) gets a factor
 `1 + n / (n + 150) × (actual ÷ expected − 1)`, capped at 0.8–1.2, and 1.0 under 30 pairs.
 Each week's factors only use earlier weeks. `python -m services.props_calibration --season 2026`
 reports the error of prop-implied points (on the stats the props cover) with and without
 the correction, on weeks the factors never saw.
-- **Status: off** (`ENABLED = False`). Props are stored for weeks 7–8 of 2026 only (289
-  player-weeks with a box score, 23 of them in week 8 at the time of the check). Week 8 with
-  factors learned from week 7: RMSE 4.13 → 4.07 points, too few rows to tell from noise.
-- So far the props ran short on yardage (rush yds +6.1 per player, rec yds +3.1) and about
+- **Status: off** (`ENABLED = False`). Props are stored for weeks 7–8 of 2026 only (323
+  player-weeks where the player played, 23 of them in week 8 at the time of the check). Week 8
+  with factors learned from week 7: RMSE 4.13 → 4.10 points, too few rows to tell from noise.
+- So far the props ran short on yardage (rush yds +5.7 per player, rec yds +2.9) and about
   right on TDs and receptions, as expected when a median line stands in for a right-skewed
   mean. Turn it on once a few more weeks show the gain holds.
 

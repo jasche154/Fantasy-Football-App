@@ -6,7 +6,8 @@ Run from backend/ (reads only; never calls The Odds API):
 Each week's stored props (weekly_source_projections, source "vegas_props") are expected
 stats: pass_yds, pass_tds, ints, rush_yds, rec, rec_yds and scrimmage_tds. Paired with the
 player's box score that week (players without one didn't play, and their props were void),
-each stat gets a multiplicative factor:
+each stat gets a multiplicative factor (a player with offensive snaps but no box score
+played and recorded nothing, so he counts with all stats 0):
 
     raw    = sum(actual) / sum(prop expectation)       (matches the mean)
     factor = 1 + n / (n + PSEUDO_SAMPLES) * (raw - 1), within [MIN_FACTOR, MAX_FACTOR]
@@ -35,7 +36,7 @@ from dataclasses import dataclass
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
-from database.models import PlayerStatsWeekly, WeeklySourceProjection
+from database.models import PlayerSnapCountsWeekly, PlayerStatsWeekly, WeeklySourceProjection
 from services.league import LeagueSettings
 from services.weekly_model import points_from_stats
 
@@ -85,16 +86,26 @@ def load_pairs(session: Session, season: int, before_week: int | None = None) ->
     box = {(r.season, r.week, r.player_id): r for r in session.scalars(select(PlayerStatsWeekly).where(
         PlayerStatsWeekly.season.in_(seasons), PlayerStatsWeekly.season_type == "REG",
         PlayerStatsWeekly.player_id.in_({pid for _, _, pid in latest})))}
+    # Took offensive snaps but no stat line: he played and recorded nothing (as in
+    # projection_eval.actual_points). Leaving these out would hide busts and lift the factors.
+    snapped = set(session.execute(select(
+        PlayerSnapCountsWeekly.season, PlayerSnapCountsWeekly.week, PlayerSnapCountsWeekly.player_id).where(
+        PlayerSnapCountsWeekly.season.in_(seasons), PlayerSnapCountsWeekly.offense_snaps > 0,
+        PlayerSnapCountsWeekly.player_id.in_({pid for _, _, pid in latest}))).tuples())
     pairs = []
     for key, row in sorted(latest.items()):
-        if key not in box:
+        if key in box:
+            actual = actual_stats(box[key])
+        elif key in snapped:
+            actual = dict.fromkeys(STATS, 0.0)
+        else:
             continue                                     # didn't play: the props were void
         try:
             props = {k: float(v) for k, v in json.loads(row.stats or "{}").items() if k in STATS}
         except (ValueError, TypeError, AttributeError):
             continue
         if props:
-            pairs.append(Pair(*key, row.position, props, actual_stats(box[key])))
+            pairs.append(Pair(*key, row.position, props, actual))
     return pairs
 
 

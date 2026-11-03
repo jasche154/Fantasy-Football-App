@@ -3,9 +3,11 @@ import { formatFraction, formatNumber } from '../../lib/format';
 
 const BARELY = 0.01;
 
-/** "31%", with "<1%" for long shots that would otherwise read as impossible. */
+/** "31%", with "<1%" and ">99%" for odds that would otherwise round to impossible or certain. */
 export function oddsPercent(probability: number): string {
-  return probability > 0 && probability < BARELY ? '<1%' : formatFraction(probability, 0);
+  if (probability > 0 && probability < BARELY) return '<1%';
+  if (probability > 1 - BARELY && probability < 1) return '>99%';
+  return formatFraction(probability, 0);
 }
 
 /** "20+ pts: 31%". */
