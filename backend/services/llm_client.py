@@ -14,7 +14,7 @@ import logging
 import re
 import threading
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any, Literal
 
@@ -42,8 +42,9 @@ TOOL_NAME_IN_ERROR = re.compile(r"\btool\s+['\"`]?([A-Za-z_][A-Za-z0-9_]{0,63})\
 # question moves to Gemini mid-way. Google documents this value for calls made outside Gemini.
 SIGNATURE_PLACEHOLDER = "skip_thought_signature_validator"
 ERROR_CODE = re.compile(r"[A-Za-z_]{1,40}")    # an error's status enum (e.g. UNAVAILABLE) is safe to log
-# A provider's next model is tried when one is overloaded, missing or out of its own quota.
-MODEL_FAILURE_STATUSES = frozenset({400, 404, 429, 500, 502, 503, 504})
+# A provider's next model is tried when one is overloaded, missing or out of its own quota (not on 400:
+# an invalid request fails on every model and would only spend their small daily quotas).
+MODEL_FAILURE_STATUSES = frozenset({404, 429, 500, 502, 503, 504})
 
 ErrorKind = Literal["rate_limit", "too_large", "provider"]
 
@@ -114,9 +115,10 @@ def _error_body(response: httpx.Response) -> dict:
 class _ModelFailed(Exception):
     """This model failed in a way another model of the same provider may not (wraps the error to raise)."""
 
-    def __init__(self, error: AgentUnavailable):
+    def __init__(self, error: AgentUnavailable, timed_out: bool = False):
         super().__init__(str(error))
         self.error = error
+        self.timed_out = timed_out
 
 
 def _error_code(error: dict) -> str:
@@ -170,20 +172,26 @@ def _usage(data: dict) -> dict | None:
     return {key: int(usage.get(key) or 0) for key in ("prompt_tokens", "completion_tokens")}
 
 
-def _signed(call: dict) -> dict:
-    """A tool call Gemini accepts: one from another provider (no thought signature) gets Google's placeholder."""
+def _signed(call: dict, own: bool) -> dict:
+    """A tool call Gemini accepts. A signature only counts for the model that made the call (`own`); calls
+    from another provider (no signature) or another Gemini model get Google's placeholder."""
     google = (call.get("extra_content") or {}).get("google") or {}
-    if google.get("thought_signature"):
+    if own and google.get("thought_signature"):
         return call
     extra = {**(call.get("extra_content") or {}), "google": {**google, "thought_signature": SIGNATURE_PLACEHOLDER}}
     return {**call, "extra_content": extra}
 
 
-def _outgoing(messages: Sequence[dict], keeps_extra: bool) -> list[dict]:
-    """Tool calls fit the provider (new copies, input untouched): Gemini gets every call signed, the others
-    lose provider-specific fields they might reject."""
+def _outgoing(messages: Sequence[dict], keeps_extra: bool, model: str = "",
+              made_by: Mapping[str, str] | None = None) -> list[dict]:
+    """Tool calls fit the provider (new copies, input untouched): Gemini gets every call signed (`made_by`:
+    tool call id -> the model that made it), the others lose provider-specific fields they might reject."""
+    made_by = made_by or {}
+
     def fix(call: dict) -> dict:
-        return _signed(call) if keeps_extra else {k: v for k, v in call.items() if k in TOOL_CALL_KEYS}
+        if keeps_extra:
+            return _signed(call, own=made_by.get(call.get("id", "")) == model)
+        return {k: v for k, v in call.items() if k in TOOL_CALL_KEYS}
     return [{**m, "tool_calls": [fix(c) for c in m["tool_calls"]]} if m.get("tool_calls") else m for m in messages]
 
 
@@ -196,6 +204,7 @@ class OpenAICompatClient:
         # The model that last answered stays first: Gemini's thought signatures belong to one model.
         self._models = tuple(dict.fromkeys((profile.model, *profile.fallback_models)))
         self._model_index = 0
+        self._made_by: dict[str, str] = {}      # tool call id -> model that made it (its signature's owner)
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         self._http = httpx.Client(base_url=profile.base_url, headers=headers, timeout=timeout, transport=transport)
 
@@ -214,7 +223,7 @@ class OpenAICompatClient:
 
     def _payload(self, model: str, messages: Sequence[dict], tools: list[dict] | None) -> dict[str, Any]:
         payload: dict[str, Any] = {"model": model, "temperature": TEMPERATURE,
-                                   "messages": _outgoing(messages, self.profile.keeps_extra)}
+                                   "messages": _outgoing(messages, self.profile.keeps_extra, model, self._made_by)}
         if "gpt-oss" in model:
             payload["reasoning_effort"] = "low"     # fewer hidden reasoning tokens against the budget
         if tools:
@@ -225,19 +234,23 @@ class OpenAICompatClient:
 
     def complete(self, messages: list[dict], tools: list[dict] | None) -> dict:
         failure: AgentUnavailable | None = None
+        timed_out = False           # one slow model moves on; a second timeout ends the call (20 s each)
         for index in range(self._model_index, len(self._models)):
             try:
-                reply = self._complete_with(self._models[index], messages, tools, last=index == len(self._models) - 1)
+                reply = self._complete_with(self._models[index], messages, tools,
+                                            last=index == len(self._models) - 1, retry_timeout=not timed_out)
             except _ModelFailed as exc:
-                failure = exc.error
+                failure, timed_out = exc.error, timed_out or exc.timed_out
                 log.warning("%s model %s failed; trying %s", self.profile.name, self._models[index],
                             self._models[index + 1])
                 continue
             self._model_index = index
+            self._made_by.update((c["id"], self._models[index]) for c in reply["tool_calls"] if c["id"])
             return reply
         raise failure or AgentUnavailable("The language model request failed.")
 
-    def _complete_with(self, model: str, messages: list[dict], tools: list[dict] | None, last: bool) -> dict:
+    def _complete_with(self, model: str, messages: list[dict], tools: list[dict] | None, last: bool,
+                       retry_timeout: bool = True) -> dict:
         """One model's reply; _ModelFailed (unless `last`) when the provider's next model might answer."""
         name = self.profile.name
         try:
@@ -245,8 +258,8 @@ class OpenAICompatClient:
         except httpx.HTTPError as exc:      # timeouts, refused connections, DNS
             log.warning("%s request failed: %s", name, type(exc).__name__)
             error = AgentUnavailable(f"The language model request failed: {type(exc).__name__}")
-            if isinstance(exc, httpx.TimeoutException) and not last:
-                raise _ModelFailed(error) from exc
+            if isinstance(exc, httpx.TimeoutException) and retry_timeout and not last:
+                raise _ModelFailed(error, timed_out=True) from exc
             raise error from exc
         try:
             _raise_for_status(name, response)
@@ -366,14 +379,14 @@ class FallbackClient:
                    too_small: set[str]) -> dict:
         cooling = [self._cooldown(c) for c in self._clients if c.profile.name not in too_small]
         cooling = [entry for entry in cooling if entry[0] > 0]
-        # Groq at its per-minute limit and Gemini down: the limit surely passes, so it's a rate limit
-        # (the agent waits it out), retried as soon as either provider may answer.
-        limited = any(kind == "rate_limit" for _, kind in cooling)
+        # Groq at its per-minute limit and Gemini down: the limit surely passes, so it's a rate limit the
+        # agent waits out, until the rate-limited provider is back (the failing one may still be failing).
+        limited = [seconds for seconds, kind in cooling if kind == "rate_limit"]
         if last_error and not limited:
             raise last_error
         if not cooling:                      # only providers too small for this request were left
             raise too_large or AgentUnavailable(TOO_LARGE_MESSAGE, kind="too_large")
-        wait = min(seconds for seconds, _ in cooling)
+        wait = min(limited or [seconds for seconds, _ in cooling])
         seconds = max(1, round(wait))
         if not limited:
             raise AgentUnavailable(f"The AI providers are unreachable right now. Try again in about {seconds} "

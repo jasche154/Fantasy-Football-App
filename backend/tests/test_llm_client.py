@@ -255,8 +255,8 @@ def test_a_pending_rate_limit_makes_a_mixed_cooldown_waitable_until_the_soonest_
         chain.complete([], None)
     with pytest.raises(AgentUnavailable) as info:          # gemini's 30 s outage ends first
         chain.complete([], None)
-    # A rate limit is pending, so it's waitable; the retry comes when gemini may be back.
-    assert info.value.kind == "rate_limit" and info.value.retry_after == 30
+    # A rate limit is pending, so it's waitable, until groq (the one sure to answer) is back.
+    assert info.value.kind == "rate_limit" and 119 <= info.value.retry_after <= 120
     clock.now += 31
     chain = FallbackClient([client_for("groq", respond(429, {}, {"retry-after": "120"})),
                             client_for("gemini", respond(429, {}, {"retry-after": "500"}))], clock=clock)
@@ -408,7 +408,7 @@ def test_a_short_rate_limit_beats_another_providers_outage():
     gemini = client_for("gemini", respond(503, OVERLOADED))
     with pytest.raises(AgentUnavailable) as caught:
         FallbackClient([groq, gemini], clock=Clock()).complete([], None)
-    assert caught.value.kind == "rate_limit" and caught.value.retry_after == 30     # gemini may be back first
+    assert caught.value.kind == "rate_limit" and caught.value.retry_after == 36     # when groq is back
 
 
 def test_gemini_gets_a_placeholder_signature_on_tool_calls_from_another_provider():
@@ -422,10 +422,58 @@ def test_gemini_gets_a_placeholder_signature_on_tool_calls_from_another_provider
                {"role": "tool", "tool_call_id": "fc_groq", "content": "{}"}]
     client_for("gemini", respond(200, ok_body("ok")), seen).complete(history, None)
     sent = json.loads(seen[0].content)["messages"][1]["tool_calls"]
-    assert sent[0]["extra_content"]["google"]["thought_signature"] == "real-signature"         # kept as it came
-    assert sent[1]["extra_content"]["google"]["thought_signature"] == llm_client.SIGNATURE_PLACEHOLDER
+    # Neither call was made by this client's model, so both carry the placeholder (own signatures are kept:
+    # test_a_signature_is_only_sent_to_the_model_that_made_it).
+    assert [c["extra_content"]["google"]["thought_signature"] for c in sent] == [llm_client.SIGNATURE_PLACEHOLDER] * 2
     assert "extra_content" not in unsigned                                                       # input untouched
 
     groq_seen = []
     client_for("groq", respond(200, ok_body("ok")), groq_seen).complete(history, None)
     assert all("extra_content" not in c for c in json.loads(groq_seen[0].content)["messages"][1]["tool_calls"])
+
+
+def test_an_invalid_request_is_not_retried_on_every_model():
+    """A 400 fails on every model alike; retrying would only spend each model's small daily quota."""
+    seen = []
+    invalid = {"error": {"code": 400, "status": "INVALID_ARGUMENT", "message": "bad"}}
+    with pytest.raises(AgentUnavailable, match="HTTP 400"):
+        client_for("gemini", respond(400, invalid), seen).complete([], None)
+    assert models_sent(seen) == ["gemini-3.8-flash"]
+
+
+def test_only_one_timeout_moves_down_the_models():
+    seen = []
+
+    def slow(_request):
+        raise httpx.ReadTimeout("slow")
+    with pytest.raises(AgentUnavailable, match="ReadTimeout"):
+        client_for("gemini", slow, seen).complete([], None)
+    assert len(seen) == 2                      # 3.8 then 3.5, never a third 20 s wait
+
+
+def test_a_signature_is_only_sent_to_the_model_that_made_it():
+    """3.8 makes a tool call, then is overloaded: 3.5 gets the placeholder, not 3.8's signature."""
+    seen = []
+    signed_call = {"id": "g1", "type": "function", "function": {"name": "a", "arguments": "{}"},
+                   "extra_content": {"google": {"thought_signature": "from-3.8"}}}
+    replies = iter([httpx.Response(200, json=ok_body(tool_calls=[signed_call])),
+                    httpx.Response(503, json=OVERLOADED), httpx.Response(200, json=ok_body("done"))])
+    client = client_for("gemini", lambda _request: next(replies), seen)
+    first = client.complete([{"role": "user", "content": "q"}], None)
+    history = [{"role": "user", "content": "q"},
+               {"role": "assistant", "content": "", "tool_calls": [{**c, **c.pop("extra", {})}
+                                                                     for c in first["tool_calls"]]},
+               {"role": "tool", "tool_call_id": "g1", "content": "{}"}]
+    assert client.complete(history, None)["content"] == "done"
+    sent = [json.loads(r.content) for r in seen[1:]]
+    signatures = [m["messages"][1]["tool_calls"][0]["extra_content"]["google"]["thought_signature"] for m in sent]
+    assert [m["model"] for m in sent] == ["gemini-3.8-flash", "gemini-3.5-flash"]
+    assert signatures == ["from-3.8", llm_client.SIGNATURE_PLACEHOLDER]
+
+
+def test_error_codes_are_logged_only_as_plain_identifiers(caplog):
+    for code in ("INVALID_ARGUMENT", "has spaces in it", "sk-live-1234"):
+        with pytest.raises(AgentUnavailable):
+            client_for("groq", respond(500, {"error": {"status": code}})).complete([], None)
+    assert "INVALID_ARGUMENT" in caplog.text
+    assert "has spaces" not in caplog.text and "sk-live" not in caplog.text

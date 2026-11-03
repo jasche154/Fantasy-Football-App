@@ -878,7 +878,10 @@ model is overloaded (503 "high demand"), failing or out of its own daily quota (
 each model allows about 20 requests a day), and stays on the model that answered. A question
 can start on Groq and finish on Gemini: Gemini 3 rejects earlier tool calls without a "thought
 signature", so calls from other providers carry Google's documented placeholder. When one
-provider is rate-limited and another is down, the chat waits for whichever may answer first.
+provider is rate-limited and another is down, the chat waits until the rate-limited one is back.
+A model only gets its own thought signatures back; calls made by another Gemini model also get
+the placeholder. A 400 (an invalid request) is not retried on other models, and only one
+timeout per call moves on to the next model.
 
 | Provider | Default model | Free limits (checked 2026-10-30) | Data use |
 |---|---|---|---|
