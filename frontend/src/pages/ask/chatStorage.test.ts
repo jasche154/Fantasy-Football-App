@@ -15,6 +15,13 @@ describe('chatStorage', () => {
     expect(window.localStorage.getItem(STORAGE_KEY)).toBeNull();
   });
 
+  it('keeps the "answered by the app" mark and drops unknown values', () => {
+    saveChat({ leagueId: null, memory: [], entries: [
+      { id: 'a', role: 'assistant', content: 'Roster', toolCalls: [], answeredBy: 'app' },
+      { id: 'b', role: 'assistant', content: 'AI', toolCalls: [], answeredBy: 'robot' as never }] });
+    expect(loadChat().entries.map((entry) => entry.answeredBy)).toEqual(['app', undefined]);
+  });
+
   it('survives corrupt or hostile storage', () => {
     window.localStorage.setItem(STORAGE_KEY, '{not json');
     expect(loadChat().entries).toEqual([]);

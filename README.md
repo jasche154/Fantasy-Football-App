@@ -845,8 +845,18 @@ from fixed templates keyed on the tools used (never model or Yahoo text), a "Sou
 which data was used and for which week, a note appears when an answer was partial or had
 unverified details, and a free-tier rate limit shows a countdown with Retry.
 
-**Evaluation set** (`services/eval_cases.py`, runner `services/agent_eval.py`): 63 saved
-questions across 18 intents, including multi-turn follow-ups and out-of-scope questions; 22 are
+**Instant answers without AI** (`services/agent_direct.py`): a few plain questions are answered
+straight from a tool result with a fixed template and no LLM call, so they cost no free-tier
+quota and work without a provider key: "show my roster" / "who's on my team" (`get_my_team`),
+"who should I start" / "set my lineup" (best lineup, changes and alerts from `get_my_team`),
+"standings" (by record, then points for) and "power rankings" (`get_power_rankings`). The whole
+question must be one of those phrases (no players, conditions or second requests) and one league
+must be in scope (the chat's league or the only one imported); anything else, or a tool error,
+goes to the AI as usual. The reply has the normal shape plus `answered_by: "app"`, and the chat
+shows "Answered instantly from the app's data, without AI."
+
+**Evaluation set** (`services/eval_cases.py`, runner `services/agent_eval.py`): 66 saved
+questions across 18 intents, including multi-turn follow-ups and out-of-scope questions; 24 are
 held out for scoring only. The test suite checks offline that routing sends every case's tools,
 plus the loop, grounding, truncation, fallback and injection cases with a scripted fake model.
 With a provider key, `python -m services.agent_eval` runs them through the real model and checks
@@ -878,6 +888,20 @@ answer ships with a "Not verified against the app's data: …" line and the chat
 The out-of-rounds answer is checked the same way. Tool fields say what they are (`proj`,
 matchups and schedules in words like "6% harder than average") so the model can't mislabel a
 projection as an actual score.
+
+**Roster check** (`services/grounding_roster.py`): when one league is in scope (the chat's
+league, the only imported one, or the one league this question's tools used), advice is checked
+against every team's imported roster. "Pick up / add / claim / bid on X" is flagged when X is
+already on a roster in that league, and "start / bench / drop X" when X isn't on yours. It goes
+through the same one revision, then the "Not verified" line. Only advice-shaped clauses count
+(the clause starts with the verb, optionally after "I'd", "you should" and the like, and the
+player's full or unique last name follows it directly), so "Rival will start X", "don't drop X",
+ambiguous last names and typo guesses are never flagged.
+
+**Prompt rules** worth knowing: a downgrade must state the points-per-game change, projections
+and simulations are called estimates (only box scores are facts), and the prompt lists what the
+app can do (price any trade with `evaluate_trade`, waivers and bids, start/sit, matchup odds,
+injuries, rankings, stats, playoff odds and standings) so the model never says it can't.
 
 **Untrusted text:** news headlines and summaries pass through `labels.untrusted()` (one line,
 no control or zero-width characters, role markers and instruction-like sentences replaced
@@ -919,8 +943,8 @@ countdown, and the page names it as the daily limit.
 1. **REST:** `GET /api/agent/tools` lists them, `POST /api/agent/tools/{name}` runs one.
 2. **Built-in chat:** `POST /api/agent/chat` runs a multi-round tool-calling loop on the
    providers in `LLM_CHAIN` (set `GROQ_API_KEY` for the default). Rate limits return 429 with
-   `Retry-After`; the reply includes `stop_reason`, `unverified`, `provider`, `data_as_of` and
-   `suggestions`. Try it from the command line:
+   `Retry-After`; the reply includes `stop_reason`, `unverified`, `provider`, `answered_by`
+   (`"ai"`, or `"app"` for an instant answer), `data_as_of` and `suggestions`. Try it from the command line:
    `python -m testing.groq_test "Is trading Bijan Robinson for Ja'Marr Chase fair?"`
 3. **MCP server** for Claude Desktop, Claude Code, or any MCP client:
    ```bash

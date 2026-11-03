@@ -346,6 +346,8 @@ export interface ChatResponse {
   unverified?: string[];
   /** Which AI provider answered (e.g. "groq"). */
   provider?: string | null;
+  /** "app": answered instantly from the app's own data with no AI call (e.g. "show my roster"). */
+  answered_by?: 'ai' | 'app';
   data_as_of?: { season: number | null; week: number | null };
   /** Follow-up questions built from fixed templates on the server. */
   suggestions?: string[];

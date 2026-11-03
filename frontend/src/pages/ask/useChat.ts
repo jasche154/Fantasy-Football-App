@@ -56,6 +56,7 @@ function replyFields(response: ChatResponse): Omit<ChatEntry, 'id' | 'role' | 'c
     dataAsOf: response.data_as_of,
     stopReason: response.stop_reason,
     provider: response.provider ?? null,
+    answeredBy: response.answered_by,
   };
 }
 

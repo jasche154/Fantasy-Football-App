@@ -7,7 +7,8 @@ from sqlalchemy.orm import Session
 
 from config import get_settings
 from database.db import get_session
-from services.agent import AgentUnavailable, run_agent
+from services.agent import AgentReply, AgentUnavailable, run_agent
+from services.agent_direct import answer_directly
 from services.agent_suggestions import suggest
 from services.llm_client import build_llm_client
 from services.my_team import my_leagues
@@ -78,28 +79,34 @@ def _unavailable(exc: AgentUnavailable) -> HTTPException:
     return HTTPException(status, TOO_LARGE if status == 413 else str(exc), headers=headers)
 
 
-@router.post("/agent/chat")
-def agent_chat(request: ChatRequest, session: Session = Depends(get_session)) -> dict:
-    leagues = my_leagues(session)
-    if request.league_id is not None and request.league_id not in {league.id for league, _ in leagues}:
-        raise HTTPException(422, "That league isn't imported.")
+def _ask_llm(session: Session, history: list[dict], request: ChatRequest) -> AgentReply:
     client = build_llm_client(get_settings())
     if client is None:
         raise HTTPException(503, NO_LLM)
     try:
-        result = run_agent(session, client, [m.model_dump() for m in request.messages],
-                           memory=request.memory, league_id=request.league_id)
+        return run_agent(session, client, history, memory=request.memory, league_id=request.league_id)
     except AgentUnavailable as exc:
         raise _unavailable(exc) from exc
     finally:
         close = getattr(client, "close", None)    # releases the HTTP connection pool; test fakes have none
         if callable(close):
             close()
+
+
+@router.post("/agent/chat")
+def agent_chat(request: ChatRequest, session: Session = Depends(get_session)) -> dict:
+    leagues = my_leagues(session)
+    if request.league_id is not None and request.league_id not in {league.id for league, _ in leagues}:
+        raise HTTPException(422, "That league isn't imported.")
+    history = [m.model_dump() for m in request.messages]
+    # A few plain questions ("show my roster") are answered from a tool result, with no LLM call.
+    result = (answer_directly(session, history, request.memory, request.league_id)
+              or _ask_llm(session, history, request))
     season = latest_season(session)
     names = [t.name for t in result.tool_calls]
     return {"reply": result.reply,
             "tool_calls": [{"name": t.name, "arguments": dict(t.arguments), "ok": t.ok} for t in result.tool_calls],
             "memory": list(result.memory), "stop_reason": result.stop_reason, "unverified": list(result.unverified),
-            "provider": result.provider,
+            "provider": result.provider, "answered_by": result.answered_by,
             "data_as_of": {"season": season, "week": latest_week(session, season) if season else None},
             "suggestions": suggest(names, bool(leagues))}
