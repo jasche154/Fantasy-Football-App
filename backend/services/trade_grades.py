@@ -23,7 +23,7 @@ from services.yahoo_sync import modeled_position
 
 WIN_MARGIN = 10.0
 COMPLETED = ("successful", None)
-NO_TIME_HOURS = 12                     # a game with a date but no time: assume noon-ish US Eastern
+NO_TIME_HOURS = 17                     # a game with a date but no time: about 1 PM US Eastern
 
 
 def week_starts(session: Session, season: int) -> dict[int, datetime]:

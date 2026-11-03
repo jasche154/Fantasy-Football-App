@@ -13,6 +13,7 @@ Past trades, graded on the points scored since: services/trade_grades.py.
 
 Everything is read live from Yahoo and cached for CACHE_SECONDS per league.
 """
+import logging
 import time
 from collections import Counter
 from collections.abc import Sequence
@@ -43,11 +44,13 @@ from services.valuation import build_valuation
 
 CACHE_SECONDS = 3600
 TRANSACTIONS_PAGE = 200
+MAX_TRADE_PAGES = 10             # 2,000 trades: far more than any league makes in a season
 ACTIVE_TRADER_TRADES = 2
 WAIVER_REGULAR_FACTOR = 1.5      # moves vs the league median
 QUIET_MOVES = 2
 TOP_POSITIONS = 2
 
+logger = logging.getLogger(__name__)
 _cache: dict[int, tuple[float, dict]] = {}
 _lock = Lock()
 
@@ -99,6 +102,31 @@ def tendencies(standings: Sequence[dict], transactions: Sequence[dict],
     return out
 
 
+def _transactions(http: httpx.Client, token, key: str) -> list[dict]:
+    """The latest TRANSACTIONS_PAGE adds, plus every trade this season (paged, so the add volume
+    can't push trades out of the grades and trade tags)."""
+    adds = [t for t in yahoo.parse_transactions(
+        yahoo.api_get(http, token, f"league/{key}/transactions;types=add;count={TRANSACTIONS_PAGE}"))
+        if t.get("type") != "trade"]
+    trades: list[dict] = []
+    for page in range(MAX_TRADE_PAGES):
+        batch = yahoo.parse_transactions(yahoo.api_get(
+            http, token, f"league/{key}/transactions;types=trade;start={page * TRANSACTIONS_PAGE};count={TRANSACTIONS_PAGE}"))
+        trades += [t for t in batch if t.get("type") == "trade"]
+        if len(batch) < TRANSACTIONS_PAGE:
+            break
+    return adds + trades
+
+
+def _luck(http: httpx.Client, token, key: str, games_played: int) -> dict[str, dict]:
+    """All-play and luck per team; {} when Yahoo's scoreboards can't be read (the rankings still load)."""
+    try:
+        return all_play_rows(week_scores(http, token, key, games_played))
+    except (httpx.HTTPError, yahoo.YahooError) as exc:
+        logger.warning("All-play scoreboards unavailable (%s)", type(exc).__name__)
+        return {}
+
+
 def _habits(session: Session, league, rules: dict, standings: Sequence[dict], transactions: Sequence[dict],
             games_played: int) -> tuple[dict[str, dict], list[dict]]:
     """(tendencies with tags, graded past trades)."""
@@ -125,8 +153,7 @@ def _build(session: Session, settings: Settings, http: httpx.Client, reference: 
     token = yahoo_sync.fresh_token(session, settings, http)
     key = league.platform_league_id
     standings = yahoo.parse_standings(yahoo.api_get(http, token, f"league/{key}/standings"))
-    transactions = yahoo.parse_transactions(
-        yahoo.api_get(http, token, f"league/{key}/transactions;types=add,trade;count={TRANSACTIONS_PAGE}"))
+    transactions = _transactions(http, token, key)
     rules = mt.league_rules(league)
     league_settings = mt.league_settings(league)
     valuation = build_valuation(session, league_settings)
@@ -153,7 +180,7 @@ def _build(session: Session, settings: Settings, http: httpx.Client, reference: 
     playoff_teams = int(rules.get("playoff_teams") or (6 if len(keys) >= 10 else 4))     # Yahoo's defaults
     odds = simulate_season(keys, weekly, wins, points, games, playoff_teams, losses=losses)
     habits, past_trades = _habits(session, league, rules, standings, transactions, games_played)
-    luck = all_play_rows(week_scores(http, token, key, games_played), wins)
+    luck = _luck(http, token, key, games_played)
     remaining_opponents: dict[str, list[float]] = {k: [] for k in keys}
     for week, home, away in games:
         if home in remaining_opponents and away in weekly:
