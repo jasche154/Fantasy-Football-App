@@ -3,10 +3,11 @@ import json
 
 import pytest
 
-from database.models import Player, PlayerStatsWeekly, WeeklySourceProjection
+from database.models import Player, PlayerSnapCountsWeekly, PlayerStatsWeekly, WeeklySourceProjection
 from services import props_calibration as pc
 from services import weekly_rankings
 from services.league import LeagueSettings
+from services.valuation import build_valuation
 from services.weekly_rankings import build_weekly_rankings
 from tests.test_weekly_rankings import seed_week
 
@@ -41,6 +42,17 @@ def test_pairs_skip_void_props_and_respect_the_week(session, seeded):
     assert pc.load_pairs(session, SEASON, before_week=1) == []
     pair = before_three[0]
     assert pair.actual["rush_yds"] == 72.0 and pair.props == {"rush_yds": 60.0, "scrimmage_tds": 0.5}
+
+
+def test_a_player_with_snaps_but_no_box_score_counts_as_zero(session, seeded):
+    pids = _seed_props(session, weeks=(1,))
+    scratch = pids[-1]                                   # props, no stat line
+    assert all(p.player_id != scratch for p in pc.load_pairs(session, SEASON))
+    session.add(PlayerSnapCountsWeekly(player_id=scratch, season=SEASON, week=1, offense_snaps=12))
+    session.commit()
+    bust = next(p for p in pc.load_pairs(session, SEASON) if p.player_id == scratch)
+    assert bust.actual == dict.fromkeys(pc.STATS, 0.0)
+    assert bust.props == {"rush_yds": 60.0, "scrimmage_tds": 0.5}
 
 
 def test_fit_shrinks_toward_one_and_needs_enough_samples(session, seeded):
@@ -92,3 +104,19 @@ def test_weekly_rankings_apply_the_correction_to_props_points(session, seeded, m
     # 95 props receiving yards -> 104.5: +0.95 points at 0.1 per yard.
     assert fixed.sources["vegas_props"].points == pytest.approx(plain.sources["vegas_props"].points + 0.95, abs=0.01)
     assert fixed.sources["espn"].points == plain.sources["espn"].points
+
+
+def test_blend_moves_only_the_props_source_with_prop_factors(session, seeded):
+    ids = seed_week(session)
+    league = LeagueSettings()
+    valuation = build_valuation(session, league)
+    candidates = weekly_rankings._load_sources(session, valuation.season, 7, league.scoring)
+    candidates[ids["rb1"]].props = {"rush_yds": 70.0, "scrimmage_tds": 0.5}
+    plain = {p.player_id: p for p in weekly_rankings.blend(candidates, valuation, 7, league)}[ids["rb1"]]
+    fixed = {p.player_id: p for p in weekly_rankings.blend(candidates, valuation, 7, league,
+                                                           prop_factors={"rush_yds": 1.1})}[ids["rb1"]]
+    # 70 rushing yards -> 77: +0.7 points at 0.1 per yard; every other source unchanged.
+    assert fixed.sources["vegas_props"].points == pytest.approx(plain.sources["vegas_props"].points + 0.7, abs=0.01)
+    assert {k: v for k, v in fixed.sources.items() if k != "vegas_props"} == \
+        {k: v for k, v in plain.sources.items() if k != "vegas_props"}
+    assert fixed.projection > plain.projection

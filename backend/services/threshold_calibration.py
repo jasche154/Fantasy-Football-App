@@ -6,7 +6,9 @@ Run from backend/ (reads only):
 Point in time: each row is a saved pre-kickoff projection (projection_history: if-active
 points and chance to play), the shape inputs only use games before that week, and the
 score ranges (services/score_ranges.json) were fit on earlier seasons. A player who didn't
-play counts as 0 points (the odds already include the chance he sits).
+play counts as 0 points (the odds already include the chance he sits). Seasons the ranges
+were fit on are refused (in-sample). Players ruled out before kickoff (play_prob 0) are left
+out of the scores, since a 0% call on them is trivially right; they're counted separately.
 
 Reported per threshold rank (low / mid / high, e.g. WR 10/15/20) and overall: predicted
 probabilities in bins of 0.1 with the actual hit rate, the mean predicted vs actual rate, and
@@ -47,11 +49,26 @@ def completed_weeks(session: Session, season: int) -> set[int]:
     return {w for w in loaded if any(g.week == w for g in games) and all(g.is_final for g in games if g.week == w)}
 
 
-def predictions(session: Session, season: int, scoring: str) -> list[tuple[str, int, float, bool]]:
-    """(position, threshold index, predicted probability, hit) per saved player-week and threshold."""
+def fit_seasons() -> set[int]:
+    """The seasons services/score_ranges.json was fit on (calibrating on them is in-sample)."""
+    try:
+        text = json.loads(score_ranges.PATH.read_text(encoding="utf-8"))["seasons"]
+        first, _, last = str(text).partition("-")
+        return set(range(int(first), int(last or first) + 1))
+    except (OSError, ValueError, KeyError):
+        return set()
+
+
+def predictions(session: Session, season: int, scoring: str,
+                ruled_out: bool = False) -> list[tuple[str, int, float, bool]]:
+    """(position, threshold index, predicted probability, hit) per saved player-week and threshold.
+
+    Players ruled out before kickoff (play_prob 0) are trivially right (0% and 0 points), so
+    they would flatter the Brier score: they're left out, or with ruled_out=True, the only rows.
+    """
     complete = completed_weeks(session, season)
     rows = [r for r in rankings_store.history(session, season, scoring)
-            if r.week in complete and r.position in THRESHOLDS]
+            if r.week in complete and r.position in THRESHOLDS and (r.play_prob <= 0) == ruled_out]
     actuals = actual_points(session, season, scoring)
     by_week: dict[int, list] = defaultdict(list)
     for row in rows:
@@ -110,8 +127,14 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--season", type=int, required=True)
     parser.add_argument("--scoring", choices=sorted(POINTS_PER_RECEPTION), default="ppr")
     args = parser.parse_args(argv)
+    if args.season in fit_seasons():
+        parser.error(f"{args.season} is one of the seasons the score ranges were fit on "
+                     f"({min(fit_seasons())}-{max(fit_seasons())}): that check would be in-sample.")
     with Session(engine) as session:
         result = report(predictions(session, args.season, args.scoring))
+        excluded = predictions(session, args.season, args.scoring, ruled_out=True)
+    result["ruled_out_excluded"] = {k: v for k, v in summarize([(p, h) for _, _, p, h in excluded]).items()
+                                    if k != "bins"}
     if not result["overall"]["n"]:
         log.info("No saved projections with final stats yet: not evaluated.")
         return

@@ -74,11 +74,16 @@ def test_calibration_uses_completed_weeks_and_counts_a_no_show_as_zero(session, 
     for week in (2, 9):
         session.add(PlayerStatsWeekly(player_id=star.id, season=2026, week=week, season_type="REG",
                                       fantasy_points=40.0, receptions=0))
-    for pid, week in ((star.id, 2), (benched.id, 2), (star.id, 9)):
+    out = Player(full_name="Ruled-out WR", position="WR", nfl_team="AAA", gsis_id="00-out")
+    session.add(out)
+    session.flush()
+    for pid, week, play in ((star.id, 2, 1.0), (benched.id, 2, 1.0), (star.id, 9, 1.0), (out.id, 2, 0.0)):
         session.add(ProjectionHistory(season=2026, week=week, scoring="ppr", player_id=pid, position="WR",
-                                      projection=14.0, if_active=14.0, play_prob=1.0, floor=None, ceiling=None,
-                                      sources="{}"))
+                                      projection=14.0 * play, if_active=14.0, play_prob=play, floor=None,
+                                      ceiling=None, sources="{}"))
     session.commit()
+    ruled_out = threshold_calibration.predictions(session, 2026, "ppr", ruled_out=True)
+    assert [(p, hit) for _, _, p, hit in ruled_out] == [(0.0, False)] * 3   # kept out of the scores below
     complete = threshold_calibration.completed_weeks(session, 2026)
     assert 2 in complete and 9 not in complete                   # week 9 isn't final yet
     rows = threshold_calibration.predictions(session, 2026, "ppr")
@@ -87,6 +92,15 @@ def test_calibration_uses_completed_weeks_and_counts_a_no_show_as_zero(session, 
     assert hits.count(True) == 3 and hits.count(False) == 3      # 40 points clears all; the scratch is 0
     report = threshold_calibration.report(rows)
     assert report["overall"]["n"] == 6 and report["by_threshold"]["low"]["hit_rate"] == 0.5
+
+
+def test_calibration_refuses_the_seasons_the_ranges_were_fit_on(monkeypatch, tmp_path):
+    ranges = tmp_path / "score_ranges.json"
+    ranges.write_text('{"seasons": "2021-2025", "positions": {}}', encoding="utf-8")
+    monkeypatch.setattr(score_ranges, "PATH", ranges)
+    assert threshold_calibration.fit_seasons() == {2021, 2022, 2023, 2024, 2025}
+    with pytest.raises(SystemExit):
+        threshold_calibration.main(["--season", "2024"])
 
 
 def test_calibration_report_bins_and_brier():
