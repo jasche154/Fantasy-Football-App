@@ -63,8 +63,10 @@ only *explains* numbers that came back from a tool call. Every output is labeled
   week, your weakest week, and the free agents and trade targets who beat your weakest starter
   at each position over those weeks.
 - **League power rankings:** every team's lineup strength, record, and playoff odds from
-  10,000 simulations of Yahoo's remaining schedule, with each manager's habits (active trader,
-  waiver regular, quiet; the positions they trade for and pick up).
+  10,000 simulations of Yahoo's remaining schedule, each team's all-play record and luck, each
+  manager's habits (active trader, waiver regular, quiet; the positions they trade for and pick
+  up) and tags with their evidence (FAAB whale, waiver hawk, RB hunter, trade shark...), and the
+  season's past trades graded on the points scored since.
 - **Player news** from Sleeper on player pages and under your lineup.
 - **Compare players:** any 2–4 players game by game across up to four seasons, any stat,
   with a 3-game average and a per-season summary.
@@ -172,7 +174,7 @@ Open <http://localhost:5173>. The UI talks to `http://localhost:8000` by default
 |---|---|
 | **Dashboard** | Top buy-low and sell-high players with the reason behind each, Sleeper's most-added players, data freshness |
 | **Matchup** | This week's Yahoo opponent. Both starting lineups with projections and ranges, live points as games finish, and your win probability (with Yahoo's for comparison). **Lineup strategy** compares three versions of your lineup: most points, upside (favoring ceilings) and safe (favoring floors). Each is simulated against the opponent, and the one that wins most often is recommended, with the swaps to make. **Updated lineup** at the bottom shows that lineup's projected total and win chance, then your **bench** with each player's projection |
-| **My Team** | Your imported Yahoo team (pick the league if you have several). **Lineup:** starters and bench with this week's projection, range, flags and rest-of-season value; the best lineup under your league's slots, with "Start X over Y (+points)" advice and Start/Sit tags. **Waivers:** players on no roster in your league. **Trades:** fair offers with each real team, built from their roster, teams that need what you'd send first. **Playoffs:** each player's projection for every playoff week (your league's weeks from Yahoo, else 16–18), byes marked, the best lineup per week, your weakest week, and the **Playoff planner**: free agents and players on other teams who beat your weakest starter at each position by 3+ playoff points. **League:** power rankings by lineup strength, record, points for, remaining opponents, simulated playoff odds and projected wins, and each manager's tendencies (also shown next to each team's trade offers). **Player news** works like Yahoo's: a news icon next to each player with news, highlighted (with a dot) when there's news from the last 48 hours you haven't opened. Click it for a side panel with his latest notes (headline, summary, analysis, source link); opening it marks the news read (remembered in this browser). The **News feed** below the lineup lists the newest notes across your roster, new ones tagged, and clicking a name opens his panel. **Sync from Yahoo** re-imports now (the app also re-syncs every 6 hours) |
+| **My Team** | Your imported Yahoo team (pick the league if you have several). **Lineup:** starters and bench with this week's projection, range, flags and rest-of-season value; the best lineup under your league's slots, with "Start X over Y (+points)" advice and Start/Sit tags. **Waivers:** players on no roster in your league. **Trades:** fair offers with each real team, built from their roster, teams that need what you'd send first. **Playoffs:** each player's projection for every playoff week (your league's weeks from Yahoo, else 16–18), byes marked, the best lineup per week, your weakest week, and the **Playoff planner**: free agents and players on other teams who beat your weakest starter at each position by 3+ playoff points. **League:** power rankings by lineup strength, record, points for, remaining opponents, simulated playoff odds and projected wins, luck and all-play record, each manager's tendencies (also shown next to each team's trade offers) and tags (hover a tag for its evidence), and **Past trades** graded on the points scored since. **Player news** works like Yahoo's: a news icon next to each player with news, highlighted (with a dot) when there's news from the last 48 hours you haven't opened. Click it for a side panel with his latest notes (headline, summary, analysis, source link); opening it marks the news read (remembered in this browser). The **News feed** below the lineup lists the newest notes across your roster, new ones tagged, and clicking a name opens his panel. **Sync from Yahoo** re-imports now (the app also re-syncs every 6 hours) |
 | **Week X Rankings** | This week's projections by position; pick any week. Each row shows the matchup grade (opponent-adjusted, #1 = easiest), the Vegas implied team total, the blended projection, and every source's number (props, Josh & Hayden, Yahoo, ESPN, model). For finished games, **Actual** shows what each player scored (green beat the projection by 20%+, red missed by 20%+, DNP sat). Click a column header (Proj, Actual, Team total, or any source) to sort by it. **Schedule strength** switches to defenses ranked by adjusted points allowed and each team's upcoming opponents. **Refresh sources** re-pulls Yahoo and ESPN (Vegas props follow their credit budget) |
 | **Rankings** | Rest-of-season rankings by position; sort by actual, expected, or projected points, schedule strength, **Playoff SOS** (your league's playoff weeks, else the last three), trade value, or ECR |
 | **Week X → Start / Sit** | Add up to four players. Each shows its projection, floor–ceiling range, injury status, "if <teammate> sits" scenarios, flags, and a **Why?** breakdown. A tiebreaker (most points / safe / upside) decides close calls |
@@ -360,7 +362,7 @@ noise. The production ridge (20) stays. Learned source weights move in small cap
 ### Power rankings and playoff odds
 
 `services/league_insights.py`, read live from Yahoo (standings, the season's adds and trades,
-and the scoreboard for every remaining regular-season week), cached for an hour:
+and the scoreboard for every regular-season week so far and to come), cached for an hour:
 - **Strength** is each team's best QB/RB/WR/TE lineup in rest-of-season points per game.
 - **Weekly best ball:** for every remaining week, each team plays its best possible lineup from
   its whole roster (not IR), with every player projected against that week's opponent. A player
@@ -377,6 +379,22 @@ and the scoreboard for every remaining regular-season week), cached for an hour:
 - **Tendencies:** "Active trader" (2+ trades), "Waiver regular" (1.5× the league's median
   moves), "Quiet" (2 moves or fewer, no trades), plus the positions each manager has traded for
   and picked up.
+- **All-play and luck** (`services/all_play.py`, from Yahoo's scoreboard for every completed
+  week, each finished week fetched once): every week each team's score is compared with every
+  other team's score that week, giving its all-play record (e.g. 52-33). All-play expected
+  wins = the sum over weeks of (teams beaten + half the ties) / (teams − 1); **luck** = actual
+  wins − all-play expected wins (positive: the schedule gave it more wins than its scores earned).
+- **Manager tags** (`services/manager_tags.py`), each shown with its evidence: "Active trader"
+  (3+ trades), "FAAB whale" (average winning bid ≥ 12% of the budget), "Sits on FAAB" (spent
+  under 25% of the budget by week 6 or later; both FAAB leagues only), "Waiver hawk" (1.5+ moves
+  per week played), "RB hunter" etc. (50%+ of at least 4 adds and trades at one position),
+  "Trade shark" / "Overpays" (won / lost 2+ graded trades by 10+ points).
+- **Past trades** (`services/trade_grades.py`): every completed trade this season, graded after
+  the fact. For each side, the points (your league's scoring, from the nflverse weekly stats in
+  the database) its received players scored in the weeks after the trade, minus the same for the
+  players it sent. Counting starts with the first NFL week that kicked off after the trade, and
+  only weeks with stats loaded count. A side ahead by 10+ points wins the trade. Players we can't
+  match to our stats (and kickers / defenses) are skipped and listed.
 
 ### Floors, ceilings and the matchup simulation
 
@@ -749,7 +767,7 @@ League parameters accepted by every valuation endpoint: `scoring=ppr|half|std`,
 | GET | `/api/my-team/{league_id}/matchup` | This week's opponent, both lineups, win probability, expected/upside/safe lineups, the updated lineup and the bench |
 | GET | `/api/my-team/{league_id}/playoffs` | Each player's playoff weeks (opponent, bye, projection), the best lineup per week, and planner fixes |
 | GET | `/api/my-team/{league_id}/streaming` | DEF (and one-QB-league QB) streaming grid for 3 weeks with a suggested path |
-| GET | `/api/my-team/{league_id}/league` | Power rankings, simulated playoff odds and manager tendencies (live from Yahoo, cached 1 h) |
+| GET | `/api/my-team/{league_id}/league` | Power rankings, simulated playoff odds, all-play records and luck, manager tendencies and tags, and graded past trades (live from Yahoo, cached 1 h) |
 | GET | `/api/my-team/{league_id}/news?limit=` | Newest news across your roster, plus `latest` (each player's newest item time) |
 | GET | `/api/players/{id}/news` | One player's latest news (Sleeper) |
 | GET | `/api/compare?ids=&seasons=&scoring=` | 2–4 players' games and season summaries across up to four seasons |
@@ -772,7 +790,7 @@ With a Yahoo league imported, more tools answer from your real league:
 - `get_my_matchup`: this week's opponent, both lineups, win probability and the changes to make;
 - `get_league_rosters`: any team's roster, or every team's top players and weak positions;
 - `get_playoff_outlook`: your players across your league's playoff weeks, with planner fixes;
-- `get_power_rankings`: every team's strength, record, playoff odds and manager tendencies;
+- `get_power_rankings`: every team's strength, record, playoff odds, all-play record and luck, manager tendencies and tags, and graded past trades;
 - `get_player_news`: a player's latest headlines (any player, league or not);
 - `get_league_waivers`: players free in your league, each with the action, FAAB bid, market
   price, value to you, the drop (and why), and only players who actually improve your lineup;

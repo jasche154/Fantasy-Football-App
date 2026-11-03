@@ -117,10 +117,17 @@ export interface PlayoffFix {
   trade_targets: PlayoffFixOption[];
 }
 
+/** A manager tag ("FAAB whale", "RB hunter", ...) with the numbers behind it. */
+export interface ManagerTag {
+  tag: string;
+  evidence: string;
+}
+
 export interface ManagerTendencies {
   moves: number;
   trades: number;
   label: 'Active trader' | 'Waiver regular' | 'Quiet' | null;
+  tags?: ManagerTag[];
   trades_for: string[];
   trades_away: string[];
   picks_up: string[];
@@ -142,7 +149,35 @@ export interface PowerRankingRow {
   playoff_odds?: number;
   top_seed_odds?: number;
   expected_wins?: number;
+  /** Record if the team had played every other team every completed week, e.g. "52-33". */
+  all_play?: string;
+  all_play_expected_wins?: number;
+  /** Actual wins minus all-play expected wins (positive = lucky). */
+  luck?: number;
   tendencies: ManagerTendencies | null;
+}
+
+export interface TradeGradeSide {
+  team_key: string;
+  team: string;
+  received: { name: string; points: number }[];
+  sent: { name: string; points: number }[];
+  received_points: number;
+  sent_points: number;
+  /** Points by the players received minus the players sent, since the trade. */
+  net: number;
+}
+
+export interface TradeGrade {
+  date: string | null;
+  first_week: number | null;
+  weeks: number[];
+  graded: boolean;
+  sides: TradeGradeSide[];
+  winner: string | null;
+  margin: number | null;
+  /** Players we couldn't match to our stats (skipped). */
+  unmatched: string[];
 }
 
 export interface LeagueOverview {
@@ -151,6 +186,7 @@ export interface LeagueOverview {
   regular_season_weeks_left: number;
   simulations: number;
   teams: PowerRankingRow[];
+  past_trades?: TradeGrade[];
 }
 
 export interface NewsItem {
