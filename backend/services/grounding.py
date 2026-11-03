@@ -247,11 +247,12 @@ def _unknown_numbers(answer: str, evidence: Evidence) -> list[str]:
 
 
 def check_answer(answer: str, evidence: Evidence, index: NameIndex,
-                 rosters: LeagueRosters | None = None) -> GroundingReport:
+                 rosters: LeagueRosters | None = None, incoming: Sequence[str] = ()) -> GroundingReport:
     """Players and numbers in the answer that nothing in the evidence supports, and (with a league in
-    scope) adds of rostered players or start/bench/drop advice for players the user doesn't have."""
+    scope) adds of rostered players or start/bench/drop advice for players the user doesn't have.
+    `incoming`: players the user would receive in a trade priced this turn (they count as the user's)."""
     return GroundingReport(tuple(_unknown_players(answer, evidence, index)), tuple(_unknown_numbers(answer, evidence)),
-                           grounding_roster.check(fold(answer), rosters, index))
+                           grounding_roster.check(fold(answer), rosters, index, incoming))
 
 
 def revision_message(report: GroundingReport) -> str:

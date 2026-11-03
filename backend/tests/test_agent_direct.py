@@ -107,6 +107,27 @@ def test_no_league_or_a_failing_tool_falls_back(session, league, monkeypatch):
     assert answer_directly(session, ask("standings")) is None
 
 
+def test_a_reply_to_the_assistants_question_goes_to_the_ai(session, league):
+    asked = [{"role": "user", "content": "Who has the best WRs?"},
+             {"role": "assistant", "content": "In which roster: your team or Rival's?"},
+             {"role": "user", "content": "my team"}]
+    assert answer_directly(session, asked) is None
+    told = [*asked[:1], {"role": "assistant", "content": "Rival has the best WRs."}, asked[2]]
+    reply = answer_directly(session, told)
+    assert reply is not None and reply.answered_by == "app"
+
+
+def test_yahoo_down_gets_a_short_app_reply_instead_of_a_second_timeout(session, league, monkeypatch):
+    from integrations.yahoo import YahooError
+
+    def down(*_a, **_k):
+        raise YahooError("timed out")
+    monkeypatch.setattr(league_insights, "build", down)       # the tool turns this into ToolUnavailable
+    reply = answer_directly(session, ask("standings"))
+    assert reply is not None and reply.answered_by == "app" and "unavailable" in reply.reply
+    assert reply.tool_calls == (agent_direct.ToolCallTrace("get_power_rankings", {"league": "Family League"}, False),)
+
+
 def test_no_imported_league_falls_back(session, seeded):
     assert answer_directly(session, ask("Show my roster")) is None
 

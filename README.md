@@ -833,8 +833,10 @@ quota and work without a provider key: "show my roster" / "who's on my team" (`g
 "who should I start" / "set my lineup" (best lineup, changes and alerts from `get_my_team`),
 "standings" (by record, then points for) and "power rankings" (`get_power_rankings`). The whole
 question must be one of those phrases (no players, conditions or second requests) and one league
-must be in scope (the chat's league or the only one imported); anything else, or a tool error,
-goes to the AI as usual. The reply has the normal shape plus `answered_by: "app"`, and the chat
+must be in scope (the chat's league or the only one imported). A reply to a question the
+assistant just asked ("your team or Rival's?" -> "my team") goes to the AI, as does anything else
+or a tool error; if Yahoo itself is down, the app says so at once instead of letting the AI wait
+through the same timeout again. The reply has the normal shape plus `answered_by: "app"`, and the chat
 shows "Answered instantly from the app's data, without AI."
 
 **Evaluation set** (`services/eval_cases.py`, runner `services/agent_eval.py`): 66 saved
@@ -875,8 +877,10 @@ projection as an actual score.
 league, the only imported one, or the one league this question's tools used), advice is checked
 against every team's imported roster. "Pick up / add / claim / bid on X" is flagged when X is
 already on a roster in that league, and "start / bench / drop X" when X isn't on yours. It goes
-through the same one revision, then the "Not verified" line. Only advice-shaped clauses count
-(the clause starts with the verb, optionally after "I'd", "you should" and the like, and the
+through the same one revision, then the "Not verified" line. A player the answer adds first, or
+receives in a trade priced this turn (`evaluate_trade`'s `get`), counts as yours for a later
+start. Only advice-shaped clauses count (the clause starts with the verb, optionally after a list
+marker or "I'd", "you should" and the like, and the
 player's full or unique last name follows it directly), so "Rival will start X", "don't drop X",
 ambiguous last names and typo guesses are never flagged.
 

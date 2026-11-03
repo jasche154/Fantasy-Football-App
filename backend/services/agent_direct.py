@@ -20,7 +20,7 @@ from services.agent import AgentReply, ToolCallTrace, clean_memory
 from services.labels import label
 from services.my_team import my_leagues
 from tools.definitions import TOOLS, sanitize_for_agent
-from tools.registry import ToolRegistry
+from tools.registry import ToolRegistry, ToolUnavailable
 from tools.shaping import dumps
 
 log = logging.getLogger(__name__)
@@ -160,19 +160,32 @@ RENDER = {"roster": _roster_text, "lineup": _lineup_text,
 def answer_directly(session: Session, history: Sequence[Mapping[str, str]], memory: Sequence[str] = (),
                     league_id: int | None = None, registry: ToolRegistry = TOOLS) -> AgentReply | None:
     """An instant, template answer for the latest question, or None to use the LLM."""
-    questions = [m.get("content") or "" for m in history if m.get("role") == "user"]
-    intent = match_intent(questions[-1]) if questions else None
+    if not history or history[-1].get("role") != "user" or _answers_a_question(history):
+        return None
+    intent = match_intent(history[-1].get("content") or "")
     league = _league_name(session, league_id) if intent else None
     if intent is None or league is None:
         return None
     name, arguments = TOOL_FOR[intent], {"league": league}
+    kept = clean_memory(f for f in memory if grounding.safe_fact(f))
     try:
         result = sanitize_for_agent(registry.call(session, name, arguments))
         text = RENDER[intent](result)
-    except Exception:   # tool error, source down or an unexpected shape: the LLM path handles (and explains) it
+    except ToolUnavailable as exc:
+        # The source (Yahoo) is down: the AI would call the same tool and wait through the same timeout.
+        session.rollback()
+        return AgentReply(f"{exc} Try again in a few minutes.", (ToolCallTrace(name, arguments, False),), kept,
+                          "answer", (), None, "app", rounds=0)
+    except Exception:   # tool error or an unexpected shape: the LLM path handles (and explains) it
         log.info("Direct answer for %s fell back to the AI", intent, exc_info=True)
         session.rollback()
         return None
-    kept = clean_memory(f for f in memory if grounding.safe_fact(f))
     return AgentReply(text, (ToolCallTrace(name, arguments, True),), kept, "answer", (), None, "app",
                       rounds=0, evidence=(dumps(result),))
+
+
+def _answers_a_question(history: Sequence[Mapping[str, str]]) -> bool:
+    """The latest message replies to the assistant's question ("your team or Rival's?" -> "my team"),
+    so it depends on earlier turns: leave it to the AI."""
+    previous = next((m for m in reversed(history[:-1]) if m.get("role") == "assistant"), None)
+    return previous is not None and (previous.get("content") or "").rstrip().endswith("?")

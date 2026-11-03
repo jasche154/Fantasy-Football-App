@@ -26,6 +26,13 @@ ROSTERS = from_names("Family League", ["Puka Nacua", "Jahmyr Gibbs", "Amon-Ra St
     ("Bench Ja'Marr Chase this week.", "bench Ja'Marr Chase (not on your roster"),
     ("If Gibbs sits, start Rome Odunze.", "start Rome Odunze"),
     ("Drop: Bijan Robinson", "drop Bijan Robinson"),
+    # list items after an intro line: the marker is layout, not wording
+    ("Here is the plan.\n- Drop Bijan Robinson", "drop Bijan Robinson"),
+    ("Plan:\n- Start Rome Odunze", "start Rome Odunze"),
+    ("Plan\n* Add Bijan Robinson", "add Bijan Robinson"),
+    ("Moves:\n1. Bench Ja'Marr Chase\n", "bench Ja'Marr Chase"),
+    ("Moves:\n2) Claim Ja'Marr Chase", "claim Ja'Marr Chase"),
+    ("• Pick up Bijan Robinson", "pick up Bijan Robinson"),
 ])
 def test_moves_that_do_not_fit_the_rosters_are_flagged(text, expected):
     issues = check(text, ROSTERS, INDEX)
@@ -49,6 +56,21 @@ def test_moves_that_do_not_fit_the_rosters_are_flagged(text, expected):
 ])
 def test_descriptions_negations_and_correct_moves_pass(text):
     assert check(text, ROSTERS, INDEX) == ()
+
+
+def test_a_player_added_earlier_in_the_answer_can_then_start():
+    assert check("Add Rome Odunze, then start Rome Odunze over Gibbs.", ROSTERS, INDEX) == ()
+    assert check("- Pick up Rome Odunze\n- Start Odunze at FLEX", ROSTERS, INDEX) == ()
+    # order matters: a start before the add is still flagged
+    assert check("Start Rome Odunze. Then add Rome Odunze.", ROSTERS, INDEX) == (
+        "start Rome Odunze (not on your roster in Family League)",)
+
+
+def test_players_received_in_a_priced_trade_can_start():
+    text = "Accept it, then start Bijan Robinson over Gibbs."
+    assert check(text, ROSTERS, INDEX, incoming=["Bijan"]) == ()
+    assert check(text, ROSTERS, INDEX, incoming=["Ja'Marr Chase"]) != ()
+    assert check(text, ROSTERS, INDEX, incoming=["Williams"]) != ()     # ambiguous: not assumed
 
 
 def test_no_league_in_scope_means_no_roster_check():
@@ -94,6 +116,13 @@ def test_a_start_for_someone_elses_player_still_wrong_gets_a_caveat(session, lea
 
 def test_the_users_own_players_pass_without_a_revision(session, league):
     client = ScriptedLLM([call("get_my_team", {}), answer("Start QB Player 01 and drop RB Player 01.")])
+    reply = agent.run_agent(session, client, ASK)
+    assert len(client.requests) == 2 and reply.unverified == ()
+
+
+def test_the_get_side_of_an_evaluated_trade_counts_as_the_users(session, league):
+    client = ScriptedLLM([call("evaluate_trade", {"give": ["WR Player 05"], "get": ["WR Player 02"]}),
+                          answer("Accept, then start WR Player 02.")])
     reply = agent.run_agent(session, client, ASK)
     assert len(client.requests) == 2 and reply.unverified == ()
 
