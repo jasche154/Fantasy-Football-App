@@ -5,6 +5,7 @@ bench / start X" is wrong when X isn't on the user's roster. Verb detection is d
 (an advice-shaped clause that starts with one of those verbs, followed straight by one player's
 name), so a description like "Rival will start X" or "don't drop X" is never flagged. No LLM call.
 """
+import logging
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -15,6 +16,8 @@ from sqlalchemy.orm import Session
 
 from services.labels import label
 from services.player_index import normalize
+
+log = logging.getLogger(__name__)
 
 ADD_VERBS = ("pick up", "add", "claim", "bid on")
 MINE_VERBS = ("drop", "bench", "start")
@@ -147,3 +150,14 @@ def check(answer: str, rosters: LeagueRosters | None, index: _Index,
         elif verb in MINE_VERBS and key not in mine:
             issues.append(f"{verb} {player} (not on your roster in {rosters.league})")
     return tuple(dict.fromkeys(issues))
+
+
+def safe_in_scope(session: Session, focus_league_id: int | None, trace: Iterable) -> LeagueRosters | None:
+    """in_scope for an agent turn (leagues named by its tool calls); None (check skipped) if rosters can't load."""
+    named = [str(t.arguments["league"]) for t in trace if t.arguments.get("league")]
+    try:
+        return in_scope(session, focus_league_id, named)
+    except Exception:   # the roster check is a safety net: never fail the chat over it
+        log.exception("Roster check skipped")
+        session.rollback()
+        return None

@@ -238,18 +238,8 @@ def _ground(answer: str, messages: Sequence[Mapping[str, Any]], turn: _Turn):
     evidence = grounding.collect_evidence(messages, turn.evidence)
     incoming = [str(p) for t in turn.trace if t.name == "evaluate_trade" and isinstance(t.arguments.get("get"), list)
                 for p in t.arguments["get"]]
-    return grounding.check_answer(answer, evidence, get_index(turn.session), _league_rosters(turn), incoming)
-
-
-def _league_rosters(turn: _Turn) -> grounding_roster.LeagueRosters | None:
-    """Rosters of the league in scope, for the roster check; None (check skipped) if they can't load."""
-    named = [str(t.arguments["league"]) for t in turn.trace if t.arguments.get("league")]
-    try:
-        return grounding_roster.in_scope(turn.session, turn.league_id, named)
-    except Exception:   # the roster check is a safety net: never fail the chat over it
-        log.exception("Roster check skipped")
-        turn.session.rollback()
-        return None
+    return grounding.check_answer(answer, evidence, get_index(turn.session),
+                                  grounding_roster.safe_in_scope(turn.session, turn.league_id, turn.trace), incoming)
 
 
 def _route(session: Session, history: Sequence[Mapping[str, str]]) -> tuple[list[str], tuple[str, ...], tuple]:
