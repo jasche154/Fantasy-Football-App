@@ -179,6 +179,8 @@ def test_fallback_moves_on_after_rate_limit_and_cools_down():
     assert chain.last_provider == "gemini" and chain.profile.max_tool_chars == 24_000
     chain.complete([], None)
     assert len(groq_seen) == 1 and len(gemini_seen) == 2          # groq skipped while cooling down
+    clock.now += 31
+    assert chain.profile.name == "groq"          # requests are sized for groq again once it's ready
 
     clock.now += 31
     FallbackClient([groq, gemini], clock=clock).complete([], None)  # a new request tries groq again

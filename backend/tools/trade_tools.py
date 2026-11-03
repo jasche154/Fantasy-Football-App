@@ -21,8 +21,8 @@ from tools.league_tools import TRADE_PERSPECTIVE, settings_for
 from tools.registry import ToolError
 from tools.rows import player_str
 
-SPLIT_NOTE = ("The players you'd receive are on different teams in this league, so each team's players are "
-              "evaluated as a separate trade for what you give. Treat them as alternatives, not one deal; "
+SPLIT_NOTE = ("The players you'd receive are on different teams in this league (or are free agents), so each "
+              "team's players (and the free agents) are evaluated as a separate trade for what you give. Treat them as alternatives, not one deal; "
               "evaluate one of them alone for balance players.")
 SPLIT_DROPS = ("give", "balance_suggestions", "summary", "league")
 LINEUP_NOTE = ("your_lineup_gain / their_lineup_gain: points each team's best starting lineup gains over the rest "

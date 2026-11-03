@@ -10,6 +10,7 @@ routing and trade tool failures.
 
 Files:
 - `backend/services/agent.py`: wait out short rate limits and retry; fit chat history into the provider budget
+- `backend/services/llm_client.py` (`FallbackClient.profile` only): size requests for the provider that answers next
 - `backend/services/agent_routing.py`: keep each topic's main tools under the tool cap; trade typo
 - `backend/tools/trade_tools.py`: evaluate_trade splits players from different teams into one trade per team
 - `backend/tools/league_tools.py` (`league_trades` only): explain an empty trade list

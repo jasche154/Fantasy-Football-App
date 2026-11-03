@@ -241,10 +241,12 @@ class FallbackClient:
 
     @property
     def profile(self) -> ProviderProfile:
-        """The provider that answered last, else the first one not cooling down."""
-        if self._answered:
-            return self._answered.profile
-        return next((c for c in self._clients if self._ready_in(c) == 0), self._clients[0]).profile
+        """The provider the next request goes to: the first one not cooling down, else the one ready soonest.
+
+        The agent sizes each request with it, so after a rate-limit wait the request fits whichever
+        provider answers then (not a bigger one that answered before and is still cooling down).
+        """
+        return min(self._clients, key=lambda c: (self._ready_in(c), self._clients.index(c))).profile
 
     @property
     def last_provider(self) -> str | None:
