@@ -236,7 +236,9 @@ class _RateWait:
 def _ground(answer: str, messages: Sequence[Mapping[str, Any]], turn: _Turn):
     """grounding skips this turn's drafts and notes itself; digested results come from `turn.evidence`."""
     evidence = grounding.collect_evidence(messages, turn.evidence)
-    return grounding.check_answer(answer, evidence, get_index(turn.session), _league_rosters(turn))
+    incoming = [str(p) for t in turn.trace if t.name == "evaluate_trade" and isinstance(t.arguments.get("get"), list)
+                for p in t.arguments["get"]]
+    return grounding.check_answer(answer, evidence, get_index(turn.session), _league_rosters(turn), incoming)
 
 
 def _league_rosters(turn: _Turn) -> grounding_roster.LeagueRosters | None:

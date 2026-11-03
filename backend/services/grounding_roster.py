@@ -27,11 +27,15 @@ _ADVICE_PREFIX = re.compile(rf"^(?:(?:{_ADVICE})\b[\s,]*)*$")
 _ACTION = re.compile(r"(?<![\w'])(?P<verb>pick\s+up|add|claim|bid\s+on|drop|bench|start)(?:\s*:)?\s+"
                      r"(?P<rest>[^.;!?\n,()]{1,60})", re.IGNORECASE)
 _CLAUSE_END = re.compile(r"[.;:!?\n,()•]|(?:^|\s)-\s")
+# A list marker that opens the clause ("- ", "* ", "• ", "1. ", "2) "): layout, not wording.
+_LIST_MARKER = re.compile(r"^\s*(?:[-*•]|\d{1,2}[.)])\s*")
 
 
 class _Index(Protocol):
     """What the check needs from services.player_index.PlayerIndex."""
     def mentions(self, text: str) -> Sequence: ...
+
+    def resolve(self, token: str) -> tuple[str, ...]: ...
 
 
 @dataclass(frozen=True)
@@ -86,7 +90,7 @@ def in_scope(session: Session, focus_league_id: int | None, named_leagues: Itera
 def _advice_clause(answer: str, verb_start: int) -> bool:
     before = answer[:verb_start]
     ends = list(_CLAUSE_END.finditer(before))
-    clause = before[ends[-1].end():] if ends else before
+    clause = _LIST_MARKER.sub("", before[ends[-1].end():] if ends else before)
     return _ADVICE_PREFIX.match(clause.strip().lower().replace("’", "'")) is not None
 
 
@@ -106,11 +110,26 @@ def _named_player(rest: str, index: _Index) -> str | None:
     return first.names[0]
 
 
-def check(answer: str, rosters: LeagueRosters | None, index: _Index) -> tuple[str, ...]:
-    """Short problem notes ("add Bijan Robinson: already on Rival"), empty when every move fits the rosters."""
+def incoming_keys(names: Iterable[str], index: _Index) -> set[str]:
+    """Normalized full names of players the user would receive (an evaluate_trade `get` side)."""
+    keys = set()
+    for name in names:
+        found = index.resolve(str(name))
+        if len(found) == 1:
+            keys.add(normalize(found[0]))
+    return keys
+
+
+def check(answer: str, rosters: LeagueRosters | None, index: _Index,
+          incoming: Iterable[str] = ()) -> tuple[str, ...]:
+    """Short problem notes ("add Bijan Robinson: already on Rival"), empty when every move fits the rosters.
+
+    Players the answer tells the user to add, and the `incoming` players of a trade this turn priced,
+    count as the user's for a later start/bench/drop ("Add X, then start X over Gibbs")."""
     if rosters is None or not answer:
         return ()
     issues: list[str] = []
+    mine = set(rosters.mine) | incoming_keys(incoming, index)
     for match in _ACTION.finditer(answer):
         verb = " ".join(match.group("verb").lower().split())
         if not _advice_clause(answer, match.start()):
@@ -119,10 +138,12 @@ def check(answer: str, rosters: LeagueRosters | None, index: _Index) -> tuple[st
         if player is None:
             continue
         key = normalize(player)
-        if verb in ADD_VERBS and key in rosters.owners:
-            owner = rosters.owners[key]
-            where = "already on your roster" if key in rosters.mine else f"already on {owner}'s roster"
-            issues.append(f"{verb} {player} ({where} in {rosters.league})")
-        elif verb in MINE_VERBS and key not in rosters.mine:
+        if verb in ADD_VERBS:
+            if key in rosters.owners:
+                owner = rosters.owners[key]
+                where = "already on your roster" if key in rosters.mine else f"already on {owner}'s roster"
+                issues.append(f"{verb} {player} ({where} in {rosters.league})")
+            mine.add(key)    # flagged or not, a later "start him" follows from this add
+        elif verb in MINE_VERBS and key not in mine:
             issues.append(f"{verb} {player} (not on your roster in {rosters.league})")
     return tuple(dict.fromkeys(issues))
