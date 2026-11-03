@@ -13,7 +13,7 @@ ros_ppg includes strength of schedule: the player's rate is scaled by the averag
 opponent-adjusted factor of the defenses left on their schedule (services.schedule_strength).
 """
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from threading import Lock
 from types import MappingProxyType
 from typing import Mapping
@@ -39,6 +39,7 @@ from services.schedule_strength import NEUTRAL, DefenseStrength, Schedule, defen
 # Exponent on the remaining-schedule factor; 1.0 applies the matchup difference in full.
 ROS_SCHEDULE_WEIGHT = 1.0
 MIN_SHARE = 0.05        # below this share of games, the rate isn't divided back out (too noisy)
+REFERENCE_TEAMS = 12    # league size behind the no-prior-season prior (see value_players)
 
 
 @dataclass(frozen=True)
@@ -123,7 +124,11 @@ def value_players(current: Sequence[PlayerSeason], previous: Sequence[PlayerSeas
     role_cuts: {returning RB: (fill-in, share of his rate to take off)}; recoveries add the
     injury fields (the shares themselves arrive through consensus availability)."""
     rates = {p.player_id: current_rate(p) for p in current}
-    first_pass = replacement_levels(((p.position, rates[p.player_id]) for p in current), league)
+    # Players without a prior season shrink toward the replacement level of the same league at a
+    # reference size (12 teams, 1 QB), so league size and superflex change values (VORP) but never
+    # projected points. 12-team 1-QB leagues are unchanged by this.
+    reference = replace(league, teams=REFERENCE_TEAMS, superflex=False)
+    first_pass = replacement_levels(((p.position, rates[p.player_id]) for p in current), reference)
     priors = _priors(previous)
     base = {p.player_id: project_ros_ppg(rates[p.player_id], p.games_played,
                                          priors.get(p.player_id, first_pass.get(p.position, 0.0)))

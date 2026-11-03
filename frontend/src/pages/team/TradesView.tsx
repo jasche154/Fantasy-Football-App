@@ -8,7 +8,7 @@ import { useAsync } from '../../hooks/useAsync';
 import { formatNumber } from '../../lib/format';
 import { filterToPosition, type PositionFilterValue } from '../../lib/positions';
 import { offerHash, offerTitle } from '../trade/TradeFinder';
-import { VERDICT_COPY } from '../trade/TradeResultView';
+import { LineupLabel, VERDICT_COPY } from '../trade/TradeResultView';
 import { TendencyNote } from './LeagueView';
 
 export function deadlineText(date: string | null | undefined, now: number = Date.now()): string | null {
@@ -30,7 +30,9 @@ function OfferLine({ offer, leagueId }: { offer: LeagueOffer; leagueId: number }
       {offer.your_gain != null && <> · you +{formatNumber(offer.your_gain)} lineup pts</>}
       {offer.their_gain != null && <>, them {offer.their_gain >= 0 ? '+' : ''}{formatNumber(offer.their_gain)}</>}
       {' '}· <span className={`verdict--${verdict.tone}`}>{verdict.label.toLowerCase()} by value</span>
-      {offer.helps_both && <>{' '}<span className="status-badge status-badge--ok">Helps both lineups</span></>}
+      {offer.lineup_label
+        ? <>{' '}<LineupLabel label={offer.lineup_label} /></>
+        : offer.helps_both && <>{' '}<span className="status-badge status-badge--ok">Helps both lineups</span></>}
       {offer.fills_their_need.length > 0 && <>{' '}<span className="status-badge status-badge--ok">Fills their {offer.fills_their_need.join('/')} need</span></>}
       {offer.their_drop && <> · they drop {offer.their_drop.name}</>}
       {offer.your_add && <> · you add {offer.your_add.name} with the open spot</>}

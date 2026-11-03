@@ -2,6 +2,7 @@ import { useId } from 'react';
 import type {
   BalanceSuggestion,
   PlayerSummary,
+  TradeEvenIt,
   TradeLineupImpact,
   TradeResult,
   TradeSide,
@@ -53,11 +54,36 @@ export function marketText(market: number | null | undefined): string | null {
   return `By expert consensus it favours ${side} by ${formatFraction(Math.abs(market), 0)}.`;
 }
 
+/** "To even it: ask for a player worth about 17 (closest: Travis Kelce, value 14)." */
+export function evenItText(evenIt: TradeEvenIt): string {
+  const action = evenIt.add_to === 'get' ? 'ask for a player' : 'add a player to what you give';
+  const closest = evenIt.closest
+    ? ` (closest: ${evenIt.closest.player.name}, value ${formatNumber(evenIt.closest.trade_value, 0)})`
+    : '';
+  return `To even it: ${action} worth about ${formatNumber(evenIt.value, 0)}${closest}.`;
+}
+
+const HELPS_YOU = new Set(['Helps both lineups', 'Helps you, costs them', 'Helps you, even for them', 'Helps your lineup']);
+const COSTS_YOU = new Set(['Helps them, costs you', 'Hurts both', 'Costs you, even for them', 'Costs your lineup']);
+
+/** Badge tone for a lineup label: green when it helps your lineup, red when it costs it. */
+export function labelTone(label: string): 'ok' | 'out' | 'missing' {
+  if (HELPS_YOU.has(label)) return 'ok';
+  if (COSTS_YOU.has(label)) return 'out';
+  return 'missing';
+}
+
+export function LineupLabel({ label }: { label: string | null | undefined }) {
+  if (!label) return null;
+  return <span className={`status-badge status-badge--${labelTone(label)}`}>{label}</span>;
+}
+
 export function LineupImpact({ lineup }: { lineup: TradeLineupImpact }) {
   if (lineup.your_gain == null) return <p className="meta-line">{lineup.note ?? 'Lineup gains aren’t available for this trade.'}</p>;
-  const helpsBoth = lineup.your_gain > 0 && (lineup.their_gain ?? 0) > 0;
+  const helpsBoth = !lineup.lineup_label && lineup.your_gain > 0 && (lineup.their_gain ?? 0) > 0;
   return (
     <p className="meta-line">
+      <LineupLabel label={lineup.lineup_label} />{lineup.lineup_label && ' '}
       On your league: your starting lineup {formatSigned(lineup.your_gain)} pts rest of season
       {lineup.their_gain != null && <>, {lineup.their_team ?? 'theirs'} {formatSigned(lineup.their_gain)}</>}.
       {helpsBoth && <> Both lineups improve.</>}
@@ -165,6 +191,10 @@ export function TradeResultView({ result, onAdd }: TradeResultViewProps) {
         (about <span className="num">{formatNumber(result.difference / Math.max(result.weeks_remaining, 1), 1)}</span> a week).
         {' '}{marketText(result.market_percent_difference)}
       </p>
+      {result.consolidation && (
+        <p className="meta-line"><strong>Consolidation:</strong> {result.consolidation.note}</p>
+      )}
+      {result.even_it && <p className="meta-line">{evenItText(result.even_it)}</p>}
       {result.lineup && <LineupImpact lineup={result.lineup} />}
       <BalanceSuggestions suggestions={result.balance_suggestions} onAdd={onAdd} />
       <details className="breakdowns" open>

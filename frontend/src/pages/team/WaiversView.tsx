@@ -11,9 +11,9 @@ import { WaiverRow } from '../waivers/WaiversPage';
 function WaiverSummary({ data }: { data: LeagueWaiversResponse }) {
   const kind = data.league_type;
   const text = kind === 'faab'
-    ? `FAAB league: ${data.my_balance != null ? `$${data.my_balance} left` : 'balance unknown'}${data.faab_budget ? ` of $${data.faab_budget}` : ''}. Bids follow your league's winning bids (estimates until there are 8).`
+    ? `FAAB league: ${data.my_balance != null ? `$${data.my_balance} left` : 'balance unknown'}${data.faab_budget ? ` of $${data.faab_budget}` : ''}. Bids follow your league's winning bids (estimates until there are 8) and show their share of the original budget.`
     : kind === 'priority'
-      ? `Waiver priority league: you're ${data.my_priority ? `#${data.my_priority}` : 'unranked'}. Spend a top-3 priority only on a real difference-maker.`
+      ? `Waiver priority league: you're ${data.my_priority ? `#${data.my_priority}` : 'unranked'}. Spend a top-3 priority only on a real difference-maker; each claim shows the earliest priority it's worth.`
       : kind === 'free_agency' ? 'Free agency: add players right away.' : null;
   return (
     <p className="hint">
