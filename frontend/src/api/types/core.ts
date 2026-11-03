@@ -240,6 +240,24 @@ export interface TradeResult {
   market_percent_difference?: number | null;
   /** Only when the trade was scored on an imported league (`league_id`). */
   lineup?: TradeLineupImpact | null;
+  /** n-for-m trades only: how far the package discount moves the gap (points > 0 favour you). */
+  consolidation?: TradeConsolidation | null;
+  /** Any verdict but fair: the value of one more player that evens the trade. */
+  even_it?: TradeEvenIt | null;
+}
+
+export interface TradeConsolidation {
+  /** "you" when you get fewer players than you send. */
+  side: 'you' | 'them';
+  points: number;
+  note: string;
+}
+
+export interface TradeEvenIt {
+  add_to: TradeSideKey;
+  value: number;
+  /** The balance suggestion that comes closest to even, if any. */
+  closest: { player: PlayerSummary; trade_value: number } | null;
 }
 
 /** Points each real starting lineup gains over the rest of the season. */
@@ -254,6 +272,8 @@ export interface TradeLineupImpact {
   /** Who you drop when you take on more players than you send with a full roster. */
   your_drop?: PlayerSummary | null;
   note?: string | null;
+  /** e.g. "Helps both lineups", "Helps you, costs them" (gains within 0.5 pts count as even). */
+  lineup_label?: string | null;
 }
 
 export interface TradeRequest {

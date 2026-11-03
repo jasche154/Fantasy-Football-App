@@ -25,6 +25,31 @@ THEIR_LOSS_PENALTY = 0.5          # offer_score: each point their lineup loses c
 DROP_CANDIDATES = 4               # a roster over capacity drops one of its four lowest-rated players
 FREE_AGENT_POOL = 10              # free agents considered for the spot an uneven trade opens
 MAX_SHARED_GIVE = 2               # at most two offers per team built on the same player of yours
+# A lineup gain within this many points either way counts as "even": smaller than projection noise.
+LABEL_DEAD_BAND = 0.5
+
+
+def _effect(gain: float) -> str:
+    return "helps" if gain > LABEL_DEAD_BAND else "costs" if gain < -LABEL_DEAD_BAND else "even"
+
+
+_LABELS = {
+    ("helps", "helps"): "Helps both lineups", ("helps", "costs"): "Helps you, costs them",
+    ("costs", "helps"): "Helps them, costs you", ("costs", "costs"): "Hurts both",
+    ("helps", "even"): "Helps you, even for them", ("even", "helps"): "Helps them, even for you",
+    ("costs", "even"): "Costs you, even for them", ("even", "costs"): "Costs them, even for you",
+    ("even", "even"): "About even for both",
+}
+_SOLO_LABELS = {"helps": "Helps your lineup", "costs": "Costs your lineup", "even": "About even for your lineup"}
+
+
+def lineup_label(your_gain: float | None, their_gain: float | None) -> str | None:
+    """Short label from the signs of both lineup gains, with LABEL_DEAD_BAND points counted as even."""
+    if your_gain is None:
+        return None
+    if their_gain is None:
+        return _SOLO_LABELS[_effect(your_gain)]
+    return _LABELS[(_effect(your_gain), _effect(their_gain))]
 
 
 def capacity(settings) -> int:
@@ -185,11 +210,11 @@ def trade_impact(session: Session, league_id: int, give_ids: Sequence[int], get_
         note = "Some players you get are already on your roster, so lineup gains aren't scored."
     if note:
         return {"your_gain": None, "their_gain": None, "their_team": None, "their_drop": None,
-                "your_add": None, "your_drop": None, "note": note, "pool_ids": pool}
+                "your_add": None, "your_drop": None, "note": note, "pool_ids": pool, "lineup_label": None}
     by_id = scorer.team.valuation.by_id
     result = scorer.score([by_id[p] for p in give_ids if p in by_id], [by_id[p] for p in get_ids if p in by_id], owner)
     their_team = session.get(Team, owner) if owner is not None else None
     return {"your_gain": result["your_gain"], "their_gain": result["their_gain"],
             "their_team": their_team.name if their_team else None,
             "their_drop": result["their_drop"], "your_add": result["my_add"], "your_drop": result["my_drop"],
-            "note": None, "pool_ids": pool}
+            "note": None, "pool_ids": pool, "lineup_label": lineup_label(result["your_gain"], result["their_gain"])}

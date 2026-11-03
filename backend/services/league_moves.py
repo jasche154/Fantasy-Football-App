@@ -66,12 +66,20 @@ def waiver_plan(session: Session, league_id: int, position: str | None = None, l
     pool = candidates if position is None else mt.league_waivers(session, league_id, None, CANDIDATE_POOL)[2]
     by_value = sorted({c.player.player_id: c for c in [*pool, *candidates]}.values(), key=lambda c: -c.ros_value)
     demand_rank = {c.player.player_id: i + 1 for i, c in enumerate(by_value)}
-    rows = []
-    for c in candidates:
+    scored = []
+    # Every position is scored (like demand rank) so a TE filter doesn't make the best TE claim #1.
+    for c in by_value if kind == "priority" else candidates:
         value = team.valuation.by_id.get(c.player.player_id)
         if value is None or value.position not in mt.MODELED:
             continue
-        gain, drop = lineup_gain.best_add(roster, droppable, value, horizon, projector, team.settings, protected)
+        scored.append((c, value, *lineup_gain.best_add(roster, droppable, value, horizon, projector,
+                                                       team.settings, protected)))
+    # Rank by lineup gain among the useful claims, for the priority each one is worth.
+    useful = sorted((s for s in scored if s[2] >= wa.MIN_USEFUL_GAIN), key=lambda s: -s[2])
+    gain_rank = {s[0].player.player_id: i for i, s in enumerate(useful, start=1)}
+    shown = {c.player.player_id for c in candidates}
+    rows = []
+    for c, value, gain, drop in (s for s in scored if s[0].player.player_id in shown):
         rank = demand_rank[c.player.player_id]
         if kind == "faab":
             balance = me.get("faab_balance")
@@ -87,7 +95,8 @@ def waiver_plan(session: Session, league_id: int, position: str | None = None, l
                 [v for v in roster if not drop or v.player_id != drop.player_id] + [value], value.player_id,
                 horizon.weeks[:LOOKAHEAD_WEEKS], projector, team.settings)
             advice = wa.priority_advice(gain, rank, value.position, mine, ahead,
-                                        value.position == "RB" and value.team in injured_starter_teams, starts)
+                                        value.position == "RB" and value.team in injured_starter_teams, starts,
+                                        gain_rank.get(c.player.player_id))
         else:
             advice = wa.free_agent_advice(gain)
         rows.append((gain, c, drop, advice))

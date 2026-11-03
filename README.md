@@ -456,8 +456,8 @@ add is worth twice as much). What to do depends on the league:
 
 | League type | Advice |
 |---|---|
-| FAAB | A bid: the league's typical winning bid for the k-th most wanted player (from Yahoo's transactions), scaled by rivals' balances and how many of them need the position, capped by what he's worth to you, the richest interested rival + $1, and half your balance. Before 8 winning bids exist it's a labelled estimate (rank 1 15% of the budget, 2 8%, 3 5%, 4-6 3%, else 1%; ×1.3 early, ×0.6 late) |
-| Rolling priority | Spend a top-3 priority only on a difference-maker (8+ points and the most wanted, a handcuff to your injured starter, or a starter for 3+ of the next 4 weeks); otherwise wait. Teams ahead of you that need the position are named |
+| FAAB | A bid: the league's typical winning bid for the k-th most wanted player (from Yahoo's transactions), scaled by rivals' balances and how many of them need the position, capped by what he's worth to you, the richest interested rival + $1, and half your balance. Before 8 winning bids exist it's a labelled estimate (rank 1 15% of the budget, 2 8%, 3 5%, 4-6 3%, else 1%; ×1.3 early, ×0.6 late). Each bid also shows its share of the league's original budget ("$14 · 14% of budget") |
+| Rolling priority | Each claim shows the earliest priority it's worth ("worth #N priority or later"): #1 for a difference-maker (8+ points and the most wanted, a handcuff to your injured starter, or a starter for 3+ of the next 4 weeks), otherwise N = his rank by lineup gain among this week's useful claims, but never inside the top 3. Claim if your priority is #N or later, else wait. Teams ahead of you that need the position are named |
 | Free agency | Add now, best gain first |
 
 Gains under 1 point are marked marginal.
@@ -468,8 +468,11 @@ both starting lineups before any are cut. An offer is kept only if it adds to yo
 theirs at most half a point per weighted remaining week. Roster spots count: in a 2-for-1 the team
 getting two players drops the one it misses least ("they drop X"), and if your roster was full the
 spot you open is filled by the best of the top 10 free agents ("you add Y"); both are in the gains.
+Each offer (and a calculator trade scored on a league) carries a `lineup_label` from the signs of
+both gains, with gains within ±0.5 points counted as even: "Helps both lineups", "Helps you, costs
+them", "Helps them, costs you", "Hurts both" (or "... even for them" / "About even for both").
 Offers rank by your gain minus half of what they lose (`offer_score`), so a deal that helps both
-lineups ("Helps both lineups") beats a slightly bigger one that hurts them; at most three per team,
+lineups beats a slightly bigger one that hurts them; at most three per team,
 no more than two built on the same player of yours. After the league's trade deadline the list is
 empty. The standalone calculator discounts extra players more steeply (1, 0.7, 0.5, 0.4) since
 depth is worth little; pick a league in the calculator ("Score on") to also see both lineups' gains,
@@ -622,7 +625,15 @@ moving players on matchup.
 ### Value over replacement and trade value
 - **Replacement level** depends on your league: starters league-wide (teams × slots, with
   FLEX and superflex filled by the best remaining players) plus each position's share of bench spots.
-  The next player down is the "waiver-wire" baseline.
+  The next player down is the "waiver-wire" baseline. League size and superflex change values,
+  never projected points: a player with no prior season shrinks toward the replacement level of
+  a 12-team, 1-QB version of your league (a test holds this invariant).
+- **Checked against a fixed per-team depth** (`python -m services.replacement_eval --seasons
+  2021-2025`, point in time from weeks 4 and 8): GWTTKB's depth {QB 1.17, RB 2.83, WR 3.67,
+  TE 0.75 per team} ranks all players' rest-of-season VORP better when the many zeros count
+  (PPR 12 teams: Spearman 0.47 vs 0.41 against our own target), but worse for the players who
+  ended up mattering (0.505 vs 0.519), and worse in standard scoring. Since it doesn't win
+  across the board, the replacement level is unchanged.
 - **`trade_value = availability × max(0, healthy_ppg − replacement_ppg) × games_left`**:
   rest-of-season fantasy points above what you'd get from waivers.
   - `availability` is the share of remaining value he keeps (the injury discount below; for a
@@ -708,6 +719,17 @@ to play and schedule; the result also shows how expert consensus (the market) se
 "Balance it" suggests players not in the deal whose addition brings the trade closest to even;
 when the trade is scored on a league (`league_id`), only players on the two rosters.
 
+Two more lines explain the verdict:
+- **Consolidation** (`consolidation`, n-for-m trades only): how far the package discount moves the
+  gap, i.e. the adjusted difference minus the raw one. In a 2-for-1 the side getting the single
+  player gains it: giving 100 + 60 for 130 is a raw 30-point loss but only 12 after the discount,
+  18 points toward the consolidating side.
+- **To even it** (`even_it`, any verdict but fair): the trade value one more player would need,
+  added to the short side, to make the sides even after the discount (130 + 0.7 × 17 = 142 above:
+  "ask for a player worth about 17"), with the closest balance suggestion named.
+
+The agent's `evaluate_trade` tool returns the same two fields.
+
 ### Trade finder
 1-for-1 and 2-for-1 offers for the players you'd move. An offer must be within −5%…+8% for you by
 this app's values and −15%…+5% by market (expert-consensus) value, and the app must like it for
@@ -763,7 +785,7 @@ League parameters accepted by every valuation endpoint: `scoring=ppr|half|std`,
 | GET | `/api/my-team/leagues` | Your imported leagues (your team, scoring, starter slots) |
 | GET | `/api/my-team/{league_id}` | Your roster with projections and the best-lineup advice |
 | GET | `/api/my-team/{league_id}/waivers?position=` | Waiver targets on no roster in that league |
-| GET | `/api/my-team/{league_id}/trades?want_position=` | Trade offers with each real team, scored by both lineups (named drop/add, `helps_both`, `accept_chance`); empty after the deadline |
+| GET | `/api/my-team/{league_id}/trades?want_position=` | Trade offers with each real team, scored by both lineups (named drop/add, `helps_both`, `lineup_label`, `accept_chance`); empty after the deadline |
 | GET | `/api/my-team/{league_id}/matchup` | This week's opponent, both lineups, win probability, expected/upside/safe lineups, the updated lineup and the bench |
 | GET | `/api/my-team/{league_id}/playoffs` | Each player's playoff weeks (opponent, bye, projection), the best lineup per week, and planner fixes |
 | GET | `/api/my-team/{league_id}/streaming` | DEF (and one-QB-league QB) streaming grid for 3 weeks with a suggested path |

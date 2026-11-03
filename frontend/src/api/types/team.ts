@@ -63,6 +63,10 @@ export interface WaiverAdvice {
   market?: number;
   worth?: number;
   estimate?: boolean;
+  /** FAAB: the bid as a % of the league's original budget. */
+  budget_pct?: number;
+  /** Rolling priority: worth claiming with priority #N or later. */
+  worth_priority?: number;
 }
 
 export interface LeagueWaiverCandidate extends WaiverCandidate {
@@ -89,7 +93,8 @@ export interface LeagueTeamOffers {
   team: string | null;
   owner: string | null;
   needs: Position[];
-  offers: (TradeOffer & { fills_their_need: Position[]; your_gain?: number; their_gain?: number; helps_both?: boolean })[];
+  offers: (TradeOffer & { fills_their_need: Position[]; your_gain?: number; their_gain?: number; helps_both?: boolean;
+    lineup_label?: string | null })[];
 }
 
 export interface LeagueTradesResponse {
