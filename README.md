@@ -51,7 +51,10 @@ only *explains* numbers that came back from a tool call. Every output is labeled
   Hover a point for the player's name; click a scatter point for a card with both values, ranks and quadrant
 - **Advanced-stat leaderboards:** 26 whitelisted metrics (RYOE, separation, YAC over
   expected, CPOE, time to throw, target share, EPA per play, and more), volume-weighted the right way
-- **Player pages:** season summary, weekly game log, NGS advanced stats, projection
+- **Player pages:** season summary, weekly game log, NGS advanced stats, projection, position
+  percentiles for key stats, and "what changed" (last 3 games vs the rest of the season)
+- **Odds page:** this week's closing spreads, totals and implied team totals, plus the player
+  props already bought, per game. It never buys odds itself
 - **Trade calculator:** values both sides, applies a consolidation discount, gives a verdict, and suggests players that would balance the deal
 - **Buy low / sell high:** finds players whose production is out of line with their usage, with plain-English reasons
 - **Matchup page:** your Yahoo opponent this week, both lineups, and your win probability from
@@ -183,7 +186,8 @@ Open <http://localhost:5173>. The UI talks to `http://localhost:8000` by default
 | **Advanced Stats** | Pick a category and metric, season, and minimum volume, then rank every qualified player |
 | **Trade Calculator** | Search players into "You give" / "You get". See each side's value with why (rank, rate, games left, chance to play, schedule), the verdict meter, the market's view, and suggestions that even it out. **Score on** an imported league to use its settings and rosters and see both starting lineups' gains; the URL (including the league) is shareable |
 | **Buy / Sell** | Full buy-low and sell-high lists with every reason, filtered by position |
-| **Player page** | Weekly chart of actual vs expected points, game log, NGS stats, projection, signals |
+| **Player page** | Weekly chart of actual vs expected points, game log, NGS stats, projection, signals. **Position percentiles** rank his season stats against his position (green = good, red = bad, grey for context stats like aDOT; "Small sample" until he has enough volume). **What changed** compares his last 3 games with the earlier games (snap share, target share, air-yard share, targets, carries, pass attempts) and flags big moves |
+| **Odds & Props** | Pick a week: every game's kickoff, closing spread and total, and each team's implied total. **Show props** opens the player props stored for that game (expected passing/rushing/receiving yards, receptions, TDs implied by the lines) with how long before kickoff they were bought. Props appear game by game on game day; before that the page says why they're missing |
 | **Ask AI** | Ask questions in plain English; each answer shows which tools it used |
 | **Settings** | League scoring, size, superflex, and TE premium (used everywhere); connect Yahoo; check integrations. **System** shows when the auto-update last ran and what it did, Odds API credits left, data freshness and the last backup, with **Back up now**. **API access** takes the token when the backend has `API_TOKEN` set |
 
@@ -709,6 +713,30 @@ Per player (3+ games):
 collapsing. **Sell high:** the mirror image. Only players with positive trade value qualify.
 Scores are a percent of expected points, so QBs don't drown out other positions.
 
+### Player percentiles and what changed
+Season stats are regular-season box scores (nflverse) and snap counts; shares are averaged over
+the games that have them. The **pool** is every player at the position with 4+ games (half the
+most games played anyone has, early in the season). Each stat also needs its own sample before it
+counts: 100 pass attempts for QB rates, 40 carries for yards per carry, 20 targets for yards per
+target, catch rate and aDOT, 50 touches for fumble rate, 3 games with share data for target,
+air-yard and snap share. Players below a stat's sample are left out of that stat's pool, and
+their own value shows "Small sample". The percentile is the share of the pool below him (ties
+count half). For INT rate and fumbles lost per 100 touches lower is better, so the percentile
+is flipped (90 = better than 90%). aDOT and QB air yards per attempt are **context**: shown
+with a percentile but no good/bad color. Fantasy PPG uses your scoring settings.
+
+**What changed** needs 5+ games: the last 3 against all earlier games this season. Big moves
+are flagged at ±10 points of snap share, ±5 of target share, ±8 of air-yard share, ±2
+targets/game, ±4 carries/game and ±5 pass attempts/game.
+
+### Odds page
+Read-only: it never calls The Odds API (500 credits a month). Lines are the closing
+`spread_line` (home margin, positive = home favored) and `total_line` from the nflverse
+schedule; implied team totals are (total ± spread) / 2, the same as Week X rankings. Player
+props are the rows `weekly_refresh` already stored (source `vegas_props`): the expected stats
+implied by each player's lines, bought once per game within 2 hours of kickoff. The page shows
+when each game's props were fetched relative to kickoff.
+
 ## API reference
 
 All JSON. Errors use `{"detail": ...}` with a real status code (404, 422, 502, 503).
@@ -752,6 +780,8 @@ League parameters accepted by every valuation endpoint: `scoring=ppr|half|std`,
 | GET | `/api/my-team/{league_id}/league` | Power rankings, simulated playoff odds and manager tendencies (live from Yahoo, cached 1 h) |
 | GET | `/api/my-team/{league_id}/news?limit=` | Newest news across your roster, plus `latest` (each player's newest item time) |
 | GET | `/api/players/{id}/news` | One player's latest news (Sleeper) |
+| GET | `/api/players/{id}/usage?season=&scoring=` | Position percentiles for key season stats (with sample sizes) and last-3-games usage changes |
+| GET | `/api/odds?season=&week=` | A week's games with spread, total, implied team totals, and the stored player props per game (never calls The Odds API) |
 | GET | `/api/compare?ids=&seasons=&scoring=` | 2–4 players' games and season summaries across up to four seasons |
 | GET | `/api/rankings/weekly/kdst?position=K\|DST&week=` | Kicker or defense projections with their inputs |
 | GET | `/api/model/accuracy?scoring=` | Live accuracy, floor/ceiling coverage, held-out backtest, learned weights |

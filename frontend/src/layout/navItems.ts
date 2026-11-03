@@ -19,6 +19,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { route: 'team', path: paths.team, label: 'My Team', shortLabel: 'Team', icon: 'team', isPrimary: true },
   { route: 'matchup', path: paths.matchup, label: 'Matchup', shortLabel: 'Matchup', icon: 'trade', isPrimary: false },
   { route: 'weekly', path: paths.weekly, label: 'Week X Rankings', shortLabel: 'Week', icon: 'calendar', isPrimary: true },
+  { route: 'odds', path: paths.odds, label: 'Odds & Props', shortLabel: 'Odds', icon: 'odds', isPrimary: false },
   { route: 'waivers', path: paths.waivers, label: 'Waiver Wire', shortLabel: 'Waivers', icon: 'plus', isPrimary: false },
   { route: 'trade', path: paths.trade, label: 'Trade Calculator', shortLabel: 'Trade', icon: 'trade', isPrimary: true },
   { route: 'ask', path: paths.ask, label: 'Ask AI', shortLabel: 'Ask AI', icon: 'ask', isPrimary: false },

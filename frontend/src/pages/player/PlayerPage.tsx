@@ -16,6 +16,7 @@ import { useMeta } from '../../state/MetaContext';
 import { useLeagueSettings } from '../../state/SettingsContext';
 import { GameLogTable } from './GameLogTable';
 import { AdvancedStats, ProjectionPanel, SignalsPanel } from './PlayerInsights';
+import { PlayerUsage } from './PlayerUsage';
 import { StatTiles } from './StatTiles';
 import { WeeklyChart } from './WeeklyChart';
 
@@ -89,6 +90,7 @@ function PlayerBody({ profile, selectedSeason }: { profile: PlayerProfile; selec
           <SignalsPanel signals={profile.signals} />
         </div>
       </div>
+      <PlayerUsage playerId={profile.player.id} season={profile.season} />
       <PlayerNews playerId={profile.player.id} />
       <Card title="Advanced stats" eyebrow="Next Gen Stats & usage">
         <AdvancedStats advanced={profile.advanced} />
