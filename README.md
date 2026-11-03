@@ -872,12 +872,18 @@ message.
 `LLM_CHAIN` lists providers in order; on a rate limit or outage the next one answers and the
 limited one cools down (honoring `Retry-After`). A request that is too large for the provider
 returns "ask a narrower question" instead of "wait a minute". Each provider has its own
-tool-result and request budgets.
+tool-result and request budgets, and each request is sized for the provider it goes to next.
+Gemini tries `gemini-3.8-flash`, then `gemini-3.5-flash`, then `gemini-3.1-flash-lite` when a
+model is overloaded (503 "high demand"), failing or out of its own daily quota (on a free key
+each model allows about 20 requests a day), and stays on the model that answered. A question
+can start on Groq and finish on Gemini: Gemini 3 rejects earlier tool calls without a "thought
+signature", so calls from other providers carry Google's documented placeholder. When one
+provider is rate-limited and another is down, the chat waits for whichever may answer first.
 
 | Provider | Default model | Free limits (checked 2026-10-30) | Data use |
 |---|---|---|---|
 | `groq` (default) | `openai/gpt-oss-120b` | 30 requests/min, 1,000/day, 8,000 tokens/min | Not retained by default |
-| `gemini` | `gemini-3.8-flash` | Not published outside AI Studio; reports range from 20 to 1,500 requests/day | **Free-tier prompts and answers may be used to train Google's models and read by human reviewers.** Prompts include your rosters and league-mates' team names |
+| `gemini` | `gemini-3.8-flash` (then `3.5-flash`, `3.1-flash-lite`) | Not published outside AI Studio; reports range from 20 to 1,500 requests/day | **Free-tier prompts and answers may be used to train Google's models and read by human reviewers.** Prompts include your rosters and league-mates' team names |
 | `openrouter` | `google/gemma-4-31b-it:free` | 20 requests/min, 50/day (1,000/day after buying $10 of credits once) | Depends on the upstream provider; many free models require allowing training |
 | `ollama` | `gpt-oss:20b` | None (your hardware) | Never leaves your machine |
 

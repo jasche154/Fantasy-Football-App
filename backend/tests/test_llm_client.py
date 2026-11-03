@@ -247,7 +247,7 @@ def test_fallback_all_down_keeps_provider_kind():
     assert info.value.kind == "provider" and info.value.retry_after == llm_client.PROVIDER_DOWN_COOLDOWN
 
 
-def test_cooling_down_mix_reports_the_reason_of_the_soonest_provider():
+def test_a_pending_rate_limit_makes_a_mixed_cooldown_waitable_until_the_soonest_provider():
     clock = Clock()
     chain = FallbackClient([client_for("groq", respond(429, {}, {"retry-after": "120"})),
                             client_for("gemini", respond(500))], clock=clock)
@@ -255,7 +255,8 @@ def test_cooling_down_mix_reports_the_reason_of_the_soonest_provider():
         chain.complete([], None)
     with pytest.raises(AgentUnavailable) as info:          # gemini's 30 s outage ends first
         chain.complete([], None)
-    assert info.value.kind == "provider" and info.value.retry_after == 30
+    # A rate limit is pending, so it's waitable; the retry comes when gemini may be back.
+    assert info.value.kind == "rate_limit" and info.value.retry_after == 30
     clock.now += 31
     chain = FallbackClient([client_for("groq", respond(429, {}, {"retry-after": "120"})),
                             client_for("gemini", respond(429, {}, {"retry-after": "500"}))], clock=clock)
@@ -345,3 +346,86 @@ def test_requests_far_over_a_budget_skip_that_provider_without_a_call():
     with pytest.raises(AgentUnavailable) as info:        # nobody can take it: too_large, no call made
         chain.complete(huge, None)
     assert info.value.kind == "too_large" and len(gemini_seen) == 1
+
+
+def by_model(replies: dict):
+    """A transport handler answering per requested model: {model: (status, body)}."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        status, body = replies[json.loads(request.content)["model"]]
+        return httpx.Response(status, json=body)
+    return handler
+
+
+OVERLOADED = {"error": {"code": 503, "status": "UNAVAILABLE", "message": "high demand"}}
+
+
+def models_sent(seen) -> list[str]:
+    return [json.loads(r.content)["model"] for r in seen]
+
+
+def test_an_overloaded_gemini_model_falls_back_to_the_next_one_and_stays_there(caplog):
+    seen = []
+    client = client_for("gemini", by_model({"gemini-3.8-flash": (503, OVERLOADED),
+                                            "gemini-3.5-flash": (200, ok_body("from 3.5"))}), seen)
+    assert client.complete([{"role": "user", "content": "hi"}], None)["content"] == "from 3.5"
+    assert client.complete([{"role": "user", "content": "again"}], None)["content"] == "from 3.5"
+    # The model that answered stays first, so thought signatures never cross models mid-chat.
+    assert models_sent(seen) == ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.5-flash"]
+    assert "UNAVAILABLE" in caplog.text and "high demand" not in caplog.text      # status code only
+
+
+def test_a_timeout_also_falls_back_but_model_mistakes_and_huge_requests_do_not():
+    def slow_then_ok(request):
+        if json.loads(request.content)["model"] == "gemini-3.8-flash":
+            raise httpx.ReadTimeout("slow")
+        return httpx.Response(200, json=ok_body("ok"))
+    assert client_for("gemini", slow_then_ok).complete([], None)["content"] == "ok"
+
+    rejected = {"error": {"code": "tool_use_failed", "message": "bad tool call"}}
+    seen = []
+    with pytest.raises(ToolCallRejected):
+        client_for("gemini", respond(400, rejected), seen).complete([], None)
+    seen_big = []
+    with pytest.raises(AgentUnavailable) as caught:
+        client_for("gemini", respond(413, {}), seen_big).complete([], None)
+    assert caught.value.kind == "too_large" and len(seen) == len(seen_big) == 1
+
+
+def test_when_every_model_fails_the_last_error_is_raised():
+    seen = []
+    with pytest.raises(AgentUnavailable, match="HTTP 503"):
+        client_for("gemini", respond(503, OVERLOADED), seen).complete([], None)
+    assert models_sent(seen) == ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite"]
+    groq_seen = []
+    with pytest.raises(AgentUnavailable, match="HTTP 503"):
+        client_for("groq", respond(503, OVERLOADED), groq_seen).complete([], None)
+    assert len(groq_seen) == 1                                       # no fallback models: one try
+
+
+def test_a_short_rate_limit_beats_another_providers_outage():
+    """Groq at its per-minute limit and Gemini down: report the limit, which the agent waits out."""
+    groq = client_for("groq", respond(429, {}, {"retry-after": "36"}))
+    gemini = client_for("gemini", respond(503, OVERLOADED))
+    with pytest.raises(AgentUnavailable) as caught:
+        FallbackClient([groq, gemini], clock=Clock()).complete([], None)
+    assert caught.value.kind == "rate_limit" and caught.value.retry_after == 30     # gemini may be back first
+
+
+def test_gemini_gets_a_placeholder_signature_on_tool_calls_from_another_provider():
+    """A question that starts on Groq and moves to Gemini: Gemini 3 rejects unsigned tool calls with HTTP 400."""
+    seen = []
+    signed = {"id": "g1", "type": "function", "function": {"name": "a", "arguments": "{}"},
+              "extra_content": {"google": {"thought_signature": "real-signature"}}}
+    unsigned = {"id": "fc_groq", "type": "function", "function": {"name": "b", "arguments": "{}"}}
+    history = [{"role": "user", "content": "q"}, {"role": "assistant", "content": "", "tool_calls": [signed, unsigned]},
+               {"role": "tool", "tool_call_id": "g1", "content": "{}"},
+               {"role": "tool", "tool_call_id": "fc_groq", "content": "{}"}]
+    client_for("gemini", respond(200, ok_body("ok")), seen).complete(history, None)
+    sent = json.loads(seen[0].content)["messages"][1]["tool_calls"]
+    assert sent[0]["extra_content"]["google"]["thought_signature"] == "real-signature"         # kept as it came
+    assert sent[1]["extra_content"]["google"]["thought_signature"] == llm_client.SIGNATURE_PLACEHOLDER
+    assert "extra_content" not in unsigned                                                       # input untouched
+
+    groq_seen = []
+    client_for("groq", respond(200, ok_body("ok")), groq_seen).complete(history, None)
+    assert all("extra_content" not in c for c in json.loads(groq_seen[0].content)["messages"][1]["tool_calls"])
