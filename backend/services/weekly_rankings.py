@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 
 from database.models import DataLoad, GameForecast, InjuryReport, NflGame, PlayerStatus, WeeklySourceProjection
 from integrations import espn, odds_api, yahoo_experts
-from services import projection_factors, rankings_store, score_ranges
+from services import projection_factors, props_calibration, rankings_store, score_ranges
 from services.game_features import conditions_for, team_profiles
 from services.projection_factors import inputs_for
 from services.weather import forecasts
@@ -34,6 +34,7 @@ from services.league import POSITIONS, LeagueSettings
 from services.projections import PlayerSeason
 from services.injuries import InjuryContext, build_context
 from services.valuation import Valuation, build_valuation
+from services.threshold_odds import threshold_odds
 from services.weekly_adjust import Adjusted, Scenario, Step, adjust, explain
 from services.weekly_model import Matchup, matchup_for, model_stats, points_from_stats, props_line, weekly_rate
 
@@ -79,6 +80,7 @@ class WeeklyPlayer:
     pct_rostered: float | None = None
     actual: float | None = None        # points scored that week (league scoring), once the game is final
     quantiles: tuple[float, ...] | None = None   # points if he plays, at score_ranges.LEVELS
+    threshold_odds: tuple[tuple[float, float], ...] = ()   # (points, chance of at least that many); threshold_odds.py
 
 
 @dataclass(frozen=True)
@@ -176,7 +178,8 @@ def _rank_to_points(curve: list[float], rank: float) -> float:
 
 def _numeric_sources(candidate: _Candidate, matchup: Matchup, rate: float | None,
                      season_line: PlayerSeason | None, league: LeagueSettings,
-                     model_factor: float = 1.0) -> dict[str, SourceValue]:
+                     model_factor: float = 1.0,
+                     prop_factors: Mapping[str, float] | None = None) -> dict[str, SourceValue]:
     scoring = league.scoring_settings()
     sources: dict[str, SourceValue] = {}
     model = (model_stats(season_line, rate, matchup, scoring)
@@ -184,7 +187,9 @@ def _numeric_sources(candidate: _Candidate, matchup: Matchup, rate: float | None
     model = {key: value * model_factor for key, value in model.items()}   # calibration, EPA matchup, weather
     if model:
         sources["model"] = SourceValue(points_from_stats(model, candidate.position, scoring))
-    props = props_line(candidate.props or {}, candidate.position, model)
+    # Per-stat correction learned from earlier weeks (props_calibration.py; empty while it's off).
+    props = props_line(props_calibration.corrected(candidate.props or {}, prop_factors or {}),
+                       candidate.position, model)
     if props is not None:
         sources["vegas_props"] = SourceValue(points_from_stats(props, candidate.position, scoring))
     if candidate.espn:
@@ -230,7 +235,8 @@ def blend(candidates: Mapping[int, _Candidate], valuation: Valuation, week: int,
           weights: Mapping[str, float] = WEIGHTS,
           factor_for: Callable[[str, str | None, str], tuple[float, str]] | None = None,
           weights_by_position: Mapping[str, Mapping[str, float]] | None = None,
-          shapes: Mapping[int, tuple[float | None, float | None]] | None = None) -> tuple[WeeklyPlayer, ...]:
+          shapes: Mapping[int, tuple[float | None, float | None]] | None = None,
+          prop_factors: Mapping[str, float] | None = None) -> tuple[WeeklyPlayer, ...]:
     """Pure blending step over already-loaded sources.
 
     With require_outside_source, players that no outside source projects or ranks are left
@@ -249,7 +255,7 @@ def blend(candidates: Mapping[int, _Candidate], valuation: Valuation, week: int,
             continue                                   # bye week, or team unknown
         model_factor = factor_for(candidate.position, candidate.team, matchup.opponent) if factor_for else (1.0, "")
         numeric = _numeric_sources(candidate, matchup, rates.get(candidate.player_id),
-                                   seasons.get(candidate.player_id), league, model_factor[0])
+                                   seasons.get(candidate.player_id), league, model_factor[0], prop_factors)
         prepared.append((candidate, matchup, numeric, model_factor))
 
     curves: dict[str, list[float]] = defaultdict(list)
@@ -291,6 +297,7 @@ def blend(candidates: Mapping[int, _Candidate], valuation: Valuation, week: int,
             else adjusted.availability.label,
             floor=adjusted.floor, ceiling=adjusted.ceiling, boost_points=adjusted.boost_points,
             quantiles=adjusted.quantiles,
+            threshold_odds=threshold_odds(candidate.position, adjusted.quantiles, adjusted.availability.play_prob),
             scenarios=adjusted.scenarios, explanation=steps, pct_rostered=candidate.pct_rostered,
             actual=_actual(seasons.get(candidate.player_id), week)))
     return _ranked(players)
@@ -364,7 +371,8 @@ def _build(session: Session, league: LeagueSettings, valuation: Valuation, week:
                     context=context, rates=rates, weights=weights,
                     factor_for=model_factors(session, valuation.season, week),
                     weights_by_position=position_weights(session, valuation.season, week),
-                    shapes=score_ranges.shape_inputs(session, valuation.season, candidates, before_week=week))
+                    shapes=score_ranges.shape_inputs(session, valuation.season, candidates, before_week=week),
+                    prop_factors=props_calibration.factors_for(session, valuation.season, week))
     counts = {key: sum(1 for p in players if key in grouped({k: v.points for k, v in p.sources.items()}))
               for key in weights}
     return WeeklyRankings(season=valuation.season, week=week, scoring=league.scoring,

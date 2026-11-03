@@ -53,6 +53,7 @@ SHAPED_POSITIONS = ("RB", "WR", "TE")
 # The backtest only projects players with a 5+ point rate, so projections under 4 points have no
 # fitted tier; these are the blend's own 2026 quantiles for that tier (all positions).
 LOW_TIER = {"min": 0.0, "max": 4.0, "q": [0.0, 0.0, 0.0, 0.0, 1.41, 3.22, 4.42]}
+TAIL_STRETCH = 2.0          # past the 95th percentile, how many 90th-95th gaps the top tail runs on
 Z = {0.05: -1.645, 0.10: -1.2816, 0.25: -0.6745, 0.50: 0.0, 0.75: 0.6745, 0.90: 1.2816, 0.95: 1.645}
 
 
@@ -131,12 +132,21 @@ def normal_quantiles(mean: float, floor: float, ceiling: float) -> tuple[float, 
     return tuple(round(mean + Z[level] * sd, 2) for level in LEVELS)
 
 
-def sample(quantiles: Sequence[float], u: np.ndarray) -> np.ndarray:
-    """Scores at uniform draws u, interpolating between the quantiles (tails run to 0 and past the 95th)."""
+def knots(quantiles: Sequence[float]) -> tuple[tuple[float, ...], tuple[float, ...]]:
+    """(cumulative levels, points) of the piecewise-linear distribution through the quantiles.
+
+    Below the 5th percentile it runs down to 0 (or one 5th-10th gap lower for negative
+    scores); past the 95th it runs on to 95th + TAIL_STRETCH * (95th - 90th).
+    """
     q = list(quantiles)
     low_end = max(0.0, q[0] - (q[1] - q[0])) if q[0] >= 0 else q[0] - (q[1] - q[0])
-    high_end = q[-1] + 2.0 * (q[-1] - q[-2])
-    return np.interp(u, (0.0, *LEVELS, 1.0), (low_end, *q, high_end))
+    high_end = q[-1] + TAIL_STRETCH * (q[-1] - q[-2])
+    return (0.0, *LEVELS, 1.0), (low_end, *q, high_end)
+
+
+def sample(quantiles: Sequence[float], u: np.ndarray) -> np.ndarray:
+    """Scores at uniform draws u, interpolating between the quantiles (see knots)."""
+    return np.interp(u, *knots(quantiles))
 
 
 def shape_inputs(session: Session, season: int, player_ids: Iterable[int],

@@ -1,11 +1,12 @@
 import { Fragment, useMemo, useState } from 'react';
-import type { WeeklyMatchup, WeeklyPlayer, WeeklySourceKey, WeeklySourceValue } from '../../api/types';
+import type { ThresholdOdds, WeeklyMatchup, WeeklyPlayer, WeeklySourceKey, WeeklySourceValue } from '../../api/types';
 import { FlagChips, StatusBadge } from '../../components/FlagChips';
 import { PlayerLink } from '../../components/PlayerLink';
 import { nextSort, SortableHeader, type SortState } from '../../components/SortableHeader';
 import { EMPTY_VALUE, formatNumber } from '../../lib/format';
 import { factorLabel, rankTone, TONE_LABELS } from '../../lib/matchup';
 import { ExplainPanel } from './ExplainPanel';
+import { oddsLabel } from './thresholdOdds';
 import { DEFAULT_WEEKLY_SORT, sortWeekly, weeklyDefaultDirection, type WeeklySortKey } from './weeklySort';
 
 interface SourceColumn {
@@ -75,6 +76,17 @@ function ActualCell({ row }: { row: WeeklyPlayer }) {
   );
 }
 
+/** The highest threshold's odds ("20+ pts: 31%"), with every threshold in the tooltip. */
+function TopOdds({ odds }: { odds: readonly ThresholdOdds[] | undefined }) {
+  const top = odds?.at(-1);
+  if (!odds || !top) return null;
+  const all = odds.map(oddsLabel).join(', ');  return (
+    <span className="threshold-odds" title={`Chance of each total, including the chance he sits: ${all}`}>
+      {oddsLabel(top)}
+    </span>
+  );
+}
+
 function WeeklyRow({ row, week }: { row: WeeklyPlayer; week: number }) {
   const position = row.player.position;
   const [showWhy, setShowWhy] = useState(false);
@@ -101,6 +113,7 @@ function WeeklyRow({ row, week }: { row: WeeklyPlayer; week: number }) {
         {row.floor !== null && row.ceiling !== null && (
           <span className="source-rank" title="10th to 90th percentile outcome">{formatNumber(row.floor)}–{formatNumber(row.ceiling)}</span>
         )}
+        <TopOdds odds={row.threshold_odds} />
       </td>
       <ActualCell row={row} />
       {SOURCE_COLUMNS.map((column) => (
@@ -140,7 +153,7 @@ export function WeeklyTable({ rows, caption, week }: WeeklyTableProps) {
               Team total
             </SortableHeader>
             <SortableHeader columnKey="proj" sort={sort} onSort={onSort}
-              title="Expected points (if active x chance to play), with the 10th-90th percentile range">
+              title="Expected points (if active x chance to play), with the 10th-90th percentile range and the chance of a big week">
               Proj
             </SortableHeader>
             <SortableHeader columnKey="actual" sort={sort} onSort={onSort}
