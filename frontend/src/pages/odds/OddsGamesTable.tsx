@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useId, useState } from 'react';
 import type { OddsGame, PlayerProp, PropStatKey } from '../../api/types';
 import { PlayerLink, PositionChip } from '../../components/PlayerLink';
 import { formatNumber } from '../../lib/format';
@@ -39,11 +39,12 @@ export function visiblePropColumns(props: readonly PlayerProp[]) {
   return PROP_COLUMNS.filter((column) => props.some((prop) => prop.stats[column.key] !== undefined));
 }
 
-function PropsTable({ game }: { game: OddsGame }) {
+function PropsTable({ game, id }: { game: OddsGame; id: string }) {
   const columns = visiblePropColumns(game.props);
+  const timing = propsTimingLabel(game);
   return (
-    <div className="odds-props">
-      <p className="meta-line">{propsTimingLabel(game)} · expected stats implied by the betting lines</p>
+    <div className="odds-props" id={id}>
+      <p className="meta-line">{timing && `${timing} · `}Expected stats implied by the betting lines</p>
       <div className="table-wrap">
         <table className="data-table data-table--compact">
           <caption className="sr-only">{`Player props, ${game.away_team} at ${game.home_team}`}</caption>
@@ -77,7 +78,14 @@ function PropsTable({ game }: { game: OddsGame }) {
   );
 }
 
-function GameRow({ game, isOpen, onToggle }: { game: OddsGame; isOpen: boolean; onToggle: () => void }) {
+interface GameRowProps {
+  game: OddsGame;
+  isOpen: boolean;
+  onToggle: () => void;
+  propsId: string;
+}
+
+function GameRow({ game, isOpen, onToggle, propsId }: GameRowProps) {
   const matchup = `${game.away_team} @ ${game.home_team}`;
   return (
     <tr>
@@ -92,7 +100,7 @@ function GameRow({ game, isOpen, onToggle }: { game: OddsGame; isOpen: boolean; 
         {game.props.length === 0 ? (
           <span className="muted">None yet</span>
         ) : (
-          <button type="button" className="btn btn--ghost btn--sm" aria-expanded={isOpen} onClick={onToggle}>
+          <button type="button" className="btn btn--ghost btn--sm" aria-expanded={isOpen} aria-controls={isOpen ? propsId : undefined} onClick={onToggle}>
             {isOpen ? 'Hide' : 'Show'} {game.props.length} props<span className="sr-only">{`, ${matchup}`}</span>
           </button>
         )}
@@ -102,6 +110,7 @@ function GameRow({ game, isOpen, onToggle }: { game: OddsGame; isOpen: boolean; 
 }
 
 export function OddsGamesTable({ games }: { games: readonly OddsGame[] }) {
+  const baseId = useId();
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
   const toggle = (key: string) =>
     setOpen((current) => {
@@ -130,12 +139,13 @@ export function OddsGamesTable({ games }: { games: readonly OddsGame[] }) {
           {games.map((game) => {
             const key = `${game.away_team}@${game.home_team}`;
             const isOpen = open.has(key);
+            const propsId = `${baseId}-props-${key}`;
             return (
               <Fragment key={key}>
-                <GameRow game={game} isOpen={isOpen} onToggle={() => toggle(key)} />
+                <GameRow game={game} isOpen={isOpen} onToggle={() => toggle(key)} propsId={propsId} />
                 {isOpen && (
                   <tr className="odds-props-row">
-                    <td colSpan={8}><PropsTable game={game} /></td>
+                    <td colSpan={8}><PropsTable game={game} id={propsId} /></td>
                   </tr>
                 )}
               </Fragment>

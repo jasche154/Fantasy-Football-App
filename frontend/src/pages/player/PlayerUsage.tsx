@@ -41,8 +41,10 @@ function PercentileRow({ stat }: { stat: PercentileStat }) {
       <dd className="num">{formatStatValue(stat.value, stat.unit)}</dd>
       <dd>
         {stat.percentile === null ? (
-          <span className="muted" title={stat.small_sample ? sampleNote : undefined}>
-            {stat.small_sample ? 'Small sample' : 'No pool'}
+          <span className="muted">
+            {stat.small_sample ? (
+              <>Small sample <span className="note">({sampleNote})</span></>
+            ) : 'No pool'}
           </span>
         ) : (
           <span className="percentile-bar" aria-hidden="true">
@@ -131,7 +133,7 @@ export function PlayerUsage({ playerId, season }: { playerId: number; season: nu
           {(data) => data.percentiles ? <PercentilesView percentiles={data.percentiles} /> : <p className="muted">No percentiles for this player.</p>}
         </AsyncView>
       </Card>
-      <Card title="What changed" eyebrow="Last 3 games vs before">
+      <Card title="What changed" eyebrow={usage.data?.changes ? `Last ${usage.data.changes.recent_games} games vs before` : 'Recent games vs before'}>
         <AsyncView state={usage} loading={<Skeleton lines={4} label="Loading recent usage…" />} errorTitle="Couldn't load recent usage">
           {(data) => data.changes ? <ChangesView changes={data.changes} /> : <p className="muted">No usage data for this player.</p>}
         </AsyncView>

@@ -26,7 +26,7 @@ function OddsBody({ data }: { data: OddsResponse }) {
   return (
     <>
       {data.note && <p className="note odds-note">{data.note}</p>}
-      <OddsGamesTable games={data.games} />
+      <OddsGamesTable key={data.week} games={data.games} />
     </>
   );
 }
@@ -51,7 +51,7 @@ export function OddsPage({ query }: { query: Readonly<Record<string, string>> })
           />
         }
       />
-      <Card title={odds.data ? `Week ${odds.data.week} games` : 'Games'} eyebrow="Vegas lines · stored props">
+      <Card title={shownWeek ? `Week ${shownWeek} games` : 'Games'} eyebrow="Vegas lines · stored props">
         <AsyncView state={odds} loading={<TableSkeleton rows={8} columns={8} label="Loading odds…" />}>
           {(data) => <OddsBody data={data} />}
         </AsyncView>

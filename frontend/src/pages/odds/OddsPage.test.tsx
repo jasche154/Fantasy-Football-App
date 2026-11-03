@@ -45,7 +45,11 @@ describe('OddsPage', () => {
     expect(within(within(table).getByRole('row', { name: /MIA @ NYJ/ })).getByText('None yet')).toBeInTheDocument();
     expect(within(table).getByRole('row', { name: /MIA @ NYJ/ })).toHaveTextContent('MIA −2.0');
 
-    await user.click(within(first).getByRole('button', { name: /Show 1 props/ }));
+    const toggle = within(first).getByRole('button', { name: /Show 1 props/ });
+    expect(toggle).not.toHaveAttribute('aria-controls');
+    await user.click(toggle);
+    const controlled = document.getElementById(toggle.getAttribute('aria-controls') ?? '');
+    expect(controlled).toHaveClass('odds-props');
     const props = screen.getByRole('table', { name: 'Player props, BAL at CIN' });
     expect(within(props).getByRole('link', { name: "Ja'Marr Chase" })).toHaveAttribute('href', '#/player/2');
     expect(within(props).getByText('81.2')).toBeInTheDocument();
@@ -85,6 +89,7 @@ describe('odds helpers', () => {
     expect(spreadLabel({ home_team: 'A', away_team: 'B', spread_line: 0 })).toBe('Pick');
     expect(spreadLabel({ home_team: 'A', away_team: 'B', spread_line: null })).toBe('—');
     expect(propsTimingLabel({ props_fetched_at: null, props_hours_before_kickoff: null })).toBeNull();
+    expect(propsTimingLabel({ props_fetched_at: '2025-11-09T16:30:00+00:00', props_hours_before_kickoff: 1.5 })).toBe('Props from 1.5 h before kickoff');
     expect(visiblePropColumns(WITH_PROPS.props).map((c) => c.key)).toEqual(['rec', 'rec_yds', 'scrimmage_tds']);
     expect(weekFromQuery('9')).toBe(9);
     expect(weekFromQuery('19')).toBeUndefined();
