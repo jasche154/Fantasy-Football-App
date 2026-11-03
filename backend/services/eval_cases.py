@@ -112,6 +112,9 @@ CASES: tuple[Case, ...] = (
        "get_playoff_outlook"), must_mention=(PCT + "|chance|odds",), **MY),
     _c("power-rankings", "league", "Who are the real contenders in my league?", ("get_power_rankings",)),
     _c("tendencies", "league", "Which managers in my league actually make trades?", ("get_power_rankings",), **H),
+    _c("luck", "league", "Who is the luckiest team in my league?", ("get_power_rankings",)),
+    _c("all-play", "league", "Am I unlucky this year?", ("get_power_rankings",), **H),
+    _c("past-trades", "league", "Who won the trades in my league this year?", ("get_power_rankings",)),
     _c("other-team", "league", "What does the best team in my league have on its roster?", ("get_league_rosters",
        "get_power_rankings")),
     # rankings, stats, regression, compare

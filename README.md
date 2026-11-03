@@ -390,8 +390,7 @@ and the scoreboard for every regular-season week so far and to come), cached for
   head-to-head wins in those same weeks − all-play expected wins (positive: the schedule gave it
   more wins than its scores earned). If Yahoo's scoreboards can't be read, the rankings load
   without luck.
-- **Manager tags** (`services/manager_tags.py`), each shown with its evidence: "Active trader"
-  (3+ trades), "FAAB whale" (average winning bid ≥ 12% of the budget), "Sits on FAAB" (spent
+- **Manager tags** (`services/manager_tags.py`), each shown with its evidence: "FAAB whale" (average winning bid ≥ 12% of the budget), "Sits on FAAB" (spent
   under 25% of the budget by week 6 or later, only when Yahoo reports the FAAB balance; both FAAB
   leagues only), "Waiver hawk" (1.5+ moves
   per week played), "RB hunter" etc. (50%+ of at least 4 adds and trades at one position),
@@ -951,8 +950,8 @@ or a tool error; if Yahoo itself is down, the app says so at once instead of let
 through the same timeout again. The reply has the normal shape plus `answered_by: "app"`, and the chat
 shows "Answered instantly from the app's data, without AI."
 
-**Evaluation set** (`services/eval_cases.py`, runner `services/agent_eval.py`): 66 saved
-questions across 18 intents, including multi-turn follow-ups and out-of-scope questions; 24 are
+**Evaluation set** (`services/eval_cases.py`, runner `services/agent_eval.py`): 69 saved
+questions across 18 intents, including multi-turn follow-ups and out-of-scope questions; 25 are
 held out for scoring only. The test suite checks offline that routing sends every case's tools,
 plus the loop, grounding, truncation, fallback and injection cases with a scripted fake model.
 With a provider key, `python -m services.agent_eval` runs them through the real model and checks

@@ -77,7 +77,7 @@ def test_tags_carry_their_evidence():
     tags = manager_tags(standings, transactions, uses_faab=True, budget=100, weeks_played=8,
                         records={"t1": {"graded": 3, "won": 2, "lost": 1}, "t3": {"graded": 2, "won": 0, "lost": 2}})
     t1 = _evidence(tags["t1"])
-    assert t1["Active trader"] == "4 trades"
+    assert "Active trader" not in t1            # the tendency label covers trade volume
     assert t1["FAAB whale"] == "avg winning bid 15% of $100"
     assert t1["Waiver hawk"] == "14 moves in 8 weeks"
     assert t1["RB hunter"] == "80% of 5 adds and trades were RB"
@@ -237,7 +237,8 @@ def test_league_endpoint_adds_all_play_luck_tags_and_past_trades(client, session
     teams = {t["team"]: t for t in body["teams"]}
     assert teams["My Squad"]["all_play"] == "2-0" and teams["My Squad"]["luck"] == 0.0
     assert teams["Rival"]["all_play"] == "0-2"
-    assert {"tag": "Active trader", "evidence": "3 trades"} in teams["My Squad"]["tendencies"]["tags"]
+    assert teams["My Squad"]["tendencies"]["label"] == "Active trader"
+    assert all(t["tag"] != "Active trader" for t in teams["My Squad"]["tendencies"]["tags"])
     [past] = body["past_trades"]
     sides = {s["team"]: s for s in past["sides"]}
     assert sides["My Squad"]["received"] == [{"name": "RB Player 01", "points": 88.0}]

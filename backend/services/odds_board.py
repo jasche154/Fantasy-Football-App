@@ -12,10 +12,10 @@ from sqlalchemy.orm import Session
 
 from database.models import NflGame, WeeklySourceProjection
 from integrations.weekly_sources import utc
+from services import props_calibration
 from services.schedule_strength import Game, load_schedule
 
-PROPS_SOURCE = "vegas_props"
-PROP_STATS = ("pass_yds", "pass_tds", "ints", "rush_yds", "rec", "rec_yds", "scrimmage_tds")
+PROPS_SOURCE, PROP_STATS = props_calibration.SOURCE, props_calibration.STATS
 LAST_WEEK = 18
 NO_PROPS_NOTE = ("No player props are stored for this week yet. Props are bought once per game within "
                  "2 hours of kickoff to save API credits, so they appear here game by game on game day.")

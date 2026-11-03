@@ -3,7 +3,7 @@
 From Yahoo's standings (trades, moves, FAAB balance), the season's transactions (winning bids,
 the positions each manager picks up and trades for) and the retro trade grades
 (services/trade_grades.py):
-- "Active trader": ACTIVE_TRADER_TRADES+ trades.
+(Trade volume is the tendency label in league_insights: "Active trader".)
 - "FAAB whale" (FAAB leagues): average winning bid at least WHALE_BID_SHARE of the budget.
 - "Sits on FAAB" (FAAB leagues, from week SITS_AFTER_WEEK on, FAAB balance known): spent under SITS_SPENT_SHARE of it.
 - "Waiver hawk": HAWK_ADDS_PER_WEEK+ moves per week played.
@@ -19,7 +19,6 @@ from services.trade_grades import WIN_MARGIN
 
 POSITION_CODE = re.compile(r"[A-Z]{1,4}")          # QB, RB, WR, TE, K, DEF...
 
-ACTIVE_TRADER_TRADES = 3
 WHALE_BID_SHARE = 0.12
 SITS_SPENT_SHARE = 0.25
 SITS_AFTER_WEEK = 6
@@ -73,9 +72,6 @@ def team_tags(standing: Mapping, bids: Sequence[float], acquired: Counter, *, us
               budget: float | None, weeks_played: int, record: Mapping[str, int] | None = None) -> list[dict]:
     """The tags one manager has earned, each with its evidence."""
     tags = []
-    trades = standing.get("trades") or 0
-    if trades >= ACTIVE_TRADER_TRADES:
-        tags.append(_tag("Active trader", f"{trades} trades"))
     if uses_faab and budget:
         tags += _faab_tags(standing, bids, float(budget), weeks_played)
     moves = standing.get("moves") or 0

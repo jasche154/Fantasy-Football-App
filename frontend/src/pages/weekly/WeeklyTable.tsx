@@ -80,7 +80,8 @@ function ActualCell({ row }: { row: WeeklyPlayer }) {
 function TopOdds({ odds }: { odds: readonly ThresholdOdds[] | undefined }) {
   const top = odds?.at(-1);
   if (!odds || !top) return null;
-  const all = odds.map(oddsLabel).join(', ');  return (
+  const all = odds.map(oddsLabel).join(', ');
+  return (
     <span className="threshold-odds" title={`Chance of each total, including the chance he sits: ${all}`}>
       {oddsLabel(top)}
     </span>
