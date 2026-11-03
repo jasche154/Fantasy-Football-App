@@ -7,7 +7,8 @@ tools returned (services/grounding.py) before they reach the user.
 import json
 import logging
 import re
-from collections.abc import Iterable, Mapping, Sequence
+import time
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
@@ -34,6 +35,13 @@ MIN_CALL_CHARS = 1_500         # floor per call when a round has many calls
 INPUT_TOKENS = 6_000           # whole-request budget (chars / 4) when the client has no profile
 CHARS_PER_TOKEN = 4
 DIGEST_CHARS = 400             # earlier rounds' tool results shrink to this when a request is over budget
+HISTORY_CHARS = 600            # earlier chat replies shrink to this when a request is over budget
+# Groq's free tier allows ~8,000 tokens a minute and one question takes 2-3 requests, so a short
+# rate limit mid-question is normal: wait it out (the tools already ran) instead of failing the chat.
+MAX_RATE_WAIT = 45             # seconds: longer waits (e.g. a daily cap) fail at once
+TURN_RATE_WAIT = 90            # seconds of waiting per question, at most
+RATE_WAIT_MARGIN = 1.0         # seconds added to the provider's retry-after
+_sleep = time.sleep            # module-level so tests can make waiting instant
 OUT_OF_ROUNDS = ("Out of tool rounds: answer now with the data above, and say plainly what you couldn't check.")
 TOOL_FAILURE = {"error": "The tool failed unexpectedly. Tell the user the data isn't available right now."}
 
@@ -162,8 +170,30 @@ def _estimate_tokens(messages: Sequence[Mapping[str, Any]], schemas: Sequence[Ma
     return (chars + len(json.dumps(schemas or []))) // CHARS_PER_TOKEN
 
 
-def _fit_request(messages: list[dict], schemas: list[dict] | None, turn: _Turn, budget_tokens: int) -> list[dict]:
-    """Shrinks earlier rounds' tool results (oldest first) to digests while the request is over budget.
+def _short(text: str, limit: int) -> str:
+    return text if len(text) <= limit else f"{text[:limit - 1]}…"
+
+
+def _fit_history(messages: list[dict], schemas: list[dict] | None, history_end: int, budget_tokens: int) -> list[dict]:
+    """Earlier chat messages (messages[1:history_end], before the latest question) shrink, oldest
+    first, then drop, while the request is over budget. The system prompt keeps remembered facts."""
+    shrunk = list(messages)
+    for i in range(1, history_end - 1):
+        if _estimate_tokens(shrunk, schemas) <= budget_tokens:
+            return shrunk
+        if len(shrunk[i]["content"]) > HISTORY_CHARS:
+            shrunk[i] = {**shrunk[i], "content": _short(shrunk[i]["content"], HISTORY_CHARS)}
+    dropped = 0
+    while dropped < history_end - 2 and _estimate_tokens(shrunk, schemas) > budget_tokens:
+        del shrunk[1]
+        dropped += 1
+    return shrunk
+
+
+def _fit_request(messages: list[dict], schemas: list[dict] | None, turn: _Turn, budget_tokens: int,
+                 history_end: int = 1) -> list[dict]:
+    """Shrinks earlier rounds' tool results (oldest first) to digests while the request is over budget,
+    then earlier chat messages.
 
     The latest round stays whole; the full results stay in `turn.evidence` for grounding.
     """
@@ -176,8 +206,29 @@ def _fit_request(messages: list[dict], schemas: list[dict] | None, turn: _Turn, 
         if stored and len(message["content"]) > DIGEST_CHARS:
             shrunk[i] = {**message, "content": fit(stored[0], DIGEST_CHARS, stored[1])}
             if _estimate_tokens(shrunk, schemas) <= budget_tokens:
-                break
-    return shrunk
+                return shrunk
+    return _fit_history(shrunk, schemas, history_end, budget_tokens)
+
+
+@dataclass
+class _RateWait:
+    """Waits out short provider rate limits during one question, up to TURN_RATE_WAIT in total."""
+    sleep: Callable[[float], None]
+    waited: float = 0.0
+
+    def complete(self, client: LLMClient, request: Callable[[], list[dict]], tools: list[dict] | None) -> dict:
+        """`request` builds the messages each try: after a wait another provider (budget) may answer."""
+        while True:
+            try:
+                return client.complete(request(), tools)
+            except AgentUnavailable as exc:
+                pause = (exc.retry_after or 0) + RATE_WAIT_MARGIN
+                if (exc.kind != "rate_limit" or not exc.retry_after or exc.retry_after > MAX_RATE_WAIT
+                        or self.waited + pause > TURN_RATE_WAIT):
+                    raise
+                log.info("AI provider rate limit: waiting %.0fs before retrying", pause)
+                self.waited += pause
+                self.sleep(pause)
 
 
 def _ground(answer: str, messages: Sequence[Mapping[str, Any]], turn: _Turn):
@@ -225,8 +276,10 @@ def mentions_line(mentions: Iterable[Any]) -> str:
 
 def run_agent(session: Session, client: LLMClient, history: Sequence[Mapping[str, str]],
               registry: ToolRegistry = TOOLS, max_rounds: int = MAX_ROUNDS,
-              memory: Sequence[str] = (), league_id: int | None = None) -> AgentReply:
-    """Raises ValueError for an unknown `league_id`; AgentUnavailable when the model can't answer."""
+              memory: Sequence[str] = (), league_id: int | None = None,
+              sleep: Callable[[float], None] | None = None) -> AgentReply:
+    """Raises ValueError for an unknown `league_id`; AgentUnavailable when the model can't answer
+    (short rate limits are waited out first; `sleep` is injectable for tests)."""
     turn = _Turn(session, registry, history, _focus_league(session, league_id),
                  list(clean_memory(f for f in memory if grounding.safe_fact(f))))
     tools, intents, mentions = _route(session, history)
@@ -235,15 +288,19 @@ def run_agent(session: Session, client: LLMClient, history: Sequence[Mapping[str
     messages: list[dict] = [{"role": "system", "content": system},
                             *({"role": m["role"], "content": m["content"]} for m in history)]
     schemas = registry.openai_schemas(tools)
-    input_tokens = INPUT_TOKENS
+    history_end = len(messages)
+    waiter = _RateWait(sleep or _sleep)
+
+    def fitted(offered: list[dict] | None) -> Callable[[], list[dict]]:
+        # A fallback chain may switch providers between requests, so read the budget each time.
+        return lambda: _fit_request(messages, offered, turn, _profile_value(client, "max_input_tokens", INPUT_TOKENS),
+                                    history_end)
     requests = rounds = rejections = 0
     revised = False
     while rounds < max_rounds:
-        # A fallback chain may switch providers between requests, so read the budgets each round.
-        input_tokens = _profile_value(client, "max_input_tokens", INPUT_TOKENS)
         try:
             requests += 1
-            response = client.complete(_fit_request(messages, schemas, turn, input_tokens), schemas)
+            response = waiter.complete(client, fitted(schemas), schemas)
         except ToolCallRejected as exc:
             rejections += 1
             if rejections > MAX_REJECTIONS:
@@ -274,7 +331,7 @@ def run_agent(session: Session, client: LLMClient, history: Sequence[Mapping[str
             messages.append({"role": "tool", "tool_call_id": call["id"], "content": _run_tool(turn, call, budget)})
     messages.append({"role": "system", "content": OUT_OF_ROUNDS})
     requests += 1
-    final = client.complete(_fit_request(messages, None, turn, input_tokens), None)
+    final = waiter.complete(client, fitted(None), None)
     answer = final.get("content") or ""
     return _finish(answer, _ground(answer, messages, turn), turn, client, "out_of_rounds", requests)
 

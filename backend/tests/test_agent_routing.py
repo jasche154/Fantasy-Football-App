@@ -74,6 +74,10 @@ ROUTING_CASES = (
     ("stash-ir", (), "Can I stash anyone on IR?", {WAIVERS, INJURY}),
     ("over-under", (), "what's the over/under on the Lions game", {WEEKLY}),
     ("english-last-names", (), "Should I start Love or Hurts this week?", {"start_sit", COMPARE}),
+    ("find-trades-playoffs", (), "I wanna trade Jonathan Taylor for a better running back or similar with a good "
+     "playoff schedule. maybe bijan or kenneth walker. Identify traades that will look good on Yahoo fantasy for my "
+     "chen family league", {TRADE, "find_league_trades", "get_playoff_outlook"}),
+    ("typo-trade", (), "any good traades for a WR?", {TRADE, "find_league_trades"}),
     ("greeting", (), "hi", set()),
     ("thanks", (), "thanks, that helps", set()),
 )

@@ -57,7 +57,7 @@ def test_chat_with_fake_llm(client, monkeypatch):
 
 @pytest.mark.parametrize("error, status", [
     (agent_module.AgentUnavailable("down"), 502),
-    (agent_module.AgentUnavailable("slow down", kind="rate_limit", retry_after=42), 429),
+    (agent_module.AgentUnavailable("slow down", kind="rate_limit", retry_after=3600), 429),   # daily cap: no wait
     (agent_module.AgentUnavailable("too big", kind="too_large"), 413),
 ])
 def test_chat_provider_failures_map_to_status_codes(client, monkeypatch, error, status):
@@ -65,7 +65,7 @@ def test_chat_provider_failures_map_to_status_codes(client, monkeypatch, error, 
     response = client.post("/api/agent/chat", json={"messages": [{"role": "user", "content": "hi"}]})
     assert response.status_code == status
     if status == 429:
-        assert response.headers["Retry-After"] == "42"
+        assert response.headers["Retry-After"] == "3600"
     if status == 413:
         assert "narrower" in response.json()["detail"]
 

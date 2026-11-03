@@ -794,17 +794,22 @@ numbers. The general tools (`get_weekly_rankings`, `get_fantasy_rankings`, `expl
 `compare_players`, `evaluate_trade`, `get_player_profile`) take an optional `league` and then use
 that league's scoring; every ranking result says which scoring and week it is. `evaluate_trade` in
 a league also scores both real lineups (`your_lineup_gain`, `their_lineup_gain`) and only suggests
-balancing players from the two rosters involved. Pick a league above the chat box (shown with 2+
+balancing players from the two rosters involved. Players to receive from different teams ("Bijan
+or Walker?") come back as one trade per team instead of an error, and `find_league_trades` says
+why when it finds no offer. Pick a league above the chat box (shown with 2+
 leagues) to make it the default.
 
 **Tool results always fit and stay valid JSON** (`tools/shaping.py`): tools return compact rows
 (about 230 characters per weekly row instead of 800), and anything still over the provider's
 budget loses rows from the end with a `"truncated": {"shown", "total", "hint"}` note, never a
 cut in the middle of the JSON. Earlier rounds' results shrink to short digests when a request
-would exceed the provider's per-request budget.
+would exceed the provider's per-request budget; if it is still over, earlier chat replies shrink
+to 600 characters and then the oldest messages drop (the latest question and remembered facts
+always go).
 
 **Intent routing** (`services/agent_routing.py`): each question gets only the tools it's likely
-to need, at most 10. Intents are scored by weighted keywords, follow-ups carry the previous topic
+to need, at most 10, with each chosen topic's two main tools ahead of every topic's extras (so
+"find trades with a good playoff schedule" keeps `find_league_trades`). Intents are scored by weighted keywords, follow-ups carry the previous topic
 and players, and greetings get almost no tools. Player names are found by
 `services/player_index.py`: punctuation-insensitive full names ("AJ Brown"), about 40 nicknames
 ("CMC", "JSN", "ARSB"), unique last names of active players, and typos ("Gibs" → Jahmyr Gibbs).
@@ -867,19 +872,31 @@ message.
 `LLM_CHAIN` lists providers in order; on a rate limit or outage the next one answers and the
 limited one cools down (honoring `Retry-After`). A request that is too large for the provider
 returns "ask a narrower question" instead of "wait a minute". Each provider has its own
-tool-result and request budgets.
+tool-result and request budgets, and each request is sized for the provider it goes to next.
+Gemini tries `gemini-3.8-flash`, then `gemini-3.5-flash`, then `gemini-3.1-flash-lite` when a
+model is overloaded (503 "high demand"), failing or out of its own daily quota (on a free key
+each model allows about 20 requests a day), and stays on the model that answered. A question
+can start on Groq and finish on Gemini: Gemini 3 rejects earlier tool calls without a "thought
+signature", so calls from other providers carry Google's documented placeholder. When one
+provider is rate-limited and another is down, the chat waits until the rate-limited one is back.
+A model only gets its own thought signatures back; calls made by another Gemini model also get
+the placeholder. A 400 (an invalid request) is not retried on other models, and only one
+timeout per call moves on to the next model.
 
 | Provider | Default model | Free limits (checked 2026-10-30) | Data use |
 |---|---|---|---|
 | `groq` (default) | `openai/gpt-oss-120b` | 30 requests/min, 1,000/day, 8,000 tokens/min | Not retained by default |
-| `gemini` | `gemini-3.8-flash` | Not published outside AI Studio; reports range from 20 to 1,500 requests/day | **Free-tier prompts and answers may be used to train Google's models and read by human reviewers.** Prompts include your rosters and league-mates' team names |
+| `gemini` | `gemini-3.8-flash` (then `3.5-flash`, `3.1-flash-lite`) | Not published outside AI Studio; reports range from 20 to 1,500 requests/day | **Free-tier prompts and answers may be used to train Google's models and read by human reviewers.** Prompts include your rosters and league-mates' team names |
 | `openrouter` | `google/gemma-4-31b-it:free` | 20 requests/min, 50/day (1,000/day after buying $10 of credits once) | Depends on the upstream provider; many free models require allowing training |
 | `ollama` | `gpt-oss:20b` | None (your hardware) | Never leaves your machine |
 
 Gemini and OpenRouter are opt-in for that reason, e.g. `LLM_CHAIN=groq,ollama`. Mistral's free
 tier trains on inputs by default, Cerebras is trial credit only, and GitHub Models shut down
-on 2026-07-30, so none of them is offered. Known limit: on Groq, a chat that needs two tool
-rounds can pass the 8,000 tokens/minute cap, so back-to-back questions may hit the countdown.
+on 2026-07-30, so none of them is offered. On Groq, a question that needs tool rounds usually
+passes the 8,000 tokens/minute cap on its second request. The chat then waits out the
+provider's `Retry-After` (at most 45 s at a time and 90 s per question) and continues, so the
+answer comes slower instead of failing; a longer wait (the daily cap) fails at once with a
+countdown, and the page names it as the daily limit.
 
 1. **REST:** `GET /api/agent/tools` lists them, `POST /api/agent/tools/{name}` runs one.
 2. **Built-in chat:** `POST /api/agent/chat` runs a multi-round tool-calling loop on the

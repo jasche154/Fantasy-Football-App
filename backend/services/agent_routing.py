@@ -18,6 +18,7 @@ from services.player_index import Mention, PlayerIndex
 ALWAYS = ("search_players", "get_my_team", "remember")
 MAX_TOOLS = 10
 MAX_INTENTS = 3
+CORE_TOOLS = 2                         # each chosen topic's first tools, kept ahead of every topic's extras
 DEFAULT_THRESHOLD = 2.0
 STRONG, WEAK, PATTERN = 3.0, 1.0, 3.0
 TEAM_BOOST = 2.0                       # a team name ("Lions") points at that team's injury report
@@ -51,7 +52,7 @@ INTENTS: tuple[Intent, ...] = (
            strong=("trade", "trades", "trading", "traded", "deal", "offer", "offered", "counter", "counteroffer",
                    "acquire", "give up", "get for", "swap", "what would it take"),
            weak=("sell", "fair", "accept", "package", "worth it"),
-           patterns=(r"\bwould you (do|take|accept|make)\b", r"\bi give\b.+\bget\b")),
+           patterns=(r"\bwould you (do|take|accept|make)\b", r"\bi give\b.+\bget\b", r"\btraa+d")),
     Intent("waiver", ("get_league_waivers", "get_waiver_targets", "get_trending_players"),
            strong=("waiver", "waivers", "waiver wire", "pickup", "pickups", "pick up", "add", "drop", "cut",
                    "release", "faab", "bid*", "free agent", "free agents", "stream*", "handcuff*", "stash",
@@ -204,14 +205,16 @@ def route_plan(history: Sequence[Mapping[str, str]] | str, index: PlayerIndex | 
 
 def _assemble(intents: Sequence[str], has_players: bool, max_tools: int) -> list[str]:
     by_name = {i.name: i for i in INTENTS}
-    groups: list[Sequence[str]] = [by_name[n].tools for n in intents]
-    if has_players:      # the top topic first, then the core player tools, then the rest
-        groups[1:1] = [PLAYER_TOOLS[:2]]
-        groups.append(PLAYER_TOOLS[2:] if intents else PLAYER_TOOLS)
-    if not groups:
-        groups = [DEFAULT]
+    topics: list[Sequence[str]] = [by_name[n].tools for n in intents] or ([] if has_players else [DEFAULT])
+    # Every topic's main tools before any topic's extras, so the cap never cuts a topic down to
+    # one tool ("find trades ... with a good playoff schedule" keeps find_league_trades).
+    core = [t[:CORE_TOOLS] for t in topics]
+    extras = [t[CORE_TOOLS:] for t in topics]
+    if has_players:      # the top topic first, then the core player tools; the other player tools are extras
+        core[1:1] = [PLAYER_TOOLS[:2]]
+        extras.append(PLAYER_TOOLS[2:])
     chosen = list(ALWAYS)
-    for group in groups:
+    for group in core + extras:
         chosen += [t for t in group if t not in chosen]
     return chosen[:max(max_tools, len(ALWAYS))]
 

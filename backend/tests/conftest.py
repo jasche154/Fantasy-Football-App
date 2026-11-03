@@ -175,6 +175,9 @@ def isolated_state(monkeypatch):
         monkeypatch.delenv(name, raising=False)
     get_settings.cache_clear()
     _clear_caches()
+    from services import agent
+
+    monkeypatch.setattr(agent, "_sleep", lambda _seconds: None)     # rate-limit waits are instant in tests
     yield
     get_settings.cache_clear()
     _clear_caches()
