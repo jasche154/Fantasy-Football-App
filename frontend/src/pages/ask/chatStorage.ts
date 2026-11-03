@@ -11,6 +11,7 @@ export interface ChatEntry {
   dataAsOf?: ChatResponse['data_as_of'];
   stopReason?: ChatResponse['stop_reason'];
   provider?: string | null;
+  answeredBy?: ChatResponse['answered_by'];
 }
 
 export interface StoredChat {
@@ -65,6 +66,7 @@ function toEntry(value: unknown, index: number): ChatEntry | null {
     dataAsOf: toDataAsOf(value.dataAsOf),
     stopReason: value.stopReason === 'out_of_rounds' ? 'out_of_rounds' : undefined,
     provider: typeof value.provider === 'string' ? value.provider : null,
+    answeredBy: value.answeredBy === 'app' ? 'app' : undefined,
   };
 }
 
