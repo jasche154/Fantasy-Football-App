@@ -235,15 +235,26 @@ def power_rankings(session: Session, league: str | None = None) -> dict:
             "past_trades": [_trade_row(g) for g in (data.get("past_trades") or [])[:PAST_TRADES_SHOWN]] or None}
 
 
+def _weeks_text(weeks: list[int]) -> str:
+    """'3-6 (4 weeks)' when consecutive, '3, 4, 6 (3 weeks)' when a week is missing."""
+    if not weeks:
+        return "none played yet"
+    count = f"({len(weeks)} week{'s' if len(weeks) != 1 else ''})"
+    if len(weeks) == 1:
+        return f"{weeks[0]} {count}"
+    if weeks[-1] - weeks[0] + 1 == len(weeks):
+        return f"{weeks[0]}-{weeks[-1]} {count}"
+    return f"{', '.join(map(str, weeks))} {count}"
+
+
 def _trade_row(grade: dict) -> dict:
-    """One graded trade: '<team> got A, B: +23.4 pts' per side."""
-    weeks = grade.get("weeks") or []
-    sides = [f"{label(s['team'])} got {', '.join(r['name'] for r in s['received']) or 'nothing matched'}: "
+    """One graded trade: '<team> got A, B: +23.4 pts' per side. Team and player names are Yahoo's: labeled."""
+    sides = [f"{label(s['team'])} got {', '.join(label(r['name']) for r in s['received']) or 'nothing matched'}: "
              f"{s['net']:+.1f} pts" for s in grade.get("sides", [])]
     row = {"date": grade.get("date"), "sides": sides if grade.get("graded") else None,
-           "weeks": (f"{weeks[0]}-{weeks[-1]}" if len(weeks) > 1 else str(weeks[0])) if weeks else "none played yet",
+           "weeks": _weeks_text(grade.get("weeks") or []),
            "winner": label(grade["winner"]) if grade.get("winner") else ("even" if grade.get("graded") else None),
-           "skipped": grade.get("unmatched") or None}
+           "skipped": [label(name) for name in grade.get("unmatched") or []] or None}
     return {k: v for k, v in row.items() if v is not None}
 
 

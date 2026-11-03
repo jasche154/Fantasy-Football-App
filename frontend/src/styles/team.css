@@ -76,7 +76,8 @@
 /* League: manager tags (evidence on hover), luck, past trade grades. */
 .tag-chips { display: flex; flex-wrap: wrap; gap: 4px; list-style: none; margin: 4px 0 0; padding: 0; }
 .tag-chip { padding: 1px 8px; border-radius: var(--radius-pill); background: var(--color-accent-soft);
-  color: var(--color-accent-strong); font-size: 0.75rem; font-weight: 650; cursor: help; }
+  color: var(--color-accent-strong); font-size: 0.75rem; font-weight: 650; }
+.tag-chip__evidence { font-weight: 400; color: var(--color-text-muted); }
 .value-pos { color: var(--color-pos); }
 .value-neg { color: var(--color-neg); }
 .past-trades { margin-top: 24px; }

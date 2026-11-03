@@ -5,16 +5,19 @@ the positions each manager picks up and trades for) and the retro trade grades
 (services/trade_grades.py):
 - "Active trader": ACTIVE_TRADER_TRADES+ trades.
 - "FAAB whale" (FAAB leagues): average winning bid at least WHALE_BID_SHARE of the budget.
-- "Sits on FAAB" (FAAB leagues, from week SITS_AFTER_WEEK on): spent under SITS_SPENT_SHARE of it.
+- "Sits on FAAB" (FAAB leagues, from week SITS_AFTER_WEEK on, FAAB balance known): spent under SITS_SPENT_SHARE of it.
 - "Waiver hawk": HAWK_ADDS_PER_WEEK+ moves per week played.
 - "<POS> hunter": HUNTER_SHARE+ of a manager's acquisitions (adds and trades for, at least
   HUNTER_MIN_ACQUISITIONS) at one position.
 - "Trade shark" / "Overpays": won / lost SHARK_TRADES+ graded trades by the win margin.
 """
+import re
 from collections import Counter
 from collections.abc import Mapping, Sequence
 
 from services.trade_grades import WIN_MARGIN
+
+POSITION_CODE = re.compile(r"[A-Z]{1,4}")          # QB, RB, WR, TE, K, DEF...
 
 ACTIVE_TRADER_TRADES = 3
 WHALE_BID_SHARE = 0.12
@@ -27,9 +30,10 @@ SHARK_TRADES = 2
 
 
 def _position(raw: str | None) -> str | None:
-    """'RB,WR' -> 'RB' (Yahoo's dual eligibility); '' -> None."""
+    """'RB,WR' -> 'RB' (Yahoo's dual eligibility); '' or anything that isn't a position code -> None,
+    so text from Yahoo can't ride into a tag."""
     first = (raw or "").split(",")[0].strip()
-    return first or None
+    return first if POSITION_CODE.fullmatch(first) else None
 
 
 def _tag(name: str, evidence: str) -> dict:
@@ -58,9 +62,9 @@ def _faab_tags(standing: Mapping, bids: Sequence[float], budget: float, weeks_pl
     if bids and sum(bids) / len(bids) >= WHALE_BID_SHARE * budget:
         share = sum(bids) / len(bids) / budget
         tags.append(_tag("FAAB whale", f"avg winning bid {share:.0%} of ${budget:g}"))
-    balance = standing.get("faab_balance")
-    spent = budget - balance if balance is not None else sum(bids)
-    if weeks_played >= SITS_AFTER_WEEK and spent < SITS_SPENT_SHARE * budget:
+    balance = standing.get("faab_balance")              # unknown: no tag (the bid list may be cut off)
+    spent = budget - balance if balance is not None else None
+    if spent is not None and weeks_played >= SITS_AFTER_WEEK and spent < SITS_SPENT_SHARE * budget:
         tags.append(_tag("Sits on FAAB", f"spent ${max(spent, 0):g} of ${budget:g} through week {weeks_played}"))
     return tags
 

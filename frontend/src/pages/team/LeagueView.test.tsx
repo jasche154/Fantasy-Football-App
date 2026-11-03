@@ -24,16 +24,30 @@ const OVERVIEW: LeagueOverview = {
     team({ power_rank: 3, team: 'New Team', team_key: 'n' }),
   ],
   past_trades: [
-    { date: '2026-10-14', first_week: 7, weeks: [7, 8, 9], graded: true, winner: 'Rival', margin: 23.4,
+    { date: '2026-10-14', first_week: 7, weeks: [7, 8, 9], graded: true, winner: 'Rival', winner_key: 'r', margin: 23.4,
       unmatched: ['Some Kicker'], sides: [
         { team_key: 'r', team: 'Rival', received: [{ name: 'Bijan Robinson', points: 60.1 }], sent: [],
           received_points: 60.1, sent_points: 36.7, net: 23.4 },
         { team_key: 'm', team: 'My Squad', received: [{ name: 'Ja\'Marr Chase', points: 36.7 }], sent: [],
           received_points: 36.7, sent_points: 60.1, net: -23.4 }] },
-    { date: '2026-10-30', first_week: null, weeks: [], graded: false, winner: null, margin: null, unmatched: [],
-      sides: [] },
+    { date: '2026-10-30', first_week: null, weeks: [], graded: false, winner: null, winner_key: null, margin: null,
+      unmatched: [], sides: [] },
+    { date: '2026-09-20', first_week: 3, weeks: [3, 4, 6], graded: true, winner: 'My Squad', winner_key: 'm',
+      margin: 12, unmatched: [], sides: [
+        { team_key: 'm', team: 'My Squad', received: [{ name: 'Puka Nacua', points: 50 }], sent: [],
+          received_points: 50, sent_points: 38, net: 12 }] },
   ],
 };
+
+const LUCK_COLUMN = 8;           // #, Team, Record, PF, Strength, Opp. left, Playoff odds, Proj. wins, Luck
+
+function luckCell(row: HTMLElement): HTMLElement {
+  return within(row).getAllByRole('cell')[LUCK_COLUMN];
+}
+
+function luckTitle(row: HTMLElement): string | null {
+  return luckCell(row).querySelector('[title]')?.getAttribute('title') ?? null;
+}
 
 describe('LeagueView', () => {
   it('shows luck, the all-play record and tag chips with their evidence', async () => {
@@ -44,21 +58,28 @@ describe('LeagueView', () => {
     expect(rival).toHaveTextContent('Luck +1.3');
     expect(rival).toHaveTextContent('All-play 52-33');
     const tags = within(rival).getByRole('list', { name: 'Manager tags' });
-    const hunter = within(tags).getByText('RB hunter');
-    expect(hunter.closest('li')).toHaveAttribute('title', '62% of 8 adds and trades were RB');
-    expect(within(tags).getAllByRole('listitem')).toHaveLength(2);
+    const chips = within(tags).getAllByRole('listitem');
+    expect(chips.map((chip) => chip.textContent)).toEqual(
+      ['Active trader (4 trades)', 'RB hunter (62% of 8 adds and trades were RB)']);
+    expect(luckTitle(rival)).toBe('Actual wins minus 4.7 all-play expected wins');
     const mine = within(table).getByText('My Squad').closest('tr') as HTMLElement;
-    expect(mine).toHaveTextContent('Luck −0.8');
+    expect(luckCell(mine)).toHaveTextContent('Luck −0.8');
+    // No expected-wins number: the tooltip leaves it out instead of printing a dash.
+    expect(luckTitle(mine)).toBe('Actual wins minus all-play expected wins');
     expect(within(mine).queryByRole('list', { name: 'Manager tags' })).toBeNull();
-    expect(within(table).getByText('New Team').closest('tr')).toHaveTextContent('—');
+    expect(luckCell(within(table).getByText('New Team').closest('tr') as HTMLElement)).toHaveTextContent(/^—$/);
   });
 
   it('lists past trades with each side\'s points since and the winner', async () => {
     mockFetch([META_ROUTE, { path: '/api/my-team/1/league', reply: json(OVERVIEW) }]);
     renderWithProviders(<LeagueView league={LEAGUE} />);
     const past = await screen.findByRole('region', { name: 'Past trades' });
-    const [graded, fresh] = within(past).getAllByRole('listitem').filter((li) => li.classList.contains('past-trade'));
+    const [graded, fresh, won] = within(past).getAllByRole('listitem').filter((li) => li.classList.contains('past-trade'));
     expect(graded).toHaveTextContent('2026-10-14 · weeks 7–9 · Rival won');
+    // A rival's win is neutral; only the user's own win is shown in green.
+    expect(within(graded).getByText('Rival won')).not.toHaveClass('status-badge--ok');
+    expect(within(won).getByText('My Squad won')).toHaveClass('status-badge--ok');
+    expect(won).toHaveTextContent('2026-09-20 · weeks 3, 4, 6 · My Squad won');
     expect(graded).toHaveTextContent('Rival got Bijan Robinson (60.1): +23.4 pts since the trade');
     expect(graded).toHaveTextContent('My Squad got Ja\'Marr Chase (36.7): −23.4 pts since the trade');
     expect(graded).toHaveTextContent('Not counted (no stats match): Some Kicker');

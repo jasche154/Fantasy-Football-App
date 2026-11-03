@@ -175,6 +175,7 @@ export interface TradeGrade {
   graded: boolean;
   sides: TradeGradeSide[];
   winner: string | null;
+  winner_key: string | null;
   margin: number | null;
   /** Players we couldn't match to our stats (skipped). */
   unmatched: string[];

@@ -16,7 +16,7 @@ SCHEDULE_WORKERS = 6
 FINAL_STATUSES = ("postevent", None)          # None: Yahoo left the status out (treated as final)
 
 _schedule: dict[tuple[str, int], list[tuple[str, str]]] = {}      # (league key, week): pairings
-_scores: dict[tuple[str, int], dict[str, float | None]] = {}      # (league key, week): {team: points}
+_scores: dict[tuple[str, int], list[list[tuple[str, float | None]]]] = {}   # (league key, week): matchups
 _lock = Lock()
 
 
@@ -49,15 +49,19 @@ def remaining_games(http: httpx.Client, token, league_key: str, first: int, last
         return [(w, a, b) for w in weeks for a, b in _schedule.get((league_key, w), [])]
 
 
-def week_scores(http: httpx.Client, token, league_key: str, last: int) -> dict[int, dict[str, float | None]]:
-    """{week: {team key: points}} for weeks 1..last (the completed weeks)."""
-    def fetch(week: int) -> tuple[int, dict[str, float | None] | None]:
+def week_scores(http: httpx.Client, token, league_key: str, last: int) -> dict[int, list[list[tuple[str, float | None]]]]:
+    """{week: [[(team key, points), (team key, points)], ...]} for the completed weeks among 1..last.
+
+    A week is only kept (and cached) when it has matchups, every one is over, and it has scores.
+    """
+    def fetch(week: int) -> tuple[int, list[list[tuple[str, float | None]]] | None]:
         board = _board(http, token, league_key, week)
-        scores = {t["team_key"]: t["points"] for m in board for t in m["teams"] if t.get("team_key")}
-        final = all(m.get("status") in FINAL_STATUSES for m in board)
-        return week, scores if final else None
+        matchups = [[(t["team_key"], t["points"]) for t in m["teams"] if t.get("team_key")] for m in board]
+        final = bool(board) and all(m.get("status") in FINAL_STATUSES for m in board)
+        scored = any(points is not None for matchup in matchups for _, points in matchup)
+        return week, matchups if final and scored else None
 
     weeks = range(1, last + 1)
     _fetch_missing(_scores, league_key, weeks, fetch)
     with _lock:
-        return {w: dict(_scores[(league_key, w)]) for w in weeks if (league_key, w) in _scores}
+        return {w: list(_scores[(league_key, w)]) for w in weeks if (league_key, w) in _scores}

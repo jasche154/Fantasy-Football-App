@@ -13,7 +13,8 @@ function percent(value: number | undefined): string {
 /** "Luck +1.3" with the all-play record ("All-play 52-33") under it. */
 function LuckCell({ row }: { row: PowerRankingRow }) {
   if (row.luck === undefined) return <>{EMPTY_VALUE}</>;
-  const title = `Actual wins minus ${formatNumber(row.all_play_expected_wins)} all-play expected wins`;
+  const expected = row.all_play_expected_wins === undefined ? '' : `${formatNumber(row.all_play_expected_wins)} `;
+  const title = `Actual wins minus ${expected}all-play expected wins`;
   return (
     <span title={title}>
       <span className={row.luck > 0 ? 'value-pos' : row.luck < 0 ? 'value-neg' : undefined}>
@@ -91,9 +92,9 @@ export function LeagueView({ league }: { league: MyLeague }) {
           <p className="hint">
             Active traders are the managers to send trade offers to first. Luck compares each team's wins with its
             all-play record (its score against every team, every week): positive means its schedule gave it more wins
-            than its scores earned. Hover a tag for the numbers behind it.
+            than its scores earned. Each tag shows the numbers behind it.
           </p>
-          <PastTradesView trades={d.past_trades} />
+          <PastTradesView trades={d.past_trades} mineKey={d.teams.find((t) => t.is_users_team)?.team_key} />
         </section>
       )}
     </AsyncView>
