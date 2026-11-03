@@ -96,7 +96,7 @@ def waiver_plan(session: Session, league_id: int, position: str | None = None, l
                 horizon.weeks[:LOOKAHEAD_WEEKS], projector, team.settings)
             advice = wa.priority_advice(gain, rank, value.position, mine, ahead,
                                         value.position == "RB" and value.team in injured_starter_teams, starts,
-                                        gain_rank.get(c.player.player_id))
+                                        gain_rank.get(c.player.player_id), team.settings.teams)
         else:
             advice = wa.free_agent_advice(gain)
         rows.append((gain, c, drop, advice))

@@ -465,7 +465,7 @@ add is worth twice as much). What to do depends on the league:
 | League type | Advice |
 |---|---|
 | FAAB | A bid: the league's typical winning bid for the k-th most wanted player (from Yahoo's transactions), scaled by rivals' balances and how many of them need the position, capped by what he's worth to you, the richest interested rival + $1, and half your balance. Before 8 winning bids exist it's a labelled estimate (rank 1 15% of the budget, 2 8%, 3 5%, 4-6 3%, else 1%; ×1.3 early, ×0.6 late). Each bid also shows its share of the league's original budget ("$14 · 14% of budget") |
-| Rolling priority | Each claim shows the earliest priority it's worth ("worth #N priority or later"): #1 for a difference-maker (8+ points and the most wanted, a handcuff to your injured starter, or a starter for 3+ of the next 4 weeks), otherwise N = his rank by lineup gain among this week's useful claims, but never inside the top 3. Claim if your priority is #N or later, else wait. Teams ahead of you that need the position are named |
+| Rolling priority | Each claim shows the earliest priority it's worth ("worth #N priority or later"): #1 for a difference-maker (8+ points and the most wanted, a handcuff to your injured starter, or a starter for 3+ of the next 4 weeks), otherwise N = his rank by lineup gain among this week's useful claims, but never inside the top 3 and never past the number of teams. Claim if your priority is #N or later (always with the last priority), else wait. Teams ahead of you that need the position are named |
 | Free agency | Add now, best gain first |
 
 Gains under 1 point are marked marginal.

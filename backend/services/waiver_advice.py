@@ -22,6 +22,7 @@ Rolling waiver priority (no FAAB): each claim gets worth_priority N, the earlies
           week's claim candidates with G >= MIN_USEFUL_GAIN (1 = the biggest gain). A top-3 spot
           is kept for difference-makers, and the r-th best claim this week isn't worth a spot
           ahead of the r-th: better targets should get it first.
+      N is capped at the number of teams, and the last priority is always free to use.
     Claim when your priority is #N or later; otherwise wait (he'll likely clear waivers). Teams
     ahead of you that need his position are named (your claim may lose to them).
 No waivers (free agency only): add now, best gain first.
@@ -113,22 +114,24 @@ def faab_advice(gain: float, rank: int, position: str, balance: float, budget: f
                   bid=round(bid), market=round(market), worth=round(worth), estimate=estimate, budget_pct=share)
 
 
-def worth_priority(is_difference_maker: bool, gain_rank: int | None) -> int:
-    """The earliest waiver priority worth spending on a claim (see the module docstring)."""
-    if is_difference_maker:
-        return 1
-    return max(TOP_PRIORITY + 1, gain_rank or 0)
+def worth_priority(is_difference_maker: bool, gain_rank: int | None, teams: int | None = None) -> int:
+    """The earliest waiver priority worth spending on a claim (see the module docstring).
+
+    Capped at the league's team count: the last priority costs nothing to use."""
+    needed = 1 if is_difference_maker else max(TOP_PRIORITY + 1, gain_rank or 0)
+    return min(needed, teams) if teams else needed
 
 
 def priority_advice(gain: float, rank: int, position: str, my_priority: int | None,
                     teams_ahead_needing: Sequence[str], is_handcuff_to_injured: bool, starts_weeks: int,
-                    gain_rank: int | None = None) -> Advice:
+                    gain_rank: int | None = None, teams: int | None = None) -> Advice:
     ahead = f" {', '.join(teams_ahead_needing[:3])} (ahead of you) need {position}." if teams_ahead_needing else ""
     if gain < MIN_USEFUL_GAIN:
         return Advice("wait", _marginal(gain))
     worth_top = (gain >= BIG_GAIN and rank == 1) or is_handcuff_to_injured or starts_weeks >= STARTER_WEEKS
-    needed = worth_priority(worth_top, gain_rank)
-    if my_priority is not None and my_priority < needed:
+    needed = worth_priority(worth_top, gain_rank, teams)
+    is_last = teams is not None and my_priority is not None and my_priority >= teams
+    if my_priority is not None and my_priority < needed and not is_last:
         return Advice("wait", f"Wait: not worth your #{my_priority} priority (worth #{needed} or later); "
                               f"he'll likely clear waivers.{ahead}", worth_priority=needed)
     why = ("a handcuff to your injured starter" if is_handcuff_to_injured
