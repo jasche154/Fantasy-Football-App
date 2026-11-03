@@ -5,7 +5,7 @@ import { BIJAN, KELCE, tradeResult } from '../../test/fixtures';
 import { mockFetch } from '../../test/mockFetch';
 import { META_ROUTE, renderWithProviders } from '../../test/render';
 import { adviceDetail, WaiverRow } from '../waivers/WaiversPage';
-import { evenItText, labelTone, TradeResultView } from './TradeResultView';
+import { evenItText, labelTone, LineupImpact, TradeResultView } from './TradeResultView';
 
 const noop = () => {};
 
@@ -25,6 +25,19 @@ describe('TradeResultView extras', () => {
     expect(screen.getByText(/You get the 1-player side of a 2-for-1/)).toBeInTheDocument();
     expect(screen.getByText('To even it: ask for a player worth about 17 (closest: Travis Kelce, value 14).')).toBeInTheDocument();
     expect(screen.getByText('Helps you, costs them')).toHaveClass('status-badge--ok');
+  });
+
+  it('shows the label instead of the old "Both lineups improve." line when both gain', () => {
+    mockFetch([META_ROUTE]);
+    renderWithProviders(<LineupImpact lineup={{ your_gain: 3, their_gain: 2, their_team: 'Rival', lineup_label: 'Helps both lineups' }} />);
+    expect(screen.getByText('Helps both lineups')).toHaveClass('status-badge--ok');
+    expect(screen.queryByText(/Both lineups improve/)).not.toBeInTheDocument();
+  });
+
+  it('keeps "Both lineups improve." for a response without a label', () => {
+    mockFetch([META_ROUTE]);
+    renderWithProviders(<LineupImpact lineup={{ your_gain: 3, their_gain: 2, their_team: 'Rival' }} />);
+    expect(screen.getByText(/Both lineups improve/)).toBeInTheDocument();
   });
 
   it('leaves the extras out when the API sends none', () => {

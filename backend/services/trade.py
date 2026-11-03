@@ -87,8 +87,9 @@ def depth_weight(index: int) -> float:
 
 
 def adjusted_total(values: Sequence[float]) -> float:
-    """Package total of raw trade values: sorted best first, each weighted by depth_weight."""
-    return sum(v * depth_weight(i) for i, v in enumerate(sorted(values, reverse=True)))
+    """Package total of raw trade values: sorted best first, each weighted by depth_weight and
+    rounded the way package() rounds, so even_it solves against the totals the verdict uses."""
+    return round(sum(round(v * depth_weight(i), 1) for i, v in enumerate(sorted(values, reverse=True))), 1)
 
 
 def package(players: Sequence[PlayerValue]) -> TradeSide:

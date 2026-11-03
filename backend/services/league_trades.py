@@ -29,7 +29,8 @@ MAX_SHARED_GIVE = 2               # at most two offers per team built on the sam
 LABEL_DEAD_BAND = 0.5
 
 
-def _effect(gain: float) -> str:
+def lineup_effect(gain: float) -> str:
+    """"helps", "costs" or "even" (within LABEL_DEAD_BAND points) for one lineup's gain."""
     return "helps" if gain > LABEL_DEAD_BAND else "costs" if gain < -LABEL_DEAD_BAND else "even"
 
 
@@ -48,8 +49,8 @@ def lineup_label(your_gain: float | None, their_gain: float | None) -> str | Non
     if your_gain is None:
         return None
     if their_gain is None:
-        return _SOLO_LABELS[_effect(your_gain)]
-    return _LABELS[(_effect(your_gain), _effect(their_gain))]
+        return _SOLO_LABELS[lineup_effect(your_gain)]
+    return _LABELS[(lineup_effect(your_gain), lineup_effect(their_gain))]
 
 
 def capacity(settings) -> int:

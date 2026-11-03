@@ -46,6 +46,16 @@ def test_even_it_handles_a_new_best_player_and_no_extras_on_fair_or_even_counts(
     assert fair.verdict == "fair" and fair.even_it is None and serialize.trade(fair, 10)["even_it"] is None
 
 
+def test_even_it_uses_the_same_rounded_totals_as_the_verdict():
+    give, get = [_pv(1, 97.3), _pv(2, 41.7), _pv(3, 13.3)], [_pv(4, 88.8)]
+    result = evaluate_trade(give, get, [], weeks_remaining=10)
+    filler = _pv(9, result.even_it.value)
+    evened = evaluate_trade(give, [*get, filler], [], weeks_remaining=10)
+    assert evened.difference == 0.0                                       # exactly even, as the verdict sees it
+    smaller = evaluate_trade(give, [*get, _pv(9, result.even_it.value - 0.2)], [], weeks_remaining=10)
+    assert smaller.difference < 0
+
+
 def test_they_consolidate_when_you_get_more_players():
     result = evaluate_trade([_pv(1, 130.0)], [_pv(2, 100.0), _pv(3, 60.0)], [], weeks_remaining=10)
     assert result.consolidation.side == "them" and result.consolidation.points == -18.0
@@ -94,6 +104,59 @@ def test_priority_claims_say_which_priority_they_are_worth():
     assert late.action == "claim" and late.worth_priority == 7
     starter = wa.priority_advice(3, 2, "RB", 1, [], False, 3, gain_rank=7)
     assert starter.action == "claim" and starter.worth_priority == 1
+    # Never above the team count, and the last priority is always free to use.
+    assert wa.worth_priority(False, 40, teams=12) == 12
+    last = wa.priority_advice(3, 2, "RB", 12, [], False, 1, gain_rank=40, teams=12)
+    assert last.action == "claim" and last.worth_priority == 12
+    tiny = wa.priority_advice(3, 2, "RB", 3, [], False, 1, gain_rank=9, teams=3)
+    assert tiny.action == "claim" and tiny.worth_priority == 3
+
+
+def _priority_plan(session, league_row, monkeypatch, my_priority, position=None, **rule_overrides):
+    import json
+
+    from services import league_moves
+
+    rules = {**json.loads(league_row.scoring_settings), "waiver_type": "R", **rule_overrides}
+    league_row.scoring_settings = json.dumps(rules)
+    session.commit()
+    insights = {"teams": [{"team": "My Squad", "is_users_team": True, "waiver_priority": my_priority},
+                          {"team": "Rival", "waiver_priority": 1}], "winning_bids_by_week": []}
+    monkeypatch.setattr(league_moves, "_insights", lambda *_args: insights)
+    return league_moves.waiver_plan(session, league_row.id, position, limit=30)
+
+
+WEAK = [("QB Player 20", "QB"), ("RB Player 50", "RB"), ("RB Player 49", "RB"), ("WR Player 60", "WR"),
+        ("WR Player 59", "WR"), ("TE Player 25", "TE")]
+
+
+def test_waiver_plan_gives_each_claim_the_priority_it_is_worth(session, league, monkeypatch):
+    from tests.test_my_team import THEIRS, _seed_league
+
+    _, ids = league
+    row = _seed_league(session, ids, WEAK, THEIRS, name="Weak League")     # free agents help this roster
+    # The seeded week has only a few useful free agents: drop the top-3 reserve and the
+    # difference-maker shortcut so worth_priority is the plain gain rank.
+    monkeypatch.setattr(wa, "TOP_PRIORITY", 0)
+    monkeypatch.setattr(wa, "STARTER_WEEKS", 99)
+    monkeypatch.setattr(wa, "BIG_GAIN", 999.0)
+    plan = _priority_plan(session, row, monkeypatch, my_priority=2)
+    assert plan["league_type"] == "priority"
+    useful = sorted(((g, c, a) for g, c, _d, a in plan["rows"] if g >= wa.MIN_USEFUL_GAIN), key=lambda r: -r[0])
+    assert len(useful) >= 3
+    assert [a.worth_priority for _g, _c, a in useful] == list(range(1, len(useful) + 1))
+    assert [a.action for _g, _c, a in useful] == ["claim", "claim"] + ["wait"] * (len(useful) - 2)
+    worth = {c.player.player_id: a.worth_priority for _g, c, a in useful}
+
+    # A position filter keeps the gain rank across every position (the best RB isn't #1).
+    rbs = _priority_plan(session, row, monkeypatch, my_priority=2, position="RB")
+    shown = [(c.player.player_id, a.worth_priority) for g, c, _d, a in rbs["rows"] if g >= wa.MIN_USEFUL_GAIN]
+    assert shown and all(worth[pid] == n for pid, n in shown) and min(n for _p, n in shown) > 1
+
+    # Two teams: N is capped at 2, and the last priority (#2) claims every useful player.
+    last = _priority_plan(session, row, monkeypatch, my_priority=2, num_teams=2)
+    advice = [a for g, _c, _d, a in last["rows"] if g >= wa.MIN_USEFUL_GAIN]
+    assert advice and all(a.worth_priority <= 2 and a.action == "claim" for a in advice)
 
 
 def _add_rookie(session) -> int:
