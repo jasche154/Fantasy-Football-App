@@ -3,6 +3,7 @@ import { AppShell } from './layout/AppShell';
 import { AskPage } from './pages/ask/AskPage';
 import { DashboardPage } from './pages/dashboard/DashboardPage';
 import { MarketPage } from './pages/market/MarketPage';
+import { OddsPage } from './pages/odds/OddsPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { PlayerPage } from './pages/player/PlayerPage';
 import { RankingsPage } from './pages/rankings/RankingsPage';
@@ -46,6 +47,8 @@ function renderRoute(location: HashLocation): ReactNode {
       return <TradePage query={query} />;
     case 'market':
       return <MarketPage />;
+    case 'odds':
+      return <OddsPage query={query} />;
     case 'player':
       return <PlayerPage key={route.id} playerId={route.id} query={query} />;
     case 'ask':

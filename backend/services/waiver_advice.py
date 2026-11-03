@@ -12,10 +12,19 @@ FAAB leagues (Yahoo uses_faab):
     If P x demand is more than he's worth to you: pass. With fewer than MIN_BID_HISTORY winning
     bids, P comes from a default table by demand rank (rank 1 15%, 2 8%, 3 5%, 4-6 3%, else 1%),
     x1.3 in weeks 1-4, x1.0 in weeks 5-10, x0.6 from week 11, and is labelled an estimate.
-Rolling waiver priority (no FAAB): spend a top-3 priority only on a real difference-maker:
-    G >= BIG_GAIN and the most-wanted player, a handcuff to your own Out/IR starter, or a player
-    who'd start for you in 3+ of the next 4 weeks. Otherwise wait: he'll likely clear waivers.
-    Teams ahead of you that need his position are named (your claim may lose to them).
+    Each bid is also shown as a share of the ORIGINAL budget (budget_pct), the unit league-mates
+    and FAAB guides talk in; the dollar figure is what you have left to spend.
+Rolling waiver priority (no FAAB): each claim gets worth_priority N, the earliest priority worth
+    spending on him (spending it sends you to the back of the order):
+      N = 1 for a real difference-maker: G >= BIG_GAIN and the most-wanted player, a handcuff to
+          your own Out/IR starter, or a player who'd start for you in 3+ of the next 4 weeks;
+      N = max(TOP_PRIORITY + 1, gain rank) otherwise, where gain rank is his rank by G among this
+          week's claim candidates with G >= MIN_USEFUL_GAIN (1 = the biggest gain). A top-3 spot
+          is kept for difference-makers, and the r-th best claim this week isn't worth a spot
+          ahead of the r-th: better targets should get it first.
+      N is capped at the number of teams, and the last priority is always free to use.
+    Claim when your priority is #N or later; otherwise wait (he'll likely clear waivers). Teams
+    ahead of you that need his position are named (your claim may lose to them).
 No waivers (free agency only): add now, best gain first.
 
 Demand rank is the candidate's rank by rest-of-season value among this week's candidates (the
@@ -46,6 +55,8 @@ class Advice:
     market: int | None = None
     worth: int | None = None
     estimate: bool = False
+    budget_pct: int | None = None       # FAAB bid as % of the league's original budget
+    worth_priority: int | None = None   # rolling priority: claim with priority #N or later
 
     def as_dict(self) -> dict:
         return {k: v for k, v in self.__dict__.items() if v is not None}
@@ -96,23 +107,38 @@ def faab_advice(gain: float, rank: int, position: str, balance: float, budget: f
     caps = [worth, MAX_BALANCE_SHARE * balance] + ([max(interested) + 1] if interested else [])
     bid = max(min_bid, min(max(market, min_bid), *caps))
     label = " (estimate: not enough bids in your league yet)" if estimate else ""
-    return Advice("bid", f"Bid ${round(bid)}: market about ${round(market)}{label}, worth about ${round(worth)} to you.",
-                  bid=round(bid), market=round(market), worth=round(worth), estimate=estimate)
+    share = round(bid / budget * 100) if budget else None
+    of_budget = f" ({share}% of budget)" if share is not None else ""
+    return Advice("bid", f"Bid ${round(bid)}{of_budget}: market about ${round(market)}{label}, "
+                         f"worth about ${round(worth)} to you.",
+                  bid=round(bid), market=round(market), worth=round(worth), estimate=estimate, budget_pct=share)
+
+
+def worth_priority(is_difference_maker: bool, gain_rank: int | None, teams: int | None = None) -> int:
+    """The earliest waiver priority worth spending on a claim (see the module docstring).
+
+    Capped at the league's team count: the last priority costs nothing to use."""
+    needed = 1 if is_difference_maker else max(TOP_PRIORITY + 1, gain_rank or 0)
+    return min(needed, teams) if teams else needed
 
 
 def priority_advice(gain: float, rank: int, position: str, my_priority: int | None,
-                    teams_ahead_needing: Sequence[str], is_handcuff_to_injured: bool, starts_weeks: int) -> Advice:
+                    teams_ahead_needing: Sequence[str], is_handcuff_to_injured: bool, starts_weeks: int,
+                    gain_rank: int | None = None, teams: int | None = None) -> Advice:
     ahead = f" {', '.join(teams_ahead_needing[:3])} (ahead of you) need {position}." if teams_ahead_needing else ""
     if gain < MIN_USEFUL_GAIN:
         return Advice("wait", _marginal(gain))
     worth_top = (gain >= BIG_GAIN and rank == 1) or is_handcuff_to_injured or starts_weeks >= STARTER_WEEKS
-    if my_priority is not None and my_priority <= TOP_PRIORITY and not worth_top:
-        return Advice("wait", f"Wait: not worth your #{my_priority} priority; he'll likely clear waivers.{ahead}")
+    needed = worth_priority(worth_top, gain_rank, teams)
+    is_last = teams is not None and my_priority is not None and my_priority >= teams
+    if my_priority is not None and my_priority < needed and not is_last:
+        return Advice("wait", f"Wait: not worth your #{my_priority} priority (worth #{needed} or later); "
+                              f"he'll likely clear waivers.{ahead}", worth_priority=needed)
     why = ("a handcuff to your injured starter" if is_handcuff_to_injured
            else f"he'd start {starts_weeks} of the next 4 weeks" if starts_weeks >= STARTER_WEEKS
            else f"+{gain:.1f} lineup points")
     priority = f" with your #{my_priority} priority" if my_priority else ""
-    return Advice("claim", f"Claim{priority}: {why}.{ahead}")
+    return Advice("claim", f"Claim{priority}: {why}.{ahead}", worth_priority=needed)
 
 
 def free_agent_advice(gain: float) -> Advice:

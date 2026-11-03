@@ -1,12 +1,28 @@
 import { getLeagueOverview } from '../../api/data';
-import type { ManagerTendencies, MyLeague } from '../../api/types';
+import type { ManagerTendencies, MyLeague, PowerRankingRow } from '../../api/types';
 import { AsyncView } from '../../components/AsyncView';
 import { EmptyState, TableSkeleton } from '../../components/StatusViews';
 import { useAsync } from '../../hooks/useAsync';
-import { EMPTY_VALUE, formatNumber } from '../../lib/format';
+import { EMPTY_VALUE, formatNumber, formatSigned } from '../../lib/format';
+import { PastTradesView, TagChips } from './PastTradesView';
 
 function percent(value: number | undefined): string {
   return value === undefined ? EMPTY_VALUE : `${Math.round(value * 100)}%`;
+}
+
+/** "Luck +1.3" with the all-play record ("All-play 52-33") under it. */
+function LuckCell({ row }: { row: PowerRankingRow }) {
+  if (row.luck === undefined) return <>{EMPTY_VALUE}</>;
+  const expected = row.all_play_expected_wins === undefined ? '' : `${formatNumber(row.all_play_expected_wins)} `;
+  const title = `Actual wins minus ${expected}all-play expected wins`;
+  return (
+    <span title={title}>
+      <span className={row.luck > 0 ? 'value-pos' : row.luck < 0 ? 'value-neg' : undefined}>
+        Luck {formatSigned(row.luck)}
+      </span>
+      {row.all_play && <span className="tendency"><br />All-play {row.all_play}</span>}
+    </span>
+  );
 }
 
 export function TendencyNote({ habits }: { habits: ManagerTendencies | null }) {
@@ -51,6 +67,7 @@ export function LeagueView({ league }: { league: MyLeague }) {
                   <th scope="col" className="num" title="Average strength of remaining opponents">Opp. left</th>
                   <th scope="col" className="num">Playoff odds</th>
                   <th scope="col" className="num" title="Expected wins by the end of the regular season">Proj. wins</th>
+                  <th scope="col" title="Actual wins minus all-play expected wins; all-play = record against every team every week">Luck</th>
                   <th scope="col">Tendencies</th>
                 </tr>
               </thead>
@@ -65,13 +82,19 @@ export function LeagueView({ league }: { league: MyLeague }) {
                     <td className="num">{row.remaining_opponent_strength === null ? EMPTY_VALUE : formatNumber(row.remaining_opponent_strength)}</td>
                     <td className="num"><strong>{percent(row.playoff_odds)}</strong></td>
                     <td className="num">{row.expected_wins === undefined ? EMPTY_VALUE : formatNumber(row.expected_wins)}</td>
-                    <td><TendencyNote habits={row.tendencies} /></td>
+                    <td><LuckCell row={row} /></td>
+                    <td><TendencyNote habits={row.tendencies} /><TagChips tags={row.tendencies?.tags} /></td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          <p className="hint">Active traders are the managers to send trade offers to first.</p>
+          <p className="hint">
+            Active traders are the managers to send trade offers to first. Luck compares each team's wins with its
+            all-play record (its score against every team, every week): positive means its schedule gave it more wins
+            than its scores earned. Each tag shows the numbers behind it.
+          </p>
+          <PastTradesView trades={d.past_trades} mineKey={d.teams.find((t) => t.is_users_team)?.team_key} />
         </section>
       )}
     </AsyncView>

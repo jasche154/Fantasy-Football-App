@@ -112,6 +112,9 @@ CASES: tuple[Case, ...] = (
        "get_playoff_outlook"), must_mention=(PCT + "|chance|odds",), **MY),
     _c("power-rankings", "league", "Who are the real contenders in my league?", ("get_power_rankings",)),
     _c("tendencies", "league", "Which managers in my league actually make trades?", ("get_power_rankings",), **H),
+    _c("luck", "league", "Who is the luckiest team in my league?", ("get_power_rankings",)),
+    _c("all-play", "league", "Am I unlucky this year?", ("get_power_rankings",), **H),
+    _c("past-trades", "league", "Who won the trades in my league this year?", ("get_power_rankings",)),
     _c("other-team", "league", "What does the best team in my league have on its roster?", ("get_league_rosters",
        "get_power_rankings")),
     # rankings, stats, regression, compare
@@ -158,6 +161,14 @@ CASES: tuple[Case, ...] = (
        before=("Compare Bijan Robinson and Derrick Henry",), **H),
     _c("mt-matchup-then-flip", "multi_turn", "any upside plays to flip it?", ("get_my_matchup", "start_sit",
        "get_weekly_rankings"), before=("Am I favored in my matchup this week?",), decision=True, **MY),
+    # prompt rules: never deny a capability a tool has; downgrades state the ppg change; estimates say so
+    _c("can-price-trade", "trade", "Can you price a trade of Breece Hall for George Kittle?", ("evaluate_trade",),
+       forbid=(r"\b(i can't|i cannot|i'm unable|i am unable|not able to|don't have (the )?(ability|tools?))\b",)),
+    _c("trade-downgrade-ppg", "trade", "Would you trade Ja'Marr Chase for Malik Nabers?", ("evaluate_trade",),
+       must_mention=(r"\b(ppg|points per game|per game)\b",), decision=True, **H),
+    _c("projection-is-estimate", "start_sit", "What is Trey McBride projected to score this week?",
+       ("get_weekly_rankings", "explain_projection", "get_player_profile"),
+       must_mention=(r"\b(estimate|estimated|projection|projected|projects)\b",), **H),
     # out of scope / smalltalk: no tools, short polite answer
     _c("oos-weather-city", "out_of_scope", "What's the weather in Paris today?", no_tools=True,
        forbid=(r"\d+\s*(°|degrees)",)),

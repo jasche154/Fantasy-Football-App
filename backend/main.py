@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from api import (agent_routes, data_routes, integration_routes, legacy_routes, market_routes, model_routes,
-                 player_extra_routes, system_routes, team_routes, weekly_routes)
+                 odds_routes, player_extra_routes, system_routes, team_routes, weekly_routes)
 from config import get_settings
 from database.db import SessionLocal
 from services import auto_update
@@ -88,7 +88,7 @@ def create_app(warm_cache: bool = True) -> FastAPI:
         return await call_next(request)
 
     for module in (data_routes, market_routes, weekly_routes, team_routes, model_routes, integration_routes, agent_routes,
-                   system_routes, player_extra_routes, legacy_routes):
+                   system_routes, player_extra_routes, odds_routes, legacy_routes):
         app.include_router(module.router)
     return app
 

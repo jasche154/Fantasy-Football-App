@@ -173,3 +173,17 @@ def test_league_tools_explain_when_no_league_is_imported(session):
             TOOLS.call(session, name, {})
     with pytest.raises(ValueError, match="No Yahoo league imported"):
         TOOLS.call(session, "find_trades", {})                    # no players and no league to take them from
+
+
+@pytest.mark.parametrize("question", ["Who is the luckiest team in my league?", "What is my all-play record?",
+                                      "Am I unlucky this year?", "Which team got lucky this season?",
+                                      "Who won the trades in my league this year?", "Grade the past trades in my league"])
+def test_team_luck_and_past_trade_questions_get_power_rankings(question):
+    assert "get_power_rankings" in agent_routing.route(question)
+
+
+@pytest.mark.parametrize("question", ["Which receivers got unlucky with touchdowns?",
+                                      "Is Bijan due for positive regression, he has been unlucky?"])
+def test_player_luck_stays_with_regression(question):
+    tools = agent_routing.route(question)
+    assert "get_buy_low_candidates" in tools and "get_power_rankings" not in tools

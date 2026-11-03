@@ -8,6 +8,14 @@ players are worth less than their raw sum. Both sides get the same treatment, so
 The verdict uses the percent gap, except that a gap smaller than FAIR_POINTS_PER_WEEK x weeks
 left is called fair (and SLIGHT_POINTS_PER_WEEK x weeks at most slight): between low-value
 players a few points is projection noise, even when it is a large percent.
+
+Two extra lines explain the verdict:
+- consolidation (n-for-m trades only): how far the package discount moves the gap, i.e. the
+  adjusted difference minus the raw one. It favours the side that gets fewer players: the bigger
+  package it sends is discounted, because extra players need lineup spots they rarely get.
+- even_it (any verdict but fair): the trade value one more player would need, added to the short
+  side, to make the sides even after the package discount. Solved exactly by bisection, since the
+  new player may become that side's best and shift everyone's weight.
 """
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -19,6 +27,7 @@ SLIGHT_THRESHOLD = 0.15      # within 15% -> slight edge
 FAIR_POINTS_PER_WEEK = 0.4    # a gap under 0.4 points a week left is noise -> fair
 SLIGHT_POINTS_PER_WEEK = 1.2  # and under 1.2 a week is at most a slight edge
 MAX_SUGGESTIONS = 5
+EVEN_IT_STEPS = 50            # bisection steps for even_it (far below 0.1 point)
 
 
 @dataclass(frozen=True)
@@ -43,6 +52,19 @@ class BalanceSuggestion:
 
 
 @dataclass(frozen=True)
+class Consolidation:
+    side: str                    # "you" when you get fewer players than you send, else "them"
+    points: float                # how far the package discount moves the gap; > 0 favours you
+    note: str
+
+
+@dataclass(frozen=True)
+class EvenIt:
+    add_to: str                  # "give" or "get": the short side, as in balance suggestions
+    value: float                 # trade value of one more player that makes the sides even
+
+
+@dataclass(frozen=True)
 class TradeEvaluation:
     give: TradeSide
     get: TradeSide
@@ -51,6 +73,8 @@ class TradeEvaluation:
     verdict: str
     summary: str
     balance_suggestions: tuple[BalanceSuggestion, ...]
+    consolidation: Consolidation | None = None
+    even_it: EvenIt | None = None
 
 
 # The calculator has no rosters, so extra players in a package are discounted: depth is worth
@@ -60,6 +84,12 @@ DEPTH_WEIGHTS = (1.0, 0.7, 0.5, 0.4)
 
 def depth_weight(index: int) -> float:
     return DEPTH_WEIGHTS[min(index, len(DEPTH_WEIGHTS) - 1)]
+
+
+def adjusted_total(values: Sequence[float]) -> float:
+    """Package total of raw trade values: sorted best first, each weighted by depth_weight and
+    rounded the way package() rounds, so even_it solves against the totals the verdict uses."""
+    return round(sum(round(v * depth_weight(i), 1) for i, v in enumerate(sorted(values, reverse=True))), 1)
 
 
 def package(players: Sequence[PlayerValue]) -> TradeSide:
@@ -95,6 +125,36 @@ def summarize(verdict: str, difference: float, percent: float, weeks_remaining: 
     if verdict.endswith("win"):
         return f"You win this trade by {gap} {horizon}, a {edge} in your favor."
     return f"You lose this trade by {gap} {horizon}, a {edge} for the other side."
+
+
+def consolidation(give: TradeSide, get: TradeSide) -> Consolidation | None:
+    """The package discount's effect on an n-for-m trade (None when both sides have as many players)."""
+    if len(give.players) == len(get.players):
+        return None
+    points = round((get.adjusted_total - give.adjusted_total) - (get.raw_total - give.raw_total), 1)
+    side = "you" if len(get.players) < len(give.players) else "them"
+    more, fewer = sorted((len(give.players), len(get.players)), reverse=True)
+    who = "You get" if side == "you" else "They get"
+    toward = "you" if points > 0 else "them"
+    note = (f"{who} the {fewer}-player side of a {more}-for-{fewer}: extra players count less (lineup "
+            f"spots are limited), which moves the gap {abs(points):.1f} points toward {toward}.")
+    return Consolidation(side=side, points=points, note=note)
+
+
+def even_it(give: TradeSide, get: TradeSide) -> EvenIt | None:
+    """The value of one more player that, added to the short side, makes the sides even."""
+    if give.adjusted_total == get.adjusted_total:
+        return None
+    short, long, add_to = (get, give, "get") if get.adjusted_total < give.adjusted_total else (give, get, "give")
+    values = [p.value.trade_value for p in short.players]
+    low, high = 0.0, long.adjusted_total        # added as the best player, `high` alone reaches the target
+    for _ in range(EVEN_IT_STEPS):
+        middle = (low + high) / 2
+        if adjusted_total([*values, middle]) < long.adjusted_total:
+            low = middle
+        else:
+            high = middle
+    return EvenIt(add_to=add_to, value=round(high, 1))
 
 
 def suggest_balance(give: Sequence[PlayerValue], get: Sequence[PlayerValue],
@@ -137,4 +197,6 @@ def evaluate_trade(give: Sequence[PlayerValue], get: Sequence[PlayerValue],
         give=give_side, get=get_side, difference=difference, percent_difference=percent,
         verdict=verdict, summary=summarize(verdict, difference, percent, weeks_remaining),
         balance_suggestions=suggest_balance(give, get, pool, percent, verdict),
+        consolidation=consolidation(give_side, get_side),
+        even_it=None if verdict == "fair" else even_it(give_side, get_side),
     )

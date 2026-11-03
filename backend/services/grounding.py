@@ -12,6 +12,8 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from services import grounding_roster
+from services.grounding_roster import LeagueRosters
 from services.player_index import COMMON_WORDS
 
 CAVEAT_PREFIX = "Not verified against the app's data:"
@@ -77,14 +79,15 @@ class Evidence:
 class GroundingReport:
     players: tuple[str, ...] = ()
     numbers: tuple[str, ...] = ()
+    roster: tuple[str, ...] = ()     # moves that don't fit the league's rosters (services/grounding_roster.py)
 
     @property
     def ok(self) -> bool:
-        return not self.players and not self.numbers
+        return not self.players and not self.numbers and not self.roster
 
     @property
     def unverified(self) -> tuple[str, ...]:
-        return self.players + self.numbers
+        return self.players + self.numbers + self.roster
 
 
 def fold(text: str) -> str:
@@ -243,9 +246,13 @@ def _unknown_numbers(answer: str, evidence: Evidence) -> list[str]:
     return list(dict.fromkeys(stray))
 
 
-def check_answer(answer: str, evidence: Evidence, index: NameIndex) -> GroundingReport:
-    """Players and numbers in the answer that nothing in the evidence supports."""
-    return GroundingReport(tuple(_unknown_players(answer, evidence, index)), tuple(_unknown_numbers(answer, evidence)))
+def check_answer(answer: str, evidence: Evidence, index: NameIndex,
+                 rosters: LeagueRosters | None = None, incoming: Sequence[str] = ()) -> GroundingReport:
+    """Players and numbers in the answer that nothing in the evidence supports, and (with a league in
+    scope) adds of rostered players or start/bench/drop advice for players the user doesn't have.
+    `incoming`: players the user would receive in a trade priced this turn (they count as the user's)."""
+    return GroundingReport(tuple(_unknown_players(answer, evidence, index)), tuple(_unknown_numbers(answer, evidence)),
+                           grounding_roster.check(fold(answer), rosters, index, incoming))
 
 
 def revision_message(report: GroundingReport) -> str:
@@ -256,8 +263,12 @@ def revision_message(report: GroundingReport) -> str:
                      f"{', '.join(report.players)}.")
     if report.numbers:
         parts.append(f"It states numbers that no tool result contains: {', '.join(report.numbers)}.")
-    parts.append("Rewrite it using only players and numbers from the tool results (quote numbers as given), "
-                 "or call a tool to check them first.")
+    if report.players or report.numbers:
+        parts.append("Rewrite it using only players and numbers from the tool results (quote numbers as given), "
+                     "or call a tool to check them first.")
+    if report.roster:
+        parts.append(f"These moves don't fit the league's rosters: {'; '.join(report.roster)}. Only suggest adding "
+                     "players no team has, and only start, bench or drop the user's own players. Fix those lines.")
     return " ".join(parts)
 
 

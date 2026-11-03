@@ -14,7 +14,7 @@ from typing import Any, Literal, Protocol
 
 from sqlalchemy.orm import Session
 
-from services import agent_routing, grounding
+from services import agent_routing, grounding, grounding_roster
 from services.agent_prompt import build_system_prompt, league_context, memory_context  # noqa: F401 (re-exported)
 from services.llm_client import AgentUnavailable, GroqClient, ToolCallRejected  # noqa: F401 (re-exported)
 from services.my_team import my_leagues
@@ -67,6 +67,7 @@ class AgentReply:
     stop_reason: Literal["answer", "out_of_rounds"] = "answer"
     unverified: tuple[str, ...] = ()
     provider: str | None = None
+    answered_by: Literal["ai", "app"] = "ai"     # "app": rendered from a tool result, no LLM call
     # Diagnostics: not part of equality, and `evidence` (every tool result) never goes to the API.
     rounds: int = field(default=0, compare=False)
     evidence: tuple[str, ...] = field(default=(), compare=False, repr=False)
@@ -84,6 +85,7 @@ class _Turn:
     evidence: list[str] = field(default_factory=list)       # full tool results, for grounding
     results: dict[str, tuple[Any, Sequence[str]]] = field(default_factory=dict)   # tool_call_id -> result
     cache: dict[tuple[str, str], tuple[str, Any, bool]] = field(default_factory=dict)
+    league_id: int | None = None
 
 
 def _profile_value(client: LLMClient, name: str, default: int) -> int:
@@ -234,7 +236,10 @@ class _RateWait:
 def _ground(answer: str, messages: Sequence[Mapping[str, Any]], turn: _Turn):
     """grounding skips this turn's drafts and notes itself; digested results come from `turn.evidence`."""
     evidence = grounding.collect_evidence(messages, turn.evidence)
-    return grounding.check_answer(answer, evidence, get_index(turn.session))
+    incoming = [str(p) for t in turn.trace if t.name == "evaluate_trade" and isinstance(t.arguments.get("get"), list)
+                for p in t.arguments["get"]]
+    return grounding.check_answer(answer, evidence, get_index(turn.session),
+                                  grounding_roster.safe_in_scope(turn.session, turn.league_id, turn.trace), incoming)
 
 
 def _route(session: Session, history: Sequence[Mapping[str, str]]) -> tuple[list[str], tuple[str, ...], tuple]:
@@ -250,7 +255,7 @@ def _finish(answer: str, report, turn: _Turn, client: LLMClient, stop: str, roun
         note = grounding.caveat(report, failed)
         text = f"{text}\n\n{note}" if note else text
     return AgentReply(text, tuple(turn.trace), clean_memory(turn.memory), stop, tuple(report.unverified),
-                      getattr(client, "last_provider", None), rounds, tuple(turn.evidence))
+                      getattr(client, "last_provider", None), rounds=rounds, evidence=tuple(turn.evidence))
 
 
 def _focus_league(session: Session, league_id: int | None) -> str | None:
@@ -281,7 +286,7 @@ def run_agent(session: Session, client: LLMClient, history: Sequence[Mapping[str
     """Raises ValueError for an unknown `league_id`; AgentUnavailable when the model can't answer
     (short rate limits are waited out first; `sleep` is injectable for tests)."""
     turn = _Turn(session, registry, history, _focus_league(session, league_id),
-                 list(clean_memory(f for f in memory if grounding.safe_fact(f))))
+                 list(clean_memory(f for f in memory if grounding.safe_fact(f))), league_id=league_id)
     tools, intents, mentions = _route(session, history)
     system = build_system_prompt(session, memory=turn.memory, intents=intents,
                                  mentions=mentions_line(mentions), focus_league_id=league_id)

@@ -119,6 +119,13 @@ def test_prompt_is_current_and_template_follows_intent(session):
     assert "Answer shape" not in agent_prompt.build_system_prompt(session, memory=(), intents=("stats",))
 
 
+def test_prompt_states_downgrades_estimates_and_what_the_app_can_do(session):
+    prompt = agent_prompt.build_system_prompt(session, memory=())
+    assert "must state the points-per-game change" in prompt
+    assert 'say "estimate"' in prompt
+    assert "price any trade (evaluate_trade)" in prompt and "you can't do these" in prompt
+
+
 def test_find_trades_accepts_ten_players():
     schema = next(t for t in TOOLS.openai_schemas() if t["function"]["name"] == "find_trades")
     assert schema["function"]["parameters"]["properties"]["my_players"]["maxItems"] == 10

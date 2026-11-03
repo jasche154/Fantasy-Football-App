@@ -51,7 +51,10 @@ only *explains* numbers that came back from a tool call. Every output is labeled
   Hover a point for the player's name; click a scatter point for a card with both values, ranks and quadrant
 - **Advanced-stat leaderboards:** 26 whitelisted metrics (RYOE, separation, YAC over
   expected, CPOE, time to throw, target share, EPA per play, and more), volume-weighted the right way
-- **Player pages:** season summary, weekly game log, NGS advanced stats, projection
+- **Player pages:** season summary, weekly game log, NGS advanced stats, projection, position
+  percentiles for key stats, and "what changed" (last 3 games vs the rest of the season)
+- **Odds page:** this week's closing spreads, totals and implied team totals, plus the player
+  props already bought, per game. It never buys odds itself
 - **Trade calculator:** values both sides, applies a consolidation discount, gives a verdict, and suggests players that would balance the deal
 - **Buy low / sell high:** finds players whose production is out of line with their usage, with plain-English reasons
 - **Matchup page:** your Yahoo opponent this week, both lineups, and your win probability from
@@ -63,8 +66,10 @@ only *explains* numbers that came back from a tool call. Every output is labeled
   week, your weakest week, and the free agents and trade targets who beat your weakest starter
   at each position over those weeks.
 - **League power rankings:** every team's lineup strength, record, and playoff odds from
-  10,000 simulations of Yahoo's remaining schedule, with each manager's habits (active trader,
-  waiver regular, quiet; the positions they trade for and pick up).
+  10,000 simulations of Yahoo's remaining schedule, each team's all-play record and luck, each
+  manager's habits (active trader, waiver regular, quiet; the positions they trade for and pick
+  up) and tags with their evidence (FAAB whale, waiver hawk, RB hunter, trade shark...), and the
+  season's past trades graded on the points scored since.
 - **Player news** from Sleeper on player pages and under your lineup.
 - **Compare players:** any 2–4 players game by game across up to four seasons, any stat,
   with a 3-game average and a per-season summary.
@@ -172,7 +177,7 @@ Open <http://localhost:5173>. The UI talks to `http://localhost:8000` by default
 |---|---|
 | **Dashboard** | Top buy-low and sell-high players with the reason behind each, Sleeper's most-added players, data freshness |
 | **Matchup** | This week's Yahoo opponent. Both starting lineups with projections and ranges, live points as games finish, and your win probability (with Yahoo's for comparison). **Lineup strategy** compares three versions of your lineup: most points, upside (favoring ceilings) and safe (favoring floors). Each is simulated against the opponent, and the one that wins most often is recommended, with the swaps to make. **Updated lineup** at the bottom shows that lineup's projected total and win chance, then your **bench** with each player's projection |
-| **My Team** | Your imported Yahoo team (pick the league if you have several). **Lineup:** starters and bench with this week's projection, range, flags and rest-of-season value; the best lineup under your league's slots, with "Start X over Y (+points)" advice and Start/Sit tags. **Waivers:** players on no roster in your league. **Trades:** fair offers with each real team, built from their roster, teams that need what you'd send first. **Playoffs:** each player's projection for every playoff week (your league's weeks from Yahoo, else 16–18), byes marked, the best lineup per week, your weakest week, and the **Playoff planner**: free agents and players on other teams who beat your weakest starter at each position by 3+ playoff points. **League:** power rankings by lineup strength, record, points for, remaining opponents, simulated playoff odds and projected wins, and each manager's tendencies (also shown next to each team's trade offers). **Player news** works like Yahoo's: a news icon next to each player with news, highlighted (with a dot) when there's news from the last 48 hours you haven't opened. Click it for a side panel with his latest notes (headline, summary, analysis, source link); opening it marks the news read (remembered in this browser). The **News feed** below the lineup lists the newest notes across your roster, new ones tagged, and clicking a name opens his panel. **Sync from Yahoo** re-imports now (the app also re-syncs every 6 hours) |
+| **My Team** | Your imported Yahoo team (pick the league if you have several). **Lineup:** starters and bench with this week's projection, range, flags and rest-of-season value; the best lineup under your league's slots, with "Start X over Y (+points)" advice and Start/Sit tags. **Waivers:** players on no roster in your league. **Trades:** fair offers with each real team, built from their roster, teams that need what you'd send first. **Playoffs:** each player's projection for every playoff week (your league's weeks from Yahoo, else 16–18), byes marked, the best lineup per week, your weakest week, and the **Playoff planner**: free agents and players on other teams who beat your weakest starter at each position by 3+ playoff points. **League:** power rankings by lineup strength, record, points for, remaining opponents, simulated playoff odds and projected wins, luck and all-play record, each manager's tendencies (also shown next to each team's trade offers) and tags with their evidence, and **Past trades** graded on the points scored since. **Player news** works like Yahoo's: a news icon next to each player with news, highlighted (with a dot) when there's news from the last 48 hours you haven't opened. Click it for a side panel with his latest notes (headline, summary, analysis, source link); opening it marks the news read (remembered in this browser). The **News feed** below the lineup lists the newest notes across your roster, new ones tagged, and clicking a name opens his panel. **Sync from Yahoo** re-imports now (the app also re-syncs every 6 hours) |
 | **Week X Rankings** | This week's projections by position; pick any week. Each row shows the matchup grade (opponent-adjusted, #1 = easiest), the Vegas implied team total, the blended projection, and every source's number (props, Josh & Hayden, Yahoo, ESPN, model). For finished games, **Actual** shows what each player scored (green beat the projection by 20%+, red missed by 20%+, DNP sat). Click a column header (Proj, Actual, Team total, or any source) to sort by it. **Schedule strength** switches to defenses ranked by adjusted points allowed and each team's upcoming opponents. **Refresh sources** re-pulls Yahoo and ESPN (Vegas props follow their credit budget) |
 | **Rankings** | Rest-of-season rankings by position; sort by actual, expected, or projected points, schedule strength, **Playoff SOS** (your league's playoff weeks, else the last three), trade value, or ECR |
 | **Week X → Start / Sit** | Add up to four players. Each shows its projection, floor–ceiling range, injury status, "if <teammate> sits" scenarios, flags, and a **Why?** breakdown. A tiebreaker (most points / safe / upside) decides close calls |
@@ -183,7 +188,8 @@ Open <http://localhost:5173>. The UI talks to `http://localhost:8000` by default
 | **Advanced Stats** | Pick a category and metric, season, and minimum volume, then rank every qualified player |
 | **Trade Calculator** | Search players into "You give" / "You get". See each side's value with why (rank, rate, games left, chance to play, schedule), the verdict meter, the market's view, and suggestions that even it out. **Score on** an imported league to use its settings and rosters and see both starting lineups' gains; the URL (including the league) is shareable |
 | **Buy / Sell** | Full buy-low and sell-high lists with every reason, filtered by position |
-| **Player page** | Weekly chart of actual vs expected points, game log, NGS stats, projection, signals |
+| **Player page** | Weekly chart of actual vs expected points, game log, NGS stats, projection, signals. **Position percentiles** rank his season stats against his position (green = good, red = bad, grey for context stats like aDOT; "Small sample" until he has enough volume). **What changed** compares his last 3 games with the earlier games (snap share, target share, air-yard share, targets, carries, pass attempts) and flags big moves |
+| **Odds & Props** | Pick a week: every game's kickoff, closing spread and total, and each team's implied total. **Show props** opens the player props stored for that game (expected passing/rushing/receiving yards, receptions, TDs implied by the lines) with how long before kickoff they were bought. Props appear game by game on game day; before that the page says why they're missing |
 | **Ask AI** | Ask questions in plain English; each answer shows which tools it used |
 | **Settings** | League scoring, size, superflex, and TE premium (used everywhere); connect Yahoo; check integrations. **System** shows when the auto-update last ran and what it did, Odds API credits left, data freshness and the last backup, with **Back up now**. **API access** takes the token when the backend has `API_TOKEN` set |
 
@@ -360,7 +366,7 @@ noise. The production ridge (20) stays. Learned source weights move in small cap
 ### Power rankings and playoff odds
 
 `services/league_insights.py`, read live from Yahoo (standings, the season's adds and trades,
-and the scoreboard for every remaining regular-season week), cached for an hour:
+and the scoreboard for every regular-season week so far and to come), cached for an hour:
 - **Strength** is each team's best QB/RB/WR/TE lineup in rest-of-season points per game.
 - **Weekly best ball:** for every remaining week, each team plays its best possible lineup from
   its whole roster (not IR), with every player projected against that week's opponent. A player
@@ -377,6 +383,25 @@ and the scoreboard for every remaining regular-season week), cached for an hour:
 - **Tendencies:** "Active trader" (2+ trades), "Waiver regular" (1.5× the league's median
   moves), "Quiet" (2 moves or fewer, no trades), plus the positions each manager has traded for
   and picked up.
+- **All-play and luck** (`services/all_play.py`, from Yahoo's scoreboard for every completed
+  week, each finished week fetched once): every week each team's score is compared with every
+  other team's score that week, giving its all-play record (e.g. 52-33). All-play expected
+  wins = the sum over weeks of (teams beaten + half the ties) / (teams − 1); **luck** = actual
+  head-to-head wins in those same weeks − all-play expected wins (positive: the schedule gave it
+  more wins than its scores earned). If Yahoo's scoreboards can't be read, the rankings load
+  without luck.
+- **Manager tags** (`services/manager_tags.py`), each shown with its evidence: "FAAB whale" (average winning bid ≥ 12% of the budget), "Sits on FAAB" (spent
+  under 25% of the budget by week 6 or later, only when Yahoo reports the FAAB balance; both FAAB
+  leagues only), "Waiver hawk" (1.5+ moves
+  per week played), "RB hunter" etc. (50%+ of at least 4 adds and trades at one position),
+  "Trade shark" / "Overpays" (won / lost 2+ graded trades by 10+ points).
+- **Past trades** (`services/trade_grades.py`): every completed trade this season (trades are
+  read separately from the latest 200 adds, page by page, so none are missed), graded after
+  the fact. For each side, the points (your league's scoring, from the nflverse weekly stats in
+  the database) its received players scored in the weeks after the trade, minus the same for the
+  players it sent. Counting starts with the first NFL week that kicked off after the trade, and
+  only weeks with stats loaded count. A side ahead by 10+ points wins the trade. Players we can't
+  match to our stats (and kickers / defenses) are skipped and listed.
 
 ### Floors, ceilings and the matchup simulation
 
@@ -438,8 +463,8 @@ add is worth twice as much). What to do depends on the league:
 
 | League type | Advice |
 |---|---|
-| FAAB | A bid: the league's typical winning bid for the k-th most wanted player (from Yahoo's transactions), scaled by rivals' balances and how many of them need the position, capped by what he's worth to you, the richest interested rival + $1, and half your balance. Before 8 winning bids exist it's a labelled estimate (rank 1 15% of the budget, 2 8%, 3 5%, 4-6 3%, else 1%; ×1.3 early, ×0.6 late) |
-| Rolling priority | Spend a top-3 priority only on a difference-maker (8+ points and the most wanted, a handcuff to your injured starter, or a starter for 3+ of the next 4 weeks); otherwise wait. Teams ahead of you that need the position are named |
+| FAAB | A bid: the league's typical winning bid for the k-th most wanted player (from Yahoo's transactions), scaled by rivals' balances and how many of them need the position, capped by what he's worth to you, the richest interested rival + $1, and half your balance. Before 8 winning bids exist it's a labelled estimate (rank 1 15% of the budget, 2 8%, 3 5%, 4-6 3%, else 1%; ×1.3 early, ×0.6 late). Each bid also shows its share of the league's original budget ("$14 · 14% of budget") |
+| Rolling priority | Each claim shows the earliest priority it's worth ("worth #N priority or later"): #1 for a difference-maker (8+ points and the most wanted, a handcuff to your injured starter, or a starter for 3+ of the next 4 weeks), otherwise N = his rank by lineup gain among this week's useful claims, but never inside the top 3 and never past the number of teams. Claim if your priority is #N or later (always with the last priority), else wait. Teams ahead of you that need the position are named |
 | Free agency | Add now, best gain first |
 
 Gains under 1 point are marked marginal.
@@ -450,8 +475,11 @@ both starting lineups before any are cut. An offer is kept only if it adds to yo
 theirs at most half a point per weighted remaining week. Roster spots count: in a 2-for-1 the team
 getting two players drops the one it misses least ("they drop X"), and if your roster was full the
 spot you open is filled by the best of the top 10 free agents ("you add Y"); both are in the gains.
+Each offer (and a calculator trade scored on a league) carries a `lineup_label` from the signs of
+both gains, with gains within ±0.5 points counted as even: "Helps both lineups", "Helps you, costs
+them", "Helps them, costs you", "Hurts both" (or "... even for them" / "About even for both").
 Offers rank by your gain minus half of what they lose (`offer_score`), so a deal that helps both
-lineups ("Helps both lineups") beats a slightly bigger one that hurts them; at most three per team,
+lineups beats a slightly bigger one that hurts them; at most three per team,
 no more than two built on the same player of yours. After the league's trade deadline the list is
 empty. The standalone calculator discounts extra players more steeply (1, 0.7, 0.5, 0.4) since
 depth is worth little; pick a league in the calculator ("Score on") to also see both lineups' gains,
@@ -533,6 +561,44 @@ starting weights; they're refit after every completed week (see **Learning the w
   When the month's Odds API credits can't cover every game left, only games with one of
   your rostered players are bought, plus every one-game Thursday and Monday slate.
 
+**Chance of N+ points** (`services/threshold_odds.py`). Each row carries `threshold_odds`,
+the chance of at least each of three totals: QB 15/20/25, RB and WR 10/15/20, TE 8/12/16
+(kickers and defenses have none). The Proj column shows the highest one ("20+ pts: 31%",
+the rest in its tooltip) and **Why?** lists all three.
+- **Math:** `chance to play × P(points ≥ N if he plays)`. The second part reads the same
+  7 quantiles (5th–95th percentile) behind the floor and ceiling as one piecewise-linear
+  distribution, the one the matchup simulation draws from (tails down to 0 and past the
+  95th). So a healthy player's ceiling is always a 10% shot, and the odds, the range and the
+  simulation agree.
+- **Calibration** (`python -m services.threshold_calibration --season 2026`): saved
+  pre-kickoff projections for weeks 1–7 of 2026 (8,262 player-week thresholds, PPR; the
+  ranges were fit on 2021–2025, so those seasons are refused as in-sample; a player who sat
+  counts as 0, and players already ruled out are left out of the scores). Predicted 15.3% on average,
+  hit 15.4%; Brier score 0.092 vs 0.130 for always guessing the base rate.
+
+  | Predicted | 0–10% | 10–20% | 20–30% | 30–40% | 40–50% | 50–60% | 60–70% | 70–80% | 80–90% |
+  |---|---|---|---|---|---|---|---|---|---|
+  | Happened | 2.3% | 15.3% | 22.4% | 39.2% | 42.1% | 55.4% | 61.4% | 76.4% | 90.2% |
+  | Rows | 4,741 | 1,134 | 769 | 429 | 480 | 314 | 228 | 123 | 41 |
+
+  By position the average prediction is within 0.4 points of the hit rate (QB 17.2 vs 16.9%,
+  RB 18.2 vs 18.3%, WR 15.4 vs 15.4%, TE 11.8 vs 12.2%).
+
+**Grading the props** (`services/props_calibration.py`). Stored prop-derived stats are
+compared with the box score (players who sat are skipped: their props were void; a player
+with offensive snaps but no box score played and counts as all zeros), and each
+stat (pass yds, pass TDs, INTs, rush yds, receptions, rec yds, TDs) gets a factor
+`1 + n / (n + 150) × (actual ÷ expected − 1)`, capped at 0.8–1.2, and 1.0 under 30 pairs.
+Each week's factors only use earlier weeks. `python -m services.props_calibration --season 2026`
+reports the error of prop-implied points (on the stats the props cover) with and without
+the correction, on weeks the factors never saw.
+- **Status: off** (`ENABLED = False`). Props are stored for weeks 7–8 of 2026 only (323
+  player-weeks where the player played, 23 of them in week 8 at the time of the check). Week 8
+  with factors learned from week 7: RMSE 4.13 → 4.10 points, too few rows to tell from noise.
+- So far the props ran short on yardage (rush yds +5.7 per player, rec yds +2.9) and about
+  right on TDs and receptions, as expected when a median line stands in for a right-skewed
+  mean. Turn it on once a few more weeks show the gain holds.
+
 **Saved locally.** Two tables in the local SQLite database (never committed) store the results:
 - **`rankings_snapshots`:** the computed week, keyed by league settings, week, every data input
   and a hash of the model code. A change to any of them recomputes; otherwise a load (even
@@ -604,7 +670,15 @@ moving players on matchup.
 ### Value over replacement and trade value
 - **Replacement level** depends on your league: starters league-wide (teams × slots, with
   FLEX and superflex filled by the best remaining players) plus each position's share of bench spots.
-  The next player down is the "waiver-wire" baseline.
+  The next player down is the "waiver-wire" baseline. League size and superflex change values,
+  never projected points: a player with no prior season shrinks toward the replacement level of
+  a 12-team, 1-QB version of your league (a test holds this invariant).
+- **Checked against a fixed per-team depth** (`python -m services.replacement_eval --seasons
+  2021-2025`, point in time from weeks 4 and 8): GWTTKB's depth {QB 1.17, RB 2.83, WR 3.67,
+  TE 0.75 per team} ranks all players' rest-of-season VORP better when the many zeros count
+  (PPR 12 teams: Spearman 0.47 vs 0.41 against our own target), but worse for the players who
+  ended up mattering (0.505 vs 0.519), and worse in standard scoring. Since it doesn't win
+  across the board, the replacement level is unchanged.
 - **`trade_value = availability × max(0, healthy_ppg − replacement_ppg) × games_left`**:
   rest-of-season fantasy points above what you'd get from waivers.
   - `availability` is the share of remaining value he keeps (the injury discount below; for a
@@ -690,6 +764,17 @@ to play and schedule; the result also shows how expert consensus (the market) se
 "Balance it" suggests players not in the deal whose addition brings the trade closest to even;
 when the trade is scored on a league (`league_id`), only players on the two rosters.
 
+Two more lines explain the verdict:
+- **Consolidation** (`consolidation`, n-for-m trades only): how far the package discount moves the
+  gap, i.e. the adjusted difference minus the raw one. In a 2-for-1 the side getting the single
+  player gains it: giving 100 + 60 for 130 is a raw 30-point loss but only 12 after the discount,
+  18 points toward the consolidating side.
+- **To even it** (`even_it`, any verdict but fair): the trade value one more player would need,
+  added to the short side, to make the sides even after the discount (130 + 0.7 × 17 = 142 above:
+  "ask for a player worth about 17"), with the closest balance suggestion named.
+
+The agent's `evaluate_trade` tool returns the same two fields.
+
 ### Trade finder
 1-for-1 and 2-for-1 offers for the players you'd move. An offer must be within −5%…+8% for you by
 this app's values and −15%…+5% by market (expert-consensus) value, and the app must like it for
@@ -708,6 +793,30 @@ Per player (3+ games):
 **Buy low:** a valuable role (expected PPG at or above replacement), FPOE ≤ −1, usage not
 collapsing. **Sell high:** the mirror image. Only players with positive trade value qualify.
 Scores are a percent of expected points, so QBs don't drown out other positions.
+
+### Player percentiles and what changed
+Season stats are regular-season box scores (nflverse) and snap counts; shares are averaged over
+the games that have them. The **pool** is every player at the position with 4+ games (half the
+most games played anyone has, early in the season). Each stat also needs its own sample before it
+counts: 100 pass attempts for QB rates, 40 carries for yards per carry, 20 targets for yards per
+target, catch rate and aDOT, 50 touches for fumble rate, 3 games with share data for target,
+air-yard and snap share. Players below a stat's sample are left out of that stat's pool, and
+their own value shows "Small sample". The percentile is the share of the pool below him (ties
+count half). For INT rate and fumbles lost per 100 touches lower is better, so the percentile
+is flipped (90 = better than 90%). aDOT and QB air yards per attempt are **context**: shown
+with a percentile but no good/bad color. Fantasy PPG uses your scoring settings.
+
+**What changed** needs 5+ games: the last 3 against all earlier games this season. Big moves
+are flagged at ±10 points of snap share, ±5 of target share, ±8 of air-yard share, ±2
+targets/game, ±4 carries/game and ±5 pass attempts/game.
+
+### Odds page
+Read-only: it never calls The Odds API (500 credits a month). Lines are the closing
+`spread_line` (home margin, positive = home favored) and `total_line` from the nflverse
+schedule; implied team totals are (total ± spread) / 2, the same as Week X rankings. Player
+props are the rows `weekly_refresh` already stored (source `vegas_props`): the expected stats
+implied by each player's lines, bought once per game within 2 hours of kickoff. The page shows
+when each game's props were fetched relative to kickoff.
 
 ## API reference
 
@@ -745,13 +854,15 @@ League parameters accepted by every valuation endpoint: `scoring=ppr|half|std`,
 | GET | `/api/my-team/leagues` | Your imported leagues (your team, scoring, starter slots) |
 | GET | `/api/my-team/{league_id}` | Your roster with projections and the best-lineup advice |
 | GET | `/api/my-team/{league_id}/waivers?position=` | Waiver targets on no roster in that league |
-| GET | `/api/my-team/{league_id}/trades?want_position=` | Trade offers with each real team, scored by both lineups (named drop/add, `helps_both`, `accept_chance`); empty after the deadline |
+| GET | `/api/my-team/{league_id}/trades?want_position=` | Trade offers with each real team, scored by both lineups (named drop/add, `helps_both`, `lineup_label`, `accept_chance`); empty after the deadline |
 | GET | `/api/my-team/{league_id}/matchup` | This week's opponent, both lineups, win probability, expected/upside/safe lineups, the updated lineup and the bench |
 | GET | `/api/my-team/{league_id}/playoffs` | Each player's playoff weeks (opponent, bye, projection), the best lineup per week, and planner fixes |
 | GET | `/api/my-team/{league_id}/streaming` | DEF (and one-QB-league QB) streaming grid for 3 weeks with a suggested path |
-| GET | `/api/my-team/{league_id}/league` | Power rankings, simulated playoff odds and manager tendencies (live from Yahoo, cached 1 h) |
+| GET | `/api/my-team/{league_id}/league` | Power rankings, simulated playoff odds, all-play records and luck, manager tendencies and tags, and graded past trades (live from Yahoo, cached 1 h) |
 | GET | `/api/my-team/{league_id}/news?limit=` | Newest news across your roster, plus `latest` (each player's newest item time) |
 | GET | `/api/players/{id}/news` | One player's latest news (Sleeper) |
+| GET | `/api/players/{id}/usage?season=&scoring=` | Position percentiles for key season stats (with sample sizes) and last-3-games usage changes |
+| GET | `/api/odds?season=&week=` | A week's games with spread, total, implied team totals, and the stored player props per game (never calls The Odds API) |
 | GET | `/api/compare?ids=&seasons=&scoring=` | 2–4 players' games and season summaries across up to four seasons |
 | GET | `/api/rankings/weekly/kdst?position=K\|DST&week=` | Kicker or defense projections with their inputs |
 | GET | `/api/model/accuracy?scoring=` | Live accuracy, floor/ceiling coverage, held-out backtest, learned weights |
@@ -772,7 +883,7 @@ With a Yahoo league imported, more tools answer from your real league:
 - `get_my_matchup`: this week's opponent, both lineups, win probability and the changes to make;
 - `get_league_rosters`: any team's roster, or every team's top players and weak positions;
 - `get_playoff_outlook`: your players across your league's playoff weeks, with planner fixes;
-- `get_power_rankings`: every team's strength, record, playoff odds and manager tendencies;
+- `get_power_rankings`: every team's strength, record, playoff odds, all-play record and luck, manager tendencies and tags, and graded past trades;
 - `get_player_news`: a player's latest headlines (any player, league or not);
 - `get_league_waivers`: players free in your league, each with the action, FAAB bid, market
   price, value to you, the drop (and why), and only players who actually improve your lineup;
@@ -827,8 +938,20 @@ from fixed templates keyed on the tools used (never model or Yahoo text), a "Sou
 which data was used and for which week, a note appears when an answer was partial or had
 unverified details, and a free-tier rate limit shows a countdown with Retry.
 
-**Evaluation set** (`services/eval_cases.py`, runner `services/agent_eval.py`): 63 saved
-questions across 18 intents, including multi-turn follow-ups and out-of-scope questions; 22 are
+**Instant answers without AI** (`services/agent_direct.py`): a few plain questions are answered
+straight from a tool result with a fixed template and no LLM call, so they cost no free-tier
+quota and work without a provider key: "show my roster" / "who's on my team" (`get_my_team`),
+"who should I start" / "set my lineup" (best lineup, changes and alerts from `get_my_team`),
+"standings" (by record, then points for) and "power rankings" (`get_power_rankings`). The whole
+question must be one of those phrases (no players, conditions or second requests) and one league
+must be in scope (the chat's league or the only one imported). A reply to a question the
+assistant just asked ("your team or Rival's?" -> "my team") goes to the AI, as does anything else
+or a tool error; if Yahoo itself is down, the app says so at once instead of letting the AI wait
+through the same timeout again. The reply has the normal shape plus `answered_by: "app"`, and the chat
+shows "Answered instantly from the app's data, without AI."
+
+**Evaluation set** (`services/eval_cases.py`, runner `services/agent_eval.py`): 69 saved
+questions across 18 intents, including multi-turn follow-ups and out-of-scope questions; 25 are
 held out for scoring only. The test suite checks offline that routing sends every case's tools,
 plus the loop, grounding, truncation, fallback and injection cases with a scripted fake model.
 With a provider key, `python -m services.agent_eval` runs them through the real model and checks
@@ -860,6 +983,22 @@ answer ships with a "Not verified against the app's data: …" line and the chat
 The out-of-rounds answer is checked the same way. Tool fields say what they are (`proj`,
 matchups and schedules in words like "6% harder than average") so the model can't mislabel a
 projection as an actual score.
+
+**Roster check** (`services/grounding_roster.py`): when one league is in scope (the chat's
+league, the only imported one, or the one league this question's tools used), advice is checked
+against every team's imported roster. "Pick up / add / claim / bid on X" is flagged when X is
+already on a roster in that league, and "start / bench / drop X" when X isn't on yours. It goes
+through the same one revision, then the "Not verified" line. A player the answer adds first, or
+receives in a trade priced this turn (`evaluate_trade`'s `get`), counts as yours for a later
+start. Only advice-shaped clauses count (the clause starts with the verb, optionally after a list
+marker or "I'd", "you should" and the like, and the
+player's full or unique last name follows it directly), so "Rival will start X", "don't drop X",
+ambiguous last names and typo guesses are never flagged.
+
+**Prompt rules** worth knowing: a downgrade must state the points-per-game change, projections
+and simulations are called estimates (only box scores are facts), and the prompt lists what the
+app can do (price any trade with `evaluate_trade`, waivers and bids, start/sit, matchup odds,
+injuries, rankings, stats, playoff odds and standings) so the model never says it can't.
 
 **Untrusted text:** news headlines and summaries pass through `labels.untrusted()` (one line,
 no control or zero-width characters, role markers and instruction-like sentences replaced
@@ -901,8 +1040,8 @@ countdown, and the page names it as the daily limit.
 1. **REST:** `GET /api/agent/tools` lists them, `POST /api/agent/tools/{name}` runs one.
 2. **Built-in chat:** `POST /api/agent/chat` runs a multi-round tool-calling loop on the
    providers in `LLM_CHAIN` (set `GROQ_API_KEY` for the default). Rate limits return 429 with
-   `Retry-After`; the reply includes `stop_reason`, `unverified`, `provider`, `data_as_of` and
-   `suggestions`. Try it from the command line:
+   `Retry-After`; the reply includes `stop_reason`, `unverified`, `provider`, `answered_by`
+   (`"ai"`, or `"app"` for an instant answer), `data_as_of` and `suggestions`. Try it from the command line:
    `python -m testing.groq_test "Is trading Bijan Robinson for Ja'Marr Chase fair?"`
 3. **MCP server** for Claude Desktop, Claude Code, or any MCP client:
    ```bash

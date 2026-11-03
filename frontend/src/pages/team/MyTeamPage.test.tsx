@@ -56,7 +56,7 @@ describe('MyTeamPage', () => {
 
   it('lists league trades by team with their needs', async () => {
     const offer = { give: [CHASE], get: BIJAN, get_ros_ppg: 18, fills_their_need: ['WR'],
-      evaluation: { verdict: 'fair' } };
+      your_gain: 3.1, their_gain: -1.2, lineup_label: 'Helps you, costs them', evaluation: { verdict: 'fair' } };
     mockFetch([META_ROUTE, { path: '/api/my-team/leagues', reply: json({ leagues: [LEAGUE] }) },
       { path: '/api/my-team/1', reply: json(TEAM) },
       { path: '/api/my-team/1/trades', reply: json({ league: 'Family League', perspective: 'give', teams: [
@@ -69,6 +69,7 @@ describe('MyTeamPage', () => {
     expect(list).toHaveTextContent('Needs WR');
     expect(list).toHaveTextContent("Give Ja'Marr Chase for Bijan Robinson (RB)");
     expect(within(list).getByText('Fills their WR need')).toBeInTheDocument();
+    expect(within(list).getByText('Helps you, costs them')).toHaveClass('status-badge--ok');
   });
 
   it('shows the playoff weeks, byes and the best lineup each week', async () => {

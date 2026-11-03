@@ -1,5 +1,6 @@
 /** Week X rankings and schedule strength. */
-import type { PlayerSummary, Position, Scoring, TradeResult } from './core';
+import type { PlayerSummary, Position, Scoring } from './core';
+import type { TradeResult } from './trade';
 
 /* ---------- Week X rankings & schedule strength ---------- */
 
@@ -46,6 +47,12 @@ export interface InjuryScenario {
   projection: number;
 }
 
+/** P(points >= threshold), from the same score ranges as the floor and ceiling. */
+export interface ThresholdOdds {
+  points: number;
+  probability: number;
+}
+
 export interface WeeklyPlayer {
   rank: number;
   pos_rank: string;
@@ -58,6 +65,8 @@ export interface WeeklyPlayer {
   status: string | null;
   floor: number | null;
   ceiling: number | null;
+  /** Chance of at least `points` this week (the chance he sits included), low to high threshold. */
+  threshold_odds?: ThresholdOdds[];
   /** Points added because injured teammates may sit. */
   boost_points: number;
   pct_rostered: number | null;

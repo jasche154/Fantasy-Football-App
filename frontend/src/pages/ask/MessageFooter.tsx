@@ -72,6 +72,9 @@ export function MessageFooter({ entry }: { entry: ChatEntry }) {
       {entry.stopReason === 'out_of_rounds' && (
         <p className="message__note">Partial answer: the assistant ran out of lookups. Ask a narrower follow-up for the rest.</p>
       )}
+      {entry.answeredBy === 'app' && (
+        <p className="message__note">Answered instantly from the app’s data, without AI.</p>
+      )}
       <div className="message__actions">
         <Sources calls={entry.toolCalls} week={entry.dataAsOf?.week} />
         <CopyButton text={entry.content} />

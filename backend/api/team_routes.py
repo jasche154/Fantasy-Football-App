@@ -108,7 +108,7 @@ def waivers(league_id: int, position: Position | None = None, limit: int = Query
 @router.get("/{league_id}/trades")
 def trades(league_id: int, want_position: Position | None = None, session: Session = Depends(get_session)) -> dict:
     league, _ = _league_or_404(session, league_id)
-    from services.league_trades import deadline_passed, score_trades
+    from services.league_trades import deadline_passed, lineup_effect, lineup_label, score_trades
 
     rules = mt.league_rules(league)
     body = {"league": league.name, "perspective": "give = from your roster, get = from their roster",
@@ -121,7 +121,8 @@ def trades(league_id: int, want_position: Position | None = None, session: Sessi
     return {**body, "teams": [
                 {"team": r.team.name, "owner": r.team.owner_display_name, "needs": list(r.needs),
                  "offers": [{**serialize.trade_offer(o, weeks), "your_gain": mine, "their_gain": theirs,
-                             "helps_both": theirs > 0,
+                             "helps_both": lineup_effect(mine) == lineup_effect(theirs) == "helps",
+                             "lineup_label": lineup_label(mine, theirs),
                              "fills_their_need": [p.position for p in o.give if p.position in r.needs]}
                             for o, mine, theirs in offers]}
                 for r, offers in score_trades(session, league_id, by_team)]}

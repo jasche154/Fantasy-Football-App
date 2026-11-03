@@ -162,6 +162,7 @@ def _clear_caches() -> None:
     matchup._cache.clear()
     league_insights._cache.clear()
     league_insights._schedule.clear()
+    league_insights._scores.clear()
     player_index.clear_index_cache()
     from services import llm_client
 

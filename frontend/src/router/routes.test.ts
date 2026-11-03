@@ -11,6 +11,7 @@ describe('parseHash', () => {
     expect(parseHash('#/rankings').route).toEqual({ name: 'rankings' });
     expect(parseHash('#/stats/').route).toEqual({ name: 'stats' });
     expect(parseHash('#/market').route).toEqual({ name: 'market' });
+    expect(parseHash('#/odds?week=9').route).toEqual({ name: 'odds' });
     expect(parseHash('#/ask').route).toEqual({ name: 'ask' });
     expect(parseHash('#/settings').route).toEqual({ name: 'settings' });
   });
