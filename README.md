@@ -1181,7 +1181,8 @@ what it has, how to access it, license terms, update schedule, and which ones to
   `/api` request marked cross-site is refused, GETs included (several call Yahoo or run
   simulations). A page on another localhost port counts as "same-site" to the browser, so those
   requests are refused too unless their `Origin` is in `CORS_ORIGINS` (the app's own `fetch()`
-  always sends it). Without `API_TOKEN`, only this machine may call the API.
+  always sends it), so a frontend served from anywhere else (e.g. `vite preview` on :4173) must
+  be added to `CORS_ORIGINS`. Without `API_TOKEN`, only this machine may call the API.
 - **Signed snapshots.** Cached rankings are pickled, so each is signed with a key kept in
   `backend/.snapshot_key` (git-ignored); a snapshot that doesn't verify is ignored. The key is
   written to a temp file first and must be 32 bytes, so a failed write can't leave an empty key.

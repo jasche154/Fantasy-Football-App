@@ -101,6 +101,7 @@ def _signing_key() -> bytes:
             if key is None:
                 temp = KEY_FILE.with_name(f"{KEY_FILE.name}.{secrets.token_hex(4)}.tmp")
                 temp.write_bytes(secrets.token_bytes(KEY_BYTES))
+                temp.chmod(0o600)                     # owner only (POSIX; a no-op on Windows)
                 try:
                     if KEY_FILE.exists():
                         log.warning("Replacing a snapshot signing key of the wrong length")

@@ -236,11 +236,14 @@ def props_tick(session_factory: Callable[[], Session]) -> dict | None:
     """Game days: buy props for games that just entered the window before kickoff."""
     from datetime import datetime, timezone
 
+    from services.projections import latest_season
     from services.schedule_strength import load_schedule
     from services.weekly_refresh import refresh_props_only
 
     with session_factory() as session:
-        season = _season(session)
+        # The season the Week X page shows (newest stats), not the date's: until a new season's
+        # first stats land, its props would buy credits for games the app doesn't project yet.
+        season = latest_season(session)
         week = props_due_soon(load_schedule(session, season), datetime.now(timezone.utc)) if season else None
         return refresh_props_only(session, season, week) if week else None
 
