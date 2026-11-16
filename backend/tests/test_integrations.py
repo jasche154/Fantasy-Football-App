@@ -395,8 +395,12 @@ def test_connect_stores_encrypted_tokens_and_import_league(session, seeded):
     assert mine.name == "Mine" and mine.owner_display_name == "Me"
     assert session.query(Roster).one().player_id == seeded["chase"]
 
+    from services import league_insights, matchup
+
+    matchup._cache[league.id] = league_insights._cache[league.id] = (0.0, {"stale": True})
     yahoo_sync.import_league(session, settings, http, "461.l.1")       # re-import replaces, not duplicates
     assert session.query(Roster).count() == 1 and session.query(Team).count() == 2
+    assert league.id not in matchup._cache and league.id not in league_insights._cache   # new lineups rebuild
     with pytest.raises(LookupError):
         yahoo_sync.import_league(session, settings, http, "461.l.404")
 

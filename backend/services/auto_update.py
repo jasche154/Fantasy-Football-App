@@ -43,8 +43,14 @@ _started = threading.Event()
 class UpdateResult:
     loaded_week: int | None = None           # stats loaded for this finished week
     synced_leagues: int = 0                  # Yahoo leagues re-imported
+    failed_leagues: int = 0                  # Yahoo leagues whose re-import failed
     snapshot_week: int | None = None         # pre-game projections saved for this week
+    ok: bool = True                          # False when any step failed (see notes)
     notes: list[str] = field(default_factory=list)
+
+    def fail(self, note: str) -> None:
+        self.ok = False
+        self.notes.append(note)
 
 
 def finished_week_to_load(schedule: Schedule, latest_loaded: int | None, today: date) -> int | None:
@@ -58,49 +64,116 @@ def finished_week_to_load(schedule: Schedule, latest_loaded: int | None, today: 
     return newest if newest is not None and newest > (latest_loaded or 0) else None
 
 
+def current_season() -> int:
+    """The NFL season under way (or just finished), by date: a new season starts in September."""
+    import nflreadpy as nfl
+
+    return nfl.get_current_season()
+
+
+def _season(session: Session, season_now: Callable[[], int] | None = None) -> int | None:
+    """The season to work on: by date, not the newest stats (in September those are last season's)."""
+    from services.projections import latest_season
+
+    newest = latest_season(session)
+    return None if newest is None else max(newest, (season_now or current_season)())
+
+
 def run_once(session_factory: Callable[[], Session], today: date | None = None,
              load_stats: Callable[[list[int]], None] | None = None,
              refresh: Callable[[Session, int, int], object] | None = None,
-             sync_leagues: Callable[[Session], int] | None = None) -> UpdateResult:
-    """One check. The loaders are injectable so tests don't touch the network."""
-    from config import get_settings
+             sync_leagues: Callable[[Session, int], tuple[int, int]] | None = None,
+             season_now: Callable[[], int] | None = None) -> UpdateResult:
+    """One check. Each step fails on its own (noted in the result), so one bad feed can't stop
+    the rest. The loaders are injectable so tests don't touch the network."""
     from database.populate_stats import load_data
+    from services.projections import latest_week
+    from services.schedule_strength import load_schedule
+
+    today = today or date.today()
+    result = UpdateResult()
+    with session_factory() as session:
+        season = _season(session, season_now)
+        if season is None:
+            result.notes.append("no stats loaded yet; run populate_stats once")
+            return result
+        schedule = load_schedule(session, season)
+        scheduled = bool(schedule.games)
+        due = finished_week_to_load(schedule, latest_week(session, season), today) if scheduled else None
+    if due is not None or not scheduled:      # a finished week, or a new season's schedule to fetch
+        _load_stats(session_factory, load_stats or (lambda seasons: load_data(seasons)), season, due, result)
+    try:
+        with session_factory() as session:
+            result.synced_leagues, result.failed_leagues = (sync_leagues or sync_yahoo_leagues)(session, season)
+        if result.failed_leagues:
+            result.fail(f"{result.failed_leagues} Yahoo league(s) couldn't be re-synced; "
+                        "reconnect Yahoo in Settings if this keeps happening")
+    except Exception as exc:
+        log.exception("Yahoo re-sync failed")
+        result.fail(f"Yahoo re-sync failed ({type(exc).__name__})")
+    try:
+        _snapshot(session_factory, refresh, season, result)
+    except Exception as exc:
+        log.exception("Pre-game snapshot failed")
+        result.fail(f"saving this week's projections failed ({type(exc).__name__})")
+    return result
+
+
+def _load_stats(session_factory: Callable[[], Session], load_stats: Callable[[list[int]], None],
+                season: int, due: int | None, result: UpdateResult) -> None:
+    """Load the season (this also nudges the source weights), then check the week really arrived:
+    nflverse feeds that fail are skipped inside the load, not raised."""
+    from services.projections import latest_week
+    from services.schedule_strength import load_schedule
+
+    try:
+        load_stats([season])
+    except Exception as exc:
+        log.exception("Stats load failed")
+        result.fail(f"stats load failed ({type(exc).__name__}); will retry")
+        return
+    if due is None:                     # a new season: only its schedule was due
+        with session_factory() as session:
+            if not load_schedule(session, season).games:
+                result.fail(f"the {season} schedule isn't available yet; will retry")
+        return
+    with session_factory() as session:
+        loaded = latest_week(session, season)
+    if loaded is not None and loaded >= due:
+        result.loaded_week = due
+    else:
+        result.fail(f"week {due} stats weren't available yet; will retry")
+
+
+def _snapshot(session_factory: Callable[[], Session], refresh: Callable[[Session, int, int], object] | None,
+              season: int, result: UpdateResult) -> None:
+    from config import get_settings
     from services.league import LeagueSettings
-    from services.projections import latest_season, latest_week
     from services.schedule_strength import load_schedule
     from services.valuation import build_valuation
     from services.weekly_rankings import build_weekly_rankings, default_week
     from services.weekly_refresh import refresh_sources
 
-    today = today or date.today()
-    load_stats = load_stats or (lambda seasons: load_data(seasons))
-    refresh = refresh or refresh_sources
-    result = UpdateResult()
-    with session_factory() as session:
-        season = latest_season(session)
-        if season is None:
-            result.notes.append("no stats loaded yet; run populate_stats once")
-            return result
-        due = finished_week_to_load(load_schedule(session, season), latest_week(session, season), today)
-    if due is not None:
-        load_stats([season])                   # also nudges the source weights (weight_learning)
-        result.loaded_week = due
-    with session_factory() as session:
-        result.synced_leagues = (sync_leagues or sync_yahoo_leagues)(session)
     with session_factory() as session:
         league = LeagueSettings()
-        week = default_week(build_valuation(session, league))
+        valuation = build_valuation(session, league)
+        if valuation.season != season:     # a new season before its first stats: nothing to project yet
+            return
+        week = default_week(valuation)
         games = [g for g in load_schedule(session, season).games if g.week == week]
         if any(not g.is_final for g in games):
             if get_settings().weekly_auto_refresh:
-                refresh(session, season, week)  # same caches and props credit budget as the page
+                (refresh or refresh_sources)(session, season, week)  # same caches and props budget as the page
             build_weekly_rankings(session, league, week)      # records pre-kickoff projections
             result.snapshot_week = week
-    return result
 
 
-def sync_yahoo_leagues(session: Session) -> int:
-    """Re-import every league that has the user's team (best-effort; returns how many synced)."""
+def sync_yahoo_leagues(session: Session, season: int | None = None) -> tuple[int, int]:
+    """Re-import the leagues that have the user's team: (synced, failed).
+
+    Older seasons' leagues are skipped: Yahoo only lists the current season's, so they'd fail every
+    time. Next season's (a league drafted in August) are kept.
+    """
     import httpx
 
     from config import get_settings
@@ -108,17 +181,20 @@ def sync_yahoo_leagues(session: Session) -> int:
     from services.my_team import my_leagues
 
     if yahoo_sync.get_connection(session) is None:
-        return 0
-    synced = 0
+        return 0, 0
+    synced = failed = 0
     with httpx.Client(timeout=15.0) as http:
         for league, _ in my_leagues(session):
+            if season is not None and league.season and league.season < season:   # 0 = season unknown
+                continue
             try:
                 yahoo_sync.import_league(session, get_settings(), http, league.platform_league_id)
                 synced += 1
-            except Exception:          # Yahoo down or the token revoked: keep the last import
-                log.warning("Could not re-import Yahoo league %s", league.name, exc_info=True)
+            except Exception as exc:   # Yahoo down or the token revoked: keep the last import
+                log.warning("Could not re-import Yahoo league %s (%s)", league.name, type(exc).__name__)
                 session.rollback()
-    return synced
+                failed += 1
+    return synced, failed
 
 
 def check(session_factory: Callable[[], Session]) -> dict:
@@ -131,8 +207,8 @@ def check(session_factory: Callable[[], Session]) -> dict:
     status: dict = {"at": started.isoformat(), "ok": True}
     try:
         result = run_once(session_factory)
-        status.update(loaded_week=result.loaded_week, synced_leagues=result.synced_leagues,
-                      snapshot_week=result.snapshot_week, notes=result.notes)
+        status.update(ok=result.ok, loaded_week=result.loaded_week, synced_leagues=result.synced_leagues,
+                      failed_leagues=result.failed_leagues, snapshot_week=result.snapshot_week, notes=result.notes)
         if result.loaded_week or result.snapshot_week or result.synced_leagues:
             log.info("Auto-update: loaded week %s stats, synced %s Yahoo leagues, saved week %s projections",
                      result.loaded_week, result.synced_leagues, result.snapshot_week)
@@ -169,6 +245,8 @@ def props_tick(session_factory: Callable[[], Session]) -> dict | None:
     from services.weekly_refresh import refresh_props_only
 
     with session_factory() as session:
+        # The season the Week X page shows (newest stats), not the date's: until a new season's
+        # first stats land, its props would buy credits for games the app doesn't project yet.
         season = latest_season(session)
         week = props_due_soon(load_schedule(session, season), datetime.now(timezone.utc)) if season else None
         return refresh_props_only(session, season, week) if week else None

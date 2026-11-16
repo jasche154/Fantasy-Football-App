@@ -365,7 +365,11 @@ def load_data(seasons: list[int] | None = None, reload_all: bool = False) -> Non
         for feed in FEEDS:
             load_feed(session, feed, seasons, index)
         apply_latest_teams(session, index)
-        sync_crosswalk(session, index)
+        try:
+            sync_crosswalk(session, index)
+        except Exception:          # ids are a bonus: schedules, injuries and weights must still load
+            log.warning("crosswalk: sync failed; platform ids not updated", exc_info=True)  # nflverse URLs hold no keys
+            session.rollback()
         load_snap_counts(session, seasons, index)
         load_schedules(session, seasons)
         load_injury_reports(session, seasons, index)

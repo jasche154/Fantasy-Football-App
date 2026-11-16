@@ -2,6 +2,7 @@
 scoreless players in evaluation, lineup-change confidence, remembered facts, build locks."""
 import pickle
 import threading
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
@@ -16,7 +17,12 @@ from services.projection_eval import actual_points
 
 def test_cross_site_requests_are_blocked_for_every_api_method(client):
     assert client.get("/api/players/search?q=a", headers={"Sec-Fetch-Site": "cross-site"}).status_code == 403
-    assert client.get("/api/players/search?q=a", headers={"Sec-Fetch-Site": "same-site"}).status_code == 200
+    app_origin = {"Sec-Fetch-Site": "same-site", "Origin": "http://localhost:5173"}     # the app on :5173
+    assert client.get("/api/players/search?q=a", headers=app_origin).status_code == 200
+    # Another localhost port is "same-site" too: an <img> from it sends no Origin, a fetch a foreign one.
+    assert client.get("/api/players/search?q=a", headers={"Sec-Fetch-Site": "same-site"}).status_code == 403
+    assert client.get("/api/players/search?q=a", headers={"Sec-Fetch-Site": "same-site",
+                                                          "Origin": "http://localhost:8888"}).status_code == 403
     assert client.get("/api/players/search?q=a").status_code == 200            # curl, the MCP server, scripts
 
 
@@ -44,8 +50,8 @@ def test_saving_a_snapshot_keeps_other_leagues_for_the_same_week(session):
     assert rankings_store.load(session, "ppr") == "c"
 
 
-def _ranked(projection: float, final: bool = False):
-    matchup = SimpleNamespace(game_final=final)
+def _ranked(projection: float, final: bool = False, kickoff=None):
+    matchup = SimpleNamespace(game_final=final, kickoff=kickoff)
     player = SimpleNamespace(player_id=1, position="RB", projection=projection, if_active=projection, play_prob=1.0,
                              floor=1.0, ceiling=2.0, sources={"model": SimpleNamespace(points=projection)}, matchup=matchup)
     return SimpleNamespace(season=2026, week=9, scoring="ppr", players=[player])
@@ -54,6 +60,8 @@ def _ranked(projection: float, final: bool = False):
 def test_history_upserts_in_bulk_and_keeps_pre_kickoff_rows(session, seeded):
     assert rankings_store.record_history(session, _ranked(10.0)) == 1
     assert rankings_store.record_history(session, _ranked(12.0)) == 1          # updated before kickoff
+    kicked_off = datetime.now(timezone.utc) - timedelta(hours=1)
+    assert rankings_store.record_history(session, _ranked(0.5, kickoff=kicked_off)) == 0  # hurt in-game: keep 12
     assert rankings_store.record_history(session, _ranked(30.0, final=True)) == 0   # game over: keep 12
     rows = session.scalars(select(ProjectionHistory)).all()
     assert [(r.week, r.projection) for r in rows] == [(9, 12.0)]
@@ -98,3 +106,34 @@ def test_one_build_per_key_at_a_time():
     for t in threads:
         t.join()
     assert built == [1] and results == [42] * 8
+
+
+def test_a_truncated_signing_key_is_replaced_never_used(tmp_path, monkeypatch):
+    key_file = tmp_path / ".snapshot_key"
+    key_file.write_bytes(b"")                                   # a write that failed halfway
+    monkeypatch.setattr(rankings_store, "KEY_FILE", key_file)
+    monkeypatch.setattr(rankings_store, "_key", None)
+    key = rankings_store._signing_key()
+    assert len(key) == rankings_store.KEY_BYTES and key_file.read_bytes() == key
+    assert list(tmp_path.iterdir()) == [key_file]               # no temp files left behind
+
+
+def test_a_new_signing_key_is_created_once(tmp_path, monkeypatch):
+    monkeypatch.setattr(rankings_store, "KEY_FILE", tmp_path / ".snapshot_key")
+    monkeypatch.setattr(rankings_store, "_key", None)
+    first = rankings_store._signing_key()
+    monkeypatch.setattr(rankings_store, "_key", None)
+    assert rankings_store._signing_key() == first and len(first) == rankings_store.KEY_BYTES
+
+
+def test_the_signing_key_is_created_without_hard_links(tmp_path, monkeypatch):
+    def no_links(*_args):
+        raise PermissionError("hard links aren't supported here")
+
+    key_file = tmp_path / ".snapshot_key"
+    monkeypatch.setattr(rankings_store, "KEY_FILE", key_file)
+    monkeypatch.setattr(rankings_store, "_key", None)
+    monkeypatch.setattr(rankings_store.os, "link", no_links)
+    key = rankings_store._signing_key()
+    assert len(key) == rankings_store.KEY_BYTES and key_file.read_bytes() == key
+    assert list(tmp_path.iterdir()) == [key_file]

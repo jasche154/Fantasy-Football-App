@@ -288,7 +288,7 @@ export interface ChatRequest {
 
 export interface SystemStatus {
   auto_update: { enabled: boolean; at?: string; ok?: boolean; error?: string; loaded_week?: number | null;
-    synced_leagues?: number; snapshot_week?: number | null; notes?: string[]; seconds?: number;
+    synced_leagues?: number; failed_leagues?: number; snapshot_week?: number | null; notes?: string[]; seconds?: number;
     next_check_hours?: number };
   odds_credits: { remaining: number; updated_at: string } | null;
   backup: { enabled: boolean; keep: number; at?: string; ok?: boolean; file?: string; size_mb?: number;

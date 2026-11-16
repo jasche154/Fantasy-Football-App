@@ -17,10 +17,11 @@ import hashlib
 import hmac
 import json
 import logging
+import os
 import pickle
 import secrets
 from collections.abc import Iterable
-from datetime import timedelta
+from datetime import datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
 from threading import Lock
@@ -77,18 +78,54 @@ _key_lock = Lock()
 _key: bytes | None = None
 
 
+KEY_BYTES = 32
+
+
+def _read_key() -> bytes | None:
+    """The key on disk, or None when missing or the wrong length (a truncated write must never sign)."""
+    try:
+        key = KEY_FILE.read_bytes()
+    except FileNotFoundError:
+        return None
+    return key if len(key) == KEY_BYTES else None
+
+
 def _signing_key() -> bytes:
-    """The local signing key, created once (exclusive create, so two threads can't write different keys)."""
+    """The local signing key, created once. The bytes go to a temp file first, so a failed write
+    can't leave a short key; a new key is hard-linked into place, so two processes can't each
+    write their own."""
     global _key
     with _key_lock:
         if _key is None:
-            try:
-                with KEY_FILE.open("xb") as handle:
-                    handle.write(secrets.token_bytes(32))
-            except FileExistsError:
-                pass
-            _key = KEY_FILE.read_bytes()
+            key = _read_key()
+            if key is None:
+                temp = KEY_FILE.with_name(f"{KEY_FILE.name}.{secrets.token_hex(4)}.tmp")
+                try:
+                    temp.write_bytes(secrets.token_bytes(KEY_BYTES))
+                    temp.chmod(0o600)                 # owner only (POSIX; a no-op on Windows)
+                    if KEY_FILE.exists():
+                        log.warning("Replacing a snapshot signing key of the wrong length")
+                        _replace_if_invalid(temp)
+                    else:
+                        try:
+                            os.link(temp, KEY_FILE)
+                        except FileExistsError:       # another process won the race; use its key
+                            pass
+                        except OSError:               # no hard links here (FAT, some shares)
+                            _replace_if_invalid(temp)
+                finally:
+                    temp.unlink(missing_ok=True)
+                key = _read_key()
+            if key is None:
+                raise OSError("The snapshot signing key couldn't be created")
+            _key = key
         return _key
+
+
+def _replace_if_invalid(temp: Path) -> None:
+    """Move the new key into place unless another process just wrote a valid one."""
+    if _read_key() is None:
+        os.replace(temp, KEY_FILE)
 
 
 def _sign(payload: bytes) -> bytes:
@@ -134,7 +171,11 @@ def save(session: Session, key: str, season: int, week: int, rankings: object) -
 
 
 def record_history(session: Session, rankings) -> int:
-    """Upsert pre-kickoff projections; games already final keep their last pre-game row."""
+    """Upsert pre-kickoff projections; games that kicked off keep their last pre-game row.
+
+    A rebuild after kickoff (a Friday status change, the 6-hour snapshot) would otherwise
+    rewrite the row with hindsight, which weight learning and accuracy reports must not see.
+    """
     try:
         _ensure_tables(session)
         now = utc_now()
@@ -143,7 +184,7 @@ def record_history(session: Session, rankings) -> int:
                      if_active=player.if_active, play_prob=player.play_prob, floor=player.floor,
                      ceiling=player.ceiling, computed_at=now,
                      sources=json.dumps({name: round(v.points, 2) for name, v in player.sources.items()}))
-                for player in rankings.players if not player.matchup.game_final]
+                for player in rankings.players if _before_kickoff(player.matchup, now)]
         if rows:                                       # one upsert instead of a SELECT + write per player
             statement = sqlite_insert(ProjectionHistory)
             session.execute(statement.on_conflict_do_update(
@@ -156,6 +197,12 @@ def record_history(session: Session, rankings) -> int:
         log.warning("Could not record projection history", exc_info=True)
         session.rollback()
         return 0
+
+
+def _before_kickoff(matchup, now: datetime) -> bool:
+    if matchup.game_final:
+        return False
+    return matchup.kickoff is None or now < matchup.kickoff
 
 
 def history(session: Session, season: int, scoring: str) -> list[ProjectionHistory]:

@@ -136,3 +136,15 @@ def test_an_empty_trade_list_says_why(session, league, monkeypatch):
     monkeypatch.setattr(league_moves, "score_trades", lambda *_args: [])
     result = TOOLS.call(session, "find_league_trades", {"want_position": "RB"})
     assert result["teams"] == [] and "evaluate_trade" in result["no_offers"]
+
+
+def test_league_trades_follow_the_deadline_and_explain_their_gains(session, league):  # noqa: F811
+    from services import my_team as mt
+
+    offers = [o for team in TOOLS.call(session, "find_league_trades", {})["teams"] for o in team["offers"]]
+    assert offers and all("accept_chance" in o for o in offers)
+    row, _ = league
+    row.scoring_settings = json.dumps({**mt.league_rules(row), "trade_end_date": "2000-01-01"})
+    session.commit()
+    closed = TOOLS.call(session, "find_league_trades", {})
+    assert closed["deadline_passed"] is True and closed["teams"] == [] and "deadline" in closed["note"]

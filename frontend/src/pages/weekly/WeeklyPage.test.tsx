@@ -171,6 +171,22 @@ describe('WeeklyPage', () => {
     expect(api.callsTo('/api/rankings/weekly').length).toBeGreaterThan(before);
   });
 
+  it('asks for the current week (no week=0) after a failed first load', async () => {
+    const user = userEvent.setup();
+    let calls = 0;
+    const api = mockFetch([META_ROUTE, { path: '/api/rankings/weekly', reply: () => {
+      calls += 1;
+      return calls === 1 ? json({ detail: 'Backend still starting' }, 503) : json(weekly(7));
+    } }]);
+    renderWithProviders(<WeeklyPage />);
+    await waitFor(() => expect(calls).toBe(1));
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Week' }), 'Current week');
+    expect(api.callsTo('/api/rankings/weekly').map((c) => c.url.searchParams.get('week'))).not.toContain('0');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Week' }), '9');   // the select still works
+    expect(await screen.findByRole('heading', { level: 1, name: 'Week 9 Rankings' })).toBeInTheDocument();
+    expect(api.callsTo('/api/rankings/weekly').at(-1)?.url.searchParams.get('week')).toBe('9');
+  });
+
   it('switches to schedule strength', async () => {
     const user = userEvent.setup();
     const api = mockFetch(routes());

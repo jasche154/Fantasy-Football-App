@@ -22,6 +22,7 @@ SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 OPEN_PATHS = {"/api/meta"}           # readable without the API token (tells the app a token is needed)
 # Without API_TOKEN, only this machine may call the API ("testclient" is FastAPI's test client).
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
+MIN_TOKEN_LENGTH = 32
 
 
 def _warm_cache() -> None:
@@ -43,8 +44,13 @@ async def lifespan(_app: FastAPI):
 
 def create_app(warm_cache: bool = True) -> FastAPI:
     settings = get_settings()
+    if settings.api_token and len(settings.api_token.strip()) < MIN_TOKEN_LENGTH:
+        raise RuntimeError(f"API_TOKEN must be at least {MIN_TOKEN_LENGTH} characters (it can be guessed at request "
+                           "speed). Make one with: python -c \"import secrets; print(secrets.token_urlsafe(32))\"")
+    # With a token the API may be reachable from other machines: don't publish its schema to them.
+    docs = {} if not settings.api_token else {"docs_url": None, "redoc_url": None, "openapi_url": None}
     app = FastAPI(title="Fantasy Football Toolkit", version="1.0.0",
-                  lifespan=lifespan if warm_cache else None)
+                  lifespan=lifespan if warm_cache else None, **docs)
 
     # The API is meant for localhost (API_TOKEN adds a token check). Rejecting other Host headers stops
     # DNS-rebinding pages from becoming same-origin with it.
@@ -79,7 +85,11 @@ def create_app(warm_cache: bool = True) -> FastAPI:
             return JSONResponse({"detail": "Cross-site request blocked."}, status_code=403)
         # Browsers label requests a page on another site makes (even <img> GETs). Several GETs
         # call Yahoo or run simulations, so other sites can't trigger them either.
-        if request.url.path.startswith("/api") and request.headers.get("sec-fetch-site") == "cross-site":
+        fetch_site = request.headers.get("sec-fetch-site")
+        if request.url.path.startswith("/api") and (fetch_site == "cross-site" or (
+                # "Site" ignores the port, so a page on any other localhost port is same-site. The app's
+                # own fetch() always sends its Origin; an <img> or link from elsewhere sends none.
+                fetch_site == "same-site" and origin not in settings.cors_origins)):
             return JSONResponse({"detail": "Cross-site request blocked."}, status_code=403)
         # Bound to 0.0.0.0 without a token, the Host check alone wouldn't stop other machines.
         client = request.client.host if request.client else None
