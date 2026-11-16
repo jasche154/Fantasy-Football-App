@@ -345,5 +345,5 @@ def test_weekly_endpoint_only_auto_refreshes_the_current_week_same_site(week_cli
     week_client.get("/api/rankings/weekly", params={"week": 9})                       # not the current week
     week_client.get("/api/rankings/weekly", headers={"Sec-Fetch-Site": "cross-site"})  # another website
     assert calls == []
-    week_client.get("/api/rankings/weekly", headers={"Sec-Fetch-Site": "same-site"})
+    week_client.get("/api/rankings/weekly", headers={"Sec-Fetch-Site": "same-site", "Origin": "http://localhost:5173"})
     assert calls == [WEEK]

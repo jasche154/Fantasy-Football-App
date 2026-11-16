@@ -50,7 +50,8 @@ function StatusRows({ data, onBackup, backupMessage }: { data: SystemStatus; onB
       <dd>
         {!update.enabled ? 'Off (AUTO_UPDATE=false)' : update.at ? (
           <>
-            Last check {when(update.at)}{update.ok === false ? `: failed (${update.error})` : ''}.
+            Last check {when(update.at)}{update.ok === false ? `: failed${update.error ? ` (${update.error})` : ''}` : ''}.
+            {update.notes?.length ? ` ${update.notes.join('; ')}.` : ''}
             {update.loaded_week ? ` Loaded week ${update.loaded_week} stats.` : ''}
             {update.snapshot_week ? ` Saved week ${update.snapshot_week} projections.` : ''}
             {update.synced_leagues ? ` Synced ${update.synced_leagues} Yahoo leagues.` : ''}

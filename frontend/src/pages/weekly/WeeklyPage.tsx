@@ -124,7 +124,7 @@ export function WeeklyPage() {
           <div className="weekly-controls">
             <SelectField label="Week" isInline value={shownWeek ?? ''}
               options={shownWeek ? WEEK_OPTIONS : [{ value: '', label: 'Current week' }, ...WEEK_OPTIONS]}
-              onChange={(value) => setWeek(Number(value))} />
+              onChange={(value) => setWeek(value === '' ? undefined : Number(value))} />
             <PositionFilter value={filter} onChange={setFilter} />
           </div>
         }

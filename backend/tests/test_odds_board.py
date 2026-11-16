@@ -75,7 +75,12 @@ def test_default_week_is_the_first_with_games_left(session, games):
     assert default_week(session, 2030) == 18
 
 
-def test_odds_endpoint_never_calls_the_odds_api(client, games, no_outside_calls):
+def test_odds_endpoint_never_calls_the_odds_api(client, games, no_outside_calls, monkeypatch):
+    import api.odds_routes as routes
+
+    # The default week follows today's date; pin it to the seeded games' week, or the test expires.
+    monkeypatch.setattr(routes, "default_week", lambda session, season: default_week(session, season,
+                                                                                      today=date(2026, 11, 2)))
     body = client.get("/api/odds", params={"season": SEASON, "week": 10}).json()
     assert body["week"] == 10 and body["props_count"] == 2
     default = client.get("/api/odds").json()

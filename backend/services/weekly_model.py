@@ -15,6 +15,7 @@ is the Vegas implied team total divided by the team's scoring average.
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 
@@ -114,6 +115,7 @@ class Matchup:
     implied_total: float | None
     team_ppg: float | None
     game_final: bool
+    kickoff: datetime | None = None   # UTC
 
     @property
     def implied_factor(self) -> float:
@@ -137,7 +139,7 @@ def matchup_for(team: str | None, position: str | None, week: int, schedule: Sch
     return Matchup(opponent=opponent, home=game.home_team == team,
                    sos_factor=defense.factor(opponent, position), sos_rank=defense.rank(opponent, position),
                    implied_total=game.implied_points(team), team_ppg=schedule.points_per_game(team),
-                   game_final=game.is_final)
+                   game_final=game.is_final, kickoff=game.kickoff)
 
 
 def season_stat_line(player: PlayerSeason) -> dict[str, float]:

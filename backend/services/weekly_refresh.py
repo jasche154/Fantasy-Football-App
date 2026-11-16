@@ -134,11 +134,16 @@ def refresh_props_only(session: Session, season: int, week: int) -> dict:
     settings = get_settings()
     if not settings.odds_api_key or "vegas_props" not in settings.weekly_sources:
         return _disabled()
-    with httpx.Client(timeout=TIMEOUT_SECONDS) as http:
-        try:
-            return _refresh_props(session, http, settings, season, week, False)
-        except SourceError as exc:
-            return _status("error", str(exc))
+    if not _refresh_lock.acquire(blocking=False):   # a page refresh may be buying the same games
+        return _status("busy", "Another refresh is running; it covers props.")
+    try:
+        with httpx.Client(timeout=TIMEOUT_SECONDS) as http:
+            try:
+                return _refresh_props(session, http, settings, season, week, False)
+            except SourceError as exc:
+                return _status("error", str(exc))
+    finally:
+        _refresh_lock.release()
 
 
 def _refresh_props(session: Session, http: httpx.Client, settings: Settings, season: int,
@@ -212,15 +217,16 @@ def start_background_refresh(session: Session, season: int, week: int,
                              settings: Settings | None = None) -> dict[str, dict] | None:
     """Kick off a refresh of stale sources without making the page wait.
 
-    Returns {source: "refreshing" status} for what was started, None when nothing is stale
-    or a refresh is already running.
+    Returns {source: "refreshing" status} for what is stale (started now, or still being
+    refreshed by a running refresh, so the page keeps polling), None when nothing is stale.
     """
     settings = settings or get_settings()
     stale = _stale_sources(session, settings, season, week)
-    if not stale or _refresh_lock.locked():
+    if not stale:
         return None
-    threading.Thread(target=_run_in_background, args=(session.get_bind(), season, week),
-                     name="weekly-refresh", daemon=True).start()
+    if not _refresh_lock.locked():
+        threading.Thread(target=_run_in_background, args=(session.get_bind(), season, week),
+                         name="weekly-refresh", daemon=True).start()
     return {source: _status("refreshing", "Updating in the background; reload in a moment.") for source in stale}
 
 

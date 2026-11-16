@@ -158,7 +158,19 @@ _import_lock = threading.Lock()
 def import_league(session: Session, settings: Settings, http: httpx.Client, league_key: str) -> dict:
     """One import at a time: a manual sync and the background re-sync rewrite the same roster rows."""
     with _import_lock:
-        return _import_league(session, settings, http, league_key)
+        result = _import_league(session, settings, http, league_key)
+        _forget_cached(result["league_id"])
+    return result
+
+
+def _forget_cached(league_id: int) -> None:
+    """New rosters and lineups: drop the league's cached matchup and standings so they rebuild."""
+    from services import league_insights, matchup
+
+    with matchup._cache_lock:
+        matchup._cache.pop(league_id, None)
+    with league_insights._lock:
+        league_insights._cache.pop(league_id, None)
 
 
 def modeled_position(display_position: str | None) -> str | None:

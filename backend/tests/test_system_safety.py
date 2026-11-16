@@ -15,6 +15,8 @@ from integrations import odds_api
 from integrations.weekly_sources import SourceError
 from services import auto_update, backup, system_status
 
+TOKEN = "s3cret-token-0123456789-abcdefghijk"
+
 
 @pytest.fixture
 def token_client(engine, seeded, monkeypatch):
@@ -22,7 +24,7 @@ def token_client(engine, seeded, monkeypatch):
     from database.db import get_session
     from sqlalchemy.orm import sessionmaker
 
-    monkeypatch.setenv("API_TOKEN", "s3cret-token")
+    monkeypatch.setenv("API_TOKEN", TOKEN)
     get_settings.cache_clear()
     factory = sessionmaker(bind=engine, expire_on_commit=False)
 
@@ -39,8 +41,8 @@ def token_client(engine, seeded, monkeypatch):
 def test_api_token_is_required_when_set(token_client):
     assert token_client.get("/api/players/search?q=a").status_code == 401
     assert token_client.get("/api/players/search?q=a", headers={"Authorization": "Bearer wrong"}).status_code == 401
-    assert token_client.get("/api/players/search?q=a", headers={"Authorization": "s3cret-token"}).status_code == 401
-    ok = token_client.get("/api/players/search?q=a", headers={"Authorization": "Bearer s3cret-token"})
+    assert token_client.get("/api/players/search?q=a", headers={"Authorization": TOKEN}).status_code == 401
+    ok = token_client.get("/api/players/search?q=a", headers={"Authorization": f"Bearer {TOKEN}"})
     assert ok.status_code == 200
     meta = token_client.get("/api/meta")                     # open, so the app can ask for the token
     assert meta.status_code == 200 and meta.json()["auth_required"] is True
@@ -145,3 +147,18 @@ def test_two_players_cannot_share_a_yahoo_id(session):
     session.rollback()
     session.add_all([Player(full_name="C Three", position="WR"), Player(full_name="D Four", position="WR")])
     session.commit()                                          # missing ids are fine
+
+
+def test_a_token_hides_the_api_docs_and_short_tokens_are_refused(token_client, monkeypatch):
+    from main import create_app
+
+    for path in ("/docs", "/redoc", "/openapi.json"):
+        assert token_client.get(path, headers={"Authorization": f"Bearer {TOKEN}"}).status_code == 404
+    monkeypatch.setenv("API_TOKEN", "1234")
+    get_settings.cache_clear()
+    with pytest.raises(RuntimeError, match="at least 32 characters"):
+        create_app(warm_cache=False)
+
+
+def test_api_docs_stay_on_without_a_token(client):
+    assert client.get("/openapi.json").status_code == 200

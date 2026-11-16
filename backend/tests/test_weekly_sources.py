@@ -450,12 +450,28 @@ def test_background_refresh_starts_only_for_stale_sources(session, seeded, monke
         200, json=yahoo_payload(r.url.params["position"]))), SEASON, WEEK)
     assert set(weekly_refresh.start_background_refresh(session, SEASON, WEEK, settings)) == {"espn"}   # yahoo fresh
 
+    started.clear()
     assert weekly_refresh._refresh_lock.acquire(blocking=False)
-    try:
-        assert weekly_refresh.start_background_refresh(session, SEASON, WEEK, settings) is None   # already running
+    try:   # a refresh is still running: no second thread, but the page keeps polling
+        statuses = weekly_refresh.start_background_refresh(session, SEASON, WEEK, settings)
+        assert statuses["espn"]["state"] == "refreshing" and started == []
     finally:
         weekly_refresh._refresh_lock.release()
     assert threading.Lock  # stdlib untouched
+
+
+def test_game_day_props_check_waits_for_a_running_refresh(session, seeded, monkeypatch):
+    bought = []
+    monkeypatch.setattr(weekly_refresh, "_refresh_props", lambda *a: bought.append(a) or {"state": "updated"})
+    monkeypatch.setattr(weekly_refresh, "get_settings", lambda: Settings(odds_api_key="k"))
+    assert weekly_refresh._refresh_lock.acquire(blocking=False)
+    try:   # a page refresh is buying props: the tick must not buy the same games
+        assert weekly_refresh.refresh_props_only(session, SEASON, WEEK)["state"] == "busy"
+    finally:
+        weekly_refresh._refresh_lock.release()
+    assert bought == []
+    assert weekly_refresh.refresh_props_only(session, SEASON, WEEK)["state"] == "updated"
+    assert not weekly_refresh._refresh_lock.locked()
 
 
 def test_background_runner_logs_failures(monkeypatch, caplog):

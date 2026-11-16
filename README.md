@@ -1132,7 +1132,7 @@ Settings come from environment variables or `backend/.env` (never commit it; see
 | `CORS_ORIGINS` | `["http://localhost:5173","http://127.0.0.1:5173"]` | JSON list of allowed web origins |
 | `FANTASY_END_WEEK` | `18` | Last fantasy week, the final (drives weeks remaining; playoffs default to 16–18) |
 | `ALLOWED_HOSTS` | `["localhost","127.0.0.1"]` | Host headers the API accepts (blocks DNS rebinding) |
-| `API_TOKEN` | — | Optional. When set, every `/api` request except `/api/meta` needs `Authorization: Bearer <token>`; enter it once in Settings (stored in that browser) |
+| `API_TOKEN` | — | Optional. When set, every `/api` request except `/api/meta` needs `Authorization: Bearer <token>`; enter it once in Settings (stored in that browser). At least 32 characters (the API won't start otherwise; make one with `python -c "import secrets; print(secrets.token_urlsafe(32))"`), and `/docs`, `/redoc` and `/openapi.json` are turned off |
 | `BACKUPS` | `true` | Daily SQLite backup while the API runs |
 | `BACKUP_DIR` | `backend/database/backups` | Where backups go (git-ignored) |
 | `BACKUP_KEEP` | `7` | How many backups to keep |
@@ -1172,12 +1172,21 @@ what it has, how to access it, license terms, update schedule, and which ones to
   `backend/database/fantasy.db`.
 - **Job status.** The auto-update records each check (what it loaded, synced and saved, or the
   error type) in the `app_state` table; props purchases record the credits left. Errors are
-  stored by type only, since messages can contain URLs with API keys.
+  stored by type only, since messages can contain URLs with API keys. Each step (stats load,
+  Yahoo re-sync, pre-game snapshot) runs even if an earlier one failed, and the check is marked
+  failed with a note when a step fails, a week's stats didn't actually arrive, or a Yahoo league
+  couldn't be re-synced. It works on the season by date, so a new season's schedule and weeks
+  load in September without running `populate_stats` by hand.
 - **Cross-site and remote requests.** Browsers label requests another site makes, so any
   `/api` request marked cross-site is refused, GETs included (several call Yahoo or run
-  simulations). Without `API_TOKEN`, only this machine may call the API.
+  simulations). A page on another localhost port counts as "same-site" to the browser, so those
+  requests are refused too unless their `Origin` is in `CORS_ORIGINS` (the app's own `fetch()`
+  always sends it). Without `API_TOKEN`, only this machine may call the API.
 - **Signed snapshots.** Cached rankings are pickled, so each is signed with a key kept in
-  `backend/.snapshot_key` (git-ignored); a snapshot that doesn't verify is ignored.
+  `backend/.snapshot_key` (git-ignored); a snapshot that doesn't verify is ignored. The key is
+  written to a temp file first and must be 32 bytes, so a failed write can't leave an empty key.
+- **Point-in-time history.** A player's pre-game projection is saved until his game kicks off,
+  never after, so a rebuild once news is out (an in-game injury) can't rewrite it with hindsight.
 - **Assistant memory** only keeps facts that restate the user's own words, so text in a news
   headline or team name can't plant a lasting instruction.
 - **No leaked keys.** The Odds API needs its key in the URL; a test makes failed requests and

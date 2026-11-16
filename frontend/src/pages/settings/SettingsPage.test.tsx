@@ -153,6 +153,21 @@ describe('System panel', () => {
     expect(await screen.findByText(/Saved fantasy-2.db/)).toBeInTheDocument();
     expect(api.callsTo('/api/system/backup', 'POST')).toHaveLength(1);
   });
+
+  it('says what failed in the last auto-update check', async () => {
+    const status = {
+      auto_update: { enabled: true, at: '2026-10-30T12:00:00+00:00', ok: false, synced_leagues: 0, failed_leagues: 2,
+        notes: ["2 Yahoo league(s) couldn't be re-synced; reconnect Yahoo in Settings if this keeps happening"] },
+      odds_credits: null,
+      backup: { enabled: true, keep: 7 },
+      data: { season: 2026, latest_week: 8, last_load: null, weights_learned_through_week: 7 },
+      auth_required: false,
+    };
+    mockFetch([META_ROUTE, { path: '/api/integrations/status', reply: json(integrations()) },
+      { path: '/api/system/status', reply: json(status) }]);
+    renderWithProviders(<SettingsPage />);
+    expect(await screen.findByText(/failed\. 2 Yahoo league\(s\) couldn't be re-synced/)).toBeInTheDocument();
+  });
 });
 
 describe('importSummary', () => {
