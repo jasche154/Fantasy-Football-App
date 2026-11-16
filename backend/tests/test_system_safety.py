@@ -154,10 +154,11 @@ def test_a_token_hides_the_api_docs_and_short_tokens_are_refused(token_client, m
 
     for path in ("/docs", "/redoc", "/openapi.json"):
         assert token_client.get(path, headers={"Authorization": f"Bearer {TOKEN}"}).status_code == 404
-    monkeypatch.setenv("API_TOKEN", "1234")
-    get_settings.cache_clear()
-    with pytest.raises(RuntimeError, match="at least 32 characters"):
-        create_app(warm_cache=False)
+    for weak in ("1234", " " * 40):
+        monkeypatch.setenv("API_TOKEN", weak)
+        get_settings.cache_clear()
+        with pytest.raises(RuntimeError, match="at least 32 characters"):
+            create_app(warm_cache=False)
 
 
 def test_api_docs_stay_on_without_a_token(client):

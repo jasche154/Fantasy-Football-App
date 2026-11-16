@@ -100,19 +100,19 @@ def _signing_key() -> bytes:
             key = _read_key()
             if key is None:
                 temp = KEY_FILE.with_name(f"{KEY_FILE.name}.{secrets.token_hex(4)}.tmp")
-                temp.write_bytes(secrets.token_bytes(KEY_BYTES))
-                temp.chmod(0o600)                     # owner only (POSIX; a no-op on Windows)
                 try:
+                    temp.write_bytes(secrets.token_bytes(KEY_BYTES))
+                    temp.chmod(0o600)                 # owner only (POSIX; a no-op on Windows)
                     if KEY_FILE.exists():
                         log.warning("Replacing a snapshot signing key of the wrong length")
-                        os.replace(temp, KEY_FILE)
+                        _replace_if_invalid(temp)
                     else:
                         try:
                             os.link(temp, KEY_FILE)
                         except FileExistsError:       # another process won the race; use its key
                             pass
                         except OSError:               # no hard links here (FAT, some shares)
-                            os.replace(temp, KEY_FILE)
+                            _replace_if_invalid(temp)
                 finally:
                     temp.unlink(missing_ok=True)
                 key = _read_key()
@@ -120,6 +120,12 @@ def _signing_key() -> bytes:
                 raise OSError("The snapshot signing key couldn't be created")
             _key = key
         return _key
+
+
+def _replace_if_invalid(temp: Path) -> None:
+    """Move the new key into place unless another process just wrote a valid one."""
+    if _read_key() is None:
+        os.replace(temp, KEY_FILE)
 
 
 def _sign(payload: bytes) -> bytes:
@@ -196,8 +202,7 @@ def record_history(session: Session, rankings) -> int:
 def _before_kickoff(matchup, now: datetime) -> bool:
     if matchup.game_final:
         return False
-    kickoff = getattr(matchup, "kickoff", None)          # snapshots pickled before the field existed
-    return kickoff is None or now < kickoff
+    return matchup.kickoff is None or now < matchup.kickoff
 
 
 def history(session: Session, season: int, scoring: str) -> list[ProjectionHistory]:

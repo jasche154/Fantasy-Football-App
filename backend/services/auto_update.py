@@ -124,6 +124,7 @@ def _load_stats(session_factory: Callable[[], Session], load_stats: Callable[[li
     """Load the season (this also nudges the source weights), then check the week really arrived:
     nflverse feeds that fail are skipped inside the load, not raised."""
     from services.projections import latest_week
+    from services.schedule_strength import load_schedule
 
     try:
         load_stats([season])
@@ -131,7 +132,10 @@ def _load_stats(session_factory: Callable[[], Session], load_stats: Callable[[li
         log.exception("Stats load failed")
         result.fail(f"stats load failed ({type(exc).__name__}); will retry")
         return
-    if due is None:
+    if due is None:                     # a new season: only its schedule was due
+        with session_factory() as session:
+            if not load_schedule(session, season).games:
+                result.fail(f"the {season} schedule isn't available yet; will retry")
         return
     with session_factory() as session:
         loaded = latest_week(session, season)
@@ -181,7 +185,7 @@ def sync_yahoo_leagues(session: Session, season: int | None = None) -> tuple[int
     synced = failed = 0
     with httpx.Client(timeout=15.0) as http:
         for league, _ in my_leagues(session):
-            if season is not None and league.season < season:
+            if season is not None and league.season and league.season < season:   # 0 = season unknown
                 continue
             try:
                 yahoo_sync.import_league(session, get_settings(), http, league.platform_league_id)

@@ -44,7 +44,7 @@ async def lifespan(_app: FastAPI):
 
 def create_app(warm_cache: bool = True) -> FastAPI:
     settings = get_settings()
-    if settings.api_token and len(settings.api_token) < MIN_TOKEN_LENGTH:
+    if settings.api_token and len(settings.api_token.strip()) < MIN_TOKEN_LENGTH:
         raise RuntimeError(f"API_TOKEN must be at least {MIN_TOKEN_LENGTH} characters (it can be guessed at request "
                            "speed). Make one with: python -c \"import secrets; print(secrets.token_urlsafe(32))\"")
     # With a token the API may be reachable from other machines: don't publish its schema to them.

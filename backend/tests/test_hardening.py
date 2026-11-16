@@ -124,3 +124,16 @@ def test_a_new_signing_key_is_created_once(tmp_path, monkeypatch):
     first = rankings_store._signing_key()
     monkeypatch.setattr(rankings_store, "_key", None)
     assert rankings_store._signing_key() == first and len(first) == rankings_store.KEY_BYTES
+
+
+def test_the_signing_key_is_created_without_hard_links(tmp_path, monkeypatch):
+    def no_links(*_args):
+        raise PermissionError("hard links aren't supported here")
+
+    key_file = tmp_path / ".snapshot_key"
+    monkeypatch.setattr(rankings_store, "KEY_FILE", key_file)
+    monkeypatch.setattr(rankings_store, "_key", None)
+    monkeypatch.setattr(rankings_store.os, "link", no_links)
+    key = rankings_store._signing_key()
+    assert len(key) == rankings_store.KEY_BYTES and key_file.read_bytes() == key
+    assert list(tmp_path.iterdir()) == [key_file]

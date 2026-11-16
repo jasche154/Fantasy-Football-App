@@ -367,8 +367,8 @@ def load_data(seasons: list[int] | None = None, reload_all: bool = False) -> Non
         apply_latest_teams(session, index)
         try:
             sync_crosswalk(session, index)
-        except Exception as exc:   # ids are a bonus: schedules, injuries and weights must still load
-            log.warning("crosswalk: download failed (%s); platform ids not updated", type(exc).__name__)
+        except Exception:          # ids are a bonus: schedules, injuries and weights must still load
+            log.warning("crosswalk: sync failed; platform ids not updated", exc_info=True)  # nflverse URLs hold no keys
             session.rollback()
         load_snap_counts(session, seasons, index)
         load_schedules(session, seasons)

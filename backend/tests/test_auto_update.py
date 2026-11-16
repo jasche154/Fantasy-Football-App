@@ -77,6 +77,7 @@ def test_a_new_season_loads_its_schedule_and_one_failing_step_doesnt_stop_the_re
                                   refresh=lambda *a: None, sync_leagues=yahoo_down, season_now=lambda: SEASON + 1)
     assert loads == [[SEASON + 1]]          # newest stats are last season's; the new season is fetched
     assert result.ok is False and any("Yahoo re-sync failed (ConnectionError)" in n for n in result.notes)
+    assert any(f"the {SEASON + 1} schedule isn't available yet" in n for n in result.notes)
     assert result.snapshot_week is None     # no new-season stats yet: last season's week 18 isn't rebuilt
 
 
@@ -107,3 +108,26 @@ def test_start_runs_one_thread_per_process(monkeypatch):
 
 def test_yahoo_sync_skips_without_a_connection(session):
     assert auto_update.sync_yahoo_leagues(session) == (0, 0)
+
+
+def test_yahoo_resync_skips_old_seasons_and_counts_failures(session, monkeypatch):
+    from types import SimpleNamespace
+
+    from services import my_team, yahoo_sync
+
+    leagues = [SimpleNamespace(name=f"L{s}", season=s, platform_league_id=f"key{s}")
+               for s in (SEASON - 1, SEASON, SEASON + 1, 0)]          # 0 = imported without a season
+    imported = []
+
+    def fake_import(session, settings, http, key):
+        if key == f"key{SEASON + 1}":
+            raise RuntimeError("token revoked")
+        imported.append(key)
+
+    monkeypatch.setattr(yahoo_sync, "get_connection", lambda session: object())
+    monkeypatch.setattr(my_team, "my_leagues", lambda session: [(league, None) for league in leagues])
+    monkeypatch.setattr(yahoo_sync, "import_league", fake_import)
+    assert auto_update.sync_yahoo_leagues(session, SEASON) == (2, 1)        # last season's league skipped
+    assert imported == [f"key{SEASON}", "key0"]
+    imported.clear()
+    assert auto_update.sync_yahoo_leagues(session) == (3, 1)                # no season: every league

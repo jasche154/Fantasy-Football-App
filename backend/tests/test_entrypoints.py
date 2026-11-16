@@ -55,3 +55,21 @@ def test_populate_stats_progress_survives_the_schema_upgrade(caplog, engine, mon
     with caplog.at_level(logging.INFO, logger="populate_stats"):
         populate_stats.main(["--seasons", "2026"])
     assert "Loading seasons: [2026]" in caplog.text and "Done." in caplog.text
+
+
+def test_a_failed_crosswalk_doesnt_stop_the_rest_of_the_load(caplog, engine, monkeypatch):
+    from database import populate_stats
+
+    def boom(*_args):
+        raise TimeoutError("crosswalk download timed out")
+
+    ran = []
+    monkeypatch.setattr(populate_stats, "engine", engine)
+    monkeypatch.setattr(populate_stats, "FEEDS", [])
+    monkeypatch.setattr(populate_stats, "sync_crosswalk", boom)
+    for step in ("load_snap_counts", "load_schedules", "load_injury_reports", "load_depth_charts",
+                 "load_expert_rankings", "load_advanced_stats", "record_load", "learn_source_weights"):
+        monkeypatch.setattr(populate_stats, step, lambda *args, step=step: ran.append(step))
+    populate_stats.load_data([2026])
+    assert {"load_schedules", "load_injury_reports", "record_load", "learn_source_weights"} <= set(ran)
+    assert "crosswalk: sync failed" in caplog.text
