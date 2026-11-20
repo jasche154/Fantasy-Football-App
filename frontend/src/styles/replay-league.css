@@ -1,0 +1,17 @@
+/* Replay League: the league screen. */
+.replay-league { display: grid; gap: var(--space-3); }
+.replay-league > * { min-width: 0; }
+.replay-league .hint { margin: 0; }
+
+/* The user's row (and the user's game) stands out. */
+.replay-league .data-table tbody tr.row--mine > td { background: var(--color-accent-soft); }
+.replay-league__badge { margin-inline-start: var(--space-2); }
+
+/* The playoff cut: a line under the last seed that gets in. */
+.replay-league .data-table tbody tr.replay-standings__cut > td { border-bottom: 2px solid var(--color-accent); }
+
+.replay-bracket__champion { display: flex; align-items: center; gap: var(--space-2); margin: 0 0 var(--space-2); }
+.replay-bracket__champion .icon { color: var(--color-accent); }
+.replay-bracket__week { margin: var(--space-3) 0 var(--space-1); font-size: var(--text-sm); }
+
+.replay-pager { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }

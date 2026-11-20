@@ -22,6 +22,7 @@ const ICON_PATHS = {
   plus: 'M12 5v14M5 12h14',
   check: 'm5 12 5 5 9-10',
   news: 'M4 5h12v14H5a1 1 0 0 1-1-1V5ZM16 9h4v9a1 1 0 0 1-1 1h-3M7 9h6M7 12h6M7 15h4',
+  trophy: 'M8 4h8v5a4 4 0 0 1-8 0V4ZM8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4M12 13v4M8.5 20h7M10 17h4',
   alert: 'M12 8v5M12 16.5h.01M10.3 4.2 2.6 18a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 4.2a2 2 0 0 0-3.4 0Z',
 } as const;
 

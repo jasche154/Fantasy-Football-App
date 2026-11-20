@@ -1,0 +1,26 @@
+/* Replay League: the trades screen. */
+
+/* Two sides of a deal (you give | you get): side by side, stacked on a phone. */
+.replay-trade__sides { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: var(--space-3) var(--space-4); align-items: start; }
+.replay-trade__sides > * { min-width: 0; }
+.replay-trade__title { margin: 0 0 var(--space-2); font-size: var(--text-sm); font-weight: 750; }
+.replay-trade__count { margin-inline-start: var(--space-1); color: var(--color-text-subtle); font-size: var(--text-xs); font-weight: 400; }
+.replay-trade__players { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--space-2); }
+.replay-trade__players li { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); }
+.replay-trade__value { color: var(--color-accent); font-weight: 800; font-variant-numeric: tabular-nums; }
+.replay-trade__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+
+/* Always-mounted live region for trade outcomes: takes no room until it speaks. */
+.replay-trades__notice:empty { margin: 0; }
+
+.replay-offer, .replay-builder { display: grid; gap: var(--space-3); }
+.replay-offer > *, .replay-builder > * { margin: 0; min-width: 0; }
+/* The builder's always-mounted "turned it down" live region is its last grid row: empty, it gives back the gap above it. */
+.replay-builder > [role='status']:empty { margin-top: calc(-1 * var(--space-3)); }
+
+.replay-verdict { display: grid; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md);
+  background: var(--color-surface-2); font-size: var(--text-sm); }
+.replay-verdict > * { margin: 0; }
+.replay-verdict ul { padding-inline-start: var(--space-4); }
+
+.replay-drops { display: grid; gap: var(--space-2); }
