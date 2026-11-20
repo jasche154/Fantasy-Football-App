@@ -84,6 +84,10 @@ only *explains* numbers that came back from a tool call. Every output is labeled
   - waivers limited to players actually free in your league;
   - trade ideas with the real teams in your league, matched to each team's weak positions.
   The AI assistant uses the same roster.
+- **Replay League (game engine and API):** a single-player season replay. Pick a past season (2018 on, or
+  "random"), draft against CPU managers who only know that summer's ADP, then play it week by week with
+  waivers, free agency and trades; matchups are scored with the players' real points. Every number shown
+  before a week is played is point-in-time (preseason ADP, that week's pre-game ESPN/Sleeper projection).
 - **Integrations:** Sleeper trending adds/drops, FantasyPros ROS rankings (with your key), and Yahoo league and roster import (OAuth)
 - **AI assistant and agent tools:** 17 validated tools that any agent can call over REST
   or MCP (Claude Desktop / Claude Code), plus a built-in Groq-powered chat
@@ -145,6 +149,13 @@ python -m services.weekly_refresh --force-props  # re-buy Vegas props already bo
 
 Opening the Week X page refreshes stale sources for the current week too (other weeks just
 show what's stored, and only one refresh runs at a time).
+
+Replay League needs a past season's point-in-time data, imported once per season (about a minute each;
+free public sources, no keys):
+
+```bash
+python -m services.replay_data --seasons 2019,2023   # or 2018-2025; --force re-imports
+```
 
 A season only replaces existing rows after its download succeeds, so a network hiccup
 never wipes data. `populate_stats` also brings the schema up to date first, and it works on
@@ -818,6 +829,38 @@ props are the rows `weekly_refresh` already stored (source `vegas_props`): the e
 implied by each player's lines, bought once per game within 2 hours of kickoff. The page shows
 when each game's props were fetched relative to kickoff.
 
+### Replay League
+A game against the computer on a past season (`services/replay_*.py`, API under `/api/replay`).
+One rule runs through it: **no hindsight**. CPU managers and every number shown before a week is
+played use only what existed then: preseason ADP (Fantasy Football Calculator, with MyFantasyLeague
+for the deep end) and each week's pre-game projection (ESPN, Sleeper where ESPN has none). The
+engine and the screens read the season through `SeasonData.as_of(week)`, a copy with nothing from
+that week's games on; only scoring a week reads its real points.
+
+- **Data:** `python -m services.replay_data --seasons 2019` loads the season's results (nflverse), ADP
+  and weekly projections into `replay_adp` / `replay_projections`. `GET /api/replay/seasons` says which
+  seasons are ready (stats, schedule, K/DST, 180+ ADP players, 16+ projection weeks).
+- **Draft:** a snake draft, 15 rounds by default (QB, 2 RB, 2 WR, TE, FLEX, K, DST, 6 bench). A CPU takes
+  the lowest `(ADP + noise) x need x taste` among the best players left, with position caps, K and DST
+  in the last two rounds and no reach of more than 25 picks. "Hard" halves the noise.
+- **Values:** `ros_ppg` is the weighted mean (4, 3, 2, 1) of a player's last four pre-game projections,
+  with a preseason rate (the ADP order mapped onto the week-1 projection curve) filling the slots that
+  do not exist yet. Trade value is points over replacement x games left x the share of them he is
+  expected to play (a player with no projection is "out": he is expected to miss 45% of his remaining
+  games after one week out, up to 90% after six).
+- **The week:** Wednesday waivers by rolling priority (CPUs claim when a player adds about a lineup point
+  a week), then free agency, then the games: every team's best lineup by projection (yours can be set
+  by hand), scored with real points. With waivers off, every unrostered player is a free agent.
+- **Trades:** a CPU accepts only if the package it gets is worth at least what it gives (8% more on
+  hard) and its rest-of-season lineup improves; both teams must still field a full lineup. Declines
+  come with the reasons. CPUs also trade with each other and send you offers.
+- **Season:** 14 weeks, then two playoff weeks: seeds 1-4 play for the title, everyone else plays
+  consolation games.
+
+The game is saved as one JSON document per league (`replay_leagues`); all randomness derives from the
+league's seed, so reloading never re-rolls a pick or a trade. This is the backend; response shapes are
+documented at the top of `services/replay_views.py`.
+
 ## API reference
 
 All JSON. Errors use `{"detail": ...}` with a real status code (404, 422, 502, 503).
@@ -873,6 +916,39 @@ League parameters accepted by every valuation endpoint: `scoring=ppr|half|std`,
 | POST | `/api/agent/tools/{name}` | Body `{"arguments": {...}}`; run one tool |
 | POST | `/api/agent/chat` | Body `{"messages": [{"role": "user", "content": "..."}]}`; answer plus tool trace |
 | GET | `/api/rankings/rushing` | Original rushing endpoint (kept for compatibility; now uses the fixed leaderboard math) |
+| GET | `/api/replay/seasons` | Which past seasons can be replayed (readiness per season) and the running data import |
+| POST | `/api/replay/seasons/{season}/prepare?force=` | Import that season's results, ADP and pre-game projections in the background |
+| GET | `/api/replay/games` | Saved replay leagues, most recently played first |
+| POST | `/api/replay/games` | Body `{"season": 2019, "teams": 12, "scoring": "half", "draft_slot": 6, "waiver_mode": "wednesday", "difficulty": "normal", "name": "...", "seed": 1}` (only `season` is required; it may be `"random"`; teams 8/10/12/14; `waiver_mode` `"none"` = free agency only; `difficulty` `"hard"`); a new league, drafted up to your first pick |
+| GET | `/api/replay/games/{id}` | Game summary: phase, week, your record and matchup, what to do next, champion |
+| POST | `/api/replay/games/{id}/delete` | Delete the league |
+| GET | `/api/replay/games/{id}/draft?position=&search=&limit=&offset=` | Draft room: picks, order, your roster, players left by ADP |
+| POST | `/api/replay/games/{id}/draft/pick` | Body `{"player_id": 1}`; your pick, then the CPUs pick up to your next turn |
+| POST | `/api/replay/games/{id}/draft/auto?whole_draft=` | Auto-pick for you: this pick, or every pick left |
+| GET | `/api/replay/games/{id}/team?team_id=&week=` | Any team's lineup and bench for a week up to the current one, with projections, values and (once played) real points |
+| POST | `/api/replay/games/{id}/lineup` | Body `{"starters": {"QB": [id], ...}}`, or `{"starters": null}` for the best lineup |
+| GET | `/api/replay/games/{id}/matchup?week=&team_id=` | One game's two lineups side by side |
+| GET | `/api/replay/games/{id}/scoreboard?week=` | Every game of a week |
+| GET | `/api/replay/games/{id}/standings` | The table with seeds, and the playoff bracket once known |
+| GET | `/api/replay/games/{id}/schedule?team_id=` | A team's opponents and results |
+| GET | `/api/replay/games/{id}/activity?kind=&limit=&offset=` | The league log (picks, moves, trades, results), newest first |
+| GET | `/api/replay/games/{id}/players?position=&search=&status=&sort=&limit=&offset=` | The player pool (default: unrostered) with status, projection, value and points so far |
+| GET | `/api/replay/games/{id}/players/{player_id}` | One player's weeks so far (projection, real points, value by week) and who owns him |
+| GET | `/api/replay/games/{id}/claims` | Your pending waiver claims in order, and the waiver priority |
+| POST | `/api/replay/games/{id}/claims` | Body `{"add": id, "drop": id}`; a waiver claim (before the week's waiver run) |
+| POST | `/api/replay/games/{id}/claims/{claim_id}/cancel` | Cancel a claim |
+| POST | `/api/replay/games/{id}/claims/reorder` | Body `{"ids": [claim ids]}`; your claims in a new order |
+| POST | `/api/replay/games/{id}/add-drop` | Body `{"add": id, "drop": id}`; add a free agent (after the waiver run) |
+| POST | `/api/replay/games/{id}/drop` | Body `{"player_id": id}` |
+| POST | `/api/replay/games/{id}/advance` | Body `{"step": "wednesday", "week": 3}` runs the waivers, `"play"` plays the week (409 if `week` is not the league's current week) |
+| GET | `/api/replay/games/{id}/trades` | CPU offers waiting for you (with a preview verdict) and every past offer and trade |
+| POST | `/api/replay/games/{id}/trades/evaluate` | Body `{"to_team": 3, "give": [ids], "get": [ids], "drops": [ids]}`; that CPU's verdict with reasons (nothing changes) |
+| POST | `/api/replay/games/{id}/trades/propose` | Same body; the trade is carried out when the CPU accepts |
+| POST | `/api/replay/games/{id}/trades/offers/{offer_id}/respond` | Body `{"accept": true, "drops": [ids]}`; answer a CPU's offer |
+
+Every replay `POST` under `/games` answers `{"game": <summary>, "events": [...]}` plus the action's own
+result (a declined trade is a 200 with its verdict). A replay league or player that does not exist is
+404, bad input 422, a season whose data is not imported 503.
 
 Full TypeScript types for every response: [`docs/API.md`](docs/API.md).
 
@@ -1221,10 +1297,13 @@ npm run build     # type-check and production build
 backend/
   config.py                 settings from env / .env
   main.py                   FastAPI app (uvicorn main:app)
-  api/                      thin routers: data, market, integrations, agent, legacy
+  api/                      thin routers: data, market, integrations, agent, legacy, replay (+ replay actions)
   services/                 tested business logic (scoring, projections, valuation, schedule strength,
                             weekly model and rankings, props math, leaderboards, players, trade, insights, agent)
-  integrations/             sleeper, fantasypros, yahoo, yahoo experts, espn, the odds api, token encryption
+    replay_*.py             Replay League: pool, values and state (data), draft, season, waivers, trades
+                            (engine), game (week flow), views (JSON), data (season import CLI)
+  integrations/             sleeper, fantasypros, yahoo, yahoo experts, espn, the odds api, token encryption,
+                            past-season ADP and projections (adp_history, espn_history, sleeper_projections)
   tools/                    agent tool registry and definitions
   mcp_server.py             MCP server over the same tools
   database/                 models, migrations helpers, data loader
