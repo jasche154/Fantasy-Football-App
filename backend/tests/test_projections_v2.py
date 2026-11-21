@@ -1,6 +1,5 @@
 """Round 8: team profiles, model factors, weather, kicker / defense models, matchup simulation."""
-from datetime import date, datetime, timedelta, timezone
-from types import SimpleNamespace
+from datetime import date, timedelta
 
 import httpx
 import numpy as np

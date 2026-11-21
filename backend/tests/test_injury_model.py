@@ -473,7 +473,7 @@ def test_trade_finder_keeps_offers_fair_by_market_value(session, seeded):
 
 
 def test_past_week_rankings_carry_actual_points(session, seeded, client):
-    ids = _seed_week(session)
+    _seed_week(session)
     rankings = build_weekly_rankings(session, LeagueSettings(), week=6)
     played = {p.player_id: p for p in rankings.players}
     seasons = {s.player_id: s for s in build_valuation(session, LeagueSettings()).seasons}

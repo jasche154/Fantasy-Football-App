@@ -15,7 +15,7 @@ from services.insights import player_signals
 from services.labels import label
 from services.league import POSITIONS, LeagueSettings
 from services.player_index import TYPO_CUTOFF, get_index, normalize
-from services.projections import GameLine, PlayerSeason, load_game_lines
+from services.projections import FIRST_SEASON, GameLine, PlayerSeason, load_game_lines
 from services.valuation import build_valuation
 
 FUZZY_CUTOFF = 0.75
@@ -64,6 +64,16 @@ def _latest_seasons(session: Session, player_ids: list[int]) -> dict[int, int]:
                            .where(PlayerStatsWeekly.player_id.in_(player_ids))
                            .group_by(PlayerStatsWeekly.player_id))
     return dict(rows.all())
+
+
+def _active(session: Session, refs: list[PlayerRef]) -> list[PlayerRef]:
+    """Of several namesakes, drop those whose last game is in a season loaded only for Replay League
+    (before FIRST_SEASON), so such a season never makes a live player ambiguous. Nothing else changes:
+    two namesakes inside the live seasons stay ambiguous. A player with no games (a rookie) is kept."""
+    if len(refs) < 2:
+        return refs
+    seasons = _latest_seasons(session, [r.id for r in refs])
+    return [r for r in refs if seasons.get(r.id, FIRST_SEASON) >= FIRST_SEASON]
 
 
 def search_players(session: Session, query: str, position: str | None = None,
@@ -115,16 +125,16 @@ def resolve_player(session: Session, reference: str | int) -> PlayerRef:
         refs = _refs(session.execute(select(Player.id, Player.full_name, Player.position, Player.nfl_team)
                                      .where(Player.full_name.in_(indexed), Player.position.in_(POSITIONS))
                                      .order_by(Player.id)))
-        if len(refs) == 1:
-            return refs[0]
+        if len(active := _active(session, refs)) == 1:
+            return active[0]
         if refs:
             raise AmbiguousPlayer(text, refs)
     matches = search_players(session, text, limit=5)
     if not matches:
         raise PlayerNotFound(f"No QB/RB/WR/TE found matching '{label(text)}'.")
     exact = [m for m in matches if normalize(m.name) == normalize(text)]
-    if len(exact) == 1:
-        return exact[0]
+    if len(exact_active := _active(session, exact)) == 1:
+        return exact_active[0]
     words = [m for m in matches if _whole_words(text, (m.name,))]
     if len(words) == 1 and not exact:
         return words[0]

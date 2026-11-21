@@ -15,6 +15,12 @@ import './styles/chat.css';
 import './styles/settings.css';
 import './styles/team.css';
 import './styles/odds.css';
+import './styles/replay.css';
+import './styles/replay-draft.css';
+import './styles/replay-team.css';
+import './styles/replay-players.css';
+import './styles/replay-trades.css';
+import './styles/replay-league.css';
 
 const container = document.getElementById('root');
 if (!container) {

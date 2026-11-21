@@ -1,4 +1,4 @@
-import { act, render, screen, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { App } from './App';
@@ -50,6 +50,20 @@ describe('App routing and shell', () => {
     expect(await screen.findByRole('heading', { level: 1, name: 'Buy low / Sell high' })).toBeInTheDocument();
     act(() => navigate('/ask'));
     expect(await screen.findByRole('heading', { level: 1, name: 'Ask AI' })).toBeInTheDocument();
+  });
+
+  it('moves focus to the heading when a replay league opens, though only the query changes', async () => {
+    mockEverything();
+    setHash('#/replay');
+    render(<App />);
+    act(() => navigate('/replay', { game: 7 }));
+    // The home has the same heading text, so wait for something only the league shows (here: its load error).
+    const back = await screen.findByRole('link', { name: 'Back to your leagues' });
+    expect(screen.getByRole('heading', { level: 1, name: 'Replay League' })).toHaveFocus();
+    act(() => back.focus());
+    act(() => navigate('/replay', { game: 7, view: 'league' }));        // a tab change leaves focus where it is
+    await waitFor(() => expect(window.location.hash).toContain('view=league'));
+    expect(back).toHaveFocus();
   });
 
   it('shows a not-found page for unknown routes', () => {

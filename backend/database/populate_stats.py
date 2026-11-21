@@ -33,10 +33,10 @@ from database.models import (
     PlayerReceivingAdvancedWeekly, PlayerRushingAdvancedWeekly, PlayerSnapCountsWeekly,
     PlayerStatsWeekly,
 )
+from services.projections import FIRST_SEASON  # noqa: F401  (database.populate_stats.FIRST_SEASON stays)
 
 log = logging.getLogger("populate_stats")
 
-FIRST_SEASON = 2021
 BATCH_SIZE = 5000
 SKIPPED_COLUMNS = {"id", "player_id"}
 EXPERT_PAGES = {"qb": None, "ppr-rb": "ppr", "ppr-wr": "ppr", "ppr-te": "ppr"}
@@ -335,7 +335,8 @@ def seasons_to_load(session: Session, current_season: int, reload_all: bool) -> 
     every_season = list(range(FIRST_SEASON, current_season + 1))
     if reload_all:
         return every_season
-    loaded = set(session.scalars(select(PlayerStatsWeekly.season).distinct()))
+    # Expected points: only this loader fills it (Replay League's import also writes weekly stats, so those don't count).
+    loaded = set(session.scalars(select(PlayerExpectedPointsWeekly.season).distinct()))
     return [s for s in every_season if s not in loaded or s == current_season]
 
 

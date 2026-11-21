@@ -67,6 +67,9 @@ def test_seasons_to_load(db, monkeypatch):
     assert populate.seasons_to_load(db, 2023, reload_all=False) == [2021, 2022, 2023]
     db.add(Player(id=1, full_name="A", gsis_id="g"))
     db.add_all([PlayerStatsWeekly(player_id=1, season=s, week=1) for s in (2021, 2022, 2023)])
+    db.commit()     # weekly stats alone (a Replay League import) don't count as loaded
+    assert populate.seasons_to_load(db, 2023, reload_all=False) == [2021, 2022, 2023]
+    db.add_all([PlayerExpectedPointsWeekly(player_id=1, season=s, week=1) for s in (2021, 2022, 2023)])
     db.commit()
     assert populate.seasons_to_load(db, 2023, reload_all=False) == [2023]
     assert populate.seasons_to_load(db, 2023, reload_all=True) == [2021, 2022, 2023]
@@ -174,9 +177,34 @@ def test_migrations_downgrade_and_upgrade_cleanly(tmp_path):
     ensure_schema(legacy)
     config = alembic_config(legacy)
     command.downgrade(config, "d7b5c4e6f566")
-    assert not inspect(legacy).has_table("expert_rankings")
+    assert not inspect(legacy).has_table("expert_rankings") and not inspect(legacy).has_table("replay_injuries")
     command.upgrade(config, "head")
-    assert inspect(legacy).has_table("expert_rankings")
+    assert inspect(legacy).has_table("expert_rankings") and inspect(legacy).has_table("replay_injuries")
+    command.upgrade(config, "head")                         # a second run is a no-op
+
+
+def test_replay_migrations_build_exactly_the_replay_models(tmp_path):
+    """New databases get replay tables from create_all; this proves the migrations build the same ones."""
+    from alembic.autogenerate import compare_metadata
+    from alembic.migration import MigrationContext
+    from sqlalchemy import text
+
+    from database.create_tables import ensure_schema
+    from database.models import Base
+
+    legacy = _legacy_database(tmp_path / "replay.db")
+    with legacy.begin() as connection:                     # drop them so the migrations, not create_all, build them
+        for table in ("replay_injuries", "replay_projections", "replay_adp", "replay_leagues"):
+            connection.execute(text(f"DROP TABLE {table}"))
+    ensure_schema(legacy)
+    with legacy.connect() as connection:
+        def replay_only(obj, name, kind, reflected, compare_to):
+            table = obj if kind == "table" else getattr(obj, "table", None)
+            return table is not None and table.name.startswith("replay_")
+
+        # compare_type off: SQLite stores every float as REAL, and SQLAlchemy versions disagree on Float vs FLOAT.
+        context = MigrationContext.configure(connection, opts={"include_object": replay_only, "compare_type": False})
+        assert compare_metadata(context, Base.metadata) == []
 
 
 def test_record_load_stamps_each_run(db):

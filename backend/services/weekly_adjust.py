@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from services.injuries import Availability, Boost, InjuryContext
 from services import score_ranges
 from services.weight_learning import source_shares
-from services.weekly_model import Matchup, projection_ranges, range_for
+from services.weekly_model import Matchup, range_for
 
 PRICED_IN = 0.1            # teammates below this chance to play are already priced in by outside sources
 

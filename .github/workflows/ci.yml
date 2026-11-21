@@ -19,6 +19,7 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements*.txt
       - run: pip install -r requirements-dev.txt -r requirements-mcp.txt
+      - run: ruff check .
       - run: python -m pytest -q --cov=. --cov-report=term
 
   frontend:

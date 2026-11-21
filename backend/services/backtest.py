@@ -35,7 +35,7 @@ import numpy as np
 from sqlalchemy.orm import Session
 
 from services.injuries import build_context, learned_play_rates  # noqa: F401  (rates cached for the run)
-from services.projections import MIN_PRIOR_GAMES, PlayerSeason, load_player_seasons
+from services.projections import MIN_PRIOR_GAMES, PlayerSeason, load_player_seasons, prior_player_seasons
 from services.scoring import scoring_for
 from services.schedule_strength import Schedule, defense_strength, load_schedule
 from services.weekly_model import RANGES_PATH, WeeklyModelSettings, weekly_rate
@@ -83,7 +83,7 @@ class SeasonData:
 def load_season(session: Session, season: int) -> SeasonData:
     scoring = scoring_for("ppr")
     current = load_player_seasons(session, season, scoring)
-    priors = {p.player_id: p.ppg for p in load_player_seasons(session, season - 1, scoring)
+    priors = {p.player_id: p.ppg for p in prior_player_seasons(session, season, scoring)
               if p.games_played >= MIN_PRIOR_GAMES}
     return SeasonData(season, current, priors, load_schedule(session, season), {})
 

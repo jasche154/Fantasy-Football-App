@@ -1,0 +1,56 @@
+/* Replay League: the My Team and Matchup screens. */
+
+.replay-team__controls { margin-bottom: var(--space-3); }
+
+/* ---------- My Team ---------- */
+.replay-lineup-status { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); margin-bottom: var(--space-3); }
+.replay-lineup-status .hint { flex-basis: 100%; margin: 0; }
+.replay-lineup-warnings { margin: 0 0 var(--space-3); padding-inline-start: calc(var(--space-4) + 1.1rem); }
+
+.replay-roster__actions > * + * { margin-inline-start: var(--space-1); }
+.replay-roster__total th { text-align: start; }
+.replay-roster__total th,
+.replay-roster__total td { border-top: 1px solid var(--color-border-strong); background: var(--color-surface-2); font-weight: 750; }
+.replay-roster__row--warn .td--pos { color: var(--color-warn); box-shadow: inset 3px 0 0 var(--color-warn); }
+/* A move in progress: the player picked up, and the spots he may go to. */
+.replay-roster__row--moving td { background: var(--color-accent-soft); }
+.replay-roster__row--target td { background: var(--color-pos-soft); }
+.replay-roster__row--target .td--pos { box-shadow: inset 3px 0 0 var(--color-pos); }
+
+/* ---------- Matchup ---------- */
+/* Takes focus when a scoreboard game is opened; it isn't a control. */
+.replay-matchup:focus { outline: none; box-shadow: none; }
+
+.replay-headline { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: var(--space-1) var(--space-3);
+  margin-bottom: var(--space-3); padding: var(--space-3) var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-md);
+  background: var(--color-surface-1); }
+.replay-headline p { margin: 0; }
+.replay-headline__label { grid-column: 1 / -1; color: var(--color-text-muted); font-size: var(--text-2xs); font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; }
+.replay-headline__side:last-child { text-align: end; }
+.replay-headline__team { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); overflow-wrap: anywhere; }
+.replay-headline__side:last-child .replay-headline__team { justify-content: flex-end; }
+/* Small enough that two six-character scores fit side by side on a 320px phone. */
+.replay-headline__score { font-size: clamp(1.3rem, 1rem + 1.6vw, 2rem); font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.15; }
+.replay-headline__side.is-winner .replay-headline__score { color: var(--color-pos); }
+.replay-headline__vs { color: var(--color-text-subtle); font-weight: 700; }
+
+/* Two tables: side by side only once both fit whole (each is about 370px at its narrowest), stacked otherwise. */
+.replay-faceoff { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr)); gap: var(--space-3); align-items: start; }
+.replay-faceoff > * { min-width: 0; }
+/* On a table cell `height` is a floor (a taller cell still grows its row): it keeps empty slots as tall as filled ones.
+   Each row carries its own slot, so nothing relies on the two tables lining up. */
+.replay-faceoff__table tbody td { height: 3.4rem; }
+.replay-faceoff__bench td { color: var(--color-text-muted); background: var(--color-surface-2); }
+
+.replay-scoreboard { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr));
+  gap: var(--space-2); }
+.replay-scoreboard__game { display: grid; gap: 2px; width: 100%; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border);
+  border-radius: var(--radius-md); background: var(--color-surface-1); color: var(--color-text); font: inherit; font-size: var(--text-sm);
+  text-align: start; cursor: pointer; }
+.replay-scoreboard__game:hover { border-color: var(--color-accent); }
+.replay-scoreboard__game[aria-pressed='true'] { border-color: var(--color-accent); background: var(--color-accent-soft); }
+.replay-scoreboard__label { color: var(--color-text-subtle); font-size: var(--text-2xs); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+.replay-scoreboard__side { display: flex; justify-content: space-between; gap: var(--space-3); }
+.replay-scoreboard__side.is-winner { font-weight: 750; }
+.replay-scoreboard__score { font-variant-numeric: tabular-nums; }

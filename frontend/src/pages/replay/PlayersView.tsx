@@ -1,0 +1,150 @@
+import { useCallback, useEffect, useId, useState } from 'react';
+import { getReplayClaims, getReplayPlayers, getReplayTeam, replayAddDrop, submitReplayClaim } from '../../api/replay';
+import type { ReplayPlayerRef, ReplayPlayerSort, ReplayStatusFilter, ReplaySummary, ReplayWireRow } from '../../api/types';
+import { AsyncView } from '../../components/AsyncView';
+import { SelectField } from '../../components/SelectField';
+import { EmptyState, TableSkeleton } from '../../components/StatusViews';
+import { useAsync } from '../../hooks/useAsync';
+import { useDebouncedValue } from '../../hooks/useDebouncedValue';
+import { ClaimsPanel } from './ClaimsPanel';
+import { DIALOG_KEY, PlayersDropDialog, type DropTarget } from './PlayersDropDialog';
+import { usePlayerMoves } from './PlayersMoves';
+import { addKey, PlayersTable } from './PlayersTable';
+import { positionParam, PositionTabs, ReplayIrBlockedNotice, type ReplayPositionTab, type ReplayViewProps } from './shared';
+
+const PAGE_SIZE = 25;
+const SEARCH_DELAY_MS = 250;
+const MAX_SEARCH_LENGTH = 60; // the backend's search limit
+
+const STATUS_OPTIONS: readonly { value: ReplayStatusFilter; label: string }[] = [
+  { value: 'available', label: 'Available' },
+  { value: 'free_agent', label: 'Free agents' },
+  { value: 'waivers', label: 'On waivers' },
+  { value: 'rostered', label: 'Rostered' },
+  { value: 'all', label: 'All players' },
+];
+
+const SORT_OPTIONS: readonly { value: ReplayPlayerSort; label: string }[] = [
+  { value: 'value', label: 'Value' },
+  { value: 'projection', label: 'Projection' },
+  { value: 'ros_ppg', label: 'Rest of season' },
+  { value: 'points', label: 'Season points' },
+  { value: 'adp', label: 'ADP' },
+  { value: 'name', label: 'Name' },
+];
+
+/** Where the week stands for roster moves, worded from services/replay_waivers.py. */
+function phaseNote({ phase, week, settings }: ReplaySummary): string {
+  if (phase === 'complete') return 'The season is over, so rosters are final.';
+  if (phase === 'waivers') return 'Every unrostered player is on waivers until you press “Sim to Wednesday”. Put in your claims now.';
+  if (settings.waiver_mode === 'none') {
+    return 'This league has no waivers: every unrostered player is a free agent, first come, first served. '
+      + 'A player dropped this week can’t be added until next week.';
+  }
+  return `Week ${week}’s waivers have run, so every player still unrostered is a free agent: first come, first served. `
+    + `A player dropped now waits on waivers, and once week ${week} is played everyone unrostered goes on waivers until the next “Sim to Wednesday”.`;
+}
+
+interface PagerProps {
+  total: number;
+  offset: number;
+  onChange: (offset: number) => void;
+}
+
+function Pager({ total, offset, onChange }: PagerProps) {
+  if (total <= PAGE_SIZE && offset === 0) return null;
+  const last = Math.min(offset + PAGE_SIZE, total);
+  return (
+    <nav className="replay-players__pager" aria-label="Player pages">
+      <button type="button" className="btn btn--ghost btn--sm" disabled={offset === 0} onClick={() => onChange(Math.max(0, offset - PAGE_SIZE))}>Previous</button>
+      <span className="hint">{Math.min(offset + 1, last)}–{last} of {total}</span>
+      <button type="button" className="btn btn--ghost btn--sm" disabled={last >= total} onClick={() => onChange(offset + PAGE_SIZE)}>Next</button>
+    </nav>
+  );
+}
+
+/** Players: the waiver wire, free-agent adds and waiver claims. */
+export function PlayersView({ game, version, act, isBusy, openPlayer }: ReplayViewProps) {
+  const [tab, setTab] = useState<ReplayPositionTab>('ALL');
+  const [status, setStatus] = useState<ReplayStatusFilter>('available');
+  const [sort, setSort] = useState<ReplayPlayerSort>('value');
+  const [search, setSearch] = useState('');
+  const query = useDebouncedValue(search.trim(), SEARCH_DELAY_MS);
+  const filterKey = [tab, status, sort, query].join('|');
+  const [page, setPage] = useState({ filterKey, offset: 0 });
+  const offset = page.filterKey === filterKey ? page.offset : 0;      // a new filter starts on its first page
+  const [target, setTarget] = useState<DropTarget | null>(null);
+  const closeDialog = useCallback(() => setTarget(null), []);
+  const searchId = useId();
+
+  const canMove = game.phase === 'open' || game.phase === 'waivers';
+  const showClaims = game.phase === 'waivers' || game.pending.claims > 0;
+  const players = useAsync(
+    (signal) => getReplayPlayers(game.id, { position: positionParam(tab), search: query, status, sort, limit: PAGE_SIZE, offset }, signal),
+    [game.id, version, filterKey, offset],
+  );
+  const claims = useAsync(showClaims ? (signal) => getReplayClaims(game.id, signal) : null, [game.id, version]);
+  const team = useAsync(canMove ? (signal) => getReplayTeam(game.id, {}, signal) : null, [game.id, version]);
+  const claimedIds = new Set(claims.data?.results.map((claim) => claim.add.player.id));
+  // No moves while anything reloads: the roster decides whether an add needs a drop, and a button on a
+  // stale table or claim list would act on rows or a claim order that no longer exist.
+  const moves = usePlayerMoves(act, isBusy || [players, claims, team].some((state) => state.status === 'loading'));
+  const earlierNoDrop = claims.data?.results.filter((claim) => claim.drop === null).length ?? 0;
+
+  // An add or a drop can empty the last page: step back to the new last page.
+  const emptyPage = players.status === 'success' && players.data.results.length === 0 && players.data.offset > 0;
+  const lastOffset = players.data ? Math.max(0, Math.ceil(players.data.total / PAGE_SIZE) - 1) * PAGE_SIZE : 0;
+  useEffect(() => {
+    if (emptyPage) setPage({ filterKey, offset: lastOffset });
+  }, [emptyPage, filterKey, lastOffset]);
+
+  const add = (row: ReplayWireRow) => {
+    const { id, name } = row.player;
+    // Without a known open spot the dialog asks who to drop (and shows the roster's error when it failed to load).
+    if (!team.data || team.data.results.length >= game.settings.roster_size) return setTarget({ row, kind: 'add' });
+    void moves.run(addKey(id), () => replayAddDrop(game.id, { add: id }), `Added ${name}.`);
+  };
+
+  const confirm = async (drop: ReplayPlayerRef | null) => {
+    if (!target) return;
+    const { id, name } = target.row.player;
+    const body = drop ? { add: id, drop: drop.id } : { add: id };
+    const dropping = drop ? `, dropping ${drop.name}` : '';
+    const sent = target.kind === 'claim'
+      ? moves.run(DIALOG_KEY, () => submitReplayClaim(game.id, body), `Claim for ${name} is in${dropping}. It is settled on “Sim to Wednesday”.`)
+      : moves.run(DIALOG_KEY, () => replayAddDrop(game.id, body), `Added ${name}${dropping}.`);
+    if (await sent) setTarget(null);
+  };
+
+  return (
+    <>
+      <p className="hint replay-players__note">{phaseNote(game)}</p>
+      {showClaims && <ClaimsPanel gameId={game.id} claims={claims} moves={moves} openPlayer={openPlayer} />}
+      <ReplayIrBlockedNotice game={game} />
+      <div className="weekly-controls replay-players__filters">
+        <PositionTabs value={tab} onChange={setTab} withFlex />
+        <SelectField label="Show" isInline value={status} options={STATUS_OPTIONS} onChange={(value) => setStatus(value as ReplayStatusFilter)} />
+        <SelectField label="Sort by" isInline value={sort} options={SORT_OPTIONS} onChange={(value) => setSort(value as ReplayPlayerSort)} />
+        <div className="field field--inline replay-players__search">
+          <label className="field__label" htmlFor={searchId}>Search</label>
+          <input id={searchId} type="search" className="input" placeholder="Player name" maxLength={MAX_SEARCH_LENGTH} value={search} onChange={(event) => setSearch(event.target.value)} />
+        </div>
+      </div>
+      <p ref={moves.noticeRef} tabIndex={-1} className="success-text replay-players__notice" role="status">{moves.notice}</p>
+      <AsyncView state={players} loading={<TableSkeleton rows={10} columns={6} label="Loading players…" />} errorTitle="Couldn't load the players">
+        {(data) => (
+          <>
+            {data.results.length === 0
+              ? <EmptyState title="No players match">Try another position, status or name.</EmptyState>
+              : (
+                <PlayersTable game={game} week={data.week} rows={data.results} claimedIds={claimedIds} moves={moves}
+                  onAdd={add} onClaim={(row) => setTarget({ row, kind: 'claim' })} openPlayer={openPlayer} />
+              )}
+            <Pager total={data.total} offset={data.offset} onChange={(next) => setPage({ filterKey, offset: next })} />
+          </>
+        )}
+      </AsyncView>
+      {target && <PlayersDropDialog target={target} game={game} team={team} earlierNoDrop={earlierNoDrop} moves={moves} onConfirm={(drop) => void confirm(drop)} onClose={closeDialog} />}
+    </>
+  );
+}

@@ -15,3 +15,6 @@ from database.models.sources import (  # noqa: F401
 from database.models.app_state import (  # noqa: F401
     RankingsSnapshot, ProjectionHistory, LearnedWeights, TeamGameStats, KickerGame, PlayerRedZone, GameForecast, AppState,
 )
+from database.models.replay import (  # noqa: F401
+    ReplayLeague, ReplayAdp, ReplayProjection, ReplayInjury,
+)

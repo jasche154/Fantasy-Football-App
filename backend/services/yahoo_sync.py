@@ -5,7 +5,6 @@ are matched to local players through players.yahoo_player_id (from the nflverse 
 """
 import json
 import threading
-import time
 from datetime import datetime, timezone
 
 import httpx
@@ -204,7 +203,7 @@ def _match_special(session: Session, entry: dict, position: str) -> int | None:
 
 def _import_league(session: Session, settings: Settings, http: httpx.Client, league_key: str) -> dict:
     token = fresh_token(session, settings, http)
-    leagues = {l["league_key"]: l for l in list_leagues(session, settings, http)}
+    leagues = {league["league_key"]: league for league in list_leagues(session, settings, http)}
     meta = leagues.get(league_key)
     if meta is None:
         raise LookupError(f"League {league_key} isn't one of your Yahoo NFL leagues.")

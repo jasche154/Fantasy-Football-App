@@ -46,6 +46,7 @@ from sqlalchemy.orm import Session
 
 from database.models import KickerGame, NflGame, TeamGameStats
 from services.game_features import Conditions, TeamProfiles, conditions_for, team_profiles
+from services.projections import FIRST_SEASON
 
 log = logging.getLogger(__name__)
 COEF_PATH = Path(__file__).with_name("kdst_coefficients.json")
@@ -163,8 +164,9 @@ def week_inputs(session: Session, season: int, week: int, forecast: Mapping[str,
     games = {}
     for g in session.scalars(select(NflGame).where(NflGame.season == season, NflGame.week == week)):
         games[g.home_team] = games[g.away_team] = g
+    prior = season - 1 if season - 1 >= FIRST_SEASON else None     # replay-only seasons are never a prior
     recent = list(session.scalars(select(KickerGame).where(
-        ((KickerGame.season == season) & (KickerGame.week < week)) | (KickerGame.season == season - 1))))
+        ((KickerGame.season == season) & (KickerGame.week < week)) | (KickerGame.season == prior))))
     kickers: dict[str, tuple[tuple[int, int], int]] = {}
     by_player: dict[int, list[KickerGame]] = defaultdict(list)
     for r in recent:

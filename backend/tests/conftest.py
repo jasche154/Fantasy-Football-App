@@ -167,6 +167,12 @@ def _clear_caches() -> None:
     from services import llm_client
 
     llm_client.clear_cooldowns()
+    from services import replay_draft, replay_pool, replay_trades, replay_values
+
+    replay_pool.clear_cache()
+    replay_values.clear_cache()
+    replay_trades.clear_cache()
+    replay_draft._board.cache_clear()
 
 
 @pytest.fixture(autouse=True)

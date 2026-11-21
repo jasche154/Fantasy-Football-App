@@ -1,0 +1,42 @@
+/* Replay League: the draft room. One column on phones; the board beside the roster and picks on wide screens. */
+.replay-draft { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); align-items: start; }
+.replay-draft__side { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
+
+@media (min-width: 1180px) {
+  .replay-draft { grid-template-columns: minmax(0, 3fr) minmax(320px, 2fr); }
+  .replay-draft__clock { grid-column: 1 / -1; }
+}
+
+/* ---------- The clock: louder when it is the user's pick ---------- */
+.replay-draft__clock { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3);
+  padding: var(--space-3) var(--space-4); border: 1px solid var(--color-border); border-inline-start: 3px solid var(--color-border-strong);
+  border-radius: var(--radius-md); background: var(--color-surface-1); }
+.replay-draft__clock--mine { border-color: var(--color-accent); background: var(--color-accent-soft); }
+.replay-draft__status p { margin: 0; }
+.replay-draft__pick { font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+.replay-draft__turn { font-size: var(--text-lg); font-weight: 750; }
+.replay-draft__clock--mine .replay-draft__turn { font-size: var(--text-xl); color: var(--color-accent); }
+.replay-draft__actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+/* ---------- Board ---------- */
+.replay-draft__action { text-align: end; }
+/* A refused pick, next to the button that was pressed; wraps instead of widening the table. */
+.replay-draft__error { display: block; min-width: 12rem; margin-top: var(--space-1); white-space: normal; text-align: start; }
+
+/* ---------- My roster ---------- */
+.replay-draft__roster { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: var(--space-3); margin: 0; }
+.replay-draft__roster dt { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); margin-bottom: var(--space-1);
+  color: var(--color-text-muted); font-size: var(--text-xs); font-weight: 700; }
+.replay-draft__roster dd { margin: 0; font-size: var(--text-sm); }
+.replay-draft__starts { color: var(--color-text-subtle); font-weight: 400; }
+
+/* ---------- Picks: log and snake grid, both scrolling inside their own box ---------- */
+.replay-draft__scroll { max-height: 28rem; }
+.data-table tbody tr.replay-draft__mine,
+.replay-draft__grid td.replay-draft__mine { background: var(--color-accent-soft); }
+/* The header is sticky and the soft accent is see-through, so it is marked with colour and a rule instead. */
+.replay-draft__grid thead .replay-draft__mine { color: var(--color-accent); box-shadow: inset 0 -2px 0 var(--color-accent); }
+.replay-draft__grid th,
+.replay-draft__grid td { min-width: 6.5rem; white-space: normal; vertical-align: top; font-size: var(--text-xs); }
+.replay-draft__grid .num { min-width: 0; }
+.replay-draft__cell-meta { display: block; color: var(--color-text-subtle); font-size: var(--text-2xs); }

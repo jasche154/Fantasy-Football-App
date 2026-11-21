@@ -22,6 +22,8 @@ PRIOR_STRENGTH_GAMES = 4      # how many games of evidence the prior is worth
 MIN_PRIOR_GAMES = 4           # a prior season needs this many games to count
 MIN_EXPECTED_COVERAGE = 0.75  # share of games that need expected points before averaging them
 REGULAR_SEASON = "REG"
+# The live app's first season; older seasons are loaded only for Replay League and never read here.
+FIRST_SEASON = 2021
 OPPORTUNITY_COLUMNS = (
     PlayerExpectedPointsWeekly.total_fantasy_points_exp,
     PlayerExpectedPointsWeekly.receptions_exp,
@@ -182,6 +184,13 @@ def load_player_seasons(session: Session, season: int, scoring: ScoringSettings,
             for pid, (info, lines) in loaded.items()]
 
 
+def prior_player_seasons(session: Session, season: int, scoring: ScoringSettings) -> list[PlayerSeason]:
+    """The season before `season`, or nothing when that is older than FIRST_SEASON (replay-only data)."""
+    if season - 1 < FIRST_SEASON:
+        return []
+    return load_player_seasons(session, season - 1, scoring)
+
+
 def latest_season(session: Session) -> int | None:
     return session.scalar(select(func.max(PlayerStatsWeekly.season)))
 
@@ -192,7 +201,8 @@ def latest_week(session: Session, season: int) -> int | None:
 
 
 def available_seasons(session: Session) -> list[int]:
-    return sorted(session.scalars(select(PlayerStatsWeekly.season).distinct()))
+    return sorted(session.scalars(select(PlayerStatsWeekly.season).distinct()
+                                  .where(PlayerStatsWeekly.season >= FIRST_SEASON)))
 
 
 def current_rate(player: PlayerSeason) -> float:

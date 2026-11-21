@@ -132,7 +132,6 @@ def test_agent_prompt_mentions_imported_leagues(session, league):
 
 
 def test_matchup_simulates_both_lineups_and_picks_the_best_strategy(session, league, monkeypatch, client):
-    from integrations import yahoo
     from services import matchup as mu
 
     row, ids = league

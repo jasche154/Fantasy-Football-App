@@ -12,7 +12,6 @@ movement quality assessment. RB-specific analysis is limited to 1 player.
 
 import pandas as pd
 import numpy as np
-import os
 from pathlib import Path
 
 DATA_DIR = Path(__file__).parent / "data" / "nfl-big-data-bowl-2027"

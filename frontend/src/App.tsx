@@ -7,6 +7,7 @@ import { OddsPage } from './pages/odds/OddsPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { PlayerPage } from './pages/player/PlayerPage';
 import { RankingsPage } from './pages/rankings/RankingsPage';
+import { ReplayPage } from './pages/replay/ReplayPage';
 import { SettingsPage } from './pages/settings/SettingsPage';
 import { StatsPage } from './pages/stats/StatsPage';
 import { TradePage } from './pages/trade/TradePage';
@@ -53,6 +54,8 @@ function renderRoute(location: HashLocation): ReactNode {
       return <PlayerPage key={route.id} playerId={route.id} query={query} />;
     case 'ask':
       return <AskPage />;
+    case 'replay':
+      return <ReplayPage query={query} />;
     case 'settings':
       return <SettingsPage />;
     case 'notFound':
@@ -62,8 +65,10 @@ function renderRoute(location: HashLocation): ReactNode {
 
 function Routes() {
   const location = useHashLocation();
+  // Replay's home and each league share one path, so the league id is part of the page for focus handling.
+  const pageKey = location.route.name === 'replay' ? `${location.path}?game=${location.query.game ?? ''}` : location.path;
   return (
-    <AppShell route={location.route} pageKey={location.path}>
+    <AppShell route={location.route} pageKey={pageKey}>
       {renderRoute(location)}
     </AppShell>
   );

@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from database.models import League, Player, Roster, Team
+from database.models import Player, Roster, Team
 from integrations import yahoo
 from services import my_team as mt
 from tests.test_my_team import MINE, THEIRS, _seed_league, league  # noqa: F401  (fixture)

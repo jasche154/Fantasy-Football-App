@@ -6,3 +6,5 @@ export * from './types/team';
 export * from './types/insights';
 export * from './types/usage';
 export * from './types/odds';
+export * from './types/replay';
+export * from './types/replayLeague';
