@@ -70,6 +70,8 @@ describe('App routing and shell', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Replay League' })).toHaveFocus();
     await user().click(exit);
     expect(await screen.findByRole('navigation', { name: 'Main' })).toBeInTheDocument();
+    // Leaving the game, focus lands on the lobby's heading.
+    expect(screen.getByRole('heading', { level: 1, name: 'Replay League' })).toHaveFocus();
   });
 
   it('sends an old #/replay?game= link to #/play with the same query', async () => {

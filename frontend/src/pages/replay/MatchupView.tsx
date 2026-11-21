@@ -91,6 +91,7 @@ function FaceOff({ matchup, starters, isUserIdle, openPlayer }: FaceOffProps) {
 /** Matchup: one game of a week face to face, and the week's scoreboard to pick another from. */
 export function MatchupView({ game, version, openPlayer }: ReplayViewProps) {
   const [pickedWeek, setPickedWeek] = useState<number | null>(null);       // null: follow the current week
+  const [isAutoPinned, setIsAutoPinned] = useState(false);                  // pickedWeek is the week just played, not the user's pick
   // A game picked from the scoreboard, kept with its week: another week (picked, or reached by playing) is the user's game again.
   const [picked, setPicked] = useState<{ week: number; teamId: number } | null>(null);
   const faceOffRef = useRef<HTMLElement>(null);
@@ -98,8 +99,10 @@ export function MatchupView({ game, version, openPlayer }: ReplayViewProps) {
   if (seenWeek !== game.week) {
     setSeenWeek(game.week);
     // Playing the week on screen moves the game on: stay on it, back on the user's game, so its final lands here.
-    if (pickedWeek === null && game.week === seenWeek + 1) {
+    // Each later play moves an automatic pin along; a week the user picked stays put.
+    if ((pickedWeek === null || isAutoPinned) && game.week === seenWeek + 1) {
       setPickedWeek(seenWeek);
+      setIsAutoPinned(true);
       setPicked(null);
     }
   }
@@ -107,7 +110,10 @@ export function MatchupView({ game, version, openPlayer }: ReplayViewProps) {
   const teamId = picked?.week === week ? picked.teamId : undefined;
   const matchup = useAsync((signal) => getReplayMatchup(game.id, { week, team_id: teamId }, signal), [game.id, week, teamId, version]);
   const scoreboard = useAsync((signal) => getReplayScoreboard(game.id, week, signal), [game.id, week, version]);
-  const changeWeek = (value: string) => setPickedWeek(Number(value) === game.week ? null : Number(value));
+  const changeWeek = (value: string) => {
+    setPickedWeek(Number(value) === game.week ? null : Number(value));
+    setIsAutoPinned(false);
+  };
   const show = (id: number) => {
     setPicked({ week, teamId: id });
     faceOffRef.current?.focus();        // the game is above the scoreboard: bring it into view

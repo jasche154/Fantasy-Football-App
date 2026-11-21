@@ -2,7 +2,7 @@ import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { ReplayMatchup, ReplayScoreboard } from '../../api/types';
-import { json, mockFetch, type MockRoute } from '../../test/mockFetch';
+import { json, mockFetch, type MockRequest, type MockRoute } from '../../test/mockFetch';
 import { AppProviders } from '../../App';
 import { META_ROUTE, renderWithProviders } from '../../test/render';
 import {
@@ -163,6 +163,35 @@ describe('MatchupView', () => {
     rerender(<AppProviders><MatchupView {...viewProps({ game: summary({ week: 6 }), version: 2 })} /></AppProviders>);
     await vi.waitFor(() => expect(live).toHaveTextContent('Final: Your Team 121.46, Sunday Scaries 98.20.'));
     expect(faceOff()).toHaveTextContent('Regular season · Week 5 · Final');
+  });
+
+  it('follows each played week in a row to its final, but keeps a week the user picked', async () => {
+    let current = 5;
+    const forWeek = (request: MockRequest) => {
+      const week = Number(request.url.searchParams.get('week'));
+      return json(week < current
+        ? matchup({ week, played: true, winner: USER_TEAM_ID, away: team({ actual_total: 100 + week }), home: { ...matchup().home, actual_total: 90 } })
+        : matchup({ week }));
+    };
+    const api = mockFetch([META_ROUTE, { path: MATCHUP_PATH, reply: forWeek }, { path: SCOREBOARD_PATH, reply: json(scoreboard()) }]);
+    const { rerender } = renderWithProviders(<MatchupView {...viewProps()} />);
+    await screen.findAllByRole('table');
+    const play = () => {
+      current += 1;
+      rerender(<AppProviders><MatchupView {...viewProps({ game: summary({ week: current }), version: current })} /></AppProviders>);
+    };
+
+    play();
+    await vi.waitFor(() => expect(faceOff()).toHaveTextContent('Week 5 · Final'));
+    play();
+    await vi.waitFor(() => expect(faceOff()).toHaveTextContent('Week 6 · Final'));
+    expect(faceOff()).toHaveTextContent('Your score: 106.00');
+    expect(screen.getByLabelText('Week')).toHaveValue('6');
+
+    await userEvent.setup().selectOptions(screen.getByLabelText('Week'), '3');
+    play();
+    await vi.waitFor(() => expect(api.callsTo(MATCHUP_PATH).at(-1)!.url.search).toBe('?week=3'));
+    expect(screen.getByLabelText('Week')).toHaveValue('3');
   });
 
   it('shows final scores and the winner on a played scoreboard', async () => {

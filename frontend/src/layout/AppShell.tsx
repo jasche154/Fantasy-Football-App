@@ -19,6 +19,10 @@ function useFocusOnPageChange(pageKey: string) {
   const mainRef = useRef<HTMLElement>(null);
   const previousKey = useRef(pageKey);
   useEffect(() => {
+    // Arriving from the full-screen game (Exit) unmounts whatever had focus.
+    if (document.activeElement === document.body) mainRef.current?.querySelector<HTMLElement>('[data-page-heading]')?.focus();
+  }, []);
+  useEffect(() => {
     if (previousKey.current === pageKey) return;
     previousKey.current = pageKey;
     const heading = mainRef.current?.querySelector<HTMLElement>('[data-page-heading]');

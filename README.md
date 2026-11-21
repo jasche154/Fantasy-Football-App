@@ -990,8 +990,9 @@ The page is `frontend/src/pages/replay` (`#/replay` for the saved leagues and th
 inside the dashboard; `#/play?game=ID&view=team|matchup|players|trades|league` for a league, full screen
 without the dashboard's bar or menu: an old `#/replay?game=` link is sent there). The game screen
 (`layout/GameShell.tsx` + `GameHub`) has a sticky scorebug (**Exit** back to `#/replay`, the league, the
-week, your score against your opponent, projected until the week is final, your record, a theme toggle
-and the one primary button) and the five tabs (a bottom dock on phones). `GameHub` holds the game
+week, your score against your opponent, your record, a theme toggle and the one primary button; the
+score is the current week's projection, so once a week is played it shows the next week's, and the final
+is on the Matchup tab, until the season ends) and the five tabs (a bottom dock on phones). `GameHub` holds the game
 summary; every change goes through its `act`, which swaps in the new summary, reloads the open screen
 and lists what the action caused under "What just happened". The screens show only what the API sends,
 and the API sends no result of an unplayed week. The look ("Game Night", `styles/game.css`, scoped to
@@ -1002,13 +1003,14 @@ and the API sends no result of an unplayed week. The look ("Game Night", `styles
   while a move is in progress; Escape cancels. A played week lists its bench with real points and a
   **Bench total** (weeks played before benches were saved say so instead).
 - **Matchup:** a hero band with both teams and their scores (the biggest numbers on screen), then both
-  lineups with their benches. Playing the week you are looking at keeps it on screen: the final counts up
-  (at once with reduced motion) and is announced once to screen readers.
+  lineups with their benches. Playing the week you are looking at keeps it on screen, after each week played
+  in a row (a week you picked yourself stays put): the final counts up (at once with reduced motion) and
+  is announced once to screen readers.
 - **Players:** pick the stat columns with **Stats**: Season (points, PPG, games, rest-of-season rate and
   box-score totals), Last 4 avg (points and box score a game over his last 4 games, and snap share over
   his last 3) or Week N (that week's pre-game projection and, once played, his points and box line). The
   box-score columns follow the position tab (QB passing; RB carries and catches; WR/TE targets and
-  receiving; none for K/DST). Click any column header to sort on the server (again to flip); players
+  receiving; none for K/DST). Click a column header to sort on the server (again to flip); players
   without the number come last either way.
 - **Player card:** his status, five stat tiles, a game log of played weeks (opponent, projection, points,
   box line) and the weeks to come: opponent (@ when away), a **matchup chip** and an **Est.**, his
