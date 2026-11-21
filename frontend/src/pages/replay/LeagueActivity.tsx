@@ -13,7 +13,7 @@ const FILTERS: readonly { label: string; kind?: string }[] = [
   { label: 'All' },
   { label: 'Trades', kind: 'trade' },
   { label: 'Waiver claims', kind: 'claim' },
-  { label: 'Adds/Drops', kind: 'add,drop' },
+  { label: 'Adds/Drops', kind: 'add,drop,ir' },
   { label: 'Results', kind: 'result,playoffs,champion' },
 ];
 

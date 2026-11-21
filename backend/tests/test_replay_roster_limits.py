@@ -107,6 +107,74 @@ def test_an_extra_quarterback_is_added_the_week_neither_plays_and_let_go_the_wee
     assert len(rs.team(later, TWO_QBS).roster) == SETTINGS.roster_size
 
 
+def on_ir(state: rs.State, team_id: int, player_id: int) -> rs.State:
+    team = rs.team(state, team_id)
+    return rs.with_team(state, replace(team, roster=tuple(p for p in team.roster if p != player_id), ir=(player_id,)))
+
+
+def test_a_receiver_on_ir_still_counts_toward_the_limit_while_others_play_there():
+    week = 3
+    state, _ = league(week)
+    hurt = max((v for v in roster(state, fakes.fake_knowledge(week), FULL_AT_WR) if v.position == "WR"),
+               key=lambda v: v.healthy_value).player_id
+    know = fakes.fake_knowledge(week, SETTINGS, fakes.tagged(fakes.fake_season(), {(hurt, week): fakes.Injury("O")}))
+    state = on_ir(state, FULL_AT_WR, hurt)
+    ctx, mine = ai._context(know, SETTINGS), roster(state, know, FULL_AT_WR)
+    receiver = max((v for v in know.values if v.position == "WR" and v.player_id not in rs.rostered(state)),
+                   key=lambda v: v.ros_ppg)
+    counted = ai._for_team(ctx, rs.team(state, FULL_AT_WR))
+
+    assert held(state, know, FULL_AT_WR)["WR"] == 6 and len(mine) == SETTINGS.roster_size - 1
+    assert ai._fill_spot(mine, [receiver], ctx) == (receiver.player_id, None)     # if he counted for nothing
+    assert ai._fill_spot(mine, [receiver], counted) is None
+    assert ai._best_add(mine, [receiver], counted, 0.0) is None
+    anyone = [v for v in mine if v.position in SKILL]
+    assert {v.position for v in ai._legal_drops(mine, receiver, anyone, ctx)} > {"WR"}
+    assert {v.position for v in ai._legal_drops(mine, receiver, anyone, counted)} == {"WR"}   # like for like
+    crowded = [*mine, receiver]                             # seven receivers playing, one more on IR
+    free = [v for v in know.values if v.player_id not in rs.rostered(state) | {receiver.player_id}]
+    assert ai._trim(crowded, free, ctx) is None
+    trimmed = ai._trim(crowded, free, counted)
+    assert trimmed is not None and know.by_id[trimmed[1]].position == "WR" != know.by_id[trimmed[0]].position
+
+
+def test_a_quarterback_on_ir_does_not_stop_a_cpu_covering_the_week_its_other_two_do_not_play():
+    week = 7
+    state, _ = league(week)
+    own = [v.player_id for v in roster(state, fakes.fake_knowledge(week), TWO_QBS) if v.position == "QB"]
+    third = next(v.player_id for v in fakes.fake_knowledge(week).values
+                 if v.position == "QB" and v.player_id not in rs.rostered(state))
+    data = fakes.tagged(fakes.patched(fakes.fake_season(), projected={(pid, week): None for pid in own}),
+                        {(third, week): fakes.Injury("IR")})
+    know = fakes.fake_knowledge(week, SETTINGS, data)
+    spare = min((v for v in roster(state, know, TWO_QBS) if v.position == "WR"), key=lambda v: v.healthy_value)
+    team = rs.team(state, TWO_QBS)
+    state = rs.with_team(state, replace(team, roster=tuple(p for p in team.roster if p != spare.player_id),
+                                        ir=(third,)))
+    ctx = ai._context(know, SETTINGS)
+    free = [v for v in know.values if v.player_id not in rs.rostered(state)]
+
+    move = ai._cover(roster(state, know, TWO_QBS), free, ai._for_team(ctx, rs.team(state, TWO_QBS)))
+
+    assert rv.idle_slots(know, rs.team(state, TWO_QBS).roster, SETTINGS) == ["QB"]
+    assert move is not None and know.by_id[move[0]].position == "QB" and move[1] is None
+
+
+def test_a_spot_opened_by_an_ir_move_is_filled_within_the_limits():
+    week = 3
+    state, _ = league(week)
+    hurt = max((v for v in roster(state, fakes.fake_knowledge(week), FULL_AT_WR) if v.position == "WR"),
+               key=lambda v: v.healthy_value).player_id
+    know = fakes.fake_knowledge(week, SETTINGS, fakes.tagged(fakes.fake_season(), {(hurt, week): fakes.Injury("IR")}))
+
+    after = ai.cpu_free_agency(ai.cpu_ir(state, SETTINGS, know, 0), SETTINGS, know, 0)
+
+    team = rs.team(after, FULL_AT_WR)
+    owned = Counter(know.by_id[pid].position for pid in rs.held(team))
+    assert team.ir == (hurt,) and len(team.roster) == SETTINGS.roster_size
+    assert all(owned[position] <= rv.position_cap(position, SETTINGS) for position in ALL_POSITIONS), owned
+
+
 # ---------------- trades ----------------
 
 def test_a_cpu_with_two_quarterbacks_will_not_trade_for_a_third_but_swaps_one():

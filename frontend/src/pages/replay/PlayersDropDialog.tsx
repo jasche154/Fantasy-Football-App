@@ -1,26 +1,28 @@
 import { useState, type FormEvent } from 'react';
-import type { ReplayPlayerRef, ReplaySummary, ReplayTeam, ReplayWireRow } from '../../api/types';
+import type { ReplayPlayerRef, ReplayPlayerRow, ReplaySummary, ReplayTeam } from '../../api/types';
 import { AsyncView } from '../../components/AsyncView';
 import { Skeleton } from '../../components/StatusViews';
 import type { AsyncResult } from '../../hooks/useAsync';
 import { formatNumber, pluralize } from '../../lib/format';
-import type { PlayerMoves } from './PlayersMoves';
-import { ReplayDrawer, ReplayPlayerCell } from './shared';
+import { ReplayDrawer, ReplayPlayerCell, type KeyedAct } from './shared';
 
 /** The key of the move the dialog sends. */
 export const DIALOG_KEY = 'dialog';
 
 export interface DropTarget {
-  row: ReplayWireRow;
-  kind: 'add' | 'claim';
+  row: Pick<ReplayPlayerRow, 'player'>;
+  /** `activate`: bringing a player back from IR onto a full roster (My Team). */
+  kind: 'add' | 'claim' | 'activate';
 }
+
+type DialogMoves = Pick<KeyedAct, 'isBusy' | 'pendingKey' | 'errorFor'>;
 
 interface ChooserProps {
   target: DropTarget;
   game: ReplaySummary;
   roster: ReplayTeam;
   earlierNoDrop: number;
-  moves: PlayerMoves;
+  moves: DialogMoves;
   onConfirm: (drop: ReplayPlayerRef | null) => void;
   onClose: () => void;
 }
@@ -35,10 +37,13 @@ function rosterHint(filled: number, size: number, earlierNoDrop: number, isCover
     + 'this claim fails unless you pick a drop.';
 }
 
-function Chooser({ target, game, roster, earlierNoDrop, moves, onConfirm, onClose }: ChooserProps) {
+/** The "Drop who?" form; My Team wraps it in its own drawer for an IR activation. */
+export function Chooser({ target, game, roster, earlierNoDrop, moves, onConfirm, onClose }: ChooserProps) {
   const size = game.settings.roster_size;
   const openSpots = size - roster.results.length;
-  const hasRoom = openSpots > 0;
+  const isActivate = target.kind === 'activate';
+  // An activation only opens this on a full roster: he always needs a drop.
+  const hasRoom = openSpots > 0 && !isActivate;
   // Still allowed without a drop: an earlier claim can lose to a team ahead in the waiver order.
   const isCovered = target.kind === 'claim' && hasRoom && openSpots - earlierNoDrop <= 0;
   const [picked, setPicked] = useState<number | 'none' | null>(null);
@@ -47,7 +52,8 @@ function Chooser({ target, game, roster, earlierNoDrop, moves, onConfirm, onClos
   const isClaim = target.kind === 'claim';
   const isPending = moves.pendingKey === DIALOG_KEY;
   const error = moves.errorFor(DIALOG_KEY);
-  const idleLabel = isClaim ? 'Submit claim' : (choice === 'none' ? 'Add' : 'Add and drop');
+  const idleLabel = isActivate ? 'Activate and drop' : isClaim ? 'Submit claim' : (choice === 'none' ? 'Add' : 'Add and drop');
+  const pendingLabel = isActivate ? 'Activating…' : isClaim ? 'Submitting…' : 'Adding…';
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -60,7 +66,9 @@ function Chooser({ target, game, roster, earlierNoDrop, moves, onConfirm, onClos
       <fieldset className="fieldset">
         <legend className="section-title">Drop who?</legend>
         <p className="hint">
-          {rosterHint(roster.results.length, size, earlierNoDrop, isCovered)}
+          {isActivate
+            ? `Your roster is full (${size} players): pick who to drop to make room for ${target.row.player.name}.`
+            : rosterHint(roster.results.length, size, earlierNoDrop, isCovered)}
           {' '}Least valuable first.{isClaim && ' The drop only happens if the claim wins.'}
         </p>
         {hasRoom && (
@@ -80,7 +88,7 @@ function Chooser({ target, game, roster, earlierNoDrop, moves, onConfirm, onClos
       {error && <p className="error-text" role="alert">{error}</p>}
       <div className="replay-drop__actions">
         <button type="submit" className="btn btn--primary" disabled={moves.isBusy || choice === null}>
-          {isPending ? (isClaim ? 'Submitting…' : 'Adding…') : idleLabel}
+          {isPending ? pendingLabel : idleLabel}
         </button>
         <button type="button" className="btn btn--ghost" onClick={onClose}>Cancel</button>
       </div>
@@ -95,7 +103,7 @@ interface PlayersDropDialogProps {
   team: AsyncResult<ReplayTeam>;
   /** The user's pending claims without a drop (0 when unknown). */
   earlierNoDrop: number;
-  moves: PlayerMoves;
+  moves: DialogMoves;
   /** The player to drop, or null for none. */
   onConfirm: (drop: ReplayPlayerRef | null) => void;
   onClose: () => void;

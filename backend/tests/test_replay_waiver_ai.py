@@ -66,12 +66,13 @@ def top_hundred(knowledge: Knowledge) -> set[int]:
 @pytest.fixture(scope="module")
 def season() -> tuple[Week, ...]:
     state, weeks = fakes.drafted_state(SETTINGS), []
-    for week in range(1, SIM_WEEKS + 1):
+    for week in range(1, SIM_WEEKS + 1):            # the order replay_game uses: IR, claims, IR, free agency
         before = replace(state, week=week, phase="waivers", locked=())
         knowledge = know(week)
-        claims = ai.cpu_claims(before, SETTINGS, knowledge, SEED)
-        after_claims = replay_waivers.process_claims(before, SETTINGS, knowledge, claims)
-        state = ai.cpu_free_agency(after_claims, SETTINGS, knowledge, SEED)
+        moved = ai.cpu_ir(before, SETTINGS, knowledge, SEED)
+        claims = ai.cpu_claims(moved, SETTINGS, knowledge, SEED)
+        after_claims = replay_waivers.process_claims(moved, SETTINGS, knowledge, claims)
+        state = ai.cpu_free_agency(ai.cpu_ir(after_claims, SETTINGS, knowledge, SEED), SETTINGS, knowledge, SEED)
         weeks.append(Week(week, knowledge, before, claims, after_claims, state))
     return tuple(weeks)
 
@@ -358,7 +359,7 @@ def test_no_roster_ever_exceeds_its_size_or_loses_the_ability_to_field_a_lineup(
             for team in state.teams:
                 assert len(team.roster) <= SETTINGS.roster_size
                 assert rv.can_field_lineup([week.know.by_id[pid].position for pid in team.roster], SETTINGS)
-            assert sum(len(t.roster) for t in state.teams) == len(rs.rostered(state))     # nobody on two teams
+            assert sum(len(rs.held(t)) for t in state.teams) == len(rs.rostered(state))   # nobody on two teams
 
 
 def test_cpus_never_drop_a_top_hundred_player_or_the_injured_star_and_never_touch_the_user(season):
@@ -369,8 +370,9 @@ def test_cpus_never_drop_a_top_hundred_player_or_the_injured_star_and_never_touc
         skill = {pid for pid in dropped if week.know.by_id[pid].position in SKILL}
 
         assert not skill & top_hundred(week.know)
-        assert fakes.INJURED_STAR_ID in rs.team(week.after, owner).roster
-        assert rs.team(week.after, USER).roster == rs.team(season[0].before, USER).roster
+        assert fakes.INJURED_STAR_ID in rs.held(rs.team(week.after, owner))
+        assert (fakes.INJURED_STAR_ID in rs.team(week.after, owner).ir) == (week.week in fakes.INJURED_WEEKS)
+        assert rs.held(rs.team(week.after, USER)) == rs.team(season[0].before, USER).roster
     assert owner != USER and {w.week for w in season} >= set(fakes.INJURED_WEEKS)
 
 
@@ -437,16 +439,197 @@ def test_claims_and_free_agency_for_eleven_cpus_fit_the_half_second_budget():
 
     assert len(CPUS) == 11 and knowledge.week == 6
     assert fastest(ai.cpu_claims) < BUDGET_SECONDS
-    assert fastest(ai.cpu_free_agency) < BUDGET_SECONDS
+    assert fastest(lambda *args: ai.cpu_free_agency(ai.cpu_ir(*args), *args[1:])) < BUDGET_SECONDS
+
+
+# ---------------- the IR slot ----------------
+
+STAR, STAR_OWNER = fakes.INJURED_STAR_ID, 5
+
+
+def tagged_know(week: int, tags: dict) -> Knowledge:
+    return fakes.fake_knowledge(week, SETTINGS, fakes.tagged(fakes.fake_season(), tags))
+
+
+def edited(state: State, team_id: int, roster: tuple[int, ...] | None = None, ir: tuple[int, ...] | None = None) -> State:
+    team = rs.team(state, team_id)
+    return rs.with_team(state, replace(team, roster=team.roster if roster is None else roster,
+                                       ir=team.ir if ir is None else ir))
+
+
+def ir_moves(before: State, after: State) -> list[tuple[int, tuple[int, ...]]]:
+    return [(e.team_id, e.player_ids) for e in after.events[len(before.events):] if e.kind == "ir"]
+
+
+def star_on_ir(week: int) -> State:
+    """CPU 5's star put on IR by cpu_ir in week 6, the league then moved on to `week` (an open roster spot)."""
+    return replace(ai.cpu_ir(league(6), SETTINGS, know(6), SEED), week=week)
+
+
+def best_keeper(state: State, team_id: int, week: int, *besides: int) -> int:
+    """The team's most valuable skill player above replacement (the kind a CPU stashes when he is hurt)."""
+    keep = [v for v in values(state, team_id, week) if v.position in SKILL and v.player_id not in besides
+            and v.last_projection > know(week).replacement[v.position]]
+    return max(keep, key=lambda v: v.healthy_value).player_id
+
+
+def test_a_cpu_puts_its_injured_star_on_ir_and_a_second_call_changes_nothing():     # IR-19, IR-21
+    state = league(6)
+
+    after = ai.cpu_ir(state, SETTINGS, know(6), SEED)
+
+    assert rs.team(after, STAR_OWNER).ir == (STAR,) and STAR not in rs.team(after, STAR_OWNER).roster
+    assert ir_moves(state, after) == [(STAR_OWNER, (STAR,))]
+    assert [t for t in after.teams if t.id != STAR_OWNER] == [t for t in state.teams if t.id != STAR_OWNER]
+    assert ai.cpu_ir(after, SETTINGS, know(6), SEED) == after
+    assert ai.cpu_ir(league(5), SETTINGS, know(5), SEED) == league(5)           # no tag yet: nothing
+
+
+def test_a_cpu_never_stashes_a_kicker_a_suspended_player_or_one_without_a_tag():
+    week, team_id = fakes.IR_KICKER_WEEK, 4
+    own_kicker = at(league(week), team_id, "K", week)[0]
+    keeper = best_keeper(league(week), team_id, week)
+    roster = tuple(fakes.IR_KICKER_ID if pid == own_kicker else pid for pid in rs.team(league(week), team_id).roster)
+    state = edited(league(week), team_id, roster)
+    owner = next(t.id for t in state.teams if fakes.NEVER_PLAYED_ID in t.roster)
+    suspended = tagged_know(week, {(keeper, week): fakes.Injury("SUS")})
+    hurt = tagged_know(week, {(keeper, week): fakes.Injury("O")})
+
+    after = ai.cpu_ir(state, SETTINGS, suspended, SEED)
+
+    assert suspended.by_id[fakes.IR_KICKER_ID].injury.tag == "IR" and suspended.by_id[keeper].out
+    assert rs.team(after, team_id).ir == () and rs.team(after, owner).ir == () and owner != STAR_OWNER
+    assert rs.team(ai.cpu_ir(state, SETTINGS, hurt, SEED), team_id).ir == (keeper,)      # an O tag: yes
+
+
+def test_a_cpu_activates_a_player_who_lost_his_tag_into_its_open_spot_and_starts_him():     # IR-18 a
+    state = star_on_ir(fakes.STAR_BACK_WEEK)
+
+    after = ai.cpu_ir(state, SETTINGS, know(fakes.STAR_BACK_WEEK), SEED)
+
+    team = rs.team(after, STAR_OWNER)
+    assert len(rs.team(state, STAR_OWNER).roster) == SETTINGS.roster_size - 1
+    assert team.ir == () and STAR in team.roster and ir_moves(state, after) == [(STAR_OWNER, (STAR,))]
+    assert STAR in rv.best_lineup(know(fakes.STAR_BACK_WEEK), team.roster, SETTINGS)["RB"]
+
+
+def test_activating_then_placing_is_one_of_each_and_never_a_still_eligible_player():     # IR-20
+    week = fakes.STAR_BACK_WEEK
+    state = star_on_ir(week)
+    other = best_keeper(state, STAR_OWNER, week)
+    hurt = tagged_know(week, {(other, week): fakes.Injury("IR")})
+
+    after = ai.cpu_ir(state, SETTINGS, hurt, SEED)
+    still_hurt = tagged_know(week, {(STAR, week): fakes.Injury("O"), (other, week): fakes.Injury("IR")})
+
+    assert ir_moves(state, after) == [(STAR_OWNER, (STAR,)), (STAR_OWNER, (other,))]
+    assert rs.team(after, STAR_OWNER).ir == (other,) and ai.cpu_ir(after, SETTINGS, hurt, SEED) == after
+    assert ai.cpu_ir(state, SETTINGS, still_hurt, SEED) == state     # his slot is taken by a still-eligible star
+
+
+def test_a_full_cpu_swaps_an_eligible_player_onto_ir_rather_than_cut_anyone():     # IR-18 b
+    week = fakes.STAR_BACK_WEEK
+    state = star_on_ir(week)
+    free = replay_waivers.available_players(state, know(week), "WR")[-1].player_id
+    state = edited(state, STAR_OWNER, (*rs.team(state, STAR_OWNER).roster, free))
+    other = best_keeper(state, STAR_OWNER, week)
+    hurt = tagged_know(week, {(other, week): fakes.Injury("PUP")})
+
+    after = ai.cpu_ir(state, SETTINGS, hurt, SEED)
+
+    team = rs.team(after, STAR_OWNER)
+    assert ir_moves(state, after) == [(STAR_OWNER, (STAR, other))] and team.ir == (other,)
+    assert STAR in team.roster and len(team.roster) == SETTINGS.roster_size and after.locked == state.locked
+
+
+def test_a_full_cpu_with_nobody_to_swap_cuts_the_least_valuable_player_it_can_spare():     # IR-18 c
+    week = fakes.STAR_BACK_WEEK
+    state = star_on_ir(week)
+    free = replay_waivers.available_players(state, know(week), "WR")[-1].player_id
+    state = edited(state, STAR_OWNER, (*rs.team(state, STAR_OWNER).roster, free))
+    ctx = ai._context(know(week), SETTINGS)
+    expected = ai._spare(values(state, STAR_OWNER, week) + [know(week).by_id[STAR]], know(week), ctx.protected)[0]
+
+    after = ai.cpu_ir(state, SETTINGS, know(week), SEED)
+
+    team = rs.team(after, STAR_OWNER)
+    assert STAR in team.roster and team.ir == () and len(team.roster) == SETTINGS.roster_size
+    assert ir_moves(state, after) == [(STAR_OWNER, (STAR, expected.player_id))]
+    assert expected.player_id in after.locked and expected.player_id != STAR
+
+
+def test_a_cpu_cuts_the_ir_player_himself_when_he_is_the_one_it_can_best_spare():     # IR-18 c
+    week = 3
+    spare = next(v.player_id for v in ai._spare(values(league(week), STAR_OWNER, week), know(week), frozenset())
+                 if v.position in ("RB", "WR"))             # (its least valuable are its only TE and QB)
+    roster = tuple(pid for pid in rs.team(league(week), STAR_OWNER).roster if pid != spare)
+    better = next(v.player_id for v in replay_waivers.available_players(league(week), know(week), "RB")
+                  if v.healthy_value > know(week).by_id[spare].healthy_value)
+    state = edited(league(week), STAR_OWNER, (*roster, better), (spare,))
+
+    after = ai.cpu_ir(state, SETTINGS, know(week), SEED)
+
+    assert spare not in rs.rostered(after) and spare in after.locked
+    assert rs.team(after, STAR_OWNER).roster == (*roster, better) and rs.team(after, STAR_OWNER).ir == ()
+    assert [(e.kind, e.player_ids) for e in after.events[len(state.events):]] == [("drop", (spare,))]
+
+
+def test_a_cpu_that_can_spare_nobody_stays_blocked_and_free_agency_skips_it():     # IR-18 c, IR-21
+    week = 3
+    spare = ai._spare(values(league(week), STAR_OWNER, week), know(week), frozenset())[0].player_id
+    roster = tuple(pid for pid in rs.team(league(week), STAR_OWNER).roster if pid != spare)
+    blocked = edited(league(week), STAR_OWNER, roster, (spare,))         # an open spot it may not fill
+    full = edited(blocked, STAR_OWNER, (*roster, fakes.IR_KICKER_ID))
+    everyone = frozenset(v.player_id for v in know(week).values)
+    ctx = replace(ai._context(know(week), SETTINGS), protected=everyone)
+
+    stuck = ai._bring_back(full, ctx, rs.team(full, STAR_OWNER), spare)
+    after = ai.cpu_free_agency(blocked, SETTINGS, know(week), SEED)
+
+    assert stuck is full
+    assert rs.team(after, STAR_OWNER) == rs.team(blocked, STAR_OWNER)
+    assert any(e.team_id != STAR_OWNER for e in after.events)                  # the others still moved
+
+
+def test_a_back_on_ir_still_counts_for_what_an_added_back_is_worth():     # 5.4 VALUE
+    week = 6
+    state = edited(league(week), STAR_OWNER, tuple(p for p in rs.team(league(week), STAR_OWNER).roster if p != STAR),
+                   (STAR,))
+    roster, ctx = values(state, STAR_OWNER, week), ai._context(know(week), SETTINGS)
+    back = max(replay_waivers.available_players(state, know(week), "RB"), key=lambda v: v.ros_ppg)
+
+    counted = ai._best_add(roster, [back], ai._for_team(ctx, rs.team(state, STAR_OWNER)), -1.0)
+    ignored = ai._best_add(roster, [back], ctx, -1.0)
+
+    assert ai._for_team(ctx, rs.team(state, STAR_OWNER)).stash == (know(week).by_id[STAR],) and ctx.stash == ()
+    assert counted[0] < ignored[0]
+
+
+def test_claims_and_free_agency_plan_each_team_with_its_own_ir_player(monkeypatch):
+    state = ai.cpu_ir(league(6), SETTINGS, know(6), SEED)
+    seen: dict[str, set] = {"claims": set(), "free agency": set()}
+    plan, cover = ai._plan_claims, ai._cover
+    monkeypatch.setattr(ai, "_plan_claims", lambda roster, pool, ctx: seen["claims"].add(
+        (len(roster), tuple(v.player_id for v in ctx.stash))) or plan(roster, pool, ctx))
+    monkeypatch.setattr(ai, "_cover", lambda roster, free, ctx: seen["free agency"].add(
+        (len(roster), tuple(v.player_id for v in ctx.stash))) or cover(roster, free, ctx))
+
+    ai.cpu_claims(state, SETTINGS, know(6), SEED)
+    ai.cpu_free_agency(state, SETTINGS, know(6), SEED)
+
+    for found in seen.values():                              # only CPU 5 is one short, with its star on IR
+        assert (SETTINGS.roster_size - 1, (STAR,)) in found and (SETTINGS.roster_size, ()) in found
+        assert (SETTINGS.roster_size - 1, ()) not in found
 
 
 # ---------------- no hindsight ----------------
 
 @pytest.mark.parametrize("week", [1, 4, 6, 9])
 def test_cpu_decisions_are_identical_when_everything_after_this_week_is_different(week):
-    state = league(week)
     changed = fakes.fake_knowledge(week, SETTINGS, fakes.future_changed(fakes.fake_season(), after_week=week))
+    state = ai.cpu_ir(league(week), SETTINGS, know(week), SEED)
 
+    assert ai.cpu_ir(league(week), SETTINGS, changed, SEED) == state
     real_claims = ai.cpu_claims(state, SETTINGS, know(week), SEED)
     blind_claims = ai.cpu_claims(state, SETTINGS, changed, SEED)
     real = ai.cpu_free_agency(replay_waivers.process_claims(state, SETTINGS, know(week), real_claims),

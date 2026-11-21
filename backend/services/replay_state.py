@@ -113,6 +113,7 @@ class Team(_Record):
     roster: tuple[int, ...]
     chaos: float                              # how far a CPU strays from ADP
     lean: Mapping[str, float] = field(hash=False)      # position -> multiplier on a CPU's draft score
+    ir: tuple[int, ...] = ()                  # players in the IR slot (not in `roster`); see replay_ir
 
 
 @dataclass(frozen=True)
@@ -156,7 +157,7 @@ class Offer(_Record):                         # every executed trade (CPU-CPU to
 class Event(_Record):
     id: int
     week: int
-    kind: str                                 # "draft" | "add" | "drop" | "claim" | "trade" | "result" | "playoffs" | "champion"
+    kind: str          # "draft" | "add" | "drop" | "claim" | "ir" | "trade" | "result" | "playoffs" | "champion"
     team_id: int | None
     text: str
     player_ids: tuple[int, ...] = ()
@@ -281,8 +282,13 @@ def user_team(state: State) -> Team:
     return found
 
 
+def held(team: Team) -> tuple[int, ...]:
+    """Everyone the team owns: its active roster, then its IR."""
+    return (*team.roster, *team.ir)
+
+
 def rostered(state: State) -> frozenset[int]:
-    return frozenset(pid for t in state.teams for pid in t.roster)
+    return frozenset(pid for t in state.teams for pid in held(t))
 
 
 def with_team(state: State, team: Team) -> State:
@@ -315,9 +321,10 @@ def release(state: State, settings: Settings, team_id: int, player_id: int, name
     in both waiver modes) until the next start of week, with a "drop" event (`name` is for its text only).
     log=False skips the event, for a caller that logs one event for the whole move (add or claim)."""
     owner = team(state, team_id)
-    if player_id not in owner.roster:
+    if player_id not in held(owner):
         raise ValueError(f"{owner.name} can't drop a player who isn't on the roster.")
-    smaller = replace(owner, roster=tuple(pid for pid in owner.roster if pid != player_id))
+    smaller = replace(owner, roster=tuple(pid for pid in owner.roster if pid != player_id),
+                      ir=tuple(pid for pid in owner.ir if pid != player_id))
     dropped = replace(with_team(state, smaller), locked=(*(p for p in state.locked if p != player_id), player_id))
     if not log:
         return dropped

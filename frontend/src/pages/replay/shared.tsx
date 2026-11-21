@@ -17,7 +17,7 @@
  *   openPlayer  opens the hub's player drawer for a player id
  * POSTs that answer something else (evaluateReplayTrade) are called directly, not through `act`.
  *
- * Pieces: ReplayPlayerCell, ReplayPositionChip, PositionTabs (+ positionParam), TeamSelect, ConfirmButton,
+ * Pieces: ReplayPlayerCell, ReplayInjuryBadge (+ isHardTag, canGoOnIr, injuryLabel), ReplayIrBlockedNotice, ReplayPositionChip, PositionTabs (+ positionParam), TeamSelect, ConfirmButton,
  * useKeyedAct (act with a pending state and a refusal per button), ReplayDrawer (the dialog frame),
  * EventList (+ groupEvents), formatPoints, formatRecord, ordinal, goToView, REPLAY_VIEWS.
  */
@@ -27,10 +27,13 @@ import type {
   ReplayActionResult,
   ReplayEvent,
   ReplayEventKind,
+  ReplayInjury,
+  ReplayInjuryTag,
   ReplayPlayerRef,
   ReplayPlayerRow,
   ReplayPosition,
   ReplayPositionFilter,
+  ReplayPractice,
   ReplayRecord,
   ReplaySummary,
 } from '../../api/types';
@@ -104,7 +107,59 @@ interface ReplayPlayerCellProps {
   onOpen?: (playerId: number) => void;
 }
 
-/** Name, position chip, NFL team, opponent or Bye, and Out / Trade-locked badges. */
+const TAG_WORDS: Record<ReplayInjuryTag, string> = {
+  Q: 'Questionable', D: 'Doubtful', O: 'Out', IR: 'Injured reserve', PUP: 'Physically unable to perform', SUS: 'Suspended',
+};
+const PRACTICE_WORDS: Record<ReplayPractice, string> = { DNP: 'did not practice', LP: 'limited practice', FP: 'full practice' };
+const HARD_TAGS: readonly ReplayInjuryTag[] = ['O', 'IR', 'PUP', 'SUS'];
+const IR_TAGS: readonly ReplayInjuryTag[] = ['O', 'IR', 'PUP'];
+
+/** O, IR, PUP, SUS: he does not play this week. */
+export function isHardTag(injury: ReplayInjury | null | undefined): boolean {
+  return !!injury && HARD_TAGS.includes(injury.tag);
+}
+
+/** O, IR, PUP: he may go on IR (a suspension is not an injury). */
+export function canGoOnIr(injury: ReplayInjury | null | undefined): boolean {
+  return !!injury && IR_TAGS.includes(injury.tag);
+}
+
+/** "Questionable: Hamstring (limited practice)", "Injured reserve: Groin", "Suspended". */
+export function injuryLabel({ tag, practice, injury }: ReplayInjury): string {
+  return `${TAG_WORDS[tag]}${injury ? `: ${injury}` : ''}${practice ? ` (${PRACTICE_WORDS[practice]})` : ''}`;
+}
+
+/** Yahoo-style tag: the short code on screen, the full label for hover and screen readers. */
+export function ReplayInjuryBadge({ injury }: { injury: ReplayInjury }) {
+  const label = injuryLabel(injury);
+  return (
+    <span className={`status-badge status-badge--${isHardTag(injury) ? 'out' : 'missing'}`} title={label}>
+      <span aria-hidden="true">{injury.tag}</span><span className="sr-only">{label}</span>
+    </span>
+  );
+}
+
+/** The plain Out badge, unless a hard tag already says so. */
+export function showsOut(out: boolean | undefined, injury: ReplayInjury | null | undefined): boolean {
+  return !!out && !isHardTag(injury);
+}
+
+/** The user's IR players who lost their tag block adds, claims and trades; null when nothing is blocked. */
+export function irBlockedText(game: ReplaySummary): string | null {
+  if (game.ir_blocked.length === 0 || !EDIT_PHASES.includes(game.phase)) return null;
+  return `${game.ir_blocked.map((player) => player.name).join(' and ')} is on IR but no longer has an O, IR or PUP tag. `
+    + 'Activate or drop him before you add, claim or trade for players.';
+}
+
+export function ReplayIrBlockedNotice({ game }: { game: ReplaySummary }) {
+  const text = irBlockedText(game);
+  return text ? <p className="notice" role="status">{text}</p> : null;
+}
+
+/** The backend takes roster moves in these phases only (replay_waivers.ROSTER_PHASES, replay_ir.IR_PHASES). */
+export const EDIT_PHASES: readonly string[] = ['open', 'waivers'];
+
+/** Name, position chip, NFL team, opponent or Bye, injury tag, and Out / Trade-locked badges. */
 export function ReplayPlayerCell({ player, info = {}, onOpen }: ReplayPlayerCellProps) {
   return (
     <span className="player-cell">
@@ -118,7 +173,8 @@ export function ReplayPlayerCell({ player, info = {}, onOpen }: ReplayPlayerCell
         {player.team && <span className="player-cell__team">{player.team}</span>}
         {info.opponent && !info.bye && <span className="player-cell__team">vs {info.opponent}</span>}
         {info.bye && <span className="status-badge status-badge--missing">Bye</span>}
-        {info.out && <span className="status-badge status-badge--out">Out</span>}
+        {player.injury && <ReplayInjuryBadge injury={player.injury} />}
+        {showsOut(info.out, player.injury) && <span className="status-badge status-badge--out">Out</span>}
         {info.trade_locked && (
           <span className="status-badge status-badge--missing" title="Traded in the last two weeks, so he can't be traded yet">Trade-locked</span>
         )}
@@ -285,7 +341,7 @@ const EVENT_GROUPS: readonly { title: string; kinds: readonly ReplayEventKind[] 
   { title: 'Results', kinds: ['result', 'playoffs', 'champion'] },
   { title: 'Waiver results', kinds: ['claim'] },
   { title: 'Trades', kinds: ['trade'] },
-  { title: 'Adds and drops', kinds: ['add', 'drop'] },
+  { title: 'Adds and drops', kinds: ['add', 'drop', 'ir'] },
   { title: 'Draft picks', kinds: ['draft'] },
 ];
 

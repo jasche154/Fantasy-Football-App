@@ -143,3 +143,24 @@ describe('SetupForm', () => {
     expect(screen.getByRole('button', { name: 'Prepare 2024 data' })).toBeEnabled();
   });
 });
+
+describe('SetupForm injury reports', () => {
+  it('offers injury reports for a ready season without them, and names the step while it runs', async () => {
+    const untagged = { ...readiness(2022), injury_weeks: 0 };
+    const replies = [
+      seasons({ results: [untagged, readiness(2023), readiness(2024, false)] }),
+      seasons({ results: [untagged, readiness(2023), readiness(2024, false)], prepare: { season: 2022, status: 'running', step: 'injuries', error: null } }),
+    ];
+    let reads = 0;
+    const { api, user } = renderForm([
+      { path: SEASONS_PATH, reply: () => json(replies[Math.min(reads++, replies.length - 1)]) },
+      { method: 'POST', path: `${SEASONS_PATH}/2022/prepare`, reply: json({ season: 2022, status: 'running', step: 'starting', error: null }) },
+    ]);
+    expect(await screen.findByText('Ready to play, but without injury reports. Adding them takes a few seconds.')).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '2022' })).toBeInTheDocument();          // still playable
+    expect(screen.queryByRole('button', { name: 'Add 2023 injury reports' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Add 2022 injury reports' }));
+    expect(api.callsTo(`${SEASONS_PATH}/2022/prepare`, 'POST')).toHaveLength(1);
+    expect(await screen.findByText('Preparing 2022: injury reports…')).toBeInTheDocument();
+  });
+});

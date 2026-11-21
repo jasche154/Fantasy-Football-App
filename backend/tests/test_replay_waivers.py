@@ -437,3 +437,80 @@ def test_the_waiver_run_and_the_players_screen_do_not_depend_on_the_future():
 
     assert rs.to_json(real) == rs.to_json(blind)
     assert waivers.available_players(real, know(week)) == waivers.available_players(blind, changed)
+
+
+# ---------------- the IR slot ----------------
+
+def to_ir(state: State, team_id: int, player_id: int) -> State:
+    """He moves from the active roster to IR (no tag check: an untagged IR player blocks his team)."""
+    team = rs.team(state, team_id)
+    return rs.with_team(state, replace(team, roster=tuple(p for p in team.roster if p != player_id),
+                                       ir=(*team.ir, player_id)))
+
+
+def blocked_sentence(team_id: int, player_id: int) -> str:
+    return (f"{rs.team(league(), team_id).name} can't add, claim or trade for players while "
+            f"{know().by_id[player_id].name} is on IR without an O, IR or PUP tag: activate or drop him first.")
+
+
+def test_an_ir_player_is_rostered_and_not_available():
+    hurt = roster(league(), SECOND)[0]
+    state = to_ir(league("open"), SECOND, hurt)
+
+    assert waivers.player_status(state, hurt) == "rostered"
+    assert hurt not in [v.player_id for v in waivers.available_players(state, know())]
+    assert hurt in [v.player_id for v in waivers.available_players(state, know(), status="rostered")]
+    with pytest.raises(ValueError, match=r"is already on a roster \(CPU 11\)"):
+        waivers.add_drop(state, SETTINGS, know(), USER, hurt, roster(state, USER)[-1])
+
+
+def test_a_blocked_team_cant_add_or_claim():
+    stale = roster(league(), USER)[-1]
+    sentence = blocked_sentence(USER, stale)
+    target = unrostered(league())[0]
+
+    with pytest.raises(ValueError, match="^" + sentence + "$"):
+        waivers.add_drop(to_ir(league("open"), USER, stale), SETTINGS, know(), USER, target)
+    with pytest.raises(ValueError, match="^" + sentence + "$"):
+        waivers.submit_claim(to_ir(league("waivers"), USER, stale), SETTINGS, know(), target, None)
+
+
+def test_a_claim_of_a_team_blocked_by_the_run_fails_with_the_sentence():
+    stale = roster(league(), USER)[-1]
+    target, other = unrostered(league())[:2]
+    state = waivers.submit_claim(league(), SETTINGS, know(), target, roster(league(), USER)[0])
+    state = to_ir(to_ir(state, USER, stale), SECOND, roster(state, SECOND)[0])
+    cpu = {SECOND: [claim(1, SECOND, other, bench(state, SECOND)[-1])]}
+
+    after = waivers.process_claims(state, SETTINGS, know(), cpu)
+
+    assert target not in rs.rostered(after) and other not in rs.rostered(after) and after.claims == ()
+    failures = [e.text for e in after.events if e.kind == "claim"]
+    assert failures == [f"Your claim for {know().by_id[target].name} failed. {blocked_sentence(USER, stale)}"]
+
+
+def test_an_ir_player_cant_be_the_drop_of_a_claim_but_can_be_dropped():
+    hurt = roster(league(), USER)[0]
+    state = to_ir(league("waivers"), USER, hurt)
+    tagged = fakes.fake_knowledge(1, SETTINGS, fakes.tagged(fakes.fake_season(), {(hurt, 1): fakes.Injury("O")}))
+
+    with pytest.raises(ValueError, match=f"can't drop {tagged.by_id[hurt].name}: he isn't on that roster"):
+        waivers.submit_claim(state, SETTINGS, tagged, unrostered(state)[0], hurt)
+    assert waivers.submit_claim(state, SETTINGS, tagged, unrostered(state)[0], None).claims    # IR is no roster spot
+    dropped = waivers.drop(state, SETTINGS, know(), USER, hurt)
+    assert rs.team(dropped, USER).ir == () and hurt in dropped.locked
+    assert dropped.events[-1].kind == "drop"
+
+
+def test_a_pending_claim_fails_at_the_run_when_its_drop_has_gone_to_ir():
+    state = league()
+    target, hurt = unrostered(state)[0], roster(state, USER)[-1]
+    tagged = fakes.fake_knowledge(1, SETTINGS, fakes.tagged(fakes.fake_season(), {(hurt, 1): fakes.Injury("O")}))
+    claimed = to_ir(waivers.submit_claim(state, SETTINGS, tagged, target, hurt), USER, hurt)           # IR-26
+
+    after = waivers.process_claims(claimed, SETTINGS, tagged, {})
+
+    assert target not in rs.rostered(after) and rs.team(after, USER).ir == (hurt,)
+    assert [e.text for e in after.events if e.kind == "claim"] == [
+        f"Your claim for {tagged.by_id[target].name} failed. "
+        f"{rs.team(state, USER).name} can't drop {tagged.by_id[hurt].name}: he isn't on that roster."]

@@ -2,6 +2,7 @@
 import type {
   ReplayActionResult,
   ReplayGameRow,
+  ReplayInjury,
   ReplayPage,
   ReplayPagination,
   ReplayPhase,
@@ -97,6 +98,8 @@ export interface ReplayPlayerWeek {
   trade_value: number;
   rank: number;
   pos_rank: string;
+  /** That week's tag. */
+  injury: ReplayInjury | null;
 }
 
 /** One player: where he stands now and weeks 1..current. */

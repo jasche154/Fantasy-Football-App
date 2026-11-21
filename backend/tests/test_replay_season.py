@@ -256,6 +256,49 @@ def test_injured_star_starts_when_healthy_and_sits_while_out():
     assert {1, 10} <= started and not started & set(fakes.INJURED_WEEKS)
 
 
+def _to_ir(state: State, team_id: int, player_id: int) -> State:
+    team = rs.team(state, team_id)
+    return rs.with_team(state, replace(team, roster=tuple(p for p in team.roster if p != player_id),
+                                       ir=(*team.ir, player_id)))
+
+
+def test_an_ir_player_never_starts_or_scores_and_starts_again_once_activated():
+    settings, star = _settings(), fakes.INJURED_STAR_ID
+    state = _play(fakes.drafted_state(settings), settings, 5)
+    owner = next(team.id for team in state.teams if star in team.roster)
+    state = _play(_to_ir(state, owner, star), settings, 4)              # weeks 6-9 with him on IR
+    team = rs.team(state, owner)
+    state = rs.with_team(state, replace(team, roster=(*team.roster, star), ir=()))
+    state = _play(state, settings, 1)                                  # week 10: activated
+
+    started = {r.week for r in state.results if any(star in ids for ids in r.starters[owner].values())}
+    scored = {r.week for r in state.results if star in r.points}
+    assert started == scored and {1, 10} <= started and not started & set(fakes.INJURED_WEEKS)
+
+
+def test_a_player_on_ir_cant_be_started():
+    settings = _settings()
+    state, know = fakes.drafted_state(settings), fakes.fake_knowledge(1, settings)
+    back = _user_by_position(state, know)["RB"][0]
+
+    with pytest.raises(ValueError, match=f"^{know.by_id[back].name} is on IR: activate him before starting him.$"):
+        season.set_lineup(_to_ir(state, 1, back), settings, know, {"RB": [back]})
+
+
+def test_a_manual_starter_moved_to_ir_is_replaced_from_the_bench():
+    settings = _settings()
+    state, know = fakes.drafted_state(settings), fakes.fake_knowledge(1, settings)
+    mine = _user_by_position(state, know)
+    hurt, kept, next_best = mine["RB"][:3]
+    lined_up = season.set_lineup(state, settings, know, {"RB": [hurt, kept]})
+
+    repaired = season.starters_for(_to_ir(lined_up, 1, hurt), settings, know, 1)
+
+    assert repaired["RB"] == (kept, next_best)
+    played = season.play_week(_to_ir(lined_up, 1, hurt), settings, fakes.fake_season(), know, SEED)
+    assert hurt not in played.results[0].points
+
+
 # ---------------- the user's lineup ----------------
 
 def test_manual_lineup_is_stored_used_and_cleared_after_the_week():

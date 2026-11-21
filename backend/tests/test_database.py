@@ -174,9 +174,10 @@ def test_migrations_downgrade_and_upgrade_cleanly(tmp_path):
     ensure_schema(legacy)
     config = alembic_config(legacy)
     command.downgrade(config, "d7b5c4e6f566")
-    assert not inspect(legacy).has_table("expert_rankings")
+    assert not inspect(legacy).has_table("expert_rankings") and not inspect(legacy).has_table("replay_injuries")
     command.upgrade(config, "head")
-    assert inspect(legacy).has_table("expert_rankings")
+    assert inspect(legacy).has_table("expert_rankings") and inspect(legacy).has_table("replay_injuries")
+    command.upgrade(config, "head")                         # a second run is a no-op
 
 
 def test_record_load_stamps_each_run(db):

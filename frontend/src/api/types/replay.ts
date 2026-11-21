@@ -9,7 +9,16 @@ export type ReplaySlot = ReplayPosition | 'FLEX' | 'BN';
 export type ReplayPhase = 'draft' | 'waivers' | 'open' | 'complete';
 export type ReplayWaiverMode = 'wednesday' | 'none';
 export type ReplayDifficulty = 'normal' | 'hard';
-export type ReplayEventKind = 'draft' | 'add' | 'drop' | 'claim' | 'trade' | 'result' | 'playoffs' | 'champion';
+export type ReplayEventKind = 'draft' | 'add' | 'drop' | 'claim' | 'trade' | 'result' | 'playoffs' | 'champion' | 'ir';
+/** O, IR, PUP and SUS mean he does not play; O, IR and PUP may go on IR. */
+export type ReplayInjuryTag = 'Q' | 'D' | 'O' | 'IR' | 'PUP' | 'SUS';
+export type ReplayPractice = 'DNP' | 'LP' | 'FP';
+
+export interface ReplayInjury {
+  tag: ReplayInjuryTag;
+  practice: ReplayPractice | null;
+  injury: string | null;
+}
 
 // ---------------- shared pieces ----------------
 
@@ -25,6 +34,8 @@ export interface ReplayPlayerRef {
   position: ReplayPosition;
   /** His NFL team as known before the week shown. */
   team: string | null;
+  /** His tag in the current week (a row built for another week: that week's); always null in the draft room. */
+  injury: ReplayInjury | null;
 }
 
 export interface ReplayPlayerRow {
@@ -140,6 +151,8 @@ export interface ReplayReadiness {
   projection_weeks: number;
   kickers: number;
   defenses: number;
+  /** Weeks with injury tags stored (`ready` does not need it). */
+  injury_weeks: number;
 }
 
 export interface ReplayPrepareStatus {
@@ -238,6 +251,10 @@ export interface ReplaySummary {
   pending: { claims: number; offers: number };
   champion: ReplayTeamRef | null;
   updated_at: string | null;
+  /** The user's IR players who lost their tag: adds, claims and trades are refused while non-empty. */
+  ir_blocked: ReplayPlayerRef[];
+  /** Injury tags are loaded for this season. */
+  has_injuries: boolean;
 }
 
 /** What every POST under /games answers; `events` is what the action caused, oldest first. */
@@ -295,6 +312,11 @@ export interface ReplayRosterRow extends ReplayPlayerRow {
   starting: boolean;
 }
 
+export interface ReplayIrRow extends ReplayPlayerRow {
+  slot: 'IR';
+  starting: false;
+}
+
 /** A roster for one week: starters in slot order, then the bench (current week only). */
 export interface ReplayTeam {
   team: ReplayTeamRef;
@@ -305,6 +327,8 @@ export interface ReplayTeam {
   actual_total: number | null;
   record: ReplayRecord;
   results: ReplayRosterRow[];
+  /** The IR slot: current week only, else []. Never in `results`. */
+  ir: ReplayIrRow[];
 }
 
 /** POST lineup body: {slot: player ids}; null goes back to the best lineup. */

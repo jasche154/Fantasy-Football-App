@@ -148,7 +148,7 @@ export function TradeBuilder({ game, version, roster, maxPlayers, initialPartner
         </AsyncView>
       </div>
       <p className="hint">
-        Up to {maxPlayers} players a side. A player who is out right now or was traded in the last two weeks can't be dealt.
+        Up to {maxPlayers} players a side. A player who is out right now, on IR, or was traded in the last two weeks can't be dealt.
       </p>
       {over > 0 && <DropPicker rows={spare} count={over} value={drops} onChange={(ids) => change(() => setPicked(ids))} />}
       {body ? (

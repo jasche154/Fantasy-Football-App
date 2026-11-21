@@ -17,6 +17,8 @@ results are used for the `games` / `ppg` display fields alone, and only for week
   availability. Kickers and defenses have neither; `market_value` is what any player counts for in a trade
   package (never below a roster-spot floor, so nobody is a free throw-in; a kicker or defense is worth that
   floor and no more, so a free-agent unit cannot be turned into skill value).
+- Injury tags (week >= 1): a hard tag (O, IR, PUP, SUS) means out, and that week's projection counts as 0.
+  Tagged IR or PUP, he is expected to miss at least IR_OUT_SHARE of his remaining games. Q and D change nothing.
 
 `Knowledge` and `ReplayValue` duck-type `valuation.Valuation` / `PlayerValue` for services/lineup_gain.py and
 services/trade.py. One difference matters: PlayerValue.ros_ppg is already discounted by availability, a
@@ -30,13 +32,14 @@ from types import MappingProxyType, SimpleNamespace
 
 from services import lineup_gain, my_team as mt, replay_state
 from services.league import LeagueSettings, replacement_levels
-from services.replay_pool import SKILL, PoolPlayer, SeasonData
+from services.replay_pool import SKILL, Injury, PoolPlayer, SeasonData
 from services.schedule_strength import NEUTRAL, DefenseStrength, Schedule
 from services.trade import FAIR_POINTS_PER_WEEK
 
 RECENCY_WEIGHTS = (4, 3, 2, 1)                        # newest first: the projections (or priors) behind ros_ppg
 OUT_SHARE = {1: 0.45, 2: 0.55, 3: 0.60, 4: 0.65, 5: 0.75}    # share of remaining games missed, by weeks out so far
 OUT_SHARE_LONG = 0.90                                 # six or more weeks out (measured, RB/WR/TE 2021-25)
+IR_OUT_SHARE = 0.80                                   # least share missed when tagged IR or PUP (measured 2018-25)
 FLEX_POSITIONS = ("RB", "WR", "TE")
 BACKUPS = {"QB": 1, "RB": 3, "WR": 4, "TE": 1}        # most a CPU carries behind its starters (no spare K or DST)
 
@@ -64,6 +67,7 @@ class ReplayValue:
     games_left: int = 0            # his team's games from this week to the league's last week
     market_value: float = 0.0      # what he counts for in a trade package (K and DST: the roster-spot floor)
     last_projection: float = 0.0   # his most recent non-zero pre-game projection
+    injury: Injury | None = None   # this week's tag; always None at week 0
 
 
 @dataclass(frozen=True, eq=False)
@@ -102,11 +106,17 @@ def _priors(data: SeasonData) -> Mapping[int, float]:
     return MappingProxyType(priors)
 
 
+def _projection(data: SeasonData, player_id: int, week: int) -> float:
+    """That week's projection, or 0 when he carries a hard tag that week (a stale projection is not a plan)."""
+    tag = data.injuries.get((player_id, week))
+    return 0.0 if tag is not None and tag.hard else data.projection(player_id, week)
+
+
 def _recent(data: SeasonData, player_id: int, week: int) -> list[float]:
     """His last non-zero projections up to `week`, newest first (at most one per weight)."""
     found: list[float] = []
     for w in range(week, 0, -1):
-        if (points := data.projection(player_id, w)) > 0:
+        if (points := _projection(data, player_id, w)) > 0:
             found.append(points)
             if len(found) == len(RECENCY_WEIGHTS):
                 break
@@ -122,7 +132,7 @@ def _out_streak(data: SeasonData, player_id: int, prior: float, week: int) -> in
     """Consecutive non-bye weeks ending at `week` with no projection, for a player who had one or a prior."""
     streak = 0
     for w in range(week, 0, -1):
-        if data.projection(player_id, w) > 0:
+        if _projection(data, player_id, w) > 0:
             return streak
         if not data.on_bye(player_id, w):
             streak += 1
@@ -134,15 +144,18 @@ def _row(data: SeasonData, player: PoolPlayer, prior: float, week: int, team: st
     """Everything about a player except his value over replacement and his rank."""
     pid = player.player_id
     streak = _out_streak(data, pid, prior, week)
+    injury = data.injuries.get((pid, week)) if week else None
     share = OUT_SHARE.get(streak, OUT_SHARE_LONG) if streak else 0.0
+    if injury is not None and injury.tag in ("IR", "PUP"):
+        share = max(share, IR_OUT_SHARE)
     recent = _recent(data, pid, week)
     played = [data.actual[(pid, w)] for w in range(1, week) if (pid, w) in data.actual]
     return {
         "player_id": pid, "name": player.name, "position": player.position, "adp": player.adp, "team": team,
         "ros_ppg": round(_ros_ppg(recent, prior), 2),
-        "projection": data.projection(pid, week) if week else prior,     # draft time: only what ADP knew
-        "last_projection": recent[0] if recent else 0.0,
-        "out": streak > 0, "games_left": games_left,
+        "projection": _projection(data, pid, week) if week else prior,   # draft time: only what ADP knew
+        "last_projection": recent[0] if recent else 0.0, "injury": injury,
+        "out": streak > 0 or (injury is not None and injury.hard), "games_left": games_left,
         "expected_missed": round(games_left * share, 2), "availability": round(1.0 - share, 3),
         "games": len(played), "ppg": round(sum(played) / len(played), 2) if played else 0.0,
     }

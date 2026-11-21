@@ -14,13 +14,19 @@ import numpy as np
 import pytest
 
 from services import (
-    replay_draft, replay_game as rg, replay_season, replay_state as rs, replay_trades, replay_values as rv,
-    replay_waivers,
+    replay_draft, replay_game as rg, replay_ir, replay_season, replay_state as rs, replay_trades,
+    replay_values as rv, replay_waivers,
 )
 from tests import replay_fakes as fakes
 
 DATA = fakes.fake_season()
 POSITION = {pid: player.position for pid, player in DATA.players.items()}
+DRAFTED = sorted((p for p in DATA.players.values() if p.adp is not None and p.position in ("RB", "WR", "TE")),
+                 key=lambda p: (p.adp, p.player_id))
+# The active user's leagues: one drafted skill player in six is Out for three weeks somewhere in weeks 3-13,
+# so the random user (and every CPU) has players to place on IR, activate, swap and be blocked by.
+ACTIVE_DATA = fakes.tagged(DATA, {(p.player_id, week): fakes.Injury("O")
+                                  for n, p in enumerate(DRAFTED[:180:6]) for week in range(3 + n % 9, 6 + n % 9)})
 BOT_BOARD, BOT_WIRE, BOT_PROPOSALS = 12, 60, 3      # how far down the lists the active user reaches
 STEP_BUDGET_SECONDS = 1.0
 
@@ -62,7 +68,7 @@ class Run:
 
 def problems(state: rs.State, settings: rs.Settings, before: rs.State | None) -> list[str]:
     """Every invariant this state breaks (empty = healthy)."""
-    ids = [pid for team in state.teams for pid in team.roster]
+    ids = [pid for team in state.teams for pid in rs.held(team)]
     rostered, user = set(ids), rs.user_team(state).id
     event_ids = [event.id for event in state.events]
     stored = event_ids + [offer.id for offer in state.offers] + [claim.id for claim in state.claims]
@@ -72,6 +78,8 @@ def problems(state: rs.State, settings: rs.Settings, before: rs.State | None) ->
         "a player is on two rosters": len(ids) == len(rostered),
         "an unknown player is rostered": rostered <= POSITION.keys(),
         "a roster is over the limit": all(len(team.roster) <= settings.roster_size for team in state.teams),
+        "IR over its limit or shared with the roster": all(
+            len(team.ir) <= replay_ir.IR_SLOTS and not set(team.ir) & set(team.roster) for team in state.teams),
         "a CPU can't field a legal lineup": not in_season or all(
             rv.can_field_lineup([POSITION[pid] for pid in team.roster], settings)
             for team in state.teams if not team.is_user),
@@ -192,10 +200,26 @@ def _bot_lineup(state: rs.State, settings: rs.Settings, data, dice) -> rs.State:
     return state
 
 
+def _bot_ir(state: rs.State, settings: rs.Settings, data, dice) -> rs.State:
+    """Places, activates (with a drop or a swap) and drops from IR; always clears a block first, so the
+    adds, claims and trades after it are not refused."""
+    know, team = rg.knowledge(state, settings, data), rs.user_team(state)
+    hurt = [pid for pid in team.roster if replay_ir.eligible(know, pid)]
+    if team.ir and (replay_ir.ineligible(state, know, team.id) or _chance(dice, 0.3)):
+        if hurt and _chance(dice, 0.5):
+            return rg.ir_activate(state, settings, data, team.ir[0], swap=_some(dice, hurt, 1, 1)[0])
+        if _chance(dice, 0.2):
+            return rg.drop(state, settings, data, team.ir[0])
+        return rg.ir_activate(state, settings, data, team.ir[0], _a_drop(state, settings, dice))
+    if hurt and not team.ir and _chance(dice, 0.7):
+        return rg.ir_place(state, settings, data, _some(dice, hurt, 1, 1)[0])
+    return state
+
+
 def bot_turn(state: rs.State, settings: rs.Settings, data, seed: int) -> rs.State:
     dice = rs.rng(seed, "bot", state.week, state.phase)
     acts = (_bot_claims,) if state.phase == "waivers" else (_bot_answers, _bot_add, _bot_trades)
-    for act in (*acts, _bot_lineup):
+    for act in (_bot_ir, *acts, _bot_lineup):
         state = act(state, settings, data, dice)
     return state
 
@@ -203,15 +227,15 @@ def bot_turn(state: rs.State, settings: rs.Settings, data, seed: int) -> rs.Stat
 # ---------------- playing a league ----------------
 
 @lru_cache(maxsize=None)
-def changed(after_week: int):
-    return fakes.future_changed(DATA, after_week)
+def changed(after_week: int, active: bool):
+    return fakes.future_changed(ACTIVE_DATA if active else DATA, after_week)
 
 
 def play(settings: rs.Settings, seed: int, active: bool = False, changed_after: int | None = None,
          last_week: int | None = None, checked: bool = True) -> Run:
     """The league from creation to its champion (or through `last_week`), every step timed and checked.
     (`checked=False` is for a replay that is compared state by state with a run that was checked.)"""
-    data = DATA if changed_after is None else changed(changed_after)
+    data = (ACTIVE_DATA if active else DATA) if changed_after is None else changed(changed_after, active)
     steps: list[Step] = []
     faults: list[str] = []
 
@@ -346,6 +370,41 @@ def test_the_user_can_answer_a_cpu_offer_until_it_no_longer_stands():
     assert [o.status for o in refused.value.state.offers if o.id == offer.id] == ["expired"]
 
 
+def test_cpus_make_their_ir_moves_first_at_the_waiver_run_and_at_the_start_of_the_week(monkeypatch):
+    waivers = simulate(*IDLE[0]).steps[2].state
+    calls = []
+    for name in ("cpu_ir", "cpu_claims", "cpu_free_agency"):
+        original = getattr(rg.replay_waiver_ai, name)
+        monkeypatch.setattr(rg.replay_waiver_ai, name,
+                            lambda *args, _name=name, _call=original: calls.append((_name, args[2])) or _call(*args))
+
+    rg.advance(waivers, LEAGUES[0], DATA, 1, rg.WEDNESDAY)
+
+    assert waivers.phase == "waivers" and [name for name, _ in calls] == [
+        "cpu_ir", "cpu_claims", "cpu_ir", "cpu_free_agency"]
+    assert calls[0][1] is calls[1][1]                        # the same Knowledge
+
+
+def test_the_users_ir_actions_pass_through_to_the_users_team():
+    settings, run = LEAGUES[0], simulate(*IDLE[0])
+    state = next(step.state for step in run.steps if (step.state.week, step.state.phase) == (6, "open"))
+    first, second, third = rs.user_team(state).roster[:3]
+    data = fakes.tagged(DATA, {(first, 6): fakes.Injury("O"), (second, 6): fakes.Injury("IR")})
+
+    placed = rg.ir_place(state, settings, data, first)
+    back = rg.ir_activate(placed, settings, data, first)
+    dropping = rg.ir_activate(placed, settings, data, first, drop=third)
+    swapped = rg.ir_activate(placed, settings, data, first, swap=second)
+
+    assert rs.user_team(placed).ir == (first,) and first not in rs.user_team(placed).roster
+    assert rs.user_team(back).ir == () and first in rs.user_team(back).roster
+    assert third in dropping.locked and third not in rs.held(rs.user_team(dropping))
+    assert rs.user_team(swapped).ir == (second,) and first in rs.user_team(swapped).roster
+    assert [e.kind for e in swapped.events[len(state.events):]] == ["ir", "ir"]
+    with pytest.raises(ValueError, match="can't go on IR"):
+        rg.ir_place(state, settings, DATA, first)               # no tag in the real week 6
+
+
 def test_nothing_can_be_changed_once_the_season_is_over():
     settings, final = LEAGUES[0], simulate(*IDLE[0]).final
     mine, theirs = rs.user_team(final).roster, final.teams[0].roster
@@ -380,7 +439,7 @@ def test_engine_calls_never_receive_the_future(monkeypatch):
         return call
 
     for module in (rg.replay_draft, rg.replay_season, rg.replay_waivers, rg.replay_waiver_ai, rg.replay_trade_ai,
-                   rg.replay_trades):
+                   rg.replay_trades, rg.replay_ir):
         for name, function in list(vars(module).items()):
             if callable(function) and getattr(function, "__module__", "") == module.__name__ and name[0].islower():
                 monkeypatch.setattr(module, name, watched(name, function))
@@ -415,6 +474,32 @@ def test_the_active_user_really_used_every_action():
     assert any(e.kind == "claim" and "failed" in e.text for e in events)
     assert any(e.kind == "add" and e.text.startswith("Your Team") for e in events)
     assert {o.status for o in offers if o.from_team in users and o.to_team not in users} >= {"accepted", "declined"}
+    mine = [e.text for e in events if e.kind == "ir" and e.text.startswith("Your Team")]
+    assert any(text.endswith(" to IR") and " activated " not in text for text in mine)          # placed
+    assert any(" from IR, dropping " in text for text in mine)                                  # activated, drop
+    assert any(" from IR and moved " in text for text in mine)                                  # swapped
+
+
+@pytest.mark.parametrize("settings, seed, active", IDLE)
+def test_a_cpu_keeps_its_injured_star_on_ir_while_he_is_out_and_starts_him_when_he_is_back(settings, seed, active):
+    """IR-22, and IR-25 for an idle user who drafted him."""
+    run, star = simulate(settings, seed, active), fakes.INJURED_STAR_ID
+    before = {week: run.steps[run.index("play", week) - 1].state for week in range(1, settings.end_week + 1)}
+    never = {fakes.NEVER_PLAYED_ID, fakes.IR_KICKER_ID}
+
+    for week, state in before.items():
+        owner = next((team for team in state.teams if star in rs.held(team)), None)
+        assert not never & {pid for team in state.teams for pid in team.ir}
+        if owner is None or owner.is_user:
+            assert all(team.ir == () for team in state.teams if team.is_user)
+            continue
+        assert (star in owner.ir) == (week in fakes.INJURED_WEEKS), week
+        if week in fakes.INJURED_WEEKS:                                   # the spot he opened was filled
+            assert len(owner.roster) == settings.roster_size, week
+        if week == fakes.STAR_BACK_WEEK:
+            know = rg.knowledge(state, settings, DATA)
+            lineup = replay_season.starters_for(state, settings, know, owner.id)
+            assert star in owner.roster and star in {pid for ids in lineup.values() for pid in ids}
 
 
 @pytest.mark.parametrize("settings, seed, active", [IDLE[0], ACTIVE[2]])

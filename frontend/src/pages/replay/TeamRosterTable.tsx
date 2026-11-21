@@ -1,17 +1,20 @@
-import type { ReplayTeam } from '../../api/types';
+import type { ReplayPlayerRow, ReplayTeam } from '../../api/types';
 import { EMPTY_VALUE, formatNumber } from '../../lib/format';
-import { ConfirmButton, formatPoints, ReplayPlayerCell } from './shared';
+import { canGoOnIr, ConfirmButton, formatPoints, ReplayPlayerCell } from './shared';
 import { canSwap, type LineupSpot } from './teamLineup';
 
 /** Lineup editing, passed only when the user may change this roster. */
 export interface RosterEditing {
   /** The spot whose player is being moved, if any. */
   source: LineupSpot | null;
-  /** The action in flight: "move:<spot key>" or "drop:<player id>". */
+  /** The action in flight: "move:<spot key>", "drop:<id>", "ir:<id>" or "activate:<id>". */
   pending: string | null;
   isDisabled: boolean;
   onMove: (spot: LineupSpot) => void;
   onDrop: (playerId: number) => void;
+  /** Moves an active player to IR (swapping him with the player there, if any). */
+  onIr: (playerId: number) => void;
+  onActivate: (playerId: number) => void;
 }
 
 interface TeamRosterTableProps {
@@ -19,6 +22,8 @@ interface TeamRosterTableProps {
   spots: readonly LineupSpot[];
   openPlayer: (playerId: number) => void;
   editing?: RosterEditing;
+  /** Show the IR slot (the current, unplayed week only). */
+  showIr?: boolean;
 }
 
 /** The row's lineup button: the Move toggle (`pressed` set), or a place to put the player being moved. */
@@ -31,8 +36,36 @@ function moveButton(spot: LineupSpot, source: LineupSpot | null): { text: string
   return name ? { text: 'Swap', label: `Swap ${moving} with ${name}` } : { text: 'Move here', label: `Move ${moving} to the empty ${spot.slot} slot` };
 }
 
-function Actions({ spot, editing }: { spot: LineupSpot; editing: RosterEditing }) {
-  const { source, pending, isDisabled, onMove, onDrop } = editing;
+interface IrButtonProps {
+  name: string;
+  playerId: number;
+  /** The player now on IR, if any: then it is a swap. */
+  irName: string | undefined;
+  editing: RosterEditing;
+}
+
+/** "Move to IR" for an active player tagged O, IR or PUP; "Swap to IR" when the slot is taken. */
+function IrButton({ name, playerId, irName, editing }: IrButtonProps) {
+  const isPending = editing.pending === `ir:${playerId}`;
+  const [text, label, busy] = irName
+    ? ['Swap to IR', `Move ${name} to IR and activate ${irName}`, 'Swapping…']
+    : ['Move to IR', `Move ${name} to IR`, 'Moving…'];
+  return (
+    <button type="button" className="btn btn--ghost btn--sm" aria-label={label} disabled={editing.isDisabled} onClick={() => editing.onIr(playerId)}>
+      {isPending ? busy : text}
+    </button>
+  );
+}
+
+function DropButton({ playerId, name, editing }: { playerId: number; name: string; editing: RosterEditing }) {
+  return (
+    <ConfirmButton label={editing.pending === `drop:${playerId}` ? 'Dropping…' : 'Drop'} confirmLabel="Yes, drop"
+      subject={name} disabled={editing.isDisabled} onConfirm={() => editing.onDrop(playerId)} />
+  );
+}
+
+function Actions({ spot, editing, irName }: { spot: LineupSpot; editing: RosterEditing; irName: string | undefined }) {
+  const { source, pending, isDisabled, onMove } = editing;
   const move = moveButton(spot, source);
   const player = spot.row?.player;
   return (
@@ -43,47 +76,84 @@ function Actions({ spot, editing }: { spot: LineupSpot; editing: RosterEditing }
           {pending === `move:${spot.key}` ? 'Saving…' : move.text}
         </button>
       )}
-      {player && !source && (
-        <ConfirmButton key={player.id} label={pending === `drop:${player.id}` ? 'Dropping…' : 'Drop'} confirmLabel="Yes, drop"
-          subject={player.name} disabled={isDisabled} onConfirm={() => onDrop(player.id)} />
-      )}
+      {player && !source && canGoOnIr(player.injury) && <IrButton name={player.name} playerId={player.id} irName={irName} editing={editing} />}
+      {player && !source && <DropButton key={player.id} playerId={player.id} name={player.name} editing={editing} />}
     </td>
   );
 }
 
-function SpotRow({ spot, openPlayer, editing }: { spot: LineupSpot; openPlayer: (playerId: number) => void; editing?: RosterEditing }) {
+/** The seven columns after Slot, the same for every row. */
+function PlayerCells({ row, openPlayer }: { row: ReplayPlayerRow; openPlayer: (playerId: number) => void }) {
+  return (
+    <>
+      {/* The Opp column carries the opponent and the bye, so the cell only adds the tag, Out and Trade-locked. */}
+      <td className="td--player"><ReplayPlayerCell player={row.player} info={{ out: row.out, trade_locked: row.trade_locked }} onOpen={openPlayer} /></td>
+      <td>{row.opponent ?? EMPTY_VALUE}</td>
+      <td className="num">{formatPoints(row.projection)}</td>
+      <td className="num">{formatPoints(row.points)}</td>
+      <td className="num">{row.games > 0 ? formatPoints(row.ppg) : EMPTY_VALUE}</td>
+      <td className="num">{formatPoints(row.ros_ppg)}</td>
+      <td className="num">{formatNumber(row.value)}</td>
+    </>
+  );
+}
+
+function rowCells(row: ReplayPlayerRow | null | undefined, openPlayer: (playerId: number) => void) {
+  return row ? <PlayerCells row={row} openPlayer={openPlayer} /> : <td className="muted" colSpan={7}>Empty</td>;
+}
+
+interface SpotRowProps {
+  spot: LineupSpot;
+  openPlayer: (playerId: number) => void;
+  editing?: RosterEditing;
+  irName: string | undefined;
+}
+
+function SpotRow({ spot, openPlayer, editing, irName }: SpotRowProps) {
   const { row } = spot;
   const source = editing?.source ?? null;
   const isTarget = source !== null && canSwap(source, spot);
   const className = [spot.key === source?.key ? 'replay-roster__row--moving' : '', isTarget ? 'replay-roster__row--target' : '',
-    row?.starting && (row.bye || row.out) ? 'replay-roster__row--warn' : ''].filter(Boolean).join(' ');
+    row?.starting && (row.bye || row.out || row.player.injury) ? 'replay-roster__row--warn' : ''].filter(Boolean).join(' ');
   return (
     <tr className={className || undefined}>
       <td className="td--pos">{spot.slot}</td>
-      {row ? (
-        <>
-          {/* The Opp column carries the opponent and the bye, so the cell only adds Out and Trade-locked. */}
-          <td className="td--player"><ReplayPlayerCell player={row.player} info={{ out: row.out, trade_locked: row.trade_locked }} onOpen={openPlayer} /></td>
-          <td>{row.opponent ?? EMPTY_VALUE}</td>
-          <td className="num">{formatPoints(row.projection)}</td>
-          <td className="num">{formatPoints(row.points)}</td>
-          <td className="num">{row.games > 0 ? formatPoints(row.ppg) : EMPTY_VALUE}</td>
-          <td className="num">{formatPoints(row.ros_ppg)}</td>
-          <td className="num">{formatNumber(row.value)}</td>
-        </>
-      ) : (
-        <td className="muted" colSpan={7}>Empty</td>
-      )}
-      {editing && <Actions spot={spot} editing={editing} />}
+      {rowCells(row, openPlayer)}
+      {editing && <Actions spot={spot} editing={editing} irName={irName} />}
     </tr>
   );
 }
 
-/** Yahoo-style roster: starters in slot order with their total, then the bench. */
-export function TeamRosterTable({ team, spots, openPlayer, editing }: TeamRosterTableProps) {
+/** The IR slot: its player (Activate, Drop; no lineup move, he can't start) or Empty. */
+function IrRow({ row, openPlayer, editing }: { row: ReplayPlayerRow | undefined; openPlayer: (playerId: number) => void; editing?: RosterEditing }) {
+  const player = row?.player;
+  return (
+    <tr>
+      <td className="td--pos">IR</td>
+      {rowCells(row, openPlayer)}
+      {editing && (
+        <td className="replay-roster__actions">
+          {player && !editing.source && (
+            <>
+              <button type="button" className="btn btn--ghost btn--sm" aria-label={`Activate ${player.name}`} disabled={editing.isDisabled}
+                onClick={() => editing.onActivate(player.id)}>
+                {editing.pending === `activate:${player.id}` ? 'Activating…' : 'Activate'}
+              </button>
+              <DropButton key={player.id} playerId={player.id} name={player.name} editing={editing} />
+            </>
+          )}
+        </td>
+      )}
+    </tr>
+  );
+}
+
+/** Yahoo-style roster: starters in slot order with their total, then the bench, then the IR slot (current week). */
+export function TeamRosterTable({ team, spots, openPlayer, editing, showIr = false }: TeamRosterTableProps) {
   const starters = spots.filter((spot) => spot.slot !== 'BN');
   const bench = spots.filter((spot) => spot.slot === 'BN');
-  const row = (spot: LineupSpot) => <SpotRow key={spot.key} spot={spot} openPlayer={openPlayer} editing={editing} />;
+  const irName = team.ir[0]?.player.name;
+  const row = (spot: LineupSpot) => <SpotRow key={spot.key} spot={spot} openPlayer={openPlayer} editing={editing} irName={irName} />;
   return (
     <div className="table-wrap">
       <table className="data-table data-table--compact replay-roster">
@@ -111,6 +181,7 @@ export function TeamRosterTable({ team, spots, openPlayer, editing }: TeamRoster
           </tr>
         </tbody>
         {bench.length > 0 && <tbody>{bench.map(row)}</tbody>}
+        {showIr && <tbody><IrRow row={team.ir[0]} openPlayer={openPlayer} editing={editing} /></tbody>}
       </table>
     </div>
   );

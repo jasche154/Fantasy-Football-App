@@ -2,7 +2,7 @@ import type { ReplaySummary, ReplayWireRow } from '../../api/types';
 import { EMPTY_VALUE, formatNumber } from '../../lib/format';
 import { buildHash, paths } from '../../router/routes';
 import type { PlayerMoves } from './PlayersMoves';
-import { formatPoints, ReplayPlayerCell } from './shared';
+import { formatPoints, irBlockedText, ReplayPlayerCell } from './shared';
 
 /** The key of a direct "Add" (the one move a table row sends itself). */
 export function addKey(playerId: number): string {
@@ -39,15 +39,17 @@ function RowAction({ game, row, hasClaim, moves, onAdd, onClaim }: RowActionProp
     // The Trades tab reads `with` (team id) and `want` (player id) from the query.
     return <a href={buildHash(paths.replay, { game: game.id, view: 'trades', with: owner.team_id, want: player.id })}>Trade{' '}<span className="sr-only">for {player.name}</span></a>;
   }
+  // The server refuses adds and claims while an IR player has lost his tag; the banner says why.
+  const blocked = irBlockedText(game) ?? undefined;
   if (game.phase === 'waivers') {
     if (hasClaim) return <span className="muted">Claim in</span>;
-    return <button type="button" className="btn btn--primary btn--sm" disabled={moves.isBusy} onClick={() => onClaim(row)}>Claim{name}</button>;
+    return <button type="button" className="btn btn--primary btn--sm" disabled={moves.isBusy || !!blocked} title={blocked} onClick={() => onClaim(row)}>Claim{name}</button>;
   }
   if (status !== 'free_agent') {
     return <span className="muted" title="Dropped this week, so he can't be added until next week">Next week</span>;
   }
   return (
-    <button type="button" className="btn btn--primary btn--sm" disabled={moves.isBusy} onClick={() => onAdd(row)}>
+    <button type="button" className="btn btn--primary btn--sm" disabled={moves.isBusy || !!blocked} title={blocked} onClick={() => onAdd(row)}>
       {moves.pendingKey === addKey(player.id) ? 'Adding…' : 'Add'}{name}
     </button>
   );

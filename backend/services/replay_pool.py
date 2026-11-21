@@ -5,12 +5,13 @@ point-in-time friendly: `actual` holds what really happened (used to score a wee
 `projected` holds what a reputable site said BEFORE each game (ESPN, with Sleeper filling the gaps), and
 `team_at` gives the team a player was last seen on before a week, never his team today. `players` is the
 whole season's pool; `as_of(week)` narrows it to those known by then (an ADP, a projection or a game), so
-a player who only turns up in week 9 is not on the draft board or the wire before week 9.
+a player who only turns up in week 9 is not on the draft board or the wire before week 9. `injuries` holds
+each week's tag (that week's final report or roster status, known before its games); none at draft time.
 """
 import logging
 from collections import defaultdict
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from threading import Lock
 from types import MappingProxyType
@@ -19,7 +20,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from database.models import (
-    KickerGame, NflGame, Player, PlayerStatsWeekly, ReplayAdp, ReplayProjection, TeamGameStats,
+    KickerGame, NflGame, Player, PlayerStatsWeekly, ReplayAdp, ReplayInjury, ReplayProjection, TeamGameStats,
 )
 from integrations.adp_history import TWO_WAY
 from services import kdst_model
@@ -40,6 +41,23 @@ MIN_ADP_PLAYERS = 180                       # a 12-team, 15-round draft
 MIN_KICKERS = MIN_DEFENSES = 14             # one each for the largest league (ADP or a week-1 projection)
 
 PlayerWeek = tuple[int, int]                # (player_id, week)
+
+TAGS = ("Q", "D", "O", "IR", "PUP", "SUS")
+HARD_TAGS = ("O", "IR", "PUP", "SUS")       # cannot play this week: forces `out`
+IR_TAGS = ("O", "IR", "PUP")                # may go on IR (a suspension is not an injury)
+PRACTICE = ("DNP", "LP", "FP")
+
+
+@dataclass(frozen=True)
+class Injury:
+    """A player's tag for one week, known before that week's games (services/replay_injuries.py)."""
+    tag: str                                # one of TAGS
+    practice: str | None = None             # one of PRACTICE
+    injury: str | None = None               # "Knee"; free text from the report, at most 60 characters
+
+    @property
+    def hard(self) -> bool:
+        return self.tag in HARD_TAGS
 
 
 @dataclass(frozen=True)
@@ -63,16 +81,18 @@ class SeasonData:
     team_by_week: Mapping[int, tuple[tuple[int, str], ...]]   # player_id -> ((week, team) per game played), sorted
     last_week: int                                            # last regular-season week with games (17 or 18)
     known_before: int | None = None                           # set by as_of: nothing from this week's games on
+    injuries: Mapping[PlayerWeek, Injury] = field(default_factory=lambda: MappingProxyType({}))   # tag per week
 
     def as_of(self, week: int) -> "SeasonData":
         """A copy holding only what was known before `week` was played (0 = draft time); cached.
 
         Real points for weeks < week, pre-game projections for weeks <= week (week 1's at draft time: the
-        preseason curve is built from them), and each player's games before `week`, or else his first game
-        of the season (the `team_at` fallback; an accepted limit: wrong only for a drafted player who changed
-        teams before his first game). `players` holds only those who existed by then: an ADP, a projection
-        or a real game in those weeks; it only grows with the week, so anyone rostered at week W is in every
-        later copy. Give CPU logic and views this, never the full season."""
+        preseason curve is built from them), injury tags for weeks 1..week (none at draft time), and each
+        player's games before `week`, or else his first game of the season (the `team_at` fallback; an
+        accepted limit: wrong only for a drafted player who changed teams before his first game). `players`
+        holds only those who existed by then: an ADP, a projection or a real game in those weeks; it only
+        grows with the week, so anyone rostered at week W is in every later copy. Give CPU logic and views
+        this, never the full season."""
         if week < 0:
             raise ValueError(f"Week {week} is not a valid week.")
         if self.known_before is not None and self.known_before <= week:
@@ -119,7 +139,9 @@ def _as_of(data: SeasonData, week: int) -> SeasonData:
     return replace(
         data, known_before=week, players=MappingProxyType(players), team_by_week=MappingProxyType(games),
         actual=MappingProxyType({key: v for key, v in actual.items() if key[0] in players}),
-        projected=MappingProxyType({key: v for key, v in projected.items() if key[0] in players}))
+        projected=MappingProxyType({key: v for key, v in projected.items() if key[0] in players}),
+        injuries=MappingProxyType({key: v for key, v in data.injuries.items()
+                                   if key[1] <= week and key[0] in players}))
 
 
 # ---------------- loading ----------------
@@ -192,9 +214,10 @@ def readiness(session: Session, season: int) -> dict:
     ready = (has_stats and bool(teams) and has_kdst and adp_players >= MIN_ADP_PLAYERS
              and every_week and kickers >= MIN_KICKERS and defenses >= MIN_DEFENSES)
     projection_weeks = len(weeks)
+    injury_weeks = _count(session, ReplayInjury.week.distinct(), ReplayInjury.season == season)  # not needed to play
     return {"season": season, "ready": ready, "has_stats": has_stats, "has_schedule": bool(teams),
             "has_kdst": has_kdst, "adp_players": adp_players, "projection_weeks": projection_weeks,
-            "kickers": kickers, "defenses": defenses}
+            "kickers": kickers, "defenses": defenses, "injury_weeks": injury_weeks}
 
 
 def ready_seasons(session: Session) -> list[int]:
@@ -314,10 +337,15 @@ def _build(session: Session, season: int, scoring: str) -> SeasonData:
                     {team for team, _ in schedule.opponents})
     actual, projected, teams = ({key: value for key, value in table.items() if key[0] in players}
                                 for table in (actual, projected, teams))
+    injuries = {(row.player_id, row.week): Injury(row.tag, row.practice, row.injury)
+                for row in session.scalars(select(ReplayInjury).where(
+                    ReplayInjury.season == season, ReplayInjury.week.between(1, last_week)))
+                if row.player_id in players}
     unplaced = sum(1 for key in actual if key not in teams)
     if unplaced > len(actual) * 0.05:
         log.warning("Replay %s: %d of %d games have no team (schedule and stats team codes may differ)",
                     season, unplaced, len(actual))
     return SeasonData(season=season, scoring=scoring, players=MappingProxyType(players), schedule=schedule,
                       actual=MappingProxyType(actual), projected=MappingProxyType(projected),
-                      team_by_week=MappingProxyType(_by_player(teams)), last_week=last_week)
+                      team_by_week=MappingProxyType(_by_player(teams)), last_week=last_week,
+                      injuries=MappingProxyType(injuries))

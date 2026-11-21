@@ -88,6 +88,11 @@ only *explains* numbers that came back from a tool call. Every output is labeled
   "random"), draft against CPU managers who only know that summer's ADP, then play it week by week with
   waivers, free agency and trades; matchups are scored with the players' real points. Every number shown
   before a week is played is point-in-time (preseason ADP, that week's pre-game ESPN/Sleeper projection).
+  Players carry Yahoo-style injury tags (Q, D, O, IR, PUP, SUS) from that week's official report and roster
+  status; a tagged starter raises a lineup warning. Each team has one IR slot: a player tagged O, IR or PUP
+  can be moved there, which frees his roster spot, and can trade places with another injured player. When
+  he loses the tag you must activate him (dropping someone if the roster is full) or drop him before you
+  can add, claim or trade for anyone.
 - **Integrations:** Sleeper trending adds/drops, FantasyPros ROS rankings (with your key), and Yahoo league and roster import (OAuth)
 - **AI assistant and agent tools:** 17 validated tools that any agent can call over REST
   or MCP (Claude Desktop / Claude Code), plus a built-in Groq-powered chat
@@ -158,7 +163,10 @@ python -m services.replay_data --seasons 2019,2023   # or 2018-2025; --force re-
 ```
 
 The Replay League page does the same from the browser: a season that is not ready has a
-**Prepare &lt;season&gt; data** button under the new-league form.
+**Prepare &lt;season&gt; data** button under the new-league form. The import also loads the season's
+injury reports and weekly roster status (nflverse). A season prepared before that existed is topped up
+by running the same command again (without `--force`), or with the **Add &lt;season&gt; injury reports**
+button.
 
 A season only replaces existing rows after its download succeeds, so a network hiccup
 never wipes data. `populate_stats` also brings the schema up to date first, and it works on
@@ -842,10 +850,26 @@ engine and the screens read the season through `SeasonData.as_of(week)`, a copy 
 that week's games on; only scoring a week reads its real points.
 
 - **Data:** `python -m services.replay_data --seasons 2019` loads the season's results (nflverse), ADP
-  and weekly projections into `replay_adp` / `replay_projections`. `GET /api/replay/seasons` says which
+  and weekly projections into `replay_adp` / `replay_projections`, and injury tags into
+  `replay_injuries`. `GET /api/replay/seasons` says which
   seasons are ready (stats, schedule, K/DST, 180+ ADP players, and projections for every week of the
-  regular season: one missing week would zero it). A re-run of Prepare fetches the MyFantasyLeague ADP
+  regular season: one missing week would zero it). It also reports `injury_weeks` (weeks with tags
+  stored), which `ready` does not require. A re-run of Prepare fetches the MyFantasyLeague ADP
   tail again while a season has none.
+- **Injuries and IR:** Q, D and O come from the official injury report; IR, PUP and SUS from the weekly
+  roster status (PUP = status PUP or reserve code R04; suspended = SUS or R40/R33/R30; every other
+  reserve list = IR; retired players and holdouts get no tag; the game-day inactive list is not used).
+  A roster status wins over a report tag, and a hard tag is carried over the player's bye. O, IR, PUP
+  and SUS mean "out" this week even if a stale projection exists; Q and D are information only.
+  IR rules: one slot per team; a player is eligible by his tag only (O, IR or PUP: not a suspension,
+  not just "no projection"); he does not count against the roster, can't start and can't be traded; he
+  can swap places with another eligible player; a team whose IR player lost his tag can't add, claim or
+  trade until it activates (dropping someone if full) or drops him. CPUs stash an injured player worth
+  keeping, swap or cut to bring one back, and still count an IR player for their positional limits and
+  their view of the rest of the season. A week's final report and roster status are shown from the
+  start of that week (before its waiver run), like its projection. The draft shows no tags: it is held
+  with what the ADP knew, and some week-1 statuses came later. Week-1 tags appear when the draft ends,
+  and the CPUs make their week-1 moves first, as they do every week.
 - **Draft:** a snake draft, 15 rounds by default (QB, 2 RB, 2 WR, TE, FLEX, K, DST, 6 bench). CPUs follow
   ADP: each takes the lowest `(ADP + noise) x need x taste` among the best players left, with position
   caps, K and DST in the last rounds, and never reaches further than a round of picks past the current
@@ -859,7 +883,8 @@ that week's games on; only scoring a week reads its real points.
   with a preseason rate (the ADP order mapped onto the week-1 projection curve) filling the slots that
   do not exist yet. Trade value is points over replacement x games left x the share of them he is
   expected to play (a player with no projection is "out": he is expected to miss 45% of his remaining
-  games after one week out, up to 90% after six).
+  games after one week out, up to 90% after six; a player on IR or PUP is expected to miss at least 80%
+  of his remaining games, measured 2018-2025).
 - **The week:** Wednesday waivers by rolling priority (CPUs claim when a player adds about a lineup point
   a week), then free agency, then the games: every team's best lineup by projection (yours can be set
   by hand), scored with real points. With waivers off, every unrostered player is a free agent.
@@ -942,7 +967,7 @@ League parameters accepted by every valuation endpoint: `scoring=ppr|half|std`,
 | POST | `/api/agent/chat` | Body `{"messages": [{"role": "user", "content": "..."}]}`; answer plus tool trace |
 | GET | `/api/rankings/rushing` | Original rushing endpoint (kept for compatibility; now uses the fixed leaderboard math) |
 | GET | `/api/replay/seasons` | Which past seasons can be replayed (readiness per season) and the running data import |
-| POST | `/api/replay/seasons/{season}/prepare?force=` | Import that season's results, ADP and pre-game projections in the background |
+| POST | `/api/replay/seasons/{season}/prepare?force=` | Import that season's results, ADP, pre-game projections and injury tags in the background |
 | GET | `/api/replay/games` | Saved replay leagues, most recently played first |
 | POST | `/api/replay/games` | Body `{"season": 2019, "teams": 12, "scoring": "half", "draft_slot": 6, "waiver_mode": "wednesday", "difficulty": "normal", "name": "...", "seed": 1}` (only `season` is required; it may be `"random"`; teams 8/10/12/14; `waiver_mode` `"none"` = free agency only; `difficulty` `"hard"`); a new league, drafted up to your first pick |
 | GET | `/api/replay/games/{id}` | Game summary: phase, week, your record and matchup, what to do next, champion |
@@ -964,7 +989,9 @@ League parameters accepted by every valuation endpoint: `scoring=ppr|half|std`,
 | POST | `/api/replay/games/{id}/claims/{claim_id}/cancel` | Cancel a claim |
 | POST | `/api/replay/games/{id}/claims/reorder` | Body `{"ids": [claim ids]}`; your claims in a new order |
 | POST | `/api/replay/games/{id}/add-drop` | Body `{"add": id, "drop": id}`; add a free agent (after the waiver run) |
-| POST | `/api/replay/games/{id}/drop` | Body `{"player_id": id}` |
+| POST | `/api/replay/games/{id}/drop` | Body `{"player_id": id}` (also drops a player from IR) |
+| POST | `/api/replay/games/{id}/ir/place` | Body `{"player_id": id}`; move a player tagged O, IR or PUP this week to your IR slot |
+| POST | `/api/replay/games/{id}/ir/activate` | Body `{"player_id": id, "drop": id, "swap": id}` (`drop` and `swap` optional, not both); bring him back, dropping `drop` when the roster is full or moving the injured `swap` to IR in his place |
 | POST | `/api/replay/games/{id}/advance` | Body `{"step": "wednesday", "week": 3}` runs the waivers, `"play"` plays the week (409 if `week` is not the league's current week) |
 | GET | `/api/replay/games/{id}/trades` | CPU offers waiting for you (with a preview verdict) and every past offer and trade |
 | POST | `/api/replay/games/{id}/trades/evaluate` | Body `{"to_team": 3, "give": [ids], "get": [ids], "drops": [ids]}`; that CPU's verdict with reasons (nothing changes) |

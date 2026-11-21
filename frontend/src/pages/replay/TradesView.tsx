@@ -10,7 +10,7 @@ import { useHashLocation } from '../../router/useHashLocation';
 import { TradeBuilder } from './TradeBuilder';
 import { TradeOffers } from './TradeOffers';
 import { PlayerNames, useTradeActions } from './TradeParts';
-import type { ReplayViewProps } from './shared';
+import { ReplayIrBlockedNotice, type ReplayViewProps } from './shared';
 
 const STATUS: Readonly<Record<ReplayOffer['status'], { label: string; tone: string }>> = {
   accepted: { label: 'Accepted', tone: 'ok' },
@@ -84,6 +84,7 @@ export function TradesView({ game, version, act, isBusy, openPlayer }: ReplayVie
   const noticeTone = notice ? (notice.isGood ? ' success-text' : ' notice') : '';
   return (
     <>
+      <ReplayIrBlockedNotice game={game} />
       <p className="hint">{rulesText(game)}</p>
       <p ref={noticeRef} tabIndex={-1} role="status" className={`replay-trades__notice${noticeTone}`}>{notice?.text}</p>
       <AsyncView state={loaded} loading={<Skeleton lines={6} label="Loading trades…" />} errorTitle="Couldn't load trades">

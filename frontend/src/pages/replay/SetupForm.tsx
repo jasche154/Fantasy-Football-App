@@ -15,7 +15,8 @@ const POLL_MS = 3000;
 const RANDOM = 'random';
 const TEAM_COUNTS = [8, 10, 12, 14];
 const MAX_NAME_LENGTH = 60;
-const STEP_LABELS: Record<string, string> = { starting: 'starting', game_results: 'game results', adp: 'ADP', projections: 'projections' };
+const STEP_LABELS: Record<string, string> = { starting: 'starting', game_results: 'game results', adp: 'ADP', projections: 'projections',
+  injuries: 'injury reports' };
 
 const WAIVER_MODES: readonly { value: ReplayWaiverMode; title: string; text: string }[] = [
   { value: 'wednesday', title: 'Wednesday waivers', text: 'After each week, unrostered players sit on waivers until Wednesday, when claims settle in priority order.' },
@@ -73,6 +74,9 @@ interface SeasonsProps {
 function UnpreparedSeasons({ seasons, prepare, isStarting, wasStartedHere, onPrepare }: SeasonsProps) {
   const isRunning = prepare?.status === 'running';
   const waiting = seasons.filter((season) => !season.ready);
+  // Prepared before injury reports existed: playable, but without tags or the IR slot.
+  const untagged = seasons.filter((season) => season.ready && season.injury_weeks === 0);
+  const isDisabled = isRunning || isStarting;
   // The server keeps the last import's status for good: an old clean "done" is not news.
   const isNews = prepare !== null && (prepare.status !== 'done' || prepare.error !== null || wasStartedHere);
   return (
@@ -86,8 +90,22 @@ function UnpreparedSeasons({ seasons, prepare, isStarting, wasStartedHere, onPre
           <ul className="replay-prepare__list">
             {waiting.map(({ season }) => (
               <li key={season}>
-                <button type="button" className="btn btn--ghost btn--sm" disabled={isRunning || isStarting} onClick={() => onPrepare(season)}>
+                <button type="button" className="btn btn--ghost btn--sm" disabled={isDisabled} onClick={() => onPrepare(season)}>
                   Prepare {season} data
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {untagged.length > 0 && (
+        <>
+          <p className="hint">Ready to play, but without injury reports. Adding them takes a few seconds.</p>
+          <ul className="replay-prepare__list">
+            {untagged.map(({ season }) => (
+              <li key={season}>
+                <button type="button" className="btn btn--ghost btn--sm" disabled={isDisabled} onClick={() => onPrepare(season)}>
+                  Add {season} injury reports
                 </button>
               </li>
             ))}

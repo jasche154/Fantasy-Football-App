@@ -24,8 +24,11 @@ PLAYER_ROW = {"player", "opponent", "bye", "out", "projection", "points", "ros_p
 WIRE_ROW = PLAYER_ROW | {"status", "owner", "season_points", "last_points"}
 SIDE = {"team_id", "name", "is_user", "projected", "points", "record"}
 RECORD = {"wins", "losses", "ties", "rank", "points_for", "points_against", "place"}
+PLAYER_REF = {"id", "name", "position", "team", "injury"}
 SUMMARY = {"id", "name", "season", "phase", "week", "end_week", "user_team_id", "settings", "teams", "on_the_clock",
-           "next_action", "record", "matchup", "pending", "champion", "updated_at"}
+           "next_action", "record", "matchup", "pending", "champion", "updated_at", "ir_blocked", "has_injuries"}
+SETTING_KEYS = {"teams", "scoring", "starters", "bench", "roster_size", "draft_slot", "waiver_mode", "difficulty",
+                "regular_season_weeks", "playoff_teams", "trade_deadline_week"}
 PAGE = {"total", "limit", "offset", "results"}
 
 
@@ -106,6 +109,11 @@ def test_the_probe_is_live_a_played_week_and_this_weeks_projection_do_show():
 
     assert {"teams", "matchups", "players", "details"} <= set(changed(state, last_week))
     assert {"summary", "teams", "matchups", "scoreboards", "players", "details"} <= set(changed(state, this_week))
+    starter = next(pid for ids in state.results[3].starters[1].values() for pid in ids    # team 1's, week 4
+                   if pid in state.teams[0].roster)
+    tag_now, tag_before = (fakes.tagged(DATA, {(starter, week): fakes.Injury("Q")}) for week in (5, 4))
+    assert {"teams", "players", "details", "activity"} <= set(changed(state, tag_now))
+    assert {"teams", "details"} <= set(changed(state, tag_before)) <= {"teams", "matchups", "details"}
 
 
 def test_a_week_not_reached_yet_cannot_be_opened():
@@ -127,7 +135,9 @@ def test_summary_follows_the_game_from_the_draft_to_the_champion():
     draft, waivers, open_, done = (views.summary(game(state)) for state in (drafting(), at(3, "waivers"), at(3),
                                                                            finished()))
 
-    assert set(draft) == SUMMARY and set(draft["record"]) == RECORD
+    assert set(draft) == SUMMARY and set(draft["record"]) == RECORD and set(open_["settings"]) == SETTING_KEYS
+    assert (draft["ir_blocked"], draft["has_injuries"], open_["ir_blocked"], open_["has_injuries"]) == ([], True,
+                                                                                                       [], True)
     assert (draft["phase"], draft["on_the_clock"], draft["matchup"]) == ("draft", USER, None)
     assert [s["next_action"]["step"] for s in (draft, waivers, open_, done)] == ["pick", "wednesday", "play", "done"]
     assert open_["next_action"]["label"] == "Play week 3" and open_["week"] == 3
@@ -182,9 +192,8 @@ def test_team_lists_starters_in_slot_order_then_the_bench():
     rows = roster["results"]
     starters = [row for row in rows if row["starting"]]
     assert set(roster) == {"team", "week", "played", "manual_lineup", "projected_total", "actual_total", "record",
-                           "results"}
-    assert set(rows[0]) == PLAYER_ROW | {"slot", "starting"} and set(rows[0]["player"]) == {"id", "name", "position",
-                                                                                           "team"}
+                           "results", "ir"} and roster["ir"] == []
+    assert set(rows[0]) == PLAYER_ROW | {"slot", "starting"} and set(rows[0]["player"]) == PLAYER_REF
     assert [row["slot"] for row in starters] == ["QB", "RB", "RB", "WR", "WR", "TE", "FLEX", "K", "DST"]
     assert [row["slot"] for row in rows[9:]] == ["BN"] * 6 and len(rows) == 15
     assert roster["projected_total"] == pytest.approx(sum(row["projection"] for row in starters), abs=0.05)
@@ -384,7 +393,7 @@ def test_player_page_has_his_weeks_so_far_and_who_owns_him():
     assert detail["player"]["owner"]["team_id"] == USER and detail["player"]["status"] == "rostered"
     assert [row["week"] for row in weeks] == [1, 2, 3, 4, 5, 6]
     assert set(weeks[0]) == {"week", "played", "team", "opponent", "bye", "out", "projection", "points", "ros_ppg",
-                             "value", "trade_value", "rank", "pos_rank"}
+                             "value", "trade_value", "rank", "pos_rank", "injury"}
     assert [row["played"] for row in weeks] == [True] * 5 + [False] and weeks[5]["points"] is None
     assert all(row["points"] == DATA.actual.get((owned, row["week"])) for row in weeks[:5])
     assert all(row["projection"] == round(DATA.projection(owned, row["week"]), 2) for row in weeks)
@@ -467,3 +476,94 @@ def test_an_offer_that_cannot_be_judged_gets_a_note_instead_of_a_verdict():
     offer = league.trades(game(lopsided))["offers"][0]
 
     assert offer["verdict"] is None and "roster limit" in offer["note"]
+
+
+# ---------------- injury tags and the IR slot ----------------
+
+def _refs(screen) -> list[dict]:
+    """Every PlayerRef anywhere in a screen."""
+    if isinstance(screen, dict):
+        found = [screen] if set(screen) == PLAYER_REF else []
+        return found + [ref for value in screen.values() for ref in _refs(value)]
+    return [ref for value in screen for ref in _refs(value)] if isinstance(screen, list) else []
+
+
+def _on_ir(state: rs.State, player_id: int) -> rs.State:
+    """The user's `player_id` moved from the active roster to the IR slot (straight on the state)."""
+    owner = rs.user_team(state)
+    return rs.with_team(state, replace(owner, roster=tuple(p for p in owner.roster if p != player_id),
+                                       ir=(player_id,)))
+
+
+def test_the_draft_room_never_shows_a_tag_even_one_known_in_week_one():
+    drafted = [pick.player_id for pick in at(1).picks[:30]]
+    hurt = fakes.tagged(DATA, {(pid, 1): fakes.Injury("IR", None, "Knee") for pid in drafted})
+
+    during, after = views.draft(game(drafting(), hurt), limit=views.MAX_PAGE), views.draft(game(at(1), hurt))
+
+    assert len(_refs(during)) > 100 and len(_refs(after)) >= 180
+    assert all(ref["injury"] is None for ref in _refs(during) + _refs(after))
+    assert any(ref["injury"] == {"tag": "IR", "practice": None, "injury": "Knee"}
+               for team in at(1).teams for ref in _refs(views.team(game(at(1), hurt), team.id)))   # week 1: shown
+
+
+def test_has_injuries_says_whether_any_tag_is_stored_for_the_season():
+    bare = fakes.tagged(DATA, {key: None for key in DATA.injuries})
+
+    assert views.summary(game(at(1)))["has_injuries"] is True             # the first tag is in week 3
+    assert views.summary(game(at(3), bare))["has_injuries"] is False
+
+
+def test_tags_are_this_weeks_on_refs_and_that_weeks_on_a_players_weeks():
+    shown = game(at(11))
+    star = fakes.INJURED_STAR_ID
+
+    weeks = league.player(shown, star)["weeks"]
+    drafted = next(e for e in league.activity(shown, kind="draft", limit=500)["results"]
+                   if e["players"][0]["id"] == star)
+    earlier = next(e for e in league.activity(game(at(7)), kind="draft", limit=500)["results"]
+                   if e["players"][0]["id"] == star)
+
+    assert [row["injury"] and row["injury"]["tag"] for row in weeks] == [None] * 5 + ["O"] * 4 + ["Q", None]
+    assert weeks[5]["injury"] == {"tag": "O", "practice": "DNP", "injury": "Knee"}
+    assert drafted["players"][0]["injury"] is None                         # an old event: today's tag (none)
+    assert earlier["players"][0]["injury"] == {"tag": "O", "practice": "DNP", "injury": "Knee"}
+
+
+def test_an_ir_player_is_listed_apart_this_week_only_and_keeps_his_owner():
+    state = at(7)
+    player = next(pid for pid in rs.user_team(state).roster if (pid, 7) not in DATA.injuries)
+    moved, hurt = _on_ir(state, player), fakes.tagged(DATA, {(player, 7): fakes.Injury("IR", None, "Ankle")})
+
+    now, past = views.team(game(moved, hurt)), views.team(game(moved, hurt), week=6)
+    page = league.player(game(moved, hurt), player)["player"]
+
+    assert [(row["slot"], row["starting"], row["player"]["id"]) for row in now["ir"]] == [("IR", False, player)]
+    assert set(now["ir"][0]) == PLAYER_ROW | {"slot", "starting"} and now["ir"][0]["out"] is True
+    assert now["ir"][0]["player"]["injury"] == {"tag": "IR", "practice": None, "injury": "Ankle"}
+    assert player not in [row["player"]["id"] for row in now["results"]] and len(now["results"]) == 14
+    assert past["ir"] == [] and (page["owner"]["team_id"], page["status"]) == (USER, "rostered")
+    assert league.activity(game(moved), kind="add,drop,ir")["total"] >= 0          # "ir" is a known kind
+
+
+def test_an_ir_player_without_his_tag_blocks_the_user():
+    state = at(7)
+    player = next(pid for pid in rs.user_team(state).roster if (pid, 7) not in DATA.injuries)
+    moved = _on_ir(state, player)
+
+    blocked = views.summary(game(moved))["ir_blocked"]
+    still_hurt = views.summary(game(moved, fakes.tagged(DATA, {(player, 7): fakes.Injury("O")})))["ir_blocked"]
+
+    assert [ref["id"] for ref in blocked] == [player] and set(blocked[0]) == PLAYER_REF
+    assert still_hurt == []
+
+
+def test_an_offer_for_a_player_since_moved_to_ir_says_why_it_cannot_be_accepted():
+    state = at(3)
+    mine, theirs = _swap(state, 9)
+    offered = _on_ir(replay_trades.record_offer(state, 9, USER, theirs, mine, "pending"), mine[0])     # IR-26
+
+    offer = league.trades(game(offered))["offers"][0]
+
+    name = rg.knowledge(state, SETTINGS, DATA).by_id[mine[0]].name
+    assert (offer["verdict"], offer["note"]) == (None, f"On IR, so not tradable until activated: {name}.")

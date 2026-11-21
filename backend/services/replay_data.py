@@ -6,7 +6,9 @@ prepare_season makes one season playable, skipping whatever is already stored (u
 1. game results from nflverse: weekly player stats, schedule, kicker games and team game stats;
 2. the 32 team-defense pseudo-players;
 3. preseason ADP (Fantasy Football Calculator, then MyFantasyLeague for the players it lacks) into replay_adp;
-4. ESPN's and Sleeper's pre-game projections for every regular-season week into replay_projections.
+4. ESPN's and Sleeper's pre-game projections for every regular-season week into replay_projections;
+5. each week's injury tags (official report and roster status, nflverse) into replay_injuries
+   (services/replay_injuries.py), matched after the ADP step because it creates drafted players who never played.
 
 Outside requests go through one polite client (a pause between requests, one retry). Problems are
 reported as exception type names only. Whether a season is ready to play is services/replay_pool's call.
@@ -32,6 +34,7 @@ from integrations.adp_history import PAUSE_SECONDS, AdpEntry, HistoryClient, His
 from integrations.espn_history import WeekProjection
 from integrations.weekly_sources import normalize_team
 from services import replay_pool, system_status
+from services.replay_injuries import load_injuries
 
 log = logging.getLogger(__name__)
 
@@ -299,10 +302,12 @@ def prepare_season(session: Session, season: int, http: httpx.Client | None = No
         run("game_results", lambda: load_game_results(session, season, force))
         summary["defenses"] = ensure_defenses(session)
         if "crosswalk" in summary["errors"]:          # nothing is stored without ids; the next run retries
-            summary["adp"] = summary["projections"] = {"skipped": "player ids not synced"}
+            summary["adp"] = summary["projections"] = summary["injuries"] = {"skipped": "player ids not synced"}
         else:
             run("adp", lambda: load_adp(session, season, client, force))
             run("projections", lambda: load_projections(session, season, client, force))
+            # Reloaded whenever ADP was: that step may have created players the tags must be matched to.
+            run("injuries", lambda: load_injuries(session, season, force or not summary["adp"].get("skipped")))
     finally:
         client.close()
         replay_pool.clear_cache()           # a season loaded before this import is read again

@@ -21,11 +21,11 @@ from sqlalchemy import insert
 from sqlalchemy.orm import Session
 
 from database.models import (
-    KickerGame, NflGame, Player, PlayerStatsWeekly, ReplayAdp, ReplayProjection, TeamGameStats,
+    KickerGame, NflGame, Player, PlayerStatsWeekly, ReplayAdp, ReplayInjury, ReplayProjection, TeamGameStats,
 )
 from services import replay_values
 from services.kdst_rankings import DST_PREFIX, TEAM_NAMES
-from services.replay_pool import ALL_POSITIONS, SKILL, PoolPlayer, SeasonData
+from services.replay_pool import ALL_POSITIONS, SKILL, Injury, PoolPlayer, SeasonData  # noqa: F401 (Injury re-exported)
 from services.replay_state import Pick, Settings, State, Team, round_robin
 from services.schedule_strength import Game, Schedule
 from services.scoring import POINTS_PER_RECEPTION
@@ -60,6 +60,11 @@ NEVER_PLAYED_ID = player_id("WR", 30)   # drafted mid-round on his ADP; no game 
 EVERY_WEEK = tuple(range(1, 19))
 STORY_IDS = frozenset({BREAKOUT_ID, BUST_ID, INJURED_STAR_ID, TRADED_ID, NEVER_PLAYED_ID})
 KICKER_CHANGES = ((31, 33, 9), (32, 34, 11))     # (starter rank, replacement rank, replacement's first week)
+IR_KICKER_ID = player_id("K", 31)       # replaced from week 9 and tagged IR from then on
+IR_KICKER_WEEK = 9
+QUESTIONABLE = (BREAKOUT_ID, 3)         # tagged Q with a projection: plays (information only)
+DOUBTFUL = (TRADED_ID, 4)               # tagged D with a projection: plays (information only)
+STAR_BACK_WEEK = 10                     # INJURED_STAR_ID is tagged O in INJURED_WEEKS, then Q this week
 SCORING_SHIFT = {"ppr": 2.0, "half": 1.0, "std": 0.0}        # seed_db: skill projections differ by format
 SLEEPER_DECOY = 1.5                     # seed_db: Sleeper's number where ESPN also has one
 
@@ -215,9 +220,20 @@ def _season(season: int, scoring: str, seed: int, weeks: int) -> SeasonData:
         for week, _ in games:
             projected[(spec.player_id, week)] = _projection(spec, week, noise[row, week - 1])
             actual[(spec.player_id, week)] = _points(spec, luck[row, week - 1], bounce[row, week - 1])
+    injuries = {key: tag for key, tag in _story_tags(weeks).items() if key[1] <= weeks and key[0] in players}
     return SeasonData(season=season, scoring=scoring, players=MappingProxyType(players), schedule=schedule,
                       actual=MappingProxyType(actual), projected=MappingProxyType(projected),
-                      team_by_week=MappingProxyType(team_by_week), last_week=weeks)
+                      team_by_week=MappingProxyType(team_by_week), last_week=weeks,
+                      injuries=MappingProxyType(injuries))
+
+
+def _story_tags(weeks: int) -> dict[tuple[int, int], Injury]:
+    """The scripted tags (spec 3.6); no projection or real point depends on them."""
+    star_out = Injury("O", "DNP", "Knee")
+    return {QUESTIONABLE: Injury("Q", "LP", "Hamstring"), DOUBTFUL: Injury("D", "DNP", "Ankle"),
+            **{(INJURED_STAR_ID, week): star_out for week in INJURED_WEEKS},
+            (INJURED_STAR_ID, STAR_BACK_WEEK): Injury("Q", "LP", "Knee"),
+            **{(IR_KICKER_ID, week): Injury("IR", None, "Groin") for week in range(IR_KICKER_WEEK, weeks + 1)}}
 
 
 def fake_season(season: int = SEASON, scoring: str = "half", seed: int = 0, weeks: int = 17) -> SeasonData:
@@ -279,16 +295,25 @@ def patched(data: SeasonData, projected: Mapping[tuple[int, int], float | None] 
     return replace(data, projected=_overlaid(data.projected, projected), actual=_overlaid(data.actual, actual))
 
 
+def tagged(data: SeasonData, injuries: Mapping[tuple[int, int], Injury | None]) -> SeasonData:
+    """A copy with some (player_id, week) injury tags replaced; None removes the tag."""
+    return replace(data, injuries=_overlaid(data.injuries, injuries))
+
+
 def future_changed(data: SeasonData, after_week: int, seed: int = 1) -> SeasonData:
-    """A copy whose real points and projections for every week after `after_week` are different
-    (about one projection in ten disappears), and identical up to it: the no-hindsight probe."""
+    """A copy whose real points, projections and injury tags for every week after `after_week` are different
+    (about one projection in ten disappears; every later tag is removed and BREAKOUT_ID and BUST_ID are on IR),
+    and identical up to it: the no-hindsight probe."""
     rng = np.random.default_rng(seed)
 
     def shaken(table: Mapping[tuple[int, int], float], drop: float) -> dict[tuple[int, int], float | None]:
         return {key: None if rng.random() < drop else round(abs(value) * rng.uniform(1.0, 2.5) + 1.0, 1)
                 for key, value in table.items() if key[1] > after_week}      # always above the old number
 
-    return patched(data, projected=shaken(data.projected, 0.1), actual=shaken(data.actual, 0.0))
+    later = range(after_week + 1, data.last_week + 1)
+    tags = {**{key: None for key in data.injuries if key[1] > after_week},
+            **{(pid, week): Injury("IR") for pid in (BREAKOUT_ID, BUST_ID) for week in later}}
+    return tagged(patched(data, projected=shaken(data.projected, 0.1), actual=shaken(data.actual, 0.0)), tags)
 
 
 # ---------------- writing a season into the real tables ----------------
@@ -376,12 +401,15 @@ def seed_db(session: Session, data: SeasonData) -> None:
     """Write the season into the real tables (players keep their fake ids) and commit.
 
     Afterwards `replay_pool.load_season_data(session, data.season, data.scoring)` returns the same pool,
-    points, projections, teams and schedule. K and DST points must be whole numbers (DST -4 or more)."""
+    points, projections, injury tags, teams and schedule. K and DST points must be whole numbers (DST -4 or more)."""
     tables = {Player: _player_rows(data), NflGame: _game_rows(data), **_result_rows(data),
               ReplayAdp: [{"season": data.season, "player_id": pid, "adp": p.adp, "stdev": p.adp_stdev,
                            "source": "ffc", "team": p.adp_team}
                           for pid, p in data.players.items() if p.adp is not None],
-              ReplayProjection: _projection_rows(data)}
+              ReplayProjection: _projection_rows(data),
+              ReplayInjury: [{"season": data.season, "week": week, "player_id": pid, "tag": tag.tag,
+                              "practice": tag.practice, "injury": tag.injury}
+                             for (pid, week), tag in data.injuries.items()]}
     for model, rows in tables.items():
         if rows:
             session.execute(insert(model), rows)

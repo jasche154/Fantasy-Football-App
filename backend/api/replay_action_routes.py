@@ -35,6 +35,12 @@ class ClaimBody(BaseModel):
     drop: int | None = Field(None, ge=1)
 
 
+class ActivateBody(BaseModel):
+    player_id: int = PlayerId
+    drop: int | None = Field(None, ge=1)
+    swap: int | None = Field(None, ge=1)            # an injured active player who takes the IR slot instead
+
+
 class ReorderBody(BaseModel):
     ids: list[int] = Field(..., max_length=100)
 
@@ -107,6 +113,20 @@ def add_drop(game_id: GameId, body: ClaimBody, session: Session = Depends(get_se
 def drop(game_id: GameId, body: PickBody, session: Session = Depends(get_session)) -> dict:
     with turn(session, game_id) as t:
         return t.done(rg.drop(*t.args, body.player_id))
+
+
+@router.post("/ir/place")
+def ir_place(game_id: GameId, body: PickBody, session: Session = Depends(get_session)) -> dict:
+    """Move a player tagged O, IR or PUP this week to the team's IR slot."""
+    with turn(session, game_id) as t:
+        return t.done(rg.ir_place(*t.args, body.player_id))
+
+
+@router.post("/ir/activate")
+def ir_activate(game_id: GameId, body: ActivateBody, session: Session = Depends(get_session)) -> dict:
+    """Bring a player back from IR, dropping `drop` when the roster is full or moving `swap` to IR instead."""
+    with turn(session, game_id) as t:
+        return t.done(rg.ir_activate(*t.args, body.player_id, body.drop, body.swap))
 
 
 @router.post("/advance")

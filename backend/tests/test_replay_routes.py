@@ -369,7 +369,8 @@ def test_unknown_games_players_and_teams_are_reported(client, story):
         assert refused(client, "/games/999999" + path, method="GET") == (404, "No replay league 999999.")
     for path, body in (("/draft/pick", {"player_id": 1}), ("/draft/auto", None), ("/lineup", {"starters": None}),
                        ("/claims", {"add": 1}), ("/claims/1/cancel", None), ("/claims/reorder", {"ids": []}),
-                       ("/add-drop", {"add": 1}), ("/drop", {"player_id": 1}),
+                       ("/add-drop", {"add": 1}), ("/drop", {"player_id": 1}), ("/ir/place", {"player_id": 1}),
+                       ("/ir/activate", {"player_id": 1}),
                        ("/advance", {"step": "play", "week": 1}),
                        ("/trades/evaluate", {"to_team": 1, "give": [1], "get": [2]}),
                        ("/trades/propose", {"to_team": 1, "give": [1], "get": [2]}),
@@ -459,6 +460,49 @@ def test_two_requests_cannot_play_the_same_week_twice(tmp_path_factory):
                                              + after["record"]["ties"]) == (2, 1)
 
 
+def test_players_go_on_ir_and_come_back_through_the_api(client, tmp_path_factory):
+    """The same league on a season where two of the user's bench players are tagged Out in week 1."""
+    rows = get(client, _idle_to(client, 1) + "/team")["results"]
+    first, second = [row["player"] for row in rows if row["slot"] == "BN" and row["player"]["position"] in SKILL][:2]
+    kicker = next(row["player"] for row in rows if row["slot"] == "K")
+    hurt = fakes.tagged(DATA, {(p["id"], 1): fakes.Injury("O", "DNP", "Knee") for p in (first, second)})
+    url = f"sqlite:///{(tmp_path_factory.mktemp('replay') / 'ir.db').as_posix()}"
+
+    for tagged in _client(hurt, url):
+        game = _idle_to(tagged, 1)
+        size = get(tagged, game)["settings"]["roster_size"]
+        placed = post(tagged, game + "/ir/place", {"player_id": first["id"]})
+        on_ir = get(tagged, game + "/team")
+        taken = refused(tagged, game + "/ir/place", {"player_id": second["id"]})
+        healthy = refused(tagged, game + "/ir/place", {"player_id": kicker["id"]})
+        swapped = post(tagged, game + "/ir/activate", {"player_id": first["id"], "swap": second["id"]})
+        free = get(tagged, game + "/players", position="K", status="free_agent", limit=1)["results"][0]["player"]
+        post(tagged, game + "/add-drop", {"add": free["id"]})
+        full = refused(tagged, game + "/ir/activate", {"player_id": second["id"]})
+        activated = post(tagged, game + "/ir/activate", {"player_id": second["id"], "drop": free["id"]})
+        moves = get(tagged, game + "/activity", kind="ir")
+        bad = [refused(tagged, game + path, body)[0] for path, body in (
+            ("/ir/place", {}), ("/ir/place", {"player_id": 0}), ("/ir/activate", {"player_id": 1, "drop": 0}),
+            ("/ir/activate", {"player_id": 1, "swap": 0}))]
+        after = get(tagged, game + "/team")
+
+    tag = {"tag": "O", "practice": "DNP", "injury": "Knee"}
+    assert set(placed) == {"game", "events"} and [e["kind"] for e in placed["events"]] == ["ir"]
+    assert placed["events"][0]["text"] == f"Your Team moved {first['name']} to IR"
+    assert placed["events"][0]["players"] == [{**first, "injury": tag}] and placed["game"]["ir_blocked"] == []
+    assert [row["player"]["id"] for row in on_ir["ir"]] == [first["id"]] and len(on_ir["results"]) == size - 1
+    assert taken == (422, f"Your Team's IR slot is taken by {first['name']}: activate or drop him first.")
+    assert healthy == (422, f"{kicker['name']} can't go on IR: only a player tagged O, IR or PUP this week can.")
+    assert [e["kind"] for e in swapped["events"]] == ["ir"]
+    assert [p["id"] for p in swapped["events"][0]["players"]] == [first["id"], second["id"]]
+    assert swapped["events"][0]["text"] == f"Your Team activated {first['name']} from IR and moved {second['name']} to IR"
+    assert full == (422, f"The roster is full ({size} players): pick a player to drop to activate {second['name']}.")
+    assert [e["kind"] for e in activated["events"]] == ["drop", "ir"]
+    assert [p["id"] for p in activated["events"][1]["players"]] == [second["id"], free["id"]]
+    assert moves["total"] == 3 and {e["kind"] for e in moves["results"]} == {"ir"}
+    assert bad == [422] * 4 and after["ir"] == [] and len(after["results"]) == size
+
+
 # ---------------- no future information ----------------
 
 def _idle_to(client: TestClient, week: int) -> str:
@@ -490,6 +534,7 @@ def test_responses_before_a_week_show_none_of_its_real_points(story):
     rows = [row for name, screen in snapshot.items() if name.startswith("team") for row in screen["results"]]
     rows += snapshot["players"]["results"] + snapshot["matchup"]["home"]["results"]
     assert len(rows) > 500 and all(row["points"] is None for row in rows)
+    assert all(row["player"]["injury"] == _tag(row["player"]["id"], LEAK_WEEK) for row in rows)   # this week's tag
     for row in snapshot["players"]["results"]:
         pid = row["player"]["id"]
         so_far = [DATA.actual[(pid, week)] for week in range(1, LEAK_WEEK) if (pid, week) in DATA.actual]
@@ -500,6 +545,16 @@ def test_responses_before_a_week_show_none_of_its_real_points(story):
     for detail in pages:
         assert [week["week"] for week in detail["weeks"]] == list(range(1, LEAK_WEEK + 1))
         assert detail["weeks"][-1]["played"] is False and detail["weeks"][-1]["points"] is None
+        assert [week["injury"] for week in detail["weeks"]] == [_tag(detail["player"]["player"]["id"], week)
+                                                                for week in range(1, LEAK_WEEK + 1)]
+    traded, breakout = (snapshot[f"player {pid}"] for pid in (fakes.TRADED_ID, fakes.BREAKOUT_ID))
+    assert (traded["player"]["player"]["injury"]["tag"], breakout["weeks"][2]["injury"]["tag"]) == ("D", "Q")
+
+
+def _tag(player_id: int, week: int) -> dict | None:
+    """The fake season's tag as the API shows it."""
+    tag = DATA.injuries.get((player_id, week))
+    return tag and {"tag": tag.tag, "practice": tag.practice, "injury": tag.injury}
 
 
 def test_responses_are_identical_when_the_unplayed_weeks_are_different(client, story, tmp_path_factory):
@@ -546,7 +601,7 @@ def test_prepare_runs_in_the_background_and_reports_its_status(client, story, mo
 
 def test_a_prepared_season_is_read_again(monkeypatch):
     cleared = []
-    for step in ("load_game_results", "load_adp", "load_projections"):
+    for step in ("load_game_results", "load_adp", "load_projections", "load_injuries"):
         monkeypatch.setattr(replay_data, step, lambda *args, **kwargs: {})
     monkeypatch.setattr(replay_data, "ensure_defenses", lambda session: 32)
     monkeypatch.setattr(replay_pool, "clear_cache", lambda: cleared.append(True))

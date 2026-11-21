@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from database.models import KickerGame, NflGame, Player, PlayerStatsWeekly, ReplayAdp, ReplayProjection, TeamGameStats
 from integrations import adp_history, espn_history, sleeper_projections
 from integrations.adp_history import AdpEntry, HistoryClient, HistoryError, SeasonMatcher
-from services import replay_data, replay_pool
+from services import replay_data, replay_injuries, replay_pool
 from tests import replay_fakes as fakes
 
 SEASON = 2019
@@ -32,6 +32,13 @@ MFL_PLAYERS = {"players": {"player": [
     {"id": "300", "name": "Kuechly, Luke", "position": "LB", "team": "CAR"},
     {"id": "400", "name": "Zuerlein, Greg", "position": "PK", "team": "LAR", "espn_id": "14993"}]}}
 CROSSWALK = {"100": "00-CMC", "200": "00-HURT"}
+# Stands in for nflverse: McCaffrey questionable in week 2; the rookie the ADP step creates is on IR in week 1.
+INJURY_REPORTS = [{"season": SEASON, "week": 2, "game_type": "REG", "gsis_id": "00-CMC", "team": "KC",
+                   "report_status": "Questionable", "practice_status": "Limited Participation in Practice",
+                   "report_primary_injury": "Ankle", "practice_primary_injury": None}]
+INJURY_ROSTERS = [{"season": SEASON, "week": 1, "game_type": "REG", "gsis_id": "00-HURT", "team": "KC",
+                   "status": "RES", "status_description_abbr": "R01"}]
+DOWNLOADS: list[int] = []
 
 
 def espn_player(player_id: int, name: str, position_id: int, stats: dict | None = None, applied: float = 0.0,
@@ -117,6 +124,9 @@ def db(engine, monkeypatch):
     """An empty database with one small 2019 season: four players, two weeks of games, all 32 defenses."""
     monkeypatch.setattr(replay_data, "PAUSE_SECONDS", 0.0)
     monkeypatch.setattr(replay_data, "mfl_crosswalk", lambda: dict(CROSSWALK))
+    monkeypatch.setattr(replay_injuries, "download", lambda season: (
+        DOWNLOADS.append(season) or (list(INJURY_REPORTS), list(INJURY_ROSTERS))))
+    DOWNLOADS.clear()
     with Session(engine) as session:
         players = [Player(gsis_id="00-CMC", full_name="Christian McCaffrey", position="RB", espn_player_id="3117251",
                           sleeper_player_id="4034"),
@@ -486,10 +496,32 @@ def test_prepare_season_runs_every_step_and_a_second_run_makes_no_requests(db, l
     summary = replay_data.prepare_season(db, SEASON, http=sites.client(), on_step=steps.append)
     again = replay_data.prepare_season(db, SEASON, http=sites.client())
 
-    assert steps == ["game_results", "adp", "projections"] and loaders == ["crosswalk", "crosswalk"]
+    assert steps == ["game_results", "adp", "projections", "injuries"] and loaders == ["crosswalk", "crosswalk"]
     assert summary["errors"] == {} and summary["requests"] == 7 and summary["defenses"] == 32
     assert summary["adp"]["rows"] == 7 and summary["projections"]["weeks"] == 2
+    assert summary["injuries"] == {"rows": 2, "weeks": 2, "tags": {"IR": 1, "Q": 1}}   # the rookie is matched
     assert again["requests"] == 0 and again["adp"] == {"rows": 7, "skipped": True}
+    assert again["injuries"] == {"rows": 2, "skipped": True} and DOWNLOADS == [SEASON]
+    assert replay_pool.readiness(db, SEASON)["injury_weeks"] == 2
+
+
+def test_prepare_season_reloads_tags_whenever_adp_was_loaded_and_skips_them_without_player_ids(db, loaders,
+                                                                                               monkeypatch):
+    from database import populate_stats as ps
+
+    for week in (1, 2):
+        db.add(team_game(SEASON, week))
+    db.commit()
+    replay_data.prepare_season(db, SEASON, http=Sites().client())
+    db.execute(replay_data.delete(ReplayAdp))                  # ADP gone: the next run loads it and the tags again
+    db.commit()
+
+    reloaded = replay_data.prepare_season(db, SEASON, http=Sites().client())
+    monkeypatch.setattr(ps, "sync_crosswalk", lambda session, index: 1 / 0)
+    unsynced = replay_data.prepare_season(db, SEASON, http=Sites().client())
+
+    assert reloaded["injuries"]["rows"] == 2 and DOWNLOADS == [SEASON, SEASON]
+    assert unsynced["injuries"] == {"skipped": "player ids not synced"} and DOWNLOADS == [SEASON, SEASON]
 
 
 def test_prepare_season_reports_a_missing_ffc_season_by_error_type_and_still_loads_projections(db, loaders):

@@ -1,5 +1,6 @@
 """Replay League values: point-in-time knowledge, and that the app's lineup and trade engines run on it."""
 import time
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -577,3 +578,102 @@ def test_lineup_helpers_reject_unknown_players():
     with pytest.raises(ValueError):
         rv.lineup_points(know, [999_999])
     assert rv.best_lineup(know, [], fakes.fake_settings()) == {} and rv.lineup_points(know, []) == 0.0
+
+
+# ---------------- injury tags (spec section 4) ----------------
+
+RB1 = fakes.player_id("RB", 1)          # projected every week 1-7 (bye in week 12)
+
+
+def tag_rb1(tag: str, *weeks: int, data=None):
+    return fakes.tagged(data or fakes.fake_season(), {(RB1, week): fakes.Injury(tag) for week in weeks})
+
+
+def test_a_value_carries_this_weeks_tag_and_none_at_the_draft():
+    assert all(v.injury is None for v in know_at(0).values)
+    assert know_at(5).by_id[fakes.INJURED_STAR_ID].injury is None
+    assert know_at(6).by_id[fakes.INJURED_STAR_ID].injury == fakes.Injury("O", "DNP", "Knee")
+    assert know_at(fakes.STAR_BACK_WEEK).by_id[fakes.INJURED_STAR_ID].injury == fakes.Injury("Q", "LP", "Knee")
+    assert know_at(fakes.IR_KICKER_WEEK).by_id[fakes.IR_KICKER_ID].injury.tag == "IR"
+
+
+def test_a_hard_tag_hides_that_weeks_projection_and_makes_him_out():
+    base, hurt = know_at(3).by_id[RB1], know_at(3, tag_rb1("O", 3)).by_id[RB1]
+
+    assert base.projection == 17.5 and not base.out
+    assert hurt.projection == 0.0 and hurt.out
+    assert hurt.last_projection == 18.3 and hurt.ros_ppg != base.ros_ppg       # week 3 feeds neither
+
+
+def test_the_out_streak_counts_a_hard_tagged_week():
+    no_week_4 = fakes.patched(fakes.fake_season(), projected={(RB1, 4): None})
+    untagged, tagged = know_at(4, no_week_4).by_id[RB1], know_at(4, tag_rb1("SUS", 3, data=no_week_4)).by_id[RB1]
+
+    assert untagged.availability == round(1 - rv.OUT_SHARE[1], 3)
+    assert tagged.availability == round(1 - rv.OUT_SHARE[2], 3)
+    assert tagged.injury is None and tagged.out                     # no tag this week: out by the streak alone
+
+
+def test_the_preseason_curve_never_depends_on_tags():
+    data = tag_rb1("IR", 1)
+    assert know_at(0, data).values == know_at(0).values
+    assert know_at(1, data).by_id[RB1].projection == 0.0
+
+
+def test_questionable_and_doubtful_change_nothing_but_the_tag():
+    top = [v.player_id for v in know_at(3).values[:60]]
+    data = fakes.tagged(fakes.fake_season(), {(pid, 3): fakes.Injury("Q" if i % 2 else "D", "LP", "Knee")
+                                              for i, pid in enumerate(top)})
+    base, tagged = know_at(3), know_at(3, data)
+
+    assert [replace(v, injury=None) for v in tagged.values] == [replace(v, injury=None) for v in base.values]
+    assert all(tagged.by_id[pid].injury.tag in ("Q", "D") for pid in top)
+    roster = top[:15]
+    assert rv.best_lineup(tagged, roster, fakes.fake_settings()) == rv.best_lineup(base, roster, fakes.fake_settings())
+
+
+@pytest.mark.parametrize("tag, floored", [("IR", True), ("PUP", True), ("O", False), ("SUS", False)])
+def test_ir_and_pup_expect_him_to_miss_at_least_80_percent_of_his_games(tag, floored):
+    value = know_at(3, tag_rb1(tag, 3)).by_id[RB1]
+    share = rv.IR_OUT_SHARE if floored else rv.OUT_SHARE[1]
+
+    assert value.availability == round(1 - share, 3)
+    assert value.expected_missed == round(value.games_left * share, 2)
+    assert value.trade_value == pytest.approx(value.healthy_value * value.availability, abs=0.15)
+
+
+def test_the_ir_floor_moves_only_the_ir_kicker_in_the_base_season():
+    kicker, data = fakes.IR_KICKER_ID, fakes.fake_season()
+    untagged = fakes.tagged(data, {key: None for key in data.injuries if key[0] == kicker})
+    floor = round(1 - rv.IR_OUT_SHARE, 3)
+    for week in range(fakes.IR_KICKER_WEEK, data.last_week + 1):
+        tagged, plain = know_at(week).by_id[kicker], know_at(week, untagged).by_id[kicker]
+        assert tagged.availability == min(floor, plain.availability)      # a longer streak's share still wins
+        assert tagged.market_value == plain.market_value                  # a kicker stays at the roster-spot floor
+        assert replace(tagged, injury=None, availability=0, expected_missed=0) == replace(
+            plain, availability=0, expected_missed=0)
+    assert know_at(9, untagged).by_id[kicker].availability == round(1 - rv.OUT_SHARE[1], 3) > floor
+
+
+def test_a_hard_tag_carried_over_his_bye_shows_and_he_stays_out():
+    data = tag_rb1("IR", 11, 12)
+    value = know_at(12, data).by_id[RB1]
+
+    assert fakes.fake_season().on_bye(RB1, 12)
+    assert value.injury == fakes.Injury("IR") and value.projection == 0.0 and value.out
+    assert not know_at(12).by_id[RB1].out                          # untagged, a bye alone is not out
+
+
+def test_a_hard_tagged_starter_is_benched_by_the_best_lineup():
+    know = know_at(3, tag_rb1("O", 3))
+    backs = [RB1, fakes.player_id("RB", 2), fakes.player_id("RB", 5)]
+
+    assert RB1 not in rv.best_lineup(know, backs, fakes.fake_settings())["RB"]
+
+
+def test_a_hard_tag_alone_makes_a_player_without_a_prior_out():
+    backup, first_week = fakes.player_id("K", fakes.KICKER_CHANGES[0][1]), fakes.KICKER_CHANGES[0][2]
+    hurt = know_at(first_week, fakes.tagged(fakes.fake_season(), {(backup, first_week): fakes.Injury("SUS")}))
+
+    assert hurt.by_id[backup].out and hurt.by_id[backup].projection == 0.0    # no prior, so no out streak: the tag says so
+    assert rv.IR_OUT_SHARE == 0.80

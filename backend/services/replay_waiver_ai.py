@@ -15,14 +15,18 @@ numbers for the current week), so no CPU ever sees a result or a projection from
   another one.
 - No add takes a CPU over its positional limit (`replay_values.crowded`: 2 QB, 2 TE, 1 K, 1 DST, 6 RB,
   7 WR) unless nobody it has there plays this week, and it lets the extra one go again afterwards.
+- `cpu_ir` (before claims and free agency): a CPU brings back an IR player who lost his tag (into an open
+  spot, swapping in an eligible player worth keeping, or cutting one it can spare, maybe him), then puts its
+  best eligible player worth keeping on IR. Size and this week's lineup read the active roster only; season
+  points and positional limits also count the IR player (`_Context.stash`): he is coming back.
 
 There is no dice roll: ties go to the better-ranked player, so the same state gives the same moves.
 """
 from collections import Counter
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
-from services import lineup_gain, replay_state as rs, replay_values as rv, replay_waivers
+from services import lineup_gain, replay_ir, replay_state as rs, replay_values as rv, replay_waivers
 from services.replay_pool import SKILL
 from services.replay_state import Claim, Settings, State
 from services.replay_values import Knowledge, ReplayValue
@@ -51,6 +55,11 @@ class _Context:
     projector: lineup_gain.Projector
     protected: frozenset[int]     # the league's top players by healthy value
     claim_gain: float             # the season-weighted gain a claim needs
+    stash: tuple[ReplayValue, ...] = ()     # the IR players of the team being planned for
+
+
+def _for_team(ctx: _Context, team: rs.Team) -> _Context:
+    return replace(ctx, stash=tuple(ctx.know.by_id[pid] for pid in team.ir))
 
 
 def _context(know: Knowledge, settings: Settings) -> _Context:
@@ -103,7 +112,8 @@ def _legal_drops(roster: Sequence[ReplayValue], add: ReplayValue, drops: Sequenc
     def allowed(out: ReplayValue) -> bool:
         left = [v for v in roster if v is not out]
         return (rv.can_field_lineup([*(v.position for v in left), add.position], ctx.settings)
-                and (out.position == add.position or not rv.crowded(left, [add], add.position, ctx.settings)))
+                and (out.position == add.position
+                     or not rv.crowded([*left, *ctx.stash], [add], add.position, ctx.settings)))
 
     return [out for out in drops if allowed(out)]
 
@@ -148,8 +158,8 @@ def _best_add(roster: Sequence[ReplayValue], pool: Sequence[ReplayValue], ctx: _
     drops = droppable(roster, ctx.know, ctx.protected) if full else []
     if full and not drops:
         return None
-    league = ctx.know.league
-    base, bars = _bars(roster, ctx)
+    league, owned = ctx.know.league, [*roster, *ctx.stash]      # value and limits count the IR player
+    base, bars = _bars(owned, ctx)
     weakest = min((v.ros_ppg for v in drops), default=0.0)
     best = None
     ceilings = sorted(((_ceiling(add, bars, ctx), order, add) for order, add in enumerate(pool)),
@@ -159,10 +169,10 @@ def _best_add(roster: Sequence[ReplayValue], pool: Sequence[ReplayValue], ctx: _
             break                                     # nobody further down the list can do better
         if full and max(add.ros_ppg, add.projection) <= weakest:
             continue
-        if not full and rv.crowded(roster, [add], add.position, ctx.settings):
+        if not full and rv.crowded(owned, [add], add.position, ctx.settings):
             continue
         # Without a drop the gain can only be higher, so this one sum rules out most of the rest.
-        gain = round(lineup_gain.season_points([*roster, add], ctx.horizon, ctx.projector, league) - base, 2)
+        gain = round(lineup_gain.season_points([*owned, add], ctx.horizon, ctx.projector, league) - base, 2)
         if gain <= needed:
             continue
         out = None
@@ -170,7 +180,7 @@ def _best_add(roster: Sequence[ReplayValue], pool: Sequence[ReplayValue], ctx: _
             legal = _legal_drops(roster, add, drops, ctx)
             if not legal:
                 continue
-            gain, out = lineup_gain.best_add(roster, legal, add, ctx.horizon, ctx.projector, league)
+            gain, out = lineup_gain.best_add(owned, legal, add, ctx.horizon, ctx.projector, league)
         if gain > needed and (best is None or gain > best[0]):
             best = (gain, add, out)
     return best
@@ -203,7 +213,7 @@ def cpu_claims(state: State, settings: Settings, know: Knowledge, seed: int) -> 
     for team in state.teams:
         if team.is_user:
             continue
-        moves = _plan_claims([know.by_id[pid] for pid in team.roster], pool, ctx)
+        moves = _plan_claims([know.by_id[pid] for pid in team.roster], pool, _for_team(ctx, team))
         if moves:
             claims[team.id] = [Claim(next_id + n, team.id, add, out) for n, (add, out) in enumerate(moves)]
             next_id += len(moves)
@@ -242,6 +252,8 @@ def _cover(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: _Con
             if own:
                 return add.player_id, own.player_id
             if len(roster) < ctx.settings.roster_size:
+                # Not counting ctx.stash here: this slot has nobody who plays, and an IR player there would use
+                # up crowded's allowance for it (two QBs on bye and one on IR would leave the slot empty).
                 if rv.crowded(roster, [add], add.position, ctx.settings):
                     continue
                 return add.player_id, None
@@ -261,7 +273,8 @@ def _fill_spot(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: 
     needs = [v for v in free if rv.lineup_holes([*positions, v.position], ctx.settings) < holes]
     if needs:
         return _top(needs).player_id, None
-    pool = [v for v in candidates(ctx.know, free) if not rv.crowded(roster, [v], v.position, ctx.settings)]
+    pool = [v for v in candidates(ctx.know, free)
+            if not rv.crowded([*roster, *ctx.stash], [v], v.position, ctx.settings)]
     best = _best_add(roster, pool, ctx, MIN_FILL_GAIN)
     add = best[1] if best else next(iter(pool), None)       # nobody helps the lineup: the most valuable
     return (add.player_id, None) if add else None
@@ -272,7 +285,7 @@ def _trim(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: _Cont
     spare at an over-full position goes (never one a starting slot needs this week) for whoever fills the
     open spot best, as long as that is no step down in value."""
     idle = len(rv.idle_slots(ctx.know, [v.player_id for v in roster], ctx.settings))
-    held = Counter(v.position for v in roster)
+    held = Counter(v.position for v in (*roster, *ctx.stash))
     for out in _spare(roster, ctx.know, ctx.protected):
         left = [v for v in roster if v is not out]
         if (held[out.position] > rv.position_cap(out.position, ctx.settings)
@@ -299,7 +312,8 @@ def _stream(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: _Co
 
 
 def _next_move(state: State, team_id: int, ctx: _Context, made: int) -> Move | None:
-    roster = [ctx.know.by_id[pid] for pid in rs.team(state, team_id).roster]
+    team = rs.team(state, team_id)
+    roster, ctx = [ctx.know.by_id[pid] for pid in team.roster], _for_team(ctx, team)
     free = _unrostered(state, ctx.know, state.locked)
     steps = (_cover, _fill_spot, _trim, _stream) if made < MAX_FREE_AGENT_MOVES else (_cover,)
     return next((move for step in steps if (move := step(roster, free, ctx)) is not None), None)
@@ -313,9 +327,57 @@ def cpu_free_agency(state: State, settings: Settings, know: Knowledge, seed: int
     ctx = _context(know, settings)
     cpus = [team_id for team_id in state.waiver_order if not rs.team(state, team_id).is_user]
     for team_id in cpus:
+        if replay_ir.blocked_reason(state, know, team_id):            # execute_move would refuse every add
+            continue
         for made in range(sum(settings.starters.values())):           # one per starting slot at the very most
             move = _next_move(state, team_id, ctx, made)
             if move is None:
                 break
             state = replay_waivers.execute_move(state, settings, know, team_id, *move)
+    return state
+
+
+# ---------------- the IR slot ----------------
+
+def _stash_pick(roster: Sequence[ReplayValue], ctx: _Context) -> ReplayValue | None:
+    """The best eligible skill player the team would never spare (top player, or above replacement)."""
+    keep = [v for v in roster if v.position in SKILL and replay_ir.eligible(ctx.know, v.player_id)
+            and (v.player_id in ctx.protected or v.last_projection > ctx.know.replacement[v.position])]
+    return max(keep, key=lambda v: (v.healthy_value, v.ros_ppg, -v.player_id), default=None)
+
+
+def _bring_back(state: State, ctx: _Context, team: rs.Team, player_id: int) -> State:
+    """IR-18: an IR player who lost his tag comes back into an open spot, swapped for an eligible player
+    worth keeping, or for the least valuable player it can spare (maybe himself). Else it stays blocked."""
+    settings, know = ctx.settings, ctx.know
+    if len(team.roster) < settings.roster_size:
+        return replay_ir.activate(state, settings, know, team.id, player_id)
+    roster = [know.by_id[pid] for pid in team.roster]
+    pick = _stash_pick(roster, ctx)
+    if pick is not None:
+        return replay_ir.activate(state, settings, know, team.id, player_id, swap=pick.player_id)
+    group = [*roster, know.by_id[player_id]]
+    for cut in _spare(group, know, ctx.protected):
+        if rv.can_field_lineup([v.position for v in group if v is not cut], settings):
+            if cut.player_id == player_id:
+                return rs.release(state, settings, team.id, player_id, cut.name)
+            return replay_ir.activate(state, settings, know, team.id, player_id, drop=cut.player_id)
+    return state
+
+
+def cpu_ir(state: State, settings: Settings, know: Knowledge, seed: int) -> State:
+    """Every CPU's IR moves for this week, in waiver-priority order: at most one activation (IR-18) and then
+    one placement into an empty slot (IR-19). Never the user's team; a second call changes nothing. `seed`
+    is unused (no randomness)."""
+    ctx = _context(know, settings)
+    for team_id in state.waiver_order:
+        if rs.team(state, team_id).is_user:
+            continue
+        stuck = replay_ir.ineligible(state, know, team_id)
+        if stuck:
+            state = _bring_back(state, ctx, rs.team(state, team_id), stuck[0])
+        team = rs.team(state, team_id)
+        pick = None if team.ir else _stash_pick([know.by_id[pid] for pid in team.roster], ctx)
+        if pick is not None:
+            state = replay_ir.place(state, know, team_id, pick.player_id)
     return state

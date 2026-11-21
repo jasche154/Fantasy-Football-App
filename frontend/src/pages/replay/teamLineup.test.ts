@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { COOK, KELCE, MAHOMES, NACUA, PACHECO, rosterRow, summary, team, TUCKER } from './fixtures';
+import type { ReplayRosterRow } from '../../api/types';
+import { COOK, ETIENNE, HILL, KELCE, MAHOMES, MCCAFFREY, NACUA, PACHECO, rosterRow, summary, tagged, team, TUCKER } from './fixtures';
 import { canSwap, lineupSpots, lineupWarnings, slotAccepts, swappedLineup, weekOptions } from './teamLineup';
 
 const STARTERS = summary().settings.starters;
@@ -54,5 +55,30 @@ describe('lineup helpers', () => {
       : row.player.id === KELCE.id ? rosterRow(KELCE, 'TE', { out: true }) : row));
     expect(lineupWarnings(lineupSpots(rows, STARTERS))).toEqual(['Patrick Mahomes (QB) is on bye.', 'Travis Kelce (TE) is out.']);
     expect(lineupWarnings(spots)).toEqual([]);
+  });
+
+  it('words a tagged starter by his tag, in slot order, and ignores a tagged bench player', () => {
+    const swap: Record<number, ReplayRosterRow> = {
+      [MAHOMES.id]: rosterRow(tagged(MAHOMES, 'O', 'DNP', 'Ankle'), 'QB', { out: true }),
+      [MCCAFFREY.id]: rosterRow(tagged(MCCAFFREY, 'IR', null, 'Achilles'), 'RB', { out: true }),
+      [ETIENNE.id]: rosterRow(tagged(ETIENNE, 'Q', 'LP', 'Hamstring'), 'RB'),
+      [HILL.id]: rosterRow(tagged(HILL, 'PUP'), 'WR', { out: true }),
+      [NACUA.id]: rosterRow(tagged(NACUA, 'D'), 'WR'),
+      [KELCE.id]: rosterRow(tagged(KELCE, 'SUS'), 'TE', { out: true }),
+      [PACHECO.id]: rosterRow(tagged(PACHECO, 'Q'), 'FLEX', { out: true }),        // no projection: out wins over Q
+      [TUCKER.id]: rosterRow(tagged(TUCKER, 'O'), 'K', { bye: true, opponent: 'BYE' }),      // a bye comes first
+      [COOK.id]: rosterRow(tagged(COOK, 'IR'), 'BN', { out: true }),
+    };
+    const rows = team().results.map((row) => swap[row.player.id] ?? row);
+    expect(lineupWarnings(lineupSpots(rows, STARTERS))).toEqual([
+      'Patrick Mahomes (QB) is out.',
+      'Christian McCaffrey (RB) is on injured reserve.',
+      'Travis Etienne (RB) is questionable (Hamstring).',
+      'Tyreek Hill (WR) is on the PUP list.',
+      'Puka Nacua (WR) is doubtful.',
+      'Travis Kelce (TE) is suspended.',
+      'Isiah Pacheco (FLEX) is out.',
+      'Justin Tucker (K) is on bye.',
+    ]);
   });
 });

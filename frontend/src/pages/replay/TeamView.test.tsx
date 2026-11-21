@@ -1,11 +1,12 @@
-import { screen, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import type { ReplayTeam } from '../../api/types';
+import type { ReplayIrRow, ReplayTeam } from '../../api/types';
 import { json, mockFetch, type MockReply, type MockRoute } from '../../test/mockFetch';
 import { META_ROUTE, renderWithProviders } from '../../test/render';
 import {
-  actionResult, COOK, GAME_ID, KELCE, MAHOMES, nextAction, OLAVE, OPPONENT_TEAM_ID, PACHECO, rosterRow, summary, team, teamRef, viewProps,
+  actionResult, COOK, ETIENNE, GAME_ID, KELCE, MAHOMES, MOSTERT, nextAction, OLAVE, OPPONENT_TEAM_ID, PACHECO, playerRow, rosterRow, summary,
+  tagged, team, teamRef, viewProps,
 } from './fixtures';
 import type { ReplayViewProps } from './shared';
 import { TeamView } from './TeamView';
@@ -34,7 +35,7 @@ describe('TeamView roster', () => {
     expect(within(rows[0]).getAllByRole('columnheader').map((cell) => cell.textContent))
       .toEqual(['Slot', 'Player', 'Opp', 'Proj', 'Pts', 'PPG', 'ROS', 'Value', 'Actions']);
     expect(rows.slice(1).map((row) => row.firstElementChild?.textContent))
-      .toEqual(['QB', 'RB', 'RB', 'WR', 'WR', 'TE', 'FLEX', 'K', 'DST', 'Starters total', 'BN', 'BN']);
+      .toEqual(['QB', 'RB', 'RB', 'WR', 'WR', 'TE', 'FLEX', 'K', 'DST', 'Starters total', 'BN', 'BN', 'IR']);
     const mahomes = within(rowOf('Patrick Mahomes')).getAllByRole('cell').map((cell) => cell.textContent);
     expect(mahomes.slice(2, 8)).toEqual(['MIN', '21.30', '—', '15.10', '13.80', '31.5']);
     expect(rowOf('Starters total')).toHaveTextContent('Starters total118.40—');
@@ -183,9 +184,155 @@ describe('TeamView phase rules', () => {
   });
 
   it('disables every action while another one is in flight', async () => {
+    // (the IR slot is empty and nobody is tagged, so no IR button is counted here)
     renderTeam(team({ manual_lineup: true }), { isBusy: true });
     await table();
     for (const button of screen.getAllByRole('button', { name: /^(Move|Drop|Reset)/ })) expect(button).toBeDisabled();
     expect(screen.getAllByRole('button', { name: /^(Move|Drop|Reset)/ })).toHaveLength(23);      // 11 players twice, and Reset
+  });
+});
+
+const PLACE_PATH = `/api/replay/games/${GAME_ID}/ir/place`;
+const ACTIVATE_PATH = `/api/replay/games/${GAME_ID}/ir/activate`;
+const ON_IR = tagged(MOSTERT, 'IR', null, 'Knee');
+const irRow = (player = ON_IR) => ({ ...playerRow(player, { out: true, projection: 0 }), slot: 'IR' as const, starting: false as const });
+/** The user's team with Olave (bench) tagged `tag`, and `ir` in the IR slot. */
+function injured(tag: 'O' | 'Q' | 'SUS' = 'O', ir: ReplayIrRow[] = []) {
+  const results = team().results.map((row) => (row.player.id === OLAVE.id
+    ? rosterRow(tagged(OLAVE, tag, 'DNP', 'Ankle'), 'BN', { out: tag !== 'Q', projection: 0 }) : row));
+  return team({ results, ir });
+}
+const lastRow = async () => within(await table()).getAllByRole('row').at(-1)!;
+
+describe('TeamView injuries and IR', () => {
+  it('shows an empty IR slot in the current week, and no IR section for a past week', async () => {
+    renderTeam();
+    expect(await lastRow()).toHaveTextContent(/^IREmpty$/);
+    expect(screen.getByText(/A player tagged O, IR or PUP can go on IR, which frees his roster spot\./)).toBeInTheDocument();
+  });
+
+  it('has no IR section in a played week', async () => {
+    renderTeam(team({ week: 3, played: true, ir: [] }));
+    const rows = within(await screen.findByRole('table', { name: 'Your Team roster, week 3' })).getAllByRole('row');
+    expect(rows.map((row) => row.firstElementChild?.textContent)).not.toContain('IR');
+    expect(screen.queryByText(/can go on IR/)).not.toBeInTheDocument();
+  });
+
+  it('moves a player tagged O to an empty IR slot', async () => {
+    const { api, user } = renderTeam(injured('O'), {}, [{ method: 'POST', path: PLACE_PATH, reply: json(actionResult()) }]);
+    await table();
+    expect(within(rowOf('Chris Olave')).getByText('O')).toBeInTheDocument();
+    expect(within(rowOf('Chris Olave')).queryByText('Out')).not.toBeInTheDocument();         // the tag already says it
+    await user.click(screen.getByRole('button', { name: 'Move Chris Olave to IR' }));
+    expect(api.callsTo(PLACE_PATH, 'POST')[0].body).toEqual({ player_id: OLAVE.id });
+  });
+
+  it('swaps a tagged player with the one on IR', async () => {
+    const { api, user } = renderTeam(injured('O', [irRow()]), {}, [{ method: 'POST', path: ACTIVATE_PATH, reply: json(actionResult()) }]);
+    expect(await lastRow()).toHaveTextContent('Raheem Mostert');
+    await user.click(screen.getByRole('button', { name: 'Move Chris Olave to IR and activate Raheem Mostert' }));
+    expect(api.callsTo(ACTIVATE_PATH, 'POST')[0].body).toEqual({ player_id: MOSTERT.id, swap: OLAVE.id });
+  });
+
+  it('offers no IR move for a suspended or questionable player', async () => {
+    for (const tag of ['SUS', 'Q'] as const) {
+      mockFetch([META_ROUTE, { path: TEAM_PATH, reply: json(injured(tag)) }]);
+      const { unmount } = renderWithProviders(<TeamView {...viewProps()} />);
+      await table();
+      expect(screen.queryByRole('button', { name: /to IR/ })).not.toBeInTheDocument();
+      unmount();
+    }
+  });
+
+  it('activates at once when the roster has room', async () => {
+    const { api, user } = renderTeam(injured('O', [irRow()]), {}, [{ method: 'POST', path: ACTIVATE_PATH, reply: json(actionResult()) }]);
+    await table();
+    expect(within(await lastRow()).queryByRole('button', { name: /^Move Raheem/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Activate Raheem Mostert' }));
+    expect(api.callsTo(ACTIVATE_PATH, 'POST')[0].body).toEqual({ player_id: MOSTERT.id });
+  });
+
+  it('asks who to drop when the roster is full, and shows a refusal inside the dialog', async () => {
+    const full = summary({ settings: { ...summary().settings, roster_size: 11 } });
+    const refusal = 'Your Team can\'t drop Chris Olave: he isn\'t on the active roster.';
+    let refuse = true;
+    const reply = () => (refuse ? json({ detail: refusal }, 422) : json(actionResult()));
+    const { api, user } = renderTeam(injured('O', [irRow()]), { game: full }, [{ method: 'POST', path: ACTIVATE_PATH, reply }]);
+    await table();
+    await user.click(screen.getByRole('button', { name: 'Activate Raheem Mostert' }));
+    const dialog = screen.getByRole('dialog', { name: 'Activate Raheem Mostert' });
+    expect(within(dialog).getByText('Injured reserve')).toBeInTheDocument();
+    expect(dialog).toHaveTextContent('Your roster is full (11 players): pick who to drop to make room for Raheem Mostert. Least valuable first.');
+    expect(within(dialog).queryByRole('radio', { name: /Don't drop anyone/ })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole('radio', { name: /Raheem Mostert/ })).not.toBeInTheDocument();
+    expect(within(dialog).getAllByRole('radio')).toHaveLength(11);
+    await user.click(within(dialog).getByRole('radio', { name: /Chris Olave/ }));
+    await user.click(within(dialog).getByRole('button', { name: 'Activate and drop' }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(refusal);
+
+    refuse = false;
+    await user.click(within(dialog).getByRole('button', { name: 'Activate and drop' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(api.callsTo(ACTIVATE_PATH, 'POST').map((call) => call.body)).toEqual([
+      { player_id: MOSTERT.id, drop: OLAVE.id }, { player_id: MOSTERT.id, drop: OLAVE.id },
+    ]);
+  });
+
+  it('drops a player from IR and says so', async () => {
+    const { api, user } = renderTeam(injured('O', [irRow()]), {}, [{ method: 'POST', path: DROP_PATH, reply: json(actionResult()) }]);
+    await table();
+    await user.click(screen.getByRole('button', { name: 'Drop Raheem Mostert' }));
+    await user.click(screen.getByRole('button', { name: 'Yes, drop Raheem Mostert' }));
+    expect(api.callsTo(DROP_PATH, 'POST')[0].body).toEqual({ player_id: MOSTERT.id });
+    expect(await screen.findByText(/Dropped Raheem Mostert\./)).toBeInTheDocument();
+  });
+
+  it('shows a CPU team\'s IR without actions', async () => {
+    renderTeam(team({ team: teamRef(OPPONENT_TEAM_ID), ir: [irRow()] }));
+    const row = within(await screen.findByRole('table', { name: 'Sunday Scaries roster, week 5' })).getAllByRole('row').at(-1)!;
+    expect(row).toHaveTextContent('Raheem Mostert');
+    expect(screen.queryByRole('button', { name: /Activate|Drop/ })).not.toBeInTheDocument();
+  });
+
+  it('warns while an IR player has lost his tag, and when the season has no injury reports', async () => {
+    const blocked = summary({ ir_blocked: [MOSTERT], has_injuries: false });
+    renderTeam(team({ ir: [irRow(MOSTERT)] }), { game: blocked });
+    await table();
+    expect(screen.getByText('Raheem Mostert is on IR but no longer has an O, IR or PUP tag. Activate or drop him before you add, '
+      + 'claim or trade for players.')).toHaveAttribute('role', 'status');
+    expect(screen.getByText(/Injury reports are not loaded for the 2023 season, so no tags are shown and the IR slot can.t be used\./))
+      .toHaveAttribute('role', 'status');
+  });
+
+  it('warns about a questionable starter and marks his row', async () => {
+    const results = team().results.map((row) => (row.player.id === ETIENNE.id
+      ? rosterRow(tagged(ETIENNE, 'Q', 'LP', 'Hamstring'), 'RB', { opponent: 'BUF' }) : row));
+    renderTeam(team({ results }));
+    await table();
+    const warnings = within(screen.getByRole('list', { name: 'Lineup warnings' })).getAllByRole('listitem').map((item) => item.textContent);
+    expect(warnings).toEqual(['Travis Etienne (RB) is questionable (Hamstring).']);
+    expect(rowOf('Travis Etienne')).toHaveClass('replay-roster__row--warn');
+  });
+
+  it('hides every IR button while a lineup move is in progress', async () => {
+    const { user } = renderTeam(injured('O', [irRow()]));
+    await table();
+    await user.click(screen.getByRole('button', { name: 'Move James Cook' }));
+    expect(screen.queryByRole('button', { name: /to IR|^Activate|^Drop/ })).not.toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    expect(screen.getByRole('button', { name: 'Activate Raheem Mostert' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Move Chris Olave to IR and activate Raheem Mostert' })).toBeInTheDocument();
+  });
+
+  it('keeps the IR warning off another team\'s roster', async () => {
+    renderTeam(team({ team: teamRef(OPPONENT_TEAM_ID) }), { game: summary({ ir_blocked: [MOSTERT] }) });
+    await screen.findByRole('table', { name: 'Sunday Scaries roster, week 5' });
+    expect(screen.queryByText(/is on IR but no longer has/)).not.toBeInTheDocument();
+  });
+
+  it('keeps the no-injury-reports notice to the current week', async () => {
+    renderTeam(team({ week: 3, played: true }), { game: summary({ has_injuries: false }) });
+    await screen.findByRole('table', { name: 'Your Team roster, week 3' });
+    expect(screen.queryByText(/Injury reports are not loaded/)).not.toBeInTheDocument();
   });
 });

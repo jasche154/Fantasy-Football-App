@@ -40,7 +40,7 @@ button.replay-player__name:hover { color: var(--color-accent); text-decoration: 
 .replay-prepare__list { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: var(--space-2); }
 
 /* ---------- Hub ---------- */
-/* The longest label ("Sim to Wednesday (process waivers)") may wrap on a narrow phone instead of pushing the page wide. */
+/* The longest label ("Sim to Wednesday") may wrap on a narrow phone instead of pushing the page wide. */
 .replay-advance { white-space: normal; padding-block: var(--space-1); text-align: center; }
 .replay-scoreline { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-5); margin: var(--space-3) 0; padding: var(--space-3) var(--space-4);
   border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-1);

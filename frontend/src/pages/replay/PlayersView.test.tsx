@@ -298,3 +298,23 @@ describe('PlayersView waivers', () => {
     expect(await within(await screen.findByRole('region', { name: 'Waiver claims' })).findByRole('alert')).toHaveTextContent('Couldn\'t load your waiver claims');
   });
 });
+
+describe('PlayersView while an IR player has lost his tag', () => {
+  const BANNER = 'Raheem Mostert is on IR but no longer has an O, IR or PUP tag. Activate or drop him before you add, claim or trade for players.';
+
+  it('shows the banner and disables Add', async () => {
+    renderPlayers(summary({ ir_blocked: [MOSTERT] }), [{ path: PLAYERS, reply: json(wire([wireRow(COLLINS)])) }]);
+    const add = (await row('Nico Collins')).getByRole('button', { name: 'Add Nico Collins' });
+    expect(screen.getByText(BANNER)).toHaveAttribute('role', 'status');
+    await waitFor(() => expect(screen.queryAllByRole('table')).toHaveLength(1));
+    expect(add).toBeDisabled();
+    expect(add).toHaveAttribute('title', BANNER);
+  });
+
+  it('disables Claim during waivers', async () => {
+    renderPlayers({ ...WAIVERS, ir_blocked: [MOSTERT] }, [{ path: PLAYERS, reply: json(wire([wireRow(COLLINS, { status: 'waivers' })])) }]);
+    const claimButton = (await row('Nico Collins')).getByRole('button', { name: 'Claim Nico Collins' });
+    expect(claimButton).toBeDisabled();
+    expect(claimButton).toHaveAttribute('title', BANNER);
+  });
+});

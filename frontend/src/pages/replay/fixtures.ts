@@ -9,10 +9,13 @@ import type {
   ReplayEvent,
   ReplayEventKind,
   ReplayGameListing,
+  ReplayInjury,
+  ReplayInjuryTag,
   ReplayPlayerDetail,
   ReplayPlayerRef,
   ReplayPlayerRow,
   ReplayPosition,
+  ReplayPractice,
   ReplayReadiness,
   ReplayRecord,
   ReplayRosterRow,
@@ -40,8 +43,15 @@ export function teamRef(teamId: number): ReplayTeamRef {
   return TEAMS[teamId - 1];
 }
 
-export function playerRef(id: number, name: string, position: ReplayPosition, team: string | null): ReplayPlayerRef {
-  return { id, name, position, team };
+export function playerRef(id: number, name: string, position: ReplayPosition, team: string | null,
+  injury: ReplayInjury | null = null): ReplayPlayerRef {
+  return { id, name, position, team, injury };
+}
+
+/** A tagged copy of a player (the shared constants stay untagged): `tagged(OLAVE, 'IR', null, 'Knee')`. */
+export function tagged(player: ReplayPlayerRef, tag: ReplayInjuryTag, practice: ReplayPractice | null = null,
+  injury: string | null = null): ReplayPlayerRef {
+  return { ...player, injury: { tag, practice, injury } };
 }
 
 export const MAHOMES = playerRef(101, 'Patrick Mahomes', 'QB', 'KC');
@@ -104,6 +114,7 @@ export function team(overrides: Partial<ReplayTeam> = {}): ReplayTeam {
       rosterRow(COOK, 'BN', { opponent: 'BYE', bye: true, projection: 0 }),
       rosterRow(OLAVE, 'BN', { opponent: 'NE', out: true, projection: 0 }),
     ],
+    ir: [],
     ...overrides,
   };
 }
@@ -123,11 +134,12 @@ export function summary(overrides: Partial<ReplaySummary> = {}): ReplaySummary {
       opponent: side(OPPONENT_TEAM_ID, { projected: 104.75, record: record({ wins: 2, losses: 2, rank: 6 }) }),
     },
     pending: { claims: 0, offers: 0 }, champion: null, updated_at: '2026-11-20T12:00:00',
+    ir_blocked: [], has_injuries: true,
     ...overrides,
   };
 }
 
-const ACTION_LABELS = { pick: 'Make your pick', wednesday: 'Sim to Wednesday (process waivers)', play: 'Play week 5', done: 'Season complete' };
+const ACTION_LABELS = { pick: 'Make your pick', wednesday: 'Sim to Wednesday', play: 'Play week 5', done: 'Season complete' };
 
 /** next_action with the server's label for a step. */
 export function nextAction(step: keyof typeof ACTION_LABELS): ReplaySummary['next_action'] {
@@ -191,7 +203,7 @@ export function playerDetail(player: ReplayPlayerRef = MOSTERT, overrides: Parti
     weeks: [1, 2, 3, 4, 5].map((week) => ({
       week, played: week < 5, team: player.team, opponent: week === 3 ? 'BYE' : 'DEN', bye: week === 3, out: false,
       projection: week === 3 ? 0 : 12.5, points: week === 3 || week === 5 ? null : 10 + week, ros_ppg: row.ros_ppg,
-      value: row.value, trade_value: row.trade_value, rank: row.rank, pos_rank: row.pos_rank,
+      value: row.value, trade_value: row.trade_value, rank: row.rank, pos_rank: row.pos_rank, injury: null,
     })),
   };
 }
@@ -203,7 +215,7 @@ export function gameListing(overrides: Partial<ReplayGameListing> = {}): ReplayG
 
 export function readiness(season: number, ready = true): ReplayReadiness {
   return { season, ready, has_stats: ready, has_schedule: ready, has_kdst: ready, adp_players: ready ? 240 : 0,
-    projection_weeks: ready ? 18 : 0, kickers: ready ? 32 : 0, defenses: ready ? 32 : 0 };
+    projection_weeks: ready ? 18 : 0, kickers: ready ? 32 : 0, defenses: ready ? 32 : 0, injury_weeks: ready ? 18 : 0 };
 }
 
 /** GET /seasons: 2022 and 2023 ready, 2024 not, nothing importing. */

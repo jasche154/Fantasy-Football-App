@@ -185,7 +185,7 @@ describe('DraftView actions', () => {
     expect(screen.getByRole('button', { name: 'Auto-pick for me' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Auto-draft the rest' })).toBeDisabled();
     expect(api.callsTo(PICK_PATH, 'POST')).toHaveLength(1);
-    expect(api.callsTo(PICK_PATH, 'POST')[0].body).toEqual({ player_id: MOSTERT.id });
+    expect(api.callsTo(PICK_PATH, 'POST')[0].body).toEqual({ player_id: MOSTERT.id, overall: 21 });
 
     finish?.();
     await waitFor(() => expect(api.callsTo(DRAFT_PATH)).toHaveLength(2));
@@ -205,13 +205,13 @@ describe('DraftView actions', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Draft Raheem Mostert' })).toBeEnabled());
   });
 
-  it('auto-picks one player for me', async () => {
+  it('auto-picks one player for me, naming the pick on the clock', async () => {
     const { api, user } = renderRoom([{ method: 'POST', path: AUTO_PATH, reply: json(actionResult(draftSummary())) }]);
     await user.click(await screen.findByRole('button', { name: 'Auto-pick for me' }));
 
     await waitFor(() => expect(api.callsTo(DRAFT_PATH)).toHaveLength(2));
     const [call] = api.callsTo(AUTO_PATH, 'POST');
-    expect(call.url.search).toBe('');
+    expect(call.url.search).toBe('?overall=21');
     expect(call.body).toBeUndefined();
   });
 
@@ -222,6 +222,6 @@ describe('DraftView actions', () => {
 
     await user.click(screen.getByRole('button', { name: 'Yes, draft the rest for me' }));
     expect(await screen.findByText('The season has started')).toBeInTheDocument();
-    expect(api.callsTo(AUTO_PATH, 'POST')[0].url.search).toBe('?whole_draft=true');
+    expect(api.callsTo(AUTO_PATH, 'POST')[0].url.search).toBe('?whole_draft=true&overall=21');
   });
 });

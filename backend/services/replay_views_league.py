@@ -15,7 +15,7 @@ from services.replay_views import (
     result_of, scoreboard, team_ref, winner,
 )
 
-EVENT_KINDS = ("draft", "add", "drop", "claim", "trade", "result", "playoffs", "champion")
+EVENT_KINDS = ("draft", "add", "drop", "claim", "trade", "ir", "result", "playoffs", "champion")
 AVAILABLE = "available"
 STATUSES = (AVAILABLE, *replay_waivers.STATUS_FILTERS)
 SORTS = ("value", "projection", "ros_ppg", "adp", "points", "name")
@@ -80,7 +80,7 @@ def activity(game: Game, kind: str | None = None, limit: int = DEFAULT_PAGE, off
 # ---------------- players ----------------
 
 def _owners(game: Game) -> dict[int, Team]:
-    return {pid: owner for owner in game.state.teams for pid in owner.roster}
+    return {pid: owner for owner in game.state.teams for pid in rs.held(owner)}
 
 
 def _season_points(game: Game) -> dict[int, float]:
@@ -129,6 +129,7 @@ def players(game: Game, position: str | None = None, search: str | None = None, 
 def _history_row(game: Game, player_id: int, week: int) -> dict:
     row = player_row(game, game.know_at(week), player_id)
     return {"week": week, "played": week <= game.played, "team": row["player"]["team"],
+            "injury": row["player"]["injury"],
             **{key: row[key] for key in ("opponent", "bye", "out", "projection", "points", "ros_ppg", "value",
                                          "trade_value", "rank", "pos_rank")}}
 

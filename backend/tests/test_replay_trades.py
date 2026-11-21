@@ -485,3 +485,102 @@ class TestExploits:
 
         assert verdict.accepted and verdict.their_drops
         assert set(verdict.their_drops) <= set(after.locked) and not set(verdict.their_drops) & rs.rostered(after)
+
+
+# ---------------- the IR slot ----------------
+
+T1, B1 = "On IR, so not tradable until activated", "can't add, claim or trade for players while"
+
+
+def on_ir(state: rs.State, team_id: int, player_id: int) -> rs.State:
+    team = rs.team(state, team_id)
+    return rs.with_team(state, replace(team, roster=tuple(p for p in team.roster if p != player_id), ir=(player_id,)))
+
+
+def hurt(week: int, *player_ids: int):
+    """This week's knowledge with those players tagged O (so they may sit on IR without blocking anyone)."""
+    tags = {(pid, week): fakes.Injury("O") for pid in player_ids}
+    return fakes.fake_knowledge(week, SETTINGS, fakes.tagged(fakes.fake_season(), tags))
+
+
+def test_a_player_on_ir_cannot_be_traded_by_either_side():
+    state, know = league()
+    mine, theirs = on_ir(state, USER, RB14), on_ir(state, NEEDS_RB, TE7)
+    name = know.by_id[TE7].name
+
+    with pytest.raises(ValueError, match=f"{T1}: {know.by_id[RB14].name}."):
+        rt.evaluate(mine, SETTINGS, know, USER, *FAIR)
+    with pytest.raises(ValueError, match=f"{T1}: {name}."):
+        rt.evaluate(theirs, SETTINGS, know, USER, *FAIR)
+    with pytest.raises(ValueError, match=T1):
+        rt.propose(theirs, SETTINGS, know, *FAIR)
+
+
+def test_an_offer_whose_player_went_on_ir_expires_with_t1():
+    made, know = offered()
+
+    with pytest.raises(rt.OfferExpired, match=T1) as error:
+        rt.respond(on_ir(made, NEEDS_RB, TE7), SETTINGS, know, made.offers[0].id, accept=True)
+
+    assert error.value.state.offers[0].status == "expired"
+
+
+def test_the_roster_limit_of_a_trade_ignores_the_ir_player():
+    know = hurt(1, SCRUB)
+    state = on_ir(league()[0], USER, SCRUB)
+    two_for_one = (NEEDS_RB, [RB14], [TE7, P("WR", 61)])
+
+    verdict = rt.evaluate(state, SETTINGS, know, USER, *two_for_one)
+
+    assert verdict.your_drops == () and len(rs.user_team(state).roster) == SETTINGS.roster_size - 1
+    with pytest.raises(ValueError, match="on your roster and not part of the trade"):     # not a trade drop
+        rt.evaluate(state, SETTINGS, know, USER, *two_for_one, [SCRUB])
+
+
+def test_a_blocked_user_cannot_propose_and_nothing_is_recorded():
+    state, know = league()
+    blocked = on_ir(state, USER, SCRUB)                     # no tag this week: he blocks the user
+
+    with pytest.raises(ValueError, match=B1):
+        rt.propose(blocked, SETTINGS, know, *FAIR)
+
+    assert rt.evaluate(blocked, SETTINGS, know, USER, *FAIR).accepted       # asking is still allowed
+    assert rt.propose(on_ir(state, USER, SCRUB), SETTINGS, hurt(1, SCRUB), *FAIR)[1].accepted     # tagged: fine
+
+
+def test_a_blocked_user_cannot_accept_an_offer_which_stays_pending_but_may_decline_it():
+    made, know = offered()
+    blocked = on_ir(made, USER, SCRUB)
+    offer_id = made.offers[0].id
+
+    with pytest.raises(ValueError, match=B1) as error:
+        rt.respond(blocked, SETTINGS, know, offer_id, accept=True)
+    declined = rt.respond(blocked, SETTINGS, know, offer_id, accept=False)
+
+    assert not isinstance(error.value, rt.OfferExpired) and rt.offers_for_user(blocked)[0].id == offer_id
+    assert declined.offers[0].status == "declined"
+
+
+def test_a_cpu_values_a_back_the_same_whether_its_injured_star_is_on_ir_or_its_bench():
+    week, star = fakes.INJURED_WEEKS[0], fakes.INJURED_STAR_ID
+    state, know = league(week)
+    deal = (DEEP_AT_WR, [RB14], [P("WR", 24)])
+    gone = rs.with_team(state, replace(rs.team(state, DEEP_AT_WR),
+                                       roster=tuple(p for p in rs.team(state, DEEP_AT_WR).roster if p != star)))
+
+    bench = rt.evaluate(state, SETTINGS, know, USER, *deal)
+    stashed = rt.evaluate(on_ir(state, DEEP_AT_WR, star), SETTINGS, know, USER, *deal)
+    forgotten = rt.evaluate(gone, SETTINGS, know, USER, *deal)
+
+    assert stashed.their_gain == pytest.approx(bench.their_gain) and stashed.accepted == bench.accepted
+    assert forgotten.their_gain > bench.their_gain + rt.MIN_TRADE_GAIN       # as if he never came back
+
+
+def test_the_position_limit_counts_the_receiver_a_cpu_has_on_ir():
+    receiver, back, injured = P("WR", 16), P("RB", 27), P("WR", 24)
+    state, know = league()
+
+    verdict = rt.evaluate(on_ir(state, DEEP_AT_WR, injured), SETTINGS, hurt(1, injured), USER, DEEP_AT_WR,
+                          [receiver], [back])
+
+    assert said(verdict, "It would leave CPU 5 with 8 at WR, more than they carry.")

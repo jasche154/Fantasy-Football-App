@@ -146,6 +146,8 @@ describe('Replay League endpoints', () => {
     await replay.replayDraftPick(7, 102);
     await replay.replayDraftAuto(7);
     await replay.replayDraftAuto(7, true);
+    await replay.replayDraftPick(7, 102, 21);
+    await replay.replayDraftAuto(7, true, 21);
     await replay.setReplayLineup(7, { QB: [101], RB: [102, 103] });
     await replay.setReplayLineup(7, null);
     await replay.submitReplayClaim(7, { add: 201, drop: 111 });
@@ -153,6 +155,10 @@ describe('Replay League endpoints', () => {
     await replay.reorderReplayClaims(7, [6, 5]);
     await replay.replayAddDrop(7, { add: 201 });
     await replay.replayDrop(7, 111);
+    await replay.replayIrPlace(7, 111);
+    await replay.replayIrActivate(7, 111);
+    await replay.replayIrActivate(7, 111, { drop: 110 });
+    await replay.replayIrActivate(7, 111, { swap: 103 });
     await replay.advanceReplay(7, 'wednesday', 5);
     await replay.evaluateReplayTrade(7, trade);
     await replay.proposeReplayTrade(7, trade);
@@ -168,6 +174,8 @@ describe('Replay League endpoints', () => {
       ['POST', `${games}/7/draft/pick`, { player_id: 102 }],
       ['POST', `${games}/7/draft/auto`, undefined],
       ['POST', `${games}/7/draft/auto?whole_draft=true`, undefined],
+      ['POST', `${games}/7/draft/pick`, { player_id: 102, overall: 21 }],
+      ['POST', `${games}/7/draft/auto?whole_draft=true&overall=21`, undefined],
       ['POST', `${games}/7/lineup`, { starters: { QB: [101], RB: [102, 103] } }],
       ['POST', `${games}/7/lineup`, { starters: null }],
       ['POST', `${games}/7/claims`, { add: 201, drop: 111 }],
@@ -175,6 +183,10 @@ describe('Replay League endpoints', () => {
       ['POST', `${games}/7/claims/reorder`, { ids: [6, 5] }],
       ['POST', `${games}/7/add-drop`, { add: 201 }],
       ['POST', `${games}/7/drop`, { player_id: 111 }],
+      ['POST', `${games}/7/ir/place`, { player_id: 111 }],
+      ['POST', `${games}/7/ir/activate`, { player_id: 111 }],
+      ['POST', `${games}/7/ir/activate`, { player_id: 111, drop: 110 }],
+      ['POST', `${games}/7/ir/activate`, { player_id: 111, swap: 103 }],
       ['POST', `${games}/7/advance`, { step: 'wednesday', week: 5 }],
       ['POST', `${games}/7/trades/evaluate`, trade],
       ['POST', `${games}/7/trades/propose`, trade],

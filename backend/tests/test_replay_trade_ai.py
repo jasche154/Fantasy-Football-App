@@ -283,6 +283,24 @@ def test_the_search_is_bounded(monkeypatch):
     assert 0 < len(calls) <= len(SEEDS) * searches * (ai.MAX_SCORED + 1)       # + 1: execute checks again
 
 
+def test_a_player_on_ir_is_never_searched_or_offered(monkeypatch):
+    """Every team's two most valuable skill players go on IR (no tag, so nothing else excludes them)."""
+    state, know = fakes.drafted_state(), fakes.fake_knowledge(1)
+    for team in state.teams:
+        best = [v.player_id for v in ai._tradable(state, know, team)[:2]]
+        state = rs.with_team(state, replace(team, roster=tuple(p for p in team.roster if p not in best), ir=tuple(best)))
+    on_ir = {pid for team in state.teams for pid in team.ir}
+    searched = []
+    tradable = ai._tradable
+    monkeypatch.setattr(ai, "_tradable", lambda *args: searched.append(found := tradable(*args)) or found)
+
+    after = [ai.cpu_trades(state, SETTINGS, know, seed) for seed in SEEDS]
+
+    dealt = {pid for later in after for offer in later.offers for pid in (*offer.give, *offer.get)}
+    assert len(on_ir) == 2 * SETTINGS.teams and searched and dealt
+    assert not on_ir & {v.player_id for found in searched for v in found} and not on_ir & dealt
+
+
 def test_cpu_trades_stays_within_its_time_budget(seasons):
     slowest = max(week.seconds for season in seasons.values() for week in season)
 

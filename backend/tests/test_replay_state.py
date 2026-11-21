@@ -317,6 +317,51 @@ def test_release_rejects_a_player_who_is_not_on_that_roster():
         rs.release(state, settings, 99, 11)
 
 
+# ---------------- the IR slot ----------------
+
+def _with_ir(state: State, team_id: int, ir: tuple[int, ...]) -> State:
+    return rs.with_team(state, replace(rs.team(state, team_id), ir=ir))
+
+
+def test_a_team_starts_with_an_empty_ir_that_round_trips_through_json():
+    assert all(t.ir == () for t in make_state().teams)
+    state = _with_ir(make_state(), 2, (25,))
+
+    restored = rs.state_from_json(rs.to_json(state))
+
+    assert restored == state and rs.team(restored, 2).ir == (25,) and isinstance(rs.team(restored, 2).ir, tuple)
+
+
+def test_a_league_saved_before_the_ir_slot_loads_with_empty_irs():
+    saved = json.loads(rs.to_json(make_state()))
+    for team in saved["teams"]:
+        team.pop("ir")
+
+    restored = rs.state_from_json(json.dumps(saved))
+
+    assert restored == make_state() and all(t.ir == () for t in restored.teams)
+
+
+def test_held_and_rostered_include_ir_players():
+    state = _with_ir(make_state(), 2, (25,))
+
+    assert rs.held(rs.team(state, 2)) == (21, 22, 25)
+    assert 25 in rs.rostered(state) and rs.rostered(state) == {11, 12, 13, 21, 22, 25, 31}
+
+
+def test_release_drops_a_player_from_ir():
+    state = _with_ir(make_state(), 2, (25,))
+
+    after = rs.release(state, Settings(season=2021), 2, 25, name="Hurt Back")
+
+    assert rs.team(after, 2).ir == () and rs.team(after, 2).roster == (21, 22)
+    assert after.locked == (77, 78, 25) and 25 not in rs.rostered(after)
+    event = after.events[-1]
+    assert (event.kind, event.player_ids, event.text) == ("drop", (25,), "CPU Two dropped Hurt Back")
+    with pytest.raises(ValueError, match="isn't on the roster"):
+        rs.release(state, Settings(season=2021), 1, 25)
+
+
 def test_a_team_has_traded_this_week_only_with_an_accepted_offer_from_this_week():
     offers = (Offer(1, 2, 2, 1, (21,), (12,), "accepted"), Offer(2, 1, 3, 4, (31,), (), "accepted"),
               Offer(3, 2, 3, 4, (31,), (), "declined"), Offer(4, 2, 4, 3, (), (31,), "pending"))

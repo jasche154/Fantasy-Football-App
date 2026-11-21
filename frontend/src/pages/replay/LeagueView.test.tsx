@@ -208,7 +208,7 @@ describe('LeagueView activity', () => {
     expect(queries).toEqual([
       { limit: '25', offset: '0' },
       { limit: '25', offset: '25' },
-      { kind: 'add,drop', limit: '25', offset: '0' },
+      { kind: 'add,drop,ir', limit: '25', offset: '0' },
     ]);
   });
 

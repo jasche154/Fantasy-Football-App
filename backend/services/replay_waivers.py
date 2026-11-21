@@ -13,7 +13,7 @@ services/replay_waiver_ai.py.
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 
-from services import replay_state as rs
+from services import replay_ir, replay_state as rs
 from services.replay_pool import ALL_POSITIONS
 from services.replay_state import Claim, Settings, State
 from services.replay_values import Knowledge, ReplayValue, can_field_lineup
@@ -69,9 +69,12 @@ def _problem(state: State, settings: Settings, know: Knowledge, team_id: int, ad
     team = rs.team(state, team_id)
     if add not in know.by_id:
         return "That player is not in this season's player pool."
-    owner = next((t for t in state.teams if add in t.roster), None)
+    owner = next((t for t in state.teams if add in rs.held(t)), None)
     if owner is not None:
         return f"{_name(know, add)} is already on a roster ({owner.name})."
+    blocked = replay_ir.blocked_reason(state, know, team_id)
+    if blocked:
+        return blocked
     if drop is not None and drop not in team.roster:
         return f"{team.name} can't drop {_name(know, drop)}: he isn't on that roster."
     if drop is None and len(team.roster) >= settings.roster_size:

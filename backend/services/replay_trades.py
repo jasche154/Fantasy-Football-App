@@ -19,6 +19,7 @@ And for both teams: at most MAX_PLAYERS_PER_SIDE players a side, nobody traded i
 legal starting lineup at all six positions afterwards, a roster within the limit (the user names who to drop;
 a CPU cuts its lowest healthy-value skill players, never its only kicker or defense), and, in every deal (CPU-CPU
 too), nobody who is out right now. Every drop goes through `replay_state.release`, so he is on waivers.
+IR players can't be traded; they still count for a CPU's lineup gain and its depth at a position.
 
 The user is always the proposer in `evaluate`: to look at a CPU's offer, mirror it (`respond` does).
 """
@@ -28,7 +29,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from functools import lru_cache
 
-from services import lineup_gain, replay_state as rs, replay_values as rv, trade
+from services import lineup_gain, replay_ir, replay_state as rs, replay_values as rv, trade
 from services.replay_pool import SKILL
 from services.replay_state import Offer, Settings, State, Team
 from services.replay_values import Knowledge
@@ -125,6 +126,9 @@ def _check(state: State, settings: Settings, know: Knowledge, from_team: int, to
         raise ValueError(f"A trade can include at most {MAX_PLAYERS_PER_SIDE} players on each side.")
     if len({*give, *get}) != len(give) + len(get):
         raise ValueError("A player is listed more than once in the trade.")
+    hurt = [pid for owner, ids in ((sender, give), (receiver, get)) for pid in ids if pid in owner.ir]
+    if hurt:
+        raise ValueError(f"On IR, so not tradable until activated: {_names(know, hurt)}.")
     for owner, ids in ((sender, give), (receiver, get)):
         missing = [pid for pid in ids if pid not in owner.roster]
         if missing:
@@ -183,7 +187,7 @@ def _side(settings: Settings, know: Knowledge, team: Team, sends: tuple[int, ...
     else:
         cut = _cpu_drops(settings, know, kept)
     roster = tuple(pid for pid in kept if pid not in (cut or ()))
-    gain = _season(settings, know, roster) - _season(settings, know, team.roster)
+    gain = _season(settings, know, (*roster, *team.ir)) - _season(settings, know, rs.held(team))
     kept_in = [pid for pid in receives if pid not in (cut or ())]      # a throw-in it cuts at once is worth nothing
     return _Side(team, sends, receives, cut, roster, package_value(know, sends), package_value(know, kept_in),
                  round(gain, 2))
@@ -214,7 +218,7 @@ def _gain_reason(side: _Side, settings: Settings, know: Knowledge) -> str:
     name = side.team.name
     if side.gain < 0:
         return f"It would make {name}'s lineup worse."
-    have, flex = Counter(_positions(know, side.team.roster)), settings.starters.get("FLEX", 0)
+    have, flex = Counter(_positions(know, rs.held(side.team))), settings.starters.get("FLEX", 0)
     room = {position: settings.starters.get(position, 0) + (flex if position in rv.FLEX_POSITIONS else 0)
             for position in SKILL}
     deep = sorted(position for position in set(_positions(know, side.receives))
@@ -232,8 +236,9 @@ def _side_reasons(side: _Side, other: Team, settings: Settings, know: Knowledge)
                        f"(short at {_short_at(settings, know, side.roster)}).")
     if side.team.is_user:
         return reasons                       # the user needs no value or lineup test: their choice
-    had, have = Counter(_positions(know, side.team.roster)), Counter(_positions(know, side.roster))
-    kept = [know.by_id[pid] for pid in side.roster if pid not in side.receives]
+    ir = side.team.ir                       # positional limits count the IR player: he is coming back
+    had, have = Counter(_positions(know, rs.held(side.team))), Counter(_positions(know, (*side.roster, *ir)))
+    kept = [know.by_id[pid] for pid in (*side.roster, *ir) if pid not in side.receives]
     new = [know.by_id[pid] for pid in side.receives if pid in side.roster]
     reasons.extend(f"It would leave {name} with {have[position]} at {position}, more than they carry."
                    for position in sorted({value.position for value in new})
@@ -354,6 +359,7 @@ def propose(state: State, settings: Settings, know: Knowledge, to_team: int, giv
     """The user offers `give` for `get` to a CPU. Accepted: carried out at once. Declined: kept as an Offer
     with status "declined" (once per identical proposal per week)."""
     user, give, get = rs.user_team(state), tuple(give), tuple(get)
+    replay_ir.require_unblocked(state, know, user.id)
     verdict = evaluate(state, settings, know, user.id, to_team, give, get, user_drops)
     if verdict.accepted:
         return _apply(state, settings, know, user.id, to_team, give, get, verdict), verdict
@@ -381,6 +387,7 @@ def respond(state: State, settings: Settings, know: Knowledge, offer_id: int, ac
         raise ValueError(f"That offer is already {offer.status}.")
     if not accept:
         return _with_status(state, offer_id, "declined")
+    replay_ir.require_unblocked(state, know, user.id)              # B1: the offer stays pending
     expired = _with_status(state, offer_id, "expired")
     deal = (user.id, offer.from_team, offer.get, offer.give)        # mirrored: the user is the proposer
     try:

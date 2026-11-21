@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from database.models import (
-    Base, KickerGame, NflGame, Player, PlayerStatsWeekly, ReplayAdp, ReplayProjection, TeamGameStats,
+    Base, KickerGame, NflGame, Player, PlayerStatsWeekly, ReplayAdp, ReplayInjury, ReplayProjection, TeamGameStats,
 )
 from services import kdst_model, replay_pool, replay_state, replay_values
 from services.injury_recovery import games_to_weeks
@@ -175,6 +175,9 @@ def test_patched_and_future_changed_copy_without_touching_the_original():
     assert all(later.projected[k] == v for k, v in data.projected.items() if k[1] <= 6)
     assert all(later.actual[k] != v for k, v in data.actual.items() if k[1] > 6)
     assert all(later.projected.get(k) != v for k, v in data.projected.items() if k[1] > 6)
+    assert {k: v for k, v in later.injuries.items() if k[1] <= 6} == {k: v for k, v in data.injuries.items() if k[1] <= 6}
+    assert {k for k in later.injuries if k[1] > 6} == {(pid, w) for pid in (fakes.BREAKOUT_ID, fakes.BUST_ID)
+                                                         for w in range(7, 18)}
 
 
 # ---------------- as_of: the season with the future removed ----------------
@@ -194,6 +197,43 @@ def test_as_of_keeps_only_what_was_known_before_the_week(week):
     assert known.players == {pid: p for pid, p in data.players.items()
                              if p.adp is not None or pid in {k[0] for k in (*known.actual, *known.projected)}}
     assert known.schedule is data.schedule and known.last_week == data.last_week
+    assert dict(known.injuries) == {key: v for key, v in data.injuries.items() if key[1] <= week}
+
+
+def test_as_of_holds_no_tags_at_draft_time_and_a_tag_never_adds_a_player():
+    data = fakes.fake_season()
+    outsider = fakes.player_id("K", 33)                  # not in the pool before his first game in week 9
+    data = fakes.tagged(data, {(outsider, 2): fakes.Injury("O")})
+
+    assert dict(data.as_of(0).injuries) == {} and data.as_of(0).projected == fakes.fake_season().as_of(0).projected
+    assert outsider not in data.as_of(2).players and (outsider, 2) not in data.as_of(2).injuries
+    assert data.as_of(3).injuries[fakes.QUESTIONABLE].tag == "Q" and fakes.QUESTIONABLE not in data.as_of(2).injuries
+
+
+def test_fake_season_tag_story():
+    data = fakes.fake_season()
+    tags = data.injuries
+
+    assert tags[fakes.QUESTIONABLE] == fakes.Injury("Q", "LP", "Hamstring")
+    assert tags[fakes.DOUBTFUL] == fakes.Injury("D", "DNP", "Ankle")
+    assert all(tags[(fakes.INJURED_STAR_ID, w)] == fakes.Injury("O", "DNP", "Knee") for w in fakes.INJURED_WEEKS)
+    assert tags[(fakes.INJURED_STAR_ID, fakes.STAR_BACK_WEEK)].tag == "Q"
+    assert [w for pid, w in tags if pid == fakes.IR_KICKER_ID] == list(range(9, 18))
+    assert data.projection(fakes.IR_KICKER_ID, 9) == 0.0 and data.projection(fakes.IR_KICKER_ID, 8) > 0
+    assert not any(pid in (fakes.NEVER_PLAYED_ID, fakes.player_id("K", 32)) for pid, _ in tags)
+    assert sorted({w for _, w in tags}) == [3, 4, *range(6, 18)]
+    assert {pid for pid, _ in fakes.fake_season(weeks=5).injuries} == {fakes.BREAKOUT_ID, fakes.TRADED_ID}
+    assert fakes.Injury("SUS").hard and not fakes.Injury("Q").hard
+
+
+def test_tagged_replaces_and_removes_tags_without_touching_the_original():
+    data = fakes.fake_season()
+
+    edited = fakes.tagged(data, {fakes.QUESTIONABLE: None, (fakes.BUST_ID, 2): fakes.Injury("PUP")})
+
+    assert fakes.QUESTIONABLE in data.injuries and fakes.QUESTIONABLE not in edited.injuries
+    assert edited.injuries[(fakes.BUST_ID, 2)].tag == "PUP" and (fakes.BUST_ID, 2) not in data.injuries
+    assert edited.projected == data.projected
 
 
 @pytest.mark.parametrize("week", [0, 1, 6, 12])
@@ -234,6 +274,7 @@ def test_as_of_is_identical_when_only_the_future_differs(week):
     assert dict(other.projected) != dict(data.projected)
     assert dict(known.projected) == dict(altered.projected) and dict(known.team_by_week) == dict(altered.team_by_week)
     assert {k: v for k, v in altered.actual.items() if k[1] < week} == dict(known.actual)
+    assert dict(other.injuries) != dict(data.injuries) and dict(known.injuries) == dict(altered.injuries)
 
 
 # ---------------- a league just after its draft ----------------
@@ -408,15 +449,33 @@ def test_load_is_cached_until_the_cache_is_cleared(seeded_db):
 def test_readiness_reports_a_loaded_season_as_ready(seeded_db):
     assert replay_pool.readiness(seeded_db, fakes.SEASON) == {
         "season": fakes.SEASON, "ready": True, "has_stats": True, "has_schedule": True, "has_kdst": True,
-        "adp_players": 220, "projection_weeks": 17, "kickers": 32, "defenses": 32}
+        "adp_players": 220, "projection_weeks": 17, "kickers": 32, "defenses": 32, "injury_weeks": 14}
     assert replay_pool.ready_seasons(seeded_db) == [fakes.SEASON]
+
+
+def test_a_season_without_injury_tags_is_still_ready_and_loads_with_none(small_db):
+    small_db.execute(delete(ReplayInjury))
+    small_db.commit()
+
+    status = replay_pool.readiness(small_db, fakes.SEASON)
+
+    assert status["ready"] is True and status["injury_weeks"] == 0
+    assert dict(replay_pool.load_season_data(small_db, fakes.SEASON, "half").injuries) == {}
+
+
+def test_load_returns_the_same_injury_tags(loaded):
+    data = fakes.fake_season()
+
+    assert dict(loaded.injuries) == dict(data.injuries) != {}
+    assert loaded.injuries[fakes.QUESTIONABLE] == fakes.Injury("Q", "LP", "Hamstring")
 
 
 def test_an_unloaded_season_is_not_ready_and_cannot_be_loaded(seeded_db):
     status = replay_pool.readiness(seeded_db, 2019)
 
     assert status == {"season": 2019, "ready": False, "has_stats": False, "has_schedule": False,
-                      "has_kdst": False, "adp_players": 0, "projection_weeks": 0, "kickers": 0, "defenses": 0}
+                      "has_kdst": False, "adp_players": 0, "projection_weeks": 0, "kickers": 0, "defenses": 0,
+                      "injury_weeks": 0}
     with pytest.raises(NoDataError):
         replay_pool.load_season_data(seeded_db, 2019, "half")
 
@@ -508,3 +567,15 @@ def test_load_ignores_postseason_weeks_null_defense_scores_and_other_positions(s
     assert (defense, week) not in loaded.actual                       # not scored as a shutout
     assert dict(loaded.team_by_week[defense])[week] == team           # but it is still that team's game
     assert all(game.home_score is None and game.away_score is None for game in loaded.schedule.games)   # no results
+
+
+def test_only_pool_players_tags_inside_the_season_are_loaded(small_db):
+    outsider = Player(full_name="Line Backer", position="LB")                 # tagged, but not in the pool
+    small_db.add(outsider)
+    small_db.flush()
+    small_db.add_all([ReplayInjury(season=fakes.SEASON, week=1, player_id=outsider.id, tag="IR"),
+                      ReplayInjury(season=fakes.SEASON, week=18, player_id=fakes.BUST_ID, tag="O")])    # past week 17
+    small_db.commit()
+    replay_pool.clear_cache()
+
+    assert dict(replay_pool.load_season_data(small_db, fakes.SEASON, "half").injuries) == dict(fakes.fake_season().injuries)

@@ -75,7 +75,7 @@ describe('GameHub primary button', () => {
     expect(within(panel).getByRole('heading', { name: 'Results' })).toBeInTheDocument();
     expect(within(panel).getByText('Your Team beat Sunday Scaries 121.46-98.20')).toBeInTheDocument();
     // The hub stays busy for the one render that first shows the new version, so the button is enabled a render later.
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Sim to Wednesday (process waivers)' })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Sim to Wednesday' })).toBeEnabled());
     expect(screen.getByText('team screen, version 1')).toBeInTheDocument();
 
     await user.click(within(panel).getByRole('button', { name: 'Dismiss' }));
@@ -112,14 +112,14 @@ describe('GameHub primary button', () => {
     expect(button).toBeDisabled();
     expect(screen.getByText('team screen, version 0, busy')).toBeInTheDocument();
     finish?.();
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Sim to Wednesday (process waivers)' })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Sim to Wednesday' })).toBeEnabled());
     expect(api.callsTo(ADVANCE_PATH, 'POST')).toHaveLength(1);
   });
 
   it('runs the waivers on "Sim to Wednesday"', async () => {
     const claims = [event(41, 'claim', 'Your Team claimed Raheem Mostert', { team: teamRef(USER_TEAM_ID), players: [MOSTERT] })];
     const { api, user } = renderHub(WAIVERS, [{ method: 'POST', path: ADVANCE_PATH, reply: json(actionResult(summary(), claims)) }]);
-    await user.click(await screen.findByRole('button', { name: 'Sim to Wednesday (process waivers)' }));
+    await user.click(await screen.findByRole('button', { name: 'Sim to Wednesday' }));
     expect(await screen.findByRole('heading', { name: 'Waiver results' })).toBeInTheDocument();
     expect(api.callsTo(ADVANCE_PATH, 'POST')[0].body).toEqual({ step: 'wednesday', week: 5 });
     expect(screen.getByRole('button', { name: 'Play week 5' })).toBeInTheDocument();
@@ -145,7 +145,7 @@ describe('GameHub primary button', () => {
   it('keeps focus on the primary button after playing a week', async () => {
     const { user } = renderHub(summary(), [{ method: 'POST', path: ADVANCE_PATH, reply: json(actionResult(WAIVERS)) }]);
     await user.click(await screen.findByRole('button', { name: 'Play week 5' }));
-    expect(await screen.findByRole('button', { name: 'Sim to Wednesday (process waivers)' })).toHaveFocus();
+    expect(await screen.findByRole('button', { name: 'Sim to Wednesday' })).toHaveFocus();
   });
 
   it('is disabled once the season is complete, under a champion banner', async () => {

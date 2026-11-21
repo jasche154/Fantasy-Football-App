@@ -36,7 +36,7 @@ import type {
 const ROOT = '/api/replay';
 const game = (gameId: number): string => `${ROOT}/games/${gameId}`;
 
-function post<T>(path: string, body?: unknown, query?: Record<string, boolean | undefined>): Promise<T> {
+function post<T>(path: string, body?: unknown, query?: Record<string, boolean | number | undefined>): Promise<T> {
   return apiRequest(path, { method: 'POST', body, query });
 }
 
@@ -131,14 +131,17 @@ export function getReplayTrades(gameId: number, signal?: AbortSignal): Promise<R
 
 // ---------------- actions ----------------
 
-/** The user's pick; `events` lists the CPU picks up to the user's next turn. */
-export function replayDraftPick(gameId: number, playerId: number): Promise<ReplayActionResult> {
-  return post(`${game(gameId)}/draft/pick`, { player_id: playerId });
+/**
+ * The user's pick; `events` lists the CPU picks up to the user's next turn. `overall` is the pick the board
+ * shows on the clock: 409 when stale.
+ */
+export function replayDraftPick(gameId: number, playerId: number, overall?: number | null): Promise<ReplayActionResult> {
+  return post(`${game(gameId)}/draft/pick`, { player_id: playerId, ...(overall != null && { overall }) });
 }
 
-/** Auto-pick for the user: this pick, or every pick left with `wholeDraft`. */
-export function replayDraftAuto(gameId: number, wholeDraft?: boolean): Promise<ReplayActionResult> {
-  return post(`${game(gameId)}/draft/auto`, undefined, { whole_draft: wholeDraft });
+/** Auto-pick for the user: this pick, or every pick left with `wholeDraft`. `overall` as in replayDraftPick. */
+export function replayDraftAuto(gameId: number, wholeDraft?: boolean, overall?: number | null): Promise<ReplayActionResult> {
+  return post(`${game(gameId)}/draft/auto`, undefined, { whole_draft: wholeDraft, overall: overall ?? undefined });
 }
 
 /** `starters` null: back to the best lineup. */
@@ -166,6 +169,16 @@ export function replayAddDrop(gameId: number, body: ReplayClaimBody): Promise<Re
 
 export function replayDrop(gameId: number, playerId: number): Promise<ReplayActionResult> {
   return post(`${game(gameId)}/drop`, { player_id: playerId });
+}
+
+/** Moves an active player tagged O, IR or PUP into the IR slot. */
+export function replayIrPlace(gameId: number, playerId: number): Promise<ReplayActionResult> {
+  return post(`${game(gameId)}/ir/place`, { player_id: playerId });
+}
+
+/** Brings a player back from IR; `drop` makes room on a full roster, `swap` (an injured active player) takes the slot instead. */
+export function replayIrActivate(gameId: number, playerId: number, options: { drop?: number; swap?: number } = {}): Promise<ReplayActionResult> {
+  return post(`${game(gameId)}/ir/activate`, { player_id: playerId, ...options });
 }
 
 /** "wednesday" runs the waivers, "play" scores the week. `week` is the week on screen: 409 when stale. */

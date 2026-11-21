@@ -77,19 +77,19 @@ export function DraftView({ game, version, act, isBusy, actError, openPlayer }: 
         return (
           <div className="replay-draft">
             <Clock draft={data} statusRef={statusRef}>
-              <button type="button" className="btn btn--ghost" disabled={!canAct} onClick={() => run('auto', () => replayDraftAuto(game.id))}>
+              <button type="button" className="btn btn--ghost" disabled={!canAct} onClick={() => run('auto', () => replayDraftAuto(game.id, undefined, data.overall))}>
                 {isPending('auto') ? 'Picking…' : 'Auto-pick for me'}
               </button>
               <ConfirmButton className="btn btn--ghost" disabled={!canAct} confirmLabel="Yes, draft the rest for me"
                 label={isPending('rest') ? 'Drafting the rest…' : 'Auto-draft the rest'}
-                onConfirm={() => run('rest', () => replayDraftAuto(game.id, true))} />
+                onConfirm={() => run('rest', () => replayDraftAuto(game.id, true, data.overall))} />
             </Clock>
             <DraftBoard draft={data} position={position} search={search} canDraft={canAct} isBusy={isBusy}
               pressedId={typeof pressed === 'number' ? pressed : null} error={actError} openPlayer={openPlayer}
               onPosition={(next) => { setPosition(next); setLimit(PAGE_SIZE); }}
               onSearch={(next) => { setSearch(next); setLimit(PAGE_SIZE); }}
               onShowMore={hasMore ? () => setLimit(limit + PAGE_SIZE) : undefined}
-              onDraft={(playerId) => run(playerId, () => replayDraftPick(game.id, playerId))} />
+              onDraft={(playerId) => run(playerId, () => replayDraftPick(game.id, playerId, data.overall))} />
             <div className="replay-draft__side">
               <DraftRoster roster={data.roster} settings={game.settings} openPlayer={openPlayer} />
               <DraftPicks draft={data} openPlayer={openPlayer} />

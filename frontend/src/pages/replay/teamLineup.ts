@@ -1,6 +1,7 @@
 /** Replay League: lineup rules for the My Team and Matchup screens (mirrors backend/services/replay_season.py). */
-import type { ReplayLineup, ReplayPosition, ReplayRosterRow, ReplaySettings, ReplaySlot } from '../../api/types';
+import type { ReplayInjuryTag, ReplayLineup, ReplayPosition, ReplayRosterRow, ReplaySettings, ReplaySlot } from '../../api/types';
 import type { SelectOption } from '../../components/SelectField';
+import { isHardTag } from './shared';
 
 type StartingSlot = Exclude<ReplaySlot, 'BN'>;
 
@@ -54,10 +55,24 @@ export function swappedLineup(spots: readonly LineupSpot[], from: LineupSpot, to
   return lineup;
 }
 
-/** What is wrong with the starting lineup: starters who are out or on bye, and empty slots. */
+const TAG_WARNINGS: Record<ReplayInjuryTag, string> = {
+  O: 'is out', IR: 'is on injured reserve', PUP: 'is on the PUP list', SUS: 'is suspended', Q: 'is questionable', D: 'is doubtful',
+};
+
+/** One starter's problem, or null: bye, then out (worded by a hard tag), then a Q or D tag. */
+function starterWarning(row: ReplayRosterRow, slot: ReplaySlot): string | null {
+  const who = `${row.player.name} (${slot})`;
+  const { injury } = row.player;
+  if (row.bye) return `${who} is on bye.`;
+  if (row.out) return `${who} ${injury && isHardTag(injury) ? TAG_WARNINGS[injury.tag] : 'is out'}.`;
+  if (injury && !isHardTag(injury)) return `${who} ${TAG_WARNINGS[injury.tag]}${injury.injury ? ` (${injury.injury})` : ''}.`;
+  return null;
+}
+
+/** What is wrong with the starting lineup: empty slots, starters on bye, out, or tagged Q or D. */
 export function lineupWarnings(spots: readonly LineupSpot[]): string[] {
-  return spots.filter((spot) => spot.slot !== 'BN' && (!spot.row || spot.row.bye || spot.row.out)).map((spot) => {
-    if (!spot.row) return `The ${spot.slot} slot is empty.`;
-    return `${spot.row.player.name} (${spot.slot}) is ${spot.row.bye ? 'on bye' : 'out'}.`;
+  return spots.filter((spot) => spot.slot !== 'BN').flatMap((spot) => {
+    const warning = spot.row ? starterWarning(spot.row, spot.slot) : `The ${spot.slot} slot is empty.`;
+    return warning ? [warning] : [];
   });
 }

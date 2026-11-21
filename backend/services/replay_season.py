@@ -35,9 +35,11 @@ def _eligible(slot: str, position: str) -> bool:
     return position in rv.FLEX_POSITIONS if slot == "FLEX" else slot == position
 
 
-def _check_starter(know: rv.Knowledge, roster: Sequence[int], slot: str, player_id: int, seen: set[int]) -> None:
+def _check_starter(know: rv.Knowledge, team: rs.Team, slot: str, player_id: int, seen: set[int]) -> None:
     value = know.by_id.get(player_id)
-    if value is None or player_id not in roster:
+    if value is not None and player_id in team.ir:
+        raise ValueError(f"{value.name} is on IR: activate him before starting him.")
+    if value is None or player_id not in team.roster:
         raise ValueError(f"{value.name if value else f'Player {player_id}'} is not on your roster.")
     if player_id in seen:
         raise ValueError(f"{value.name} is in the lineup twice.")
@@ -57,12 +59,12 @@ def set_lineup(state: State, settings: Settings, know: rv.Knowledge,
     unknown = sorted(slot for slot, ids in starters.items() if slot not in lineup and ids)
     if unknown:
         raise ValueError(f"This league has no {unknown[0]} slot.")
-    roster, seen = rs.user_team(state).roster, set()
+    user, seen = rs.user_team(state), set()
     for slot, ids in lineup.items():
         if len(ids) > settings.starters[slot]:
             raise ValueError(f"The {slot} slot takes {settings.starters[slot]}, not {len(ids)} players.")
         for player_id in ids:
-            _check_starter(know, roster, slot, player_id, seen)
+            _check_starter(know, user, slot, player_id, seen)
             seen.add(player_id)
     return replace(state, lineup=lineup)
 

@@ -5,10 +5,10 @@ each other.
     week, "wednesday" waivers:  advance("wednesday") -> advance("play") -> ...
     week, no waivers:           advance("play") -> ...
 
-- `start_week`: CPU free agency, then CPU trades and a possible offer to the user, then every dropped
-  player comes off waivers and the phase is "open".
-- `advance("wednesday")` (phase "waivers"): CPU claims plus the user's, awarded by rolling priority, then
-  `start_week`.
+- `start_week`: CPU IR moves, CPU free agency, then CPU trades and a possible offer to the user, then every
+  dropped player comes off waivers and the phase is "open".
+- `advance("wednesday")` (phase "waivers"): CPU IR moves, then CPU claims plus the user's, awarded by rolling
+  priority, then `start_week`.
 - `advance("play")` (phase "open"): the week is scored. With waivers the phase becomes "waivers"; without
   them the next week starts at once (CPUs move first, then the user can take anyone left).
 
@@ -23,7 +23,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 
 from services import (
-    replay_draft, replay_season, replay_state as rs, replay_trade_ai, replay_trades, replay_values as rv,
+    replay_draft, replay_ir, replay_season, replay_state as rs, replay_trade_ai, replay_trades, replay_values as rv,
     replay_waiver_ai, replay_waivers,
 )
 from services.replay_pool import SeasonData
@@ -32,8 +32,8 @@ from services.replay_trades import OfferExpired, Verdict       # re-exported for
 
 __all__ = [
     "OfferExpired", "STEPS", "Verdict", "add_drop", "advance", "auto_draft", "auto_pick", "cancel_claim",
-    "clear_lineup", "create_game", "drop", "evaluate_trade", "knowledge", "pick", "propose_trade",
-    "reorder_claims", "respond_offer", "set_lineup", "start_week", "submit_claim",
+    "clear_lineup", "create_game", "drop", "evaluate_trade", "ir_activate", "ir_place", "knowledge", "pick",
+    "propose_trade", "reorder_claims", "respond_offer", "set_lineup", "start_week", "submit_claim",
 ]
 
 WEDNESDAY, PLAY = "wednesday", "play"
@@ -102,11 +102,12 @@ def auto_draft(state: State, settings: Settings, data: SeasonData, seed: int) ->
 # ---------------- the week ----------------
 
 def start_week(state: State, settings: Settings, data: SeasonData, seed: int) -> State:
-    """The CPUs' start-of-week moves: free agency, then trades (and maybe an offer to the user). Then
+    """The CPUs' start-of-week moves: IR, free agency, then trades (and maybe an offer to the user). Then
     every dropped player comes off waivers and the phase is "open": the user can add anyone left."""
     if state.phase not in SEASON_PHASES:
         raise ValueError("A week can only start during the season.")
     know = knowledge(state, settings, data)
+    state = replay_waiver_ai.cpu_ir(state, settings, know, seed)
     state = replay_waiver_ai.cpu_free_agency(state, settings, know, seed)
     state = replay_trade_ai.cpu_trades(state, settings, know, seed)
     return replace(state, locked=(), phase="open")
@@ -118,6 +119,7 @@ def _wednesday(state: State, settings: Settings, data: SeasonData, seed: int) ->
                   else f"Week {state.week}'s waivers have already run")
         raise ValueError(f"{reason}: play week {state.week} instead.")
     know = knowledge(state, settings, data)
+    state = replay_waiver_ai.cpu_ir(state, settings, know, seed)
     claims = replay_waiver_ai.cpu_claims(state, settings, know, seed)
     return start_week(replay_waivers.process_claims(state, settings, know, claims), settings, data, seed)
 
@@ -173,6 +175,19 @@ def add_drop(state: State, settings: Settings, data: SeasonData, add: int, drop:
 def drop(state: State, settings: Settings, data: SeasonData, player_id: int) -> State:
     know = knowledge(state, settings, data)
     return replay_waivers.drop(state, settings, know, rs.user_team(state).id, player_id)
+
+
+def ir_place(state: State, settings: Settings, data: SeasonData, player_id: int) -> State:
+    """The user moves an eligible player from the active roster to IR."""
+    know = knowledge(state, settings, data)
+    return replay_ir.place(state, know, rs.user_team(state).id, player_id)
+
+
+def ir_activate(state: State, settings: Settings, data: SeasonData, player_id: int, drop: int | None = None,
+                swap: int | None = None) -> State:
+    """The user brings a player back from IR (dropping `drop`, or moving `swap` to IR in his place)."""
+    know = knowledge(state, settings, data)
+    return replay_ir.activate(state, settings, know, rs.user_team(state).id, player_id, drop, swap)
 
 
 def evaluate_trade(state: State, settings: Settings, data: SeasonData, to_team: int, give: Sequence[int],

@@ -4,7 +4,7 @@ import { AsyncView } from '../../components/AsyncView';
 import { Skeleton } from '../../components/StatusViews';
 import { useAsync } from '../../hooks/useAsync';
 import { EMPTY_VALUE, formatNumber } from '../../lib/format';
-import { formatPoints, ReplayDrawer, ReplayPositionChip } from './shared';
+import { formatPoints, injuryLabel, ReplayDrawer, ReplayInjuryBadge, ReplayPositionChip, showsOut } from './shared';
 
 function statusText(player: ReplayWireRow): string {
   if (player.owner) return player.owner.is_user ? 'On your team' : `Rostered by ${player.owner.name}`;
@@ -17,7 +17,8 @@ function WeekRow({ week }: { week: ReplayPlayerWeek }) {
       <th scope="row" className="num">{week.week}</th>
       <td>
         {week.bye ? 'BYE' : (week.opponent ?? EMPTY_VALUE)}
-        {week.out && <span className="status-badge status-badge--out replay-drawer__badge">Out</span>}
+        {week.injury && <> <ReplayInjuryBadge injury={week.injury} /></>}
+        {showsOut(week.out, week.injury) && <span className="status-badge status-badge--out replay-drawer__badge">Out</span>}
       </td>
       <td className="num">{formatPoints(week.projection)}</td>
       {/* A week that hasn't been played never shows a result. */}
@@ -29,13 +30,17 @@ function WeekRow({ week }: { week: ReplayPlayerWeek }) {
 
 function Detail({ detail }: { detail: ReplayPlayerDetail }) {
   const { player: row, weeks } = detail;
+  const { injury } = row.player;
   return (
     <>
       <p className="replay-drawer__status">
         <ReplayPositionChip position={row.player.position} /> {row.player.team ?? 'No team'} · {row.pos_rank} · {statusText(row)}
-        {row.out && <span className="status-badge status-badge--out replay-drawer__badge">Out</span>}
+        {injury && <> <ReplayInjuryBadge injury={injury} /></>}
+        {showsOut(row.out, injury) && <span className="status-badge status-badge--out replay-drawer__badge">Out</span>}
         {row.trade_locked && <span className="status-badge status-badge--missing replay-drawer__badge">Trade-locked</span>}
       </p>
+      {/* Hover isn't there on touch or for the keyboard: the full label in plain text. */}
+      {injury && <p className="replay-drawer__status">{injuryLabel(injury)}</p>}
       <dl className="replay-drawer__line">
         <div><dt>Games</dt><dd>{row.games}</dd></div>
         <div><dt>Points</dt><dd>{formatPoints(row.season_points)}</dd></div>

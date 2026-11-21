@@ -10,7 +10,7 @@ import { ClaimsPanel } from './ClaimsPanel';
 import { DIALOG_KEY, PlayersDropDialog, type DropTarget } from './PlayersDropDialog';
 import { usePlayerMoves } from './PlayersMoves';
 import { addKey, PlayersTable } from './PlayersTable';
-import { positionParam, PositionTabs, type ReplayPositionTab, type ReplayViewProps } from './shared';
+import { positionParam, PositionTabs, ReplayIrBlockedNotice, type ReplayPositionTab, type ReplayViewProps } from './shared';
 
 const PAGE_SIZE = 25;
 const SEARCH_DELAY_MS = 250;
@@ -120,6 +120,7 @@ export function PlayersView({ game, version, act, isBusy, openPlayer }: ReplayVi
     <>
       <p className="hint replay-players__note">{phaseNote(game)}</p>
       {showClaims && <ClaimsPanel gameId={game.id} claims={claims} moves={moves} openPlayer={openPlayer} />}
+      <ReplayIrBlockedNotice game={game} />
       <div className="weekly-controls replay-players__filters">
         <PositionTabs value={tab} onChange={setTab} withFlex />
         <SelectField label="Show" isInline value={status} options={STATUS_OPTIONS} onChange={(value) => setStatus(value as ReplayStatusFilter)} />

@@ -5,7 +5,7 @@ import type { ReplayPendingOffer, ReplaySummary, ReplayTrades, ReplayVerdict } f
 import { json, mockFetch, type MockReply, type MockRequest, type MockRoute } from '../../test/mockFetch';
 import { META_ROUTE, renderWithProviders } from '../../test/render';
 import {
-  actionResult, COLLINS, ETIENNE, GAME_ID, MCCAFFREY, MOSTERT, rosterRow, summary, team, teamRef, USER_TEAM_ID, viewProps,
+  actionResult, COLLINS, ETIENNE, GAME_ID, MCCAFFREY, MOSTERT, rosterRow, summary, tagged, team, teamRef, USER_TEAM_ID, viewProps,
 } from './fixtures';
 import type { ReplayViewProps } from './shared';
 import { TradesView } from './TradesView';
@@ -269,5 +269,28 @@ describe('TradesView rules and errors', () => {
     mockFetch([META_ROUTE, { path: TRADES_PATH, reply: json({ detail: 'Season data is not prepared.' }, 503) }, { path: `${PATH}/team`, reply: teamReply }]);
     renderWithProviders(<TradesView {...viewProps()} />);
     expect(await screen.findByRole('alert')).toHaveTextContent('Season data is not prepared.');
+  });
+});
+
+describe('TradesView injuries and IR', () => {
+  it('states the dealing rules, including IR', async () => {
+    renderTrades(trades({ max_players: 2 }));
+    expect(await screen.findByText("Up to 2 players a side. A player who is out right now, on IR, or was traded in the last two weeks can't be dealt."))
+      .toBeInTheDocument();
+  });
+
+  it('shows the IR banner while blocked, and leaves the offer answerable', async () => {
+    renderTrades(trades({ offers: [offer()] }), [], { props: { game: summary({ ir_blocked: [COLLINS] }) } });
+    const card = await screen.findByRole('listitem', { name: 'Offer from Blitz Brigade' });
+    expect(screen.getByText('Nico Collins is on IR but no longer has an O, IR or PUP tag. Activate or drop him before you add, claim or trade for players.'))
+      .toHaveAttribute('role', 'status');
+    await waitFor(() => expect(within(card).getByRole('button', { name: /Accept/ })).toBeEnabled());
+  });
+
+  it('shows the tag on an offer\'s player', async () => {
+    const hurt = tagged(MOSTERT, 'Q', 'LP', 'Hamstring');
+    renderTrades(trades({ offers: [offer({ give: [hurt], verdict: verdict({ get: [{ player: hurt, value: 35 }] }) })] }));
+    const card = await screen.findByRole('listitem', { name: 'Offer from Blitz Brigade' });
+    expect(within(card).getByTitle('Questionable: Hamstring (limited practice)')).toHaveTextContent('Q');
   });
 });
