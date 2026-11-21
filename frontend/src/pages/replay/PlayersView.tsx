@@ -78,7 +78,9 @@ export function PlayersView({ game, version, act, isBusy, openPlayer }: ReplayVi
   const searchId = useId();
 
   const canMove = game.phase === 'open' || game.phase === 'waivers';
-  const showClaims = game.phase === 'waivers' || game.pending.claims > 0;
+  const isFaab = game.settings.waiver_mode === 'faab';
+  // In FAAB leagues the panel also shows every team's budget, so it stays after each waiver run.
+  const showClaims = game.phase === 'waivers' || game.pending.claims > 0 || (isFaab && game.phase !== 'draft');
   const players = useAsync(
     (signal) => getReplayPlayers(game.id, { position: positionParam(tab), search: query, status, sort, limit: PAGE_SIZE, offset }, signal),
     [game.id, version, filterKey, offset],
@@ -105,13 +107,15 @@ export function PlayersView({ game, version, act, isBusy, openPlayer }: ReplayVi
     void moves.run(addKey(id), () => replayAddDrop(game.id, { add: id }), `Added ${name}.`);
   };
 
-  const confirm = async (drop: ReplayPlayerRef | null) => {
+  const confirm = async (drop: ReplayPlayerRef | null, bid?: number) => {
     if (!target) return;
     const { id, name } = target.row.player;
     const body = drop ? { add: id, drop: drop.id } : { add: id };
     const dropping = drop ? `, dropping ${drop.name}` : '';
+    const forBid = bid === undefined ? '' : ` for $${bid}`;
     const sent = target.kind === 'claim'
-      ? moves.run(DIALOG_KEY, () => submitReplayClaim(game.id, body), `Claim for ${name} is in${dropping}. It is settled on “Sim to Wednesday”.`)
+      ? moves.run(DIALOG_KEY, () => submitReplayClaim(game.id, bid === undefined ? body : { ...body, bid }),
+        `Claim for ${name} is in${forBid}${dropping}. It is settled on “Sim to Wednesday”.`)
       : moves.run(DIALOG_KEY, () => replayAddDrop(game.id, body), `Added ${name}${dropping}.`);
     if (await sent) setTarget(null);
   };
@@ -144,7 +148,9 @@ export function PlayersView({ game, version, act, isBusy, openPlayer }: ReplayVi
           </>
         )}
       </AsyncView>
-      {target && <PlayersDropDialog target={target} game={game} team={team} earlierNoDrop={earlierNoDrop} moves={moves} onConfirm={(drop) => void confirm(drop)} onClose={closeDialog} />}
+      {target && <PlayersDropDialog target={target} game={game} team={team} earlierNoDrop={earlierNoDrop} moves={moves}
+        bidding={isFaab && target.kind === 'claim' ? { left: claims.data?.faab?.left ?? null } : undefined}
+        onConfirm={(drop, bid) => void confirm(drop, bid)} onClose={closeDialog} />}
     </>
   );
 }

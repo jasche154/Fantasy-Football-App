@@ -191,6 +191,20 @@ def test_games_and_points_per_game_count_only_weeks_already_played():
     assert later.games == 3 and later.ppg == pytest.approx(sum(played) / 3, abs=0.006)
 
 
+def test_recent_points_are_his_last_three_games_before_this_week_newest_first():
+    data = fakes.fake_season()
+    pid = fakes.INJURED_STAR_ID                              # no game in INJURED_WEEKS (6-9)
+    games = [w for w in range(1, 6) if (pid, w) in data.actual]
+
+    early, during, later = (know_at(w).by_id[pid] for w in (1, 8, 10))
+    boosted = know_at(10, fakes.patched(data, actual={(pid, 10): 99.0, (pid, 11): 99.0})).by_id[pid]
+
+    assert (early.recent_points, early.last_game_week) == ((), 0)
+    assert during.last_game_week == later.last_game_week == games[-1] and rv.RECENT_GAMES == 3
+    assert during.recent_points == tuple(data.actual[(pid, w)] for w in games[::-1][:3]) == later.recent_points
+    assert boosted == later                                  # this week's and later games are never seen
+
+
 def test_team_is_the_one_known_before_the_week():
     data = fakes.fake_season()
     old, new = (dict(data.team_by_week[fakes.TRADED_ID])[w] for w in (fakes.TRADED_WEEK - 1, fakes.TRADED_WEEK))

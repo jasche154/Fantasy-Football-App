@@ -4,9 +4,12 @@ no-hindsight rule holds here (`Game.data` and `Game.know_at` only).
 """
 import json
 from collections import defaultdict
+from collections.abc import Sequence
+from statistics import mean
 
 from database.models import ReplayLeague
 from services import replay_season, replay_state as rs, replay_trades, replay_waivers
+from services.replay_pool import Usage
 from services.replay_state import Offer, Team
 from services.replay_trades import Verdict
 from services.replay_values import ReplayValue
@@ -19,6 +22,7 @@ EVENT_KINDS = ("draft", "add", "drop", "claim", "trade", "ir", "result", "playof
 AVAILABLE = "available"
 STATUSES = (AVAILABLE, *replay_waivers.STATUS_FILTERS)
 SORTS = ("value", "projection", "ros_ppg", "adp", "points", "name")
+USAGE_GAMES = 3                         # games averaged in a WireRow's usage
 
 
 def listing(row: ReplayLeague) -> dict:
@@ -91,12 +95,34 @@ def _season_points(game: Game) -> dict[int, float]:
     return totals
 
 
-def _wire_row(game: Game, player_id: int, owners: dict[int, Team], totals: dict[int, float]) -> dict:
+def _usage(games: Sequence[Usage]) -> dict | None:
+    """The Usage shape: means over `games`; snap % and target share over the games that have them."""
+    if not games:
+        return None
+    snaps = [g.snap_pct for g in games if g.snap_pct is not None]
+    shares = [g.target_share for g in games if g.target_share is not None]
+    return {"games": len(games), "snap_pct": round(mean(snaps), 1) if snaps else None,
+            "targets": round(mean(g.targets for g in games), 1),
+            "target_share": round(mean(shares), 3) if shares else None,
+            "carries": round(mean(g.carries for g in games), 1)}
+
+
+def _recent_usage(game: Game) -> dict[int, dict]:
+    """{player id: Usage of his last USAGE_GAMES games}: `Game.data` holds played weeks only (skill games)."""
+    games: dict[int, list[Usage]] = defaultdict(list)
+    for (player_id, _), usage in sorted(game.data.usage.items(), key=lambda item: -item[0][1]):
+        if len(games[player_id]) < USAGE_GAMES:
+            games[player_id].append(usage)
+    return {player_id: _usage(recent) for player_id, recent in games.items()}
+
+
+def _wire_row(game: Game, player_id: int, owners: dict[int, Team], totals: dict[int, float],
+              usage: dict[int, dict]) -> dict:
     owner = owners.get(player_id)
     return {**player_row(game, game.know, player_id),
             "status": replay_waivers.player_status(game.state, player_id),
             "owner": team_ref(owner) if owner else None, "season_points": round(totals.get(player_id, 0.0), 2),
-            "last_points": game.data.actual.get((player_id, game.played))}
+            "last_points": game.data.actual.get((player_id, game.played)), "usage": usage.get(player_id)}
 
 
 def _sorted(values: list[ReplayValue], sort: str, totals: dict[int, float]) -> list[ReplayValue]:
@@ -118,20 +144,21 @@ def players(game: Game, position: str | None = None, search: str | None = None, 
     status = status or AVAILABLE
     if status not in STATUSES:
         raise ValueError(f"Unknown status '{status}'. Valid: {list(STATUSES)}")
-    wanted, totals, owners = positions_for(position), _season_points(game), _owners(game)
+    wanted, totals, owners, usage = positions_for(position), _season_points(game), _owners(game), _recent_usage(game)
     found = replay_waivers.available_players(game.state, game.know, None, search,
                                              None if status == AVAILABLE else status)
     values = _sorted([value for value in found if value.position in wanted], sort, totals)
-    return {**page(values, limit, offset, lambda v: _wire_row(game, v.player_id, owners, totals)),
+    return {**page(values, limit, offset, lambda v: _wire_row(game, v.player_id, owners, totals, usage)),
             "week": game.state.week}
 
 
 def _history_row(game: Game, player_id: int, week: int) -> dict:
-    row = player_row(game, game.know_at(week), player_id)
+    row, usage = player_row(game, game.know_at(week), player_id), game.data.usage.get((player_id, week))
     return {"week": week, "played": week <= game.played, "team": row["player"]["team"],
             "injury": row["player"]["injury"],
             **{key: row[key] for key in ("opponent", "bye", "out", "projection", "points", "ros_ppg", "value",
-                                         "trade_value", "rank", "pos_rank")}}
+                                         "trade_value", "rank", "pos_rank")},
+            "usage": _usage([usage] if usage else [])}          # played weeks only: `Game.data`
 
 
 def player(game: Game, player_id: int) -> dict:
@@ -139,7 +166,7 @@ def player(game: Game, player_id: int) -> dict:
     from the week he entered the pool (a late arrival has no earlier weeks)."""
     if player_id not in game.know.by_id:
         raise rs.ReplayNotFound(f"There is no player {player_id} in the {game.settings.season} player pool.")
-    return {"player": _wire_row(game, player_id, _owners(game), _season_points(game)),
+    return {"player": _wire_row(game, player_id, _owners(game), _season_points(game), _recent_usage(game)),
             "weeks": [_history_row(game, player_id, week) for week in range(1, game.state.week + 1)
                       if player_id in game.know_at(week).by_id]}
 
@@ -147,15 +174,22 @@ def player(game: Game, player_id: int) -> dict:
 # ---------------- claims and trades ----------------
 
 def claims(game: Game) -> dict:
-    """The user's pending waiver claims in preference order, and the league's waiver priority."""
+    """The user's pending waiver claims in preference order, the league's waiver priority and, in a FAAB
+    league, every team's budget left (public, as in Yahoo; other teams' pending bids never are)."""
     state, know = game.state, game.know
-    order = list(state.waiver_order)
+    order, mine = list(state.waiver_order), [claim for claim in state.claims if claim.team_id == game.user.id]
+    faab = None
+    if game.settings.waiver_mode == "faab":
+        faab = {"budget": rs.FAAB_BUDGET, "left": rs.faab_left(state, game.user.id),
+                "teams": [{"team": team_ref(rs.team(state, team_id)), "left": rs.faab_left(state, team_id)}
+                          for team_id in order]}
     return {"phase": state.phase, "can_claim": state.phase == "waivers",
             "priority": order.index(game.user.id) + 1 if game.user.id in order else None,
-            "waiver_order": [team_ref(rs.team(state, team_id)) for team_id in order],
+            "waiver_order": [team_ref(rs.team(state, team_id)) for team_id in order], "faab": faab,
             "results": [{"id": claim.id, "order": place, "add": player_row(game, know, claim.add),
-                         "drop": player_row(game, know, claim.drop) if claim.drop is not None else None}
-                        for place, claim in enumerate(state.claims, start=1)]}
+                         "drop": player_row(game, know, claim.drop) if claim.drop is not None else None,
+                         "bid": claim.bid}
+                        for place, claim in enumerate(mine, start=1)]}
 
 
 def verdict(game: Game, found: Verdict) -> dict:
@@ -197,5 +231,6 @@ def trades(game: Game) -> dict:
     waiting = {offer.id for offer in pending}
     return {"open": state.phase in replay_trades.TRADE_PHASES and state.week <= settings.trade_deadline_week,
             "deadline_week": settings.trade_deadline_week, "max_players": replay_trades.MAX_PLAYERS_PER_SIDE,
+            "out_discount": replay_trades.OUT_RISK_DISCOUNT,
             "offers": [{**_offer_row(game, offer), **_preview(game, offer)} for offer in pending],
             "results": [_offer_row(game, offer) for offer in reversed(state.offers) if offer.id not in waiting]}

@@ -1,26 +1,26 @@
 """Replay League trades: the league's rules, a CPU manager's acceptance test, and the user's proposals.
 
-`evaluate` is deterministic (no dice), so asking twice never changes the answer. It first rejects input that
-cannot be a trade at all (ValueError with a sentence for the user), then returns a `Verdict`; a decline lists
-its reasons. Every CPU team in the deal must pass all of these, on point-in-time values only (`know`):
+`evaluate` is deterministic: a ValueError for input that cannot be a trade, else a `Verdict` whose decline
+lists its reasons. Every CPU team in the deal must pass all of these, on point-in-time values only (`know`):
 
 1. Value. The package it receives is worth at least the package it gives x a multiple: 1.00 (normal) or 1.08
    (hard) against the user, 0.95 against another CPU. A package is `replay_values.market_value` per player,
-   best first, weighted by `trade.DEPTH_WEIGHTS`. Kickers and defenses count for a roster spot only, and a
-   CPU won't send its kicker or defense for a weaker one. A player it receives and cuts at once counts for
-   nothing.
+   best first, weighted by `trade.DEPTH_WEIGHTS`; an out player it receives and keeps counts at
+   OUT_RISK_DISCOUNT of that; one it sends the user, at least OUT_SELL_SHARE of his healthy value. Kickers and
+   defenses count for a roster spot only, and a CPU won't send its kicker or defense for a weaker one. A
+   player it receives and cuts counts for nothing.
+   It never takes an out player in a deal that leaves it more idle starting slots this week.
 2. Lineup. Its rest-of-season lineup points (`lineup_gain`, skill positions, after any forced drop) rise by at
    least MIN_TRADE_GAIN. This is what stops a team with six bench receivers taking a seventh.
-3. One accepted trade per CPU per week.
-   A CPU blocked by its IR (`replay_ir.blocked_reason`) declines every trade.
+3. One accepted trade per CPU per week; a CPU blocked by its IR (`replay_ir.blocked_reason`) declines all.
 4. Depth. It never ends up with more players at a position it is already full at (`replay_values.crowded`:
    2 QB, 6 RB, 7 WR, 2 TE, 1 K, 1 DST, unless nobody it has there plays this week).
 
 And for both teams: at most MAX_PLAYERS_PER_SIDE players a side, nobody traded in the last two weeks, a full
 legal starting lineup at all six positions afterwards, a roster within the limit (the user names who to drop;
-a CPU cuts its lowest healthy-value skill players, never its only kicker or defense), and, in every deal (CPU-CPU
-too), nobody who is out right now. Every drop goes through `replay_state.release`, so he is on waivers.
-IR players can't be traded; they still count for a CPU's lineup gain and its depth at a position.
+a CPU cuts its lowest healthy-value skill players, never its only kicker or defense). Every drop goes through
+`replay_state.release`. An out player (injured or suspended) on the active roster may be traded; one in an IR
+slot can't be, but still counts for a CPU's lineup gain and its depth at a position.
 
 The user is always the proposer in `evaluate`: to look at a CPU's offer, mirror it (`respond` does).
 """
@@ -42,6 +42,13 @@ MAX_PLAYERS_PER_SIDE = 3
 CPU_TRADE_MULTIPLE = 0.95       # between two CPUs: each needs back at least this share of what it gives
 MIN_TRADE_GAIN = 0.5            # season-weighted lineup points a CPU must gain
 SUGGEST_WITHIN = 1.5            # a player suggested to close a value gap is worth at most this x what is missing
+OUT_RISK_DISCOUNT = 0.8         # a CPU's count of an out player it receives: market value already prices the games
+                                # he should miss; the rest is the bench spot he takes while out (one of 6) and
+                                # the spread of return dates the absence model averages away
+OUT_SELL_SHARE = 0.75           # a CPU sends the user an out player for no less than this share of his healthy value:
+                                # the absence model underprices most of them (2018-25, out at weeks 2-13: tagged
+                                # O they kept 0.6-0.85 of healthy value against 0.35-0.55 priced; SUS more than
+                                # all of it), and the user may simply remember when he came back
 
 
 @dataclass(frozen=True)
@@ -83,9 +90,43 @@ class _Side:
     gain: float
 
 
-def package_value(know: Knowledge, player_ids: Sequence[int]) -> float:
-    """What these players count for together: market values, best first, weighted by trade.DEPTH_WEIGHTS."""
-    return trade.adjusted_total([rv.market_value(know, pid) for pid in player_ids])
+def _sell_floor(know: Knowledge, player_id: int) -> float:
+    """The least a CPU counts an out player it sends for: OUT_SELL_SHARE of his healthy value."""
+    value = know.by_id[player_id]
+    return OUT_SELL_SHARE * value.healthy_value if value.out else 0.0
+
+
+def _counted(know: Knowledge, player_ids: Sequence[int], cpu_receives: bool, cpu_sends: bool = False) -> list[float]:
+    counted = []
+    for pid in player_ids:
+        value = rv.market_value(know, pid)
+        if cpu_receives and know.by_id[pid].out:
+            value *= OUT_RISK_DISCOUNT
+        counted.append(max(value, _sell_floor(know, pid)) if cpu_sends else value)
+    return counted
+
+
+def package_value(know: Knowledge, player_ids: Sequence[int], cpu_receives: bool = False,
+                  cpu_sends: bool = False) -> float:
+    """What these players count for together: market values, best first, weighted by trade.DEPTH_WEIGHTS.
+    `cpu_receives`: as a CPU counts them coming in (an out player at OUT_RISK_DISCOUNT). `cpu_sends`: as a
+    CPU counts them going out (an out player at no less than OUT_SELL_SHARE of his healthy value)."""
+    return trade.adjusted_total(_counted(know, player_ids, cpu_receives, cpu_sends))
+
+
+def _stranded(settings: Settings, know: Knowledge, team: Team, sends: Sequence[int], receives: Sequence[int],
+              drops: Sequence[int]) -> list[str]:
+    """The slots newly idle this week (nobody projected plays there) when the deal leaves more idle, else []."""
+    after = [pid for pid in (*team.roster, *receives) if pid not in sends and pid not in drops]
+    now, then = rv.idle_slots(know, team.roster, settings), rv.idle_slots(know, after, settings)
+    return list((Counter(then) - Counter(now)).elements()) if len(then) > len(now) else []
+
+
+def strands_a_starter(settings: Settings, know: Knowledge, team: Team, sends: Sequence[int],
+                      receives: Sequence[int], drops: Sequence[int]) -> bool:
+    """Would the deal leave this team more idle starting slots this week? A CPU's free-agency pass has already
+    run, so the slot would stay empty."""
+    return bool(_stranded(settings, know, team, sends, receives, drops))
 
 
 def needed_multiple(settings: Settings, other: Team) -> float:
@@ -179,7 +220,7 @@ def clear_cache() -> None:
 
 
 def _side(settings: Settings, know: Knowledge, team: Team, sends: tuple[int, ...], receives: tuple[int, ...],
-          drops: tuple[int, ...]) -> _Side:
+          drops: tuple[int, ...], to_user: bool = False) -> _Side:
     kept = (*(pid for pid in team.roster if pid not in sends), *receives)
     if team.is_user:
         cut = _user_drops(team, settings, kept, drops)
@@ -190,8 +231,8 @@ def _side(settings: Settings, know: Knowledge, team: Team, sends: tuple[int, ...
     roster = tuple(pid for pid in kept if pid not in (cut or ()))
     gain = _season(settings, know, (*roster, *team.ir)) - _season(settings, know, rs.held(team))
     kept_in = [pid for pid in receives if pid not in (cut or ())]      # a throw-in it cuts at once is worth nothing
-    return _Side(team, sends, receives, cut, roster, package_value(know, sends), package_value(know, kept_in),
-                 round(gain, 2))
+    return _Side(team, sends, receives, cut, roster, package_value(know, sends, cpu_sends=to_user),
+                 package_value(know, kept_in, not team.is_user), round(gain, 2))
 
 
 def _rule_reasons(state: State, know: Knowledge, sender: Team, receiver: Team, moved: tuple[int, ...]) -> list[str]:
@@ -200,9 +241,6 @@ def _rule_reasons(state: State, know: Knowledge, sender: Team, receiver: Team, m
     if locked:
         reasons.append(f"Traded in the last {rs.RETRADE_LOCK_WEEKS} weeks, so not yet tradable again: "
                        f"{_names(know, locked)}.")
-    out = [pid for pid in moved if know.by_id[pid].out]
-    if out:
-        reasons.append(f"They won't deal for or away a player who is out right now: {_names(know, out)}.")
     reasons.extend(f"{team.name} has already made a trade this week." for team in (sender, receiver)
                    if not team.is_user and rs.has_traded_this_week(state, team.id))
     reasons.extend(reason for team in (sender, receiver)
@@ -251,12 +289,22 @@ def _side_reasons(side: _Side, other: Team, settings: Settings, know: Knowledge)
                 for roster in (side.team.roster, side.roster)]
         if position in _positions(know, side.sends) and best[1] < best[0]:
             reasons.append(f"{name} won't swap its {unit} for a weaker one.")
+    out = [pid for pid in side.receives if pid in side.roster and know.by_id[pid].out]
+    idle = _stranded(settings, know, side.team, side.sends, side.receives, side.drops or ()) if out else []
+    if idle:
+        reasons.append(f"It would leave {name} without a starter this week at {', '.join(idle)}.")
     multiple = needed_multiple(settings, other)
     if side.received < side.sent * multiple:
         extra = f" They want {multiple - 1:.0%} more than they give." if multiple > 1 else ""
         cut = [pid for pid in side.receives if pid in (side.drops or ())]
         if cut:
             extra += f" They would drop {_names(know, cut)} to make room, so that counts for nothing."
+        if out:
+            extra += f" They count {_names(know, out)} at {OUT_RISK_DISCOUNT:.0%} of value while out."
+        held = [pid for pid in side.sends if other.is_user and _sell_floor(know, pid) > rv.market_value(know, pid)]
+        if held:
+            extra += (f" They won't let {_names(know, held)} go for less than {OUT_SELL_SHARE:.0%} of "
+                      f"healthy value while out.")
         reasons.append(f"Value is too far apart: {name} would give {side.sent:.1f} points of value and get "
                        f"{side.received:.1f} back.{extra}")
     if side.gain < MIN_TRADE_GAIN:
@@ -278,7 +326,7 @@ def _suggestion(state: State, settings: Settings, know: Knowledge, mine: _Side, 
         return None
     if len(mine.sends) >= MAX_PLAYERS_PER_SIDE:              # nobody can be added: the package must get better
         return _points_text(needed - theirs.received)
-    sending = [rv.market_value(know, pid) for pid in mine.sends if pid not in (theirs.drops or ())]
+    sending = _counted(know, [pid for pid in mine.sends if pid not in (theirs.drops or ())], True)
     low, missing = 0.0, needed                               # as the best player, `needed` alone closes it
     for _ in range(trade.EVEN_IT_STEPS):                     # the package discount makes it more than the gap
         middle = (low + missing) / 2
@@ -305,7 +353,7 @@ def evaluate(state: State, settings: Settings, know: Knowledge, from_team: int, 
     give, get = tuple(give), tuple(get)
     sender, receiver = _check(state, settings, know, from_team, to_team, give, get)
     mine = _side(settings, know, sender, give, get, tuple(proposer_drops))
-    theirs = _side(settings, know, receiver, get, give, ())
+    theirs = _side(settings, know, receiver, get, give, (), sender.is_user)
     reasons = [*_rule_reasons(state, know, sender, receiver, (*give, *get)),
                *_side_reasons(theirs, sender, settings, know), *_side_reasons(mine, receiver, settings, know)]
     return Verdict(

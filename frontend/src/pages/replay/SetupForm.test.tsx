@@ -137,6 +137,24 @@ describe('SetupForm', () => {
     expect(screen.getByRole('button', { name: 'Create league and draft' })).toBeInTheDocument();
   });
 
+  it('offers FAAB bidding between the other waiver modes and sends it', async () => {
+    const { api, onCreated, user } = renderForm([
+      { path: SEASONS_PATH, reply: json(seasons()) },
+      { method: 'POST', path: GAMES_PATH, reply: json(actionResult(CREATED)) },
+    ]);
+    const waivers = within(await screen.findByRole('group', { name: 'Waivers' }));
+    expect(waivers.getAllByRole('radio').map((radio) => (radio as HTMLInputElement).value)).toEqual(['wednesday', 'faab', 'none']);
+    await user.click(waivers.getByRole('radio', { name: /FAAB bidding.*\$100/ }));
+    await user.click(screen.getByRole('button', { name: 'Create league and draft' }));
+    await vi.waitFor(() => expect(onCreated).toHaveBeenCalled());
+    expect(api.callsTo(GAMES_PATH, 'POST')[0].body).toMatchObject({ waiver_mode: 'faab' });
+  });
+
+  it('names the snap counts step while it runs', async () => {
+    renderForm([{ path: SEASONS_PATH, reply: json(seasons({ prepare: { season: 2022, status: 'running', step: 'snaps', error: null } })) }]);
+    expect(await screen.findByText('Preparing 2022: snap counts…')).toBeInTheDocument();
+  });
+
   it('reports a failed import and lets the user try again', async () => {
     renderForm([{ path: SEASONS_PATH, reply: json(seasons({ prepare: { season: 2024, status: 'failed', step: null, error: 'HistoryError' } })) }]);
     expect(await screen.findByText('Preparing 2024 failed (HistoryError). Try again.')).toBeInTheDocument();

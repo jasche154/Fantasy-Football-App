@@ -91,6 +91,23 @@ def test_an_open_roster_spot_does_not_go_to_a_third_quarterback():
     assert ai._best_add(two, [star], ctx, 0.0) is None and ai._best_add(one, [star], ctx, 0.0)[1] == star
 
 
+def test_a_hot_quarterback_is_claimed_only_by_swapping_one_where_the_limit_is_reached():
+    week = 2
+    state, plain = league(week)
+    state = replace(state, phase="waivers")
+    third = next(v.player_id for v in plain.values if v.position == "QB" and v.player_id not in rs.rostered(state))
+    know = fakes.fake_knowledge(week, SETTINGS, fakes.patched(fakes.fake_season(), actual={(third, 1): 45.0}))
+    ctx = ai._for_team(replace(ai._context(know, SETTINGS), hot=frozenset({third}), hot_gain=0.0),
+                       rs.team(state, TWO_QBS))
+    hot_qb, mine = know.by_id[third], roster(state, know, TWO_QBS)
+
+    claims = ai.cpu_claims(state, SETTINGS, know, 0)
+
+    assert third in {c.add for cs in claims.values() for c in cs}           # a hot add the CPUs want
+    assert all(know.by_id[c.drop].position == "QB" for c in claims.get(TWO_QBS, ()) if c.add == third)
+    assert {v.position for v in ai._legal_drops(mine, hot_qb, mine, ctx)} == {"QB"}
+
+
 def test_an_extra_quarterback_is_added_the_week_neither_plays_and_let_go_the_week_after():
     week = 7
     state, _ = league(week)

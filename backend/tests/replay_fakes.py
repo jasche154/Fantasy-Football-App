@@ -8,7 +8,8 @@ has a preseason reputation (`perceived`, which sets his ADP and early projection
 Player ids are fixed by position and preseason rank (`player_id("RB", 3)`), so the scripted stories below
 are the same players for every seed. `drafted_state` is a league just after its draft (no replay_draft
 import). `seed_db` writes a season into the real tables in a form `replay_pool.load_season_data` reads
-back to the same data.
+back to the same data. Every skill game has a `Usage` (snap %, targets, target share, carries) worked out
+from the player's position and that game's points (`_usage`).
 """
 import math
 from collections.abc import Mapping
@@ -21,11 +22,14 @@ from sqlalchemy import insert
 from sqlalchemy.orm import Session
 
 from database.models import (
-    KickerGame, NflGame, Player, PlayerStatsWeekly, ReplayAdp, ReplayInjury, ReplayProjection, TeamGameStats,
+    KickerGame, NflGame, Player, PlayerSnapCountsWeekly, PlayerStatsWeekly, ReplayAdp, ReplayInjury, ReplayProjection,
+    TeamGameStats,
 )
 from services import replay_values
 from services.kdst_rankings import DST_PREFIX, TEAM_NAMES
-from services.replay_pool import ALL_POSITIONS, SKILL, Injury, PoolPlayer, SeasonData  # noqa: F401 (Injury re-exported)
+from services.replay_pool import (  # noqa: F401 (Injury re-exported)
+    ALL_POSITIONS, SKILL, Injury, PoolPlayer, SeasonData, Usage,
+)
 from services.replay_state import Pick, Settings, State, Team, round_robin
 from services.schedule_strength import Game, Schedule
 from services.scoring import POINTS_PER_RECEPTION
@@ -196,6 +200,15 @@ def _points(spec: _Spec, luck: float, bounce: float) -> float:
     return float(max(-4, round(spec.talent + 5.5 * bounce)))
 
 
+def _usage(position: str, points: float) -> Usage:
+    """A skill game's role, rising with its points (every field set; snap % to one decimal)."""
+    points = max(0.0, points)
+    targets = 0 if position == "QB" else 2 + int(points // 4)
+    carries = {"QB": int(points // 8), "RB": 5 + int(points // 2)}.get(position, 0)
+    snaps = 100.0 if position == "QB" else round(min(100.0, 30 + 3 * points), 1)
+    return Usage(snap_pct=snaps, targets=targets, target_share=round(targets / 40, 3), carries=carries)
+
+
 @lru_cache(maxsize=8)
 def _season(season: int, scoring: str, seed: int, weeks: int) -> SeasonData:
     if scoring not in POINTS_PER_RECEPTION or weeks < 1:
@@ -208,7 +221,7 @@ def _season(season: int, scoring: str, seed: int, weeks: int) -> SeasonData:
     shape = (len(specs), weeks)
     noise, luck = rng.lognormal(0.0, 0.10, shape), rng.gamma(4.0, 0.25, shape)
     bounce, missed = rng.standard_normal(shape), rng.random(shape) < MISS_RATE
-    players, actual, projected, team_by_week = {}, {}, {}, {}
+    players, actual, projected, team_by_week, usage = {}, {}, {}, {}, {}
     for row, spec in enumerate(specs):
         games = _games(spec, schedule, weeks, missed[row])
         if not games and spec.player_id not in adp:
@@ -220,11 +233,13 @@ def _season(season: int, scoring: str, seed: int, weeks: int) -> SeasonData:
         for week, _ in games:
             projected[(spec.player_id, week)] = _projection(spec, week, noise[row, week - 1])
             actual[(spec.player_id, week)] = _points(spec, luck[row, week - 1], bounce[row, week - 1])
+            if spec.position in SKILL:
+                usage[(spec.player_id, week)] = _usage(spec.position, actual[(spec.player_id, week)])
     injuries = {key: tag for key, tag in _story_tags(weeks).items() if key[1] <= weeks and key[0] in players}
     return SeasonData(season=season, scoring=scoring, players=MappingProxyType(players), schedule=schedule,
                       actual=MappingProxyType(actual), projected=MappingProxyType(projected),
                       team_by_week=MappingProxyType(team_by_week), last_week=weeks,
-                      injuries=MappingProxyType(injuries))
+                      injuries=MappingProxyType(injuries), usage=MappingProxyType(usage))
 
 
 def _story_tags(weeks: int) -> dict[tuple[int, int], Injury]:
@@ -301,9 +316,9 @@ def tagged(data: SeasonData, injuries: Mapping[tuple[int, int], Injury | None]) 
 
 
 def future_changed(data: SeasonData, after_week: int, seed: int = 1) -> SeasonData:
-    """A copy whose real points, projections and injury tags for every week after `after_week` are different
-    (about one projection in ten disappears; every later tag is removed and BREAKOUT_ID and BUST_ID are on IR),
-    and identical up to it: the no-hindsight probe."""
+    """A copy whose real points, usage, projections and injury tags for every week after `after_week` are
+    different (about one projection in ten disappears; every later tag is removed and BREAKOUT_ID and BUST_ID
+    are on IR), and identical up to it: the no-hindsight probe."""
     rng = np.random.default_rng(seed)
 
     def shaken(table: Mapping[tuple[int, int], float], drop: float) -> dict[tuple[int, int], float | None]:
@@ -313,7 +328,10 @@ def future_changed(data: SeasonData, after_week: int, seed: int = 1) -> SeasonDa
     later = range(after_week + 1, data.last_week + 1)
     tags = {**{key: None for key in data.injuries if key[1] > after_week},
             **{(pid, week): Injury("IR") for pid in (BREAKOUT_ID, BUST_ID) for week in later}}
-    return tagged(patched(data, projected=shaken(data.projected, 0.1), actual=shaken(data.actual, 0.0)), tags)
+    usage = {key: Usage(round((u.snap_pct or 0.0) / 2 + 1, 1), u.targets + 3, 0.5, u.carries + 2) if key[1] > after_week
+             else u for key, u in data.usage.items()}
+    changed = patched(data, projected=shaken(data.projected, 0.1), actual=shaken(data.actual, 0.0))
+    return tagged(replace(changed, usage=MappingProxyType(usage)), tags)
 
 
 # ---------------- writing a season into the real tables ----------------
@@ -336,11 +354,15 @@ def _game_rows(data: SeasonData) -> list[dict]:
 
 
 def _skill_row(data: SeasonData, pid: int, week: int, points: float, opponent: str | None) -> dict:
-    """A stat line worth exactly `points` in data.scoring (and one point more per step toward full PPR)."""
+    """A stat line worth exactly `points` in data.scoring (and one point more per step toward full PPR), with
+    the game's usage (targets and carries score nothing)."""
     receptions = 2 if data.players[pid].position != "QB" and points >= 3 else 0
     yards = round((points - receptions * POINTS_PER_RECEPTION[data.scoring]) * 10)
+    usage = data.usage.get((pid, week))
     return {"player_id": pid, "season": data.season, "week": week, "season_type": "REG",
-            "opponent_team": opponent, "receptions": receptions, "rushing_yards": yards}
+            "opponent_team": opponent, "receptions": receptions, "rushing_yards": yards,
+            "targets": usage.targets if usage else None, "carries": usage.carries if usage else None,
+            "target_share": usage.target_share if usage else None}
 
 
 def _kicker_row(data: SeasonData, pid: int, week: int, points: float, team: str | None,
@@ -401,12 +423,16 @@ def seed_db(session: Session, data: SeasonData) -> None:
     """Write the season into the real tables (players keep their fake ids) and commit.
 
     Afterwards `replay_pool.load_season_data(session, data.season, data.scoring)` returns the same pool,
-    points, projections, injury tags, teams and schedule. K and DST points must be whole numbers (DST -4 or more)."""
+    points, usage, projections, injury tags, teams and schedule. K and DST points must be whole numbers (DST -4
+    or more)."""
     tables = {Player: _player_rows(data), NflGame: _game_rows(data), **_result_rows(data),
               ReplayAdp: [{"season": data.season, "player_id": pid, "adp": p.adp, "stdev": p.adp_stdev,
                            "source": "ffc", "team": p.adp_team}
                           for pid, p in data.players.items() if p.adp is not None],
               ReplayProjection: _projection_rows(data),
+              PlayerSnapCountsWeekly: [{"player_id": pid, "season": data.season, "week": week, "game_type": "REG",
+                                        "offense_pct": usage.snap_pct / 100}
+                                       for (pid, week), usage in data.usage.items() if usage.snap_pct is not None],
               ReplayInjury: [{"season": data.season, "week": week, "player_id": pid, "tag": tag.tag,
                               "practice": tag.practice, "injury": tag.injury}
                              for (pid, week), tag in data.injuries.items()]}

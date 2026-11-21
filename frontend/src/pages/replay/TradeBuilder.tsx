@@ -18,8 +18,7 @@ type PickerRow = ReplayRosterRow | ReplayIrRow;
 /** Why he can't be in a deal with the user (the rules in backend/services/replay_trades.py), or null. */
 function blockedReason(row: PickerRow): string | null {
   if (row.slot === 'IR') return 'on IR';
-  if (row.trade_locked) return 'traded in the last two weeks';
-  return row.out ? 'out right now' : null;
+  return row.trade_locked ? 'traded in the last two weeks' : null;
 }
 
 function tradableIds(rows: readonly PickerRow[], ids: readonly number[]): number[] {
@@ -38,7 +37,7 @@ interface RosterPickerProps {
   openPlayer: (playerId: number) => void;
 }
 
-/** One roster with a checkbox per player; locked or out players and a full side can't be ticked. */
+/** One roster with a checkbox per player; IR or trade-locked players and a full side can't be ticked. */
 function RosterPicker({ title, caption, verb, rows, selected, max, onToggle, openPlayer }: RosterPickerProps) {
   return (
     <div>
@@ -85,6 +84,8 @@ interface TradeBuilderProps {
   /** The user's roster now. */
   roster: readonly ReplayRosterRow[];
   maxPlayers: number;
+  /** CPUs count an out player they receive at this share of his value. */
+  outDiscount: number;
   /** From the URL (with=TEAM, want=PLAYER) when another screen links here. */
   initialPartner: number | null;
   initialWant: number | null;
@@ -93,7 +94,7 @@ interface TradeBuilderProps {
 }
 
 /** Pick a partner and players from both rosters; the verdict follows the selection, then propose it. */
-export function TradeBuilder({ game, version, roster, maxPlayers, initialPartner, initialWant, actions, openPlayer }: TradeBuilderProps) {
+export function TradeBuilder({ game, version, roster, maxPlayers, outDiscount, initialPartner, initialWant, actions, openPlayer }: TradeBuilderProps) {
   const partners = game.teams.filter((team) => !team.is_user);
   const linked = partners.find((team) => team.team_id === initialPartner);
   const [partnerId, setPartnerId] = useState(linked?.team_id ?? partners[0]?.team_id ?? 0);
@@ -155,7 +156,8 @@ export function TradeBuilder({ game, version, roster, maxPlayers, initialPartner
         </AsyncView>
       </div>
       <p className="hint">
-        Up to {maxPlayers} players a side. A player who is out right now, on IR, or was traded in the last two weeks can't be dealt.
+        {`Up to ${maxPlayers} players a side. A player on IR or traded in the last two weeks can't be dealt. `
+          + `CPUs count a player who is out this week at ${Math.round(outDiscount * 100)}% of his value.`}
       </p>
       {over > 0 && <DropPicker rows={spare} count={over} value={drops} onChange={(ids) => change(() => setPicked(ids))} />}
       {body ? (

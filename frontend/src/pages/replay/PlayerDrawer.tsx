@@ -5,6 +5,7 @@ import { Skeleton } from '../../components/StatusViews';
 import { useAsync } from '../../hooks/useAsync';
 import { EMPTY_VALUE, formatNumber } from '../../lib/format';
 import { formatPoints, injuryLabel, ReplayDrawer, ReplayInjuryBadge, ReplayPositionChip, showsOut } from './shared';
+import { UsageCells, UsageHeaders, usageLine } from './usage';
 
 function statusText(player: ReplayWireRow): string {
   if (player.owner) return player.owner.is_user ? 'On your team' : `Rostered by ${player.owner.name}`;
@@ -24,6 +25,7 @@ function WeekRow({ week }: { week: ReplayPlayerWeek }) {
       {/* A week that hasn't been played never shows a result. */}
       <td className="num">{week.played ? formatPoints(week.points) : EMPTY_VALUE}</td>
       <td className="num">{formatNumber(week.value)}</td>
+      <UsageCells usage={week.usage} />
     </tr>
   );
 }
@@ -48,6 +50,7 @@ function Detail({ detail }: { detail: ReplayPlayerDetail }) {
         <div><dt>Rest of season</dt><dd>{formatPoints(row.ros_ppg)}</dd></div>
         <div><dt>Trade value</dt><dd>{formatNumber(row.value)}</dd></div>
       </dl>
+      {row.usage && <p className="replay-drawer__status">{usageLine(row.usage)}</p>}
       {/* During the draft there are no weeks yet. */}
       {weeks.length === 0 ? <p className="hint">The season has not started: these are his preseason numbers.</p> : (
         <>
@@ -61,12 +64,13 @@ function Detail({ detail }: { detail: ReplayPlayerDetail }) {
                   <th scope="col" className="num">Proj</th>
                   <th scope="col" className="num">Pts</th>
                   <th scope="col" className="num">Value</th>
+                  <UsageHeaders span="that week" />
                 </tr>
               </thead>
               <tbody>{weeks.map((week) => <WeekRow key={week.week} week={week} />)}</tbody>
             </table>
           </div>
-          <p className="hint">Proj is the pre-game projection. Pts shows played weeks only; a dash means he did not play.</p>
+          <p className="hint">Proj is the pre-game projection. Pts shows played weeks only; a dash means he did not play. Snap %, Tgt, Tgt % and Car are that week's usage.</p>
         </>
       )}
     </>

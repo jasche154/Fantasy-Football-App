@@ -14,6 +14,7 @@ import pytest
 from services import replay_state as rs, replay_trade_ai as ai, replay_trades as rt, replay_values as rv
 from tests import replay_fakes as fakes
 
+P = fakes.player_id
 SETTINGS = fakes.fake_settings()
 SEEDS = range(6)
 WEEKS = range(1, SETTINGS.trade_deadline_week + 1)
@@ -103,10 +104,10 @@ def test_a_deal_that_leaves_a_cpu_a_starting_slot_nobody_plays_in_is_passed_over
     know = fakes.fake_knowledge(1, data=fakes.patched(fakes.fake_season(), projected={(resting, 1): None}))
     back = next(pid for pid in rs.team(state, 9).roster if know.by_id[pid].position == "RB")
 
-    assert ai._strands_a_starter(SETTINGS, know, team, [playing], [back], [])
-    assert not ai._strands_a_starter(SETTINGS, know, team, [resting], [back], [])
-    assert ai._strands_a_starter(SETTINGS, know, team, [resting], [back], [playing])     # the forced drop does it
-    monkeypatch.setattr(ai, "_strands_a_starter", lambda *args: True)
+    assert rt.strands_a_starter(SETTINGS, know, team, [playing], [back], [])
+    assert not rt.strands_a_starter(SETTINGS, know, team, [resting], [back], [])
+    assert rt.strands_a_starter(SETTINGS, know, team, [resting], [back], [playing])     # the forced drop does it
+    monkeypatch.setattr(rt, "strands_a_starter", lambda *args: True)
     assert all(ai.cpu_trades(state, SETTINGS, fakes.fake_knowledge(1), seed).teams == state.teams for seed in SEEDS)
 
 
@@ -198,7 +199,6 @@ def test_the_user_gets_at_most_one_offer_a_week_and_each_passes_the_cpus_own_tes
             assert verdict.their_gain >= ai.MIN_CPU_GAIN
             assert ai.fair_for_user(SETTINGS, know, verdict.value_give, verdict.value_get)
             assert not verdict.fair_label.endswith("loss")
-            assert not any(know.by_id[pid].out for pid in (*offer.give, *offer.get))
     assert sum(len(offers(season)) for season in seasons.values()) >= len(SEEDS)
 
 
@@ -223,22 +223,38 @@ def test_a_second_run_in_the_same_week_does_not_send_a_second_offer(seasons):
     assert sum(o.to_team == USER and o.week == week.week for o in again.offers) == 1
 
 
-def test_players_who_are_out_are_kept_out_of_every_search():
+def test_an_out_player_on_the_active_roster_is_in_the_search_and_a_cpu_counts_him_down_coming_in():
     state = replace(fakes.drafted_state(), week=6)
-    owner = rs.team(state, STAR_OWNER)
+    know = fakes.fake_knowledge(6)
+    owner, star = rs.team(state, STAR_OWNER), fakes.INJURED_STAR_ID
 
-    hurt = [v.player_id for v in ai._tradable(state, fakes.fake_knowledge(6), owner)]
-    healthy = [v.player_id for v in ai._tradable(state, fakes.fake_knowledge(5), owner)]
+    tradable = [v.player_id for v in ai._tradable(state, know, owner)]
+    alone = next(p for p in ai._packages(know, [know.by_id[star]]))
 
-    assert fakes.INJURED_STAR_ID in healthy and fakes.INJURED_STAR_ID not in hurt
-    assert len(hurt) == ai.TOP_SKILL
+    assert know.by_id[star].out and star in tradable and len(tradable) == ai.TOP_SKILL
+    value = know.by_id[star]
+    assert alone == (value.market_value, (star,), value.market_value * rt.OUT_RISK_DISCOUNT,
+                     round(rt.OUT_SELL_SHARE * value.healthy_value, 1))     # to the user: the sell floor, above market value
+    assert rt.OUT_SELL_SHARE * value.healthy_value > value.market_value
 
 
-def test_no_executed_cpu_trade_includes_a_player_who_was_out_that_week(seasons):
-    moved = [(week.week, pid) for season in seasons.values() for week, offer in trades(season)
-             for pid in (*offer.give, *offer.get)]
+OUT_DEAL = ((P("WR", 12), fakes.INJURED_STAR_ID), (P("WR", 14), P("QB", 12)))     # week 9: CPU 5 -> CPU 3
 
-    assert moved and not [(w, pid) for w, pid in moved if fakes.fake_knowledge(w).by_id[pid].out]
+
+def test_cpu_trades_can_move_a_player_who_is_out(monkeypatch):
+    week, (give, get) = fakes.INJURED_WEEKS[-1], OUT_DEAL
+    state, know = replace(fakes.drafted_state(), week=week), fakes.fake_knowledge(week)
+    monkeypatch.setattr(ai, "_fair_deals", lambda state, settings, know, sender, receiver:
+                        [(give, get)] if (sender.id, receiver.id) == (STAR_OWNER, 3) else
+                        [(get, give)] if (sender.id, receiver.id) == (3, STAR_OWNER) else [])
+    changed = fakes.fake_knowledge(week, data=fakes.future_changed(fakes.fake_season(), after_week=week))
+
+    after = [ai.cpu_trades(state, SETTINGS, know, seed) for seed in range(100)]
+    moved = [made for made in after if fakes.INJURED_STAR_ID in rs.team(made, 3).roster]
+
+    assert know.by_id[fakes.INJURED_STAR_ID].out and moved
+    assert [rs.to_json(ai.cpu_trades(state, SETTINGS, changed, seed)) for seed in range(100)] == list(
+        map(rs.to_json, after))
 
 
 def test_on_hard_an_offer_still_gives_the_cpu_its_premium():

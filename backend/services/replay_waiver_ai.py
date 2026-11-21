@@ -4,12 +4,13 @@ numbers for the current week), so no CPU ever sees a result or a projection from
 - `cpu_claims` (before the waiver run): every CPU scores one shared short list of unrostered skill players
   with `lineup_gain` (points added to its best lineup over the rest of the season, after the drop) and
   claims a player worth about a lineup point a week. At most MAX_CLAIMS, the second planned on the roster
-  as it would be after the first.
+  as it would be after the first. Players on a hot streak are valued at their hot rate, join the list and
+  need half the bar (services/replay_claim_ai.py); in a FAAB league each claim carries a bid from there.
 - `cpu_free_agency` (after the run), free agents only: first cover every starting slot (kicker and
   defense included) that nobody on the roster can fill with a projection this week (bye or out), whatever
   that costs later. Then, up to MAX_FREE_AGENT_MOVES moves in all: fill an empty roster spot, get back
   under a positional limit, and swap a kicker or defense who does play only for STREAM_EDGE projected points.
-- A CPU never drops a top-PROTECTED_RANK player (by HEALTHY value) or an injured player who was above
+- A CPU never drops a top-PROTECTED_RANK player (by HEALTHY value; per 12 teams, scaled by league size) or an injured player who was above
   replacement (except, to cover a slot nobody plays in while its IR slot is taken, one tagged IR or PUP
   outside the top PROTECTED_RANK), and never into a roster that can't field a lineup. For a claim or an
   open spot it drops only one of its DROPPABLE_COUNT least valuable skill players. A kicker or defense is
@@ -27,7 +28,8 @@ from collections import Counter
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
 
-from services import lineup_gain, replay_ir, replay_state as rs, replay_values as rv, replay_waivers
+from services import lineup_gain, replay_claim_ai as claim_ai, replay_ir, replay_state as rs, replay_values as rv
+from services import replay_waivers
 from services.replay_pool import SKILL
 from services.replay_state import Claim, Settings, State
 from services.replay_values import Knowledge, ReplayValue
@@ -38,7 +40,8 @@ CLAIM_GAIN_PER_WEEK = 1.0         # claim when the gain is this many lineup poin
 MAX_CLAIMS = 2                    # per CPU per waiver run
 MAX_FREE_AGENT_MOVES = 2          # per CPU per week (covering a starting slot is always allowed)
 DROPPABLE_COUNT = 4               # a CPU only drops one of its lowest skill players by healthy value
-PROTECTED_RANK = 100              # never a player in the league's top 100 by healthy value
+PROTECTED_RANK = 100              # never a player in the league's top 100 by healthy value (12 teams; scaled
+                                  # by league size, else nearly every rostered player of an 8-team league is safe)
 MIN_FILL_GAIN = 0.0               # a player for an open roster spot must add more than this over the season
 STREAM_EDGE = 4.0                 # projected points a free-agent K / DST must beat the team's own by (real
                                   # seasons: a league's CPUs make about 56 such swaps a season at 2.0, nearly
@@ -58,17 +61,23 @@ class _Context:
     protected: frozenset[int]     # the league's top players by healthy value
     claim_gain: float             # the season-weighted gain a claim needs
     stash: tuple[ReplayValue, ...] = ()     # the IR players of the team being planned for
+    hot: frozenset[int] = frozenset()       # claims only: hot players, who need just `hot_gain`
+    hot_gain: float = 0.0
 
 
 def _for_team(ctx: _Context, team: rs.Team) -> _Context:
     return replace(ctx, stash=tuple(ctx.know.by_id[pid] for pid in team.ir))
 
 
+def protected_rank(settings: Settings) -> int:
+    return PROTECTED_RANK * settings.teams // 12
+
+
 def _context(know: Knowledge, settings: Settings) -> _Context:
     horizon = rv.horizon(know, settings)
     valued = sorted((v for v in know.values if v.healthy_value > 0), key=lambda v: (-v.healthy_value, v.player_id))
     return _Context(know, settings, horizon, rv.projector(know),
-                    frozenset(v.player_id for v in valued[:PROTECTED_RANK]),
+                    frozenset(v.player_id for v in valued[:protected_rank(settings)]),
                     CLAIM_GAIN_PER_WEEK * sum(horizon.weights.values()))
 
 
@@ -162,20 +171,23 @@ def _best_add(roster: Sequence[ReplayValue], pool: Sequence[ReplayValue], ctx: _
         return None
     league, owned = ctx.know.league, [*roster, *ctx.stash]      # value and limits count the IR player
     base, bars = _bars(owned, ctx)
-    weakest = min((v.ros_ppg for v in drops), default=0.0)
+    rate = ctx.projector.healthy_rate                           # a hot player's hot rate
+    weakest = min((rate(v) for v in drops), default=0.0)
     best = None
     ceilings = sorted(((_ceiling(add, bars, ctx), order, add) for order, add in enumerate(pool)),
                       key=lambda row: (-row[0], row[1]))
+    lowest = min(needed, ctx.hot_gain) if ctx.hot else needed
     for ceiling, _, add in ceilings:
-        if ceiling <= (best[0] if best else needed):
+        if ceiling <= (best[0] if best else lowest):
             break                                     # nobody further down the list can do better
-        if full and max(add.ros_ppg, add.projection) <= weakest:
+        needed_here = ctx.hot_gain if add.player_id in ctx.hot else needed
+        if full and max(rate(add), add.projection) <= weakest:
             continue
         if not full and rv.crowded(owned, [add], add.position, ctx.settings):
             continue
         # Without a drop the gain can only be higher, so this one sum rules out most of the rest.
         gain = round(lineup_gain.season_points([*owned, add], ctx.horizon, ctx.projector, league) - base, 2)
-        if gain <= needed:
+        if gain <= needed_here:
             continue
         out = None
         if full:
@@ -183,22 +195,23 @@ def _best_add(roster: Sequence[ReplayValue], pool: Sequence[ReplayValue], ctx: _
             if not legal:
                 continue
             gain, out = lineup_gain.best_add(owned, legal, add, ctx.horizon, ctx.projector, league)
-        if gain > needed and (best is None or gain > best[0]):
+        if gain > needed_here and (best is None or gain > best[0]):
             best = (gain, add, out)
     return best
 
 
-def _plan_claims(roster: Sequence[ReplayValue], pool: Sequence[ReplayValue], ctx: _Context) -> list[Move]:
-    """Up to MAX_CLAIMS claims for one roster, best first; each is scored on the roster as it would be
-    after the ones before it."""
-    moves: list[Move] = []
+def _plan_claims(roster: Sequence[ReplayValue], pool: Sequence[ReplayValue],
+                 ctx: _Context) -> list[tuple[int, int | None, float]]:
+    """Up to MAX_CLAIMS claims for one roster as (add, drop, gain), best first; each is scored on the roster
+    as it would be after the ones before it."""
+    moves: list[tuple[int, int | None, float]] = []
     roster, pool = list(roster), list(pool)
     while len(moves) < MAX_CLAIMS:
         best = _best_add(roster, pool, ctx, ctx.claim_gain)
         if best is None:
             break
-        _, add, out = best
-        moves.append((add.player_id, out.player_id if out else None))
+        gain, add, out = best
+        moves.append((add.player_id, out.player_id if out else None, gain))
         roster = [v for v in roster if v is not out] + [add]
         pool = [v for v in pool if v is not add]
     return moves
@@ -207,9 +220,16 @@ def _plan_claims(roster: Sequence[ReplayValue], pool: Sequence[ReplayValue], ctx
 def cpu_claims(state: State, settings: Settings, know: Knowledge, seed: int) -> dict[int, list[Claim]]:
     """Every CPU's waiver claims for this week's run, best first ({team id: claims}; teams with none are
     left out). Hand the result to `replay_waivers.process_claims`. Claim ids start at `state.next_id` and are
-    never stored. `seed` is unused (no randomness) and kept so every CPU step has the same call shape."""
-    ctx = _context(know, settings)
-    pool = candidates(know, _unrostered(state, know))
+    never stored. Hot players count at their hot rate (a fresh `HotProjector`, never the shared one) and
+    need `claim_ai.HOT_CLAIM_GAIN_PER_WEEK`; `seed` drives the FAAB bids (0 outside FAAB)."""
+    base = _context(know, settings)
+    weights = sum(base.horizon.weights.values())
+    rates = claim_ai.hot_rates(know)
+    ctx = replace(base, projector=claim_ai.HotProjector(know, rates), hot=frozenset(rates),
+                  hot_gain=claim_ai.HOT_CLAIM_GAIN_PER_WEEK * weights)
+    free = _unrostered(state, know)
+    listed = candidates(know, free)
+    pool = listed + claim_ai.hot_candidates(know, free, listed)
     claims: dict[int, list[Claim]] = {}
     next_id = state.next_id
     for team in state.teams:
@@ -217,8 +237,21 @@ def cpu_claims(state: State, settings: Settings, know: Knowledge, seed: int) -> 
             continue
         moves = _plan_claims([know.by_id[pid] for pid in team.roster], pool, _for_team(ctx, team))
         if moves:
-            claims[team.id] = [Claim(next_id + n, team.id, add, out) for n, (add, out) in enumerate(moves)]
+            claims[team.id] = _priced(state, settings, seed, team.id, moves, weights, next_id)
             next_id += len(moves)
+    return claims
+
+
+def _priced(state: State, settings: Settings, seed: int, team_id: int, moves: Sequence[tuple[int, int | None, float]],
+            weights: float, first_id: int) -> list[Claim]:
+    """The team's claims with their bids. A later claim was planned on the roster after the earlier ones, so it
+    never outbids them (the highest bid runs first) and the bids together fit the budget left."""
+    claims, cap, left = [], None, rs.faab_left(state, team_id)
+    for n, (add, out, gain) in enumerate(moves):
+        bid = claim_ai.claim_bid(state, settings, seed, team_id, add, gain, weights)
+        bid = min(bid, left) if cap is None else min(bid, cap, left)
+        claims.append(Claim(first_id + n, team_id, add, out, bid))
+        cap, left = bid, left - bid
     return claims
 
 

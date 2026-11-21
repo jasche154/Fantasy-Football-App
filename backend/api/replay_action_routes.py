@@ -6,12 +6,12 @@ runs under the replay lock (`replay_routes.turn`). A declined trade is a 200 wit
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from api.replay_routes import GameId, errors, open_game, turn
 from database.db import get_session
-from services import replay_game as rg, replay_views as views, replay_views_league as league_views
+from services import replay_game as rg, replay_state as rs, replay_views as views, replay_views_league as league_views
 
 router = APIRouter(prefix="/api/replay/games/{game_id}")
 
@@ -34,6 +34,17 @@ class LineupBody(BaseModel):
 class ClaimBody(BaseModel):
     add: int = PlayerId
     drop: int | None = Field(None, ge=1)
+    bid: int | None = Field(None, ge=0, le=rs.FAAB_BUDGET)     # FAAB leagues' claims only
+
+
+class AddBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")       # a bid means nothing for a free-agent add: refuse it, don't drop it
+    add: int = PlayerId
+    drop: int | None = Field(None, ge=1)
+
+
+class BidBody(BaseModel):
+    bid: int = Field(..., ge=0, le=rs.FAAB_BUDGET)
 
 
 class ActivateBody(BaseModel):
@@ -88,13 +99,20 @@ def set_lineup(game_id: GameId, body: LineupBody, session: Session = Depends(get
 @router.post("/claims")
 def submit_claim(game_id: GameId, body: ClaimBody, session: Session = Depends(get_session)) -> dict:
     with turn(session, game_id) as t:
-        return t.done(rg.submit_claim(*t.args, body.add, body.drop))
+        return t.done(rg.submit_claim(*t.args, body.add, body.drop, body.bid))
 
 
 @router.post("/claims/reorder")
 def reorder_claims(game_id: GameId, body: ReorderBody, session: Session = Depends(get_session)) -> dict:
     with turn(session, game_id) as t:
         return t.done(rg.reorder_claims(t.state, body.ids))
+
+
+@router.post("/claims/{claim_id}/bid")
+def set_claim_bid(game_id: GameId, claim_id: int, body: BidBody, session: Session = Depends(get_session)) -> dict:
+    """Change a pending claim's FAAB bid (phase "waivers" only)."""
+    with turn(session, game_id) as t:
+        return t.done(rg.set_claim_bid(t.state, t.settings, claim_id, body.bid))
 
 
 @router.post("/claims/{claim_id}/cancel")
@@ -104,7 +122,7 @@ def cancel_claim(game_id: GameId, claim_id: int, session: Session = Depends(get_
 
 
 @router.post("/add-drop")
-def add_drop(game_id: GameId, body: ClaimBody, session: Session = Depends(get_session)) -> dict:
+def add_drop(game_id: GameId, body: AddBody, session: Session = Depends(get_session)) -> dict:
     """Add a free agent now (after the week's waiver run), dropping `drop` when the roster is full."""
     with turn(session, game_id) as t:
         return t.done(rg.add_drop(*t.args, body.add, body.drop))

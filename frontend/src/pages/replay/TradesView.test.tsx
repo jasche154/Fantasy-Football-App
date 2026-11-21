@@ -34,7 +34,7 @@ function offer(overrides: Partial<ReplayPendingOffer> = {}): ReplayPendingOffer 
 }
 
 function trades(overrides: Partial<ReplayTrades> = {}): ReplayTrades {
-  return { open: true, deadline_week: 11, max_players: 3, offers: [], results: [], ...overrides };
+  return { open: true, deadline_week: 11, max_players: 3, out_discount: 0.8, offers: [], results: [], ...overrides };
 }
 
 /** GET team: the user's roster, or a CPU roster of Mostert and Collins (locked). */
@@ -220,10 +220,12 @@ describe('TradesView builder', () => {
     expect(screen.getByRole('button', { name: 'Propose trade' })).toBeDisabled();
   });
 
-  it('disables locked and out players with the reason, and caps each side at max_players', async () => {
+  it('disables locked players with the reason, lets an out player be ticked, and caps each side at max_players', async () => {
     const { user } = renderTrades(trades({ max_players: 2 }));
     expect(await screen.findByRole('checkbox', { name: "Give Puka Nacua (can't be traded: traded in the last two weeks)" })).toBeDisabled();
-    expect(screen.getByRole('checkbox', { name: "Give Chris Olave (can't be traded: out right now)" })).toBeDisabled();
+    await user.click(screen.getByRole('checkbox', { name: 'Give Chris Olave' }));     // out this week, on the active roster
+    expect(screen.getByRole('checkbox', { name: 'Give Chris Olave' })).toBeChecked();
+    await user.click(screen.getByRole('checkbox', { name: 'Give Chris Olave' }));
     expect(await screen.findByRole('checkbox', { name: "Get Nico Collins (can't be traded: traded in the last two weeks)" })).toBeDisabled();
 
     await user.click(screen.getByRole('checkbox', { name: 'Give Travis Etienne' }));
@@ -273,10 +275,10 @@ describe('TradesView rules and errors', () => {
 });
 
 describe('TradesView injuries and IR', () => {
-  it('states the dealing rules, including IR', async () => {
+  it('states the dealing rules, including IR and the CPUs\' out discount', async () => {
     renderTrades(trades({ max_players: 2 }));
-    expect(await screen.findByText("Up to 2 players a side. A player who is out right now, on IR, or was traded in the last two weeks can't be dealt."))
-      .toBeInTheDocument();
+    expect(await screen.findByText("Up to 2 players a side. A player on IR or traded in the last two weeks can't be dealt. "
+      + 'CPUs count a player who is out this week at 80% of his value.')).toBeInTheDocument();
   });
 
   it('shows the IR banner while blocked, and leaves the offer answerable', async () => {

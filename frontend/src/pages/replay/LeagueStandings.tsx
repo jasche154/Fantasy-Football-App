@@ -52,24 +52,44 @@ function StandingsTable({ standings }: { standings: ReplayStandings }) {
   );
 }
 
-/** The playoff games known so far (semi-finals, then the championship and third place) and the champion. */
+const TITLE_GAMES: readonly (string | null)[] = ['Semi-final', 'Championship', 'Third place'];
+
+/** The playoff weeks cut to the title games or to the rest (the consolation ladder that decides places 5..N). */
+function PlayoffWeeks({ bracket, isTitle, kind }: { bracket: ReplayStandings['bracket']; isTitle: boolean; kind: string }) {
+  return bracket.map((board) => {
+    const results = board.results.filter((game) => TITLE_GAMES.includes(game.label) === isTitle);
+    if (results.length === 0) return null;
+    return (
+      <div key={board.week}>
+        <h3 className="replay-bracket__week">Week {board.week}</h3>
+        <GameTable caption={`Week ${board.week} ${kind} games`} board={{ ...board, results }} />
+      </div>
+    );
+  });
+}
+
+/** The playoff games known so far (semi-finals, then the championship and third place), the champion, then the consolation games. */
 function Bracket({ standings }: { standings: ReplayStandings }) {
   const { bracket, champion } = standings;
   if (bracket.length === 0) return null;
+  const hasConsolation = bracket.some((board) => board.results.some((game) => !TITLE_GAMES.includes(game.label)));
   return (
-    <section aria-label="Playoff bracket">
-      <h2 className="section-title">Playoffs</h2>
-      {champion && (
-        <p className="replay-bracket__champion"><Icon name="trophy" size={18} /> Champion: <strong>{champion.name}</strong></p>
+    <>
+      <section aria-label="Playoff bracket">
+        <h2 className="section-title">Playoffs</h2>
+        {champion && (
+          <p className="replay-bracket__champion"><Icon name="trophy" size={18} /> Champion: <strong>{champion.name}</strong></p>
+        )}
+        <PlayoffWeeks bracket={bracket} isTitle kind="playoff" />
+      </section>
+      {hasConsolation && (
+        <section aria-label="Consolation games">
+          <h2 className="section-title">Consolation</h2>
+          <p className="hint">The other teams play for places 5 and down; the final standings follow these games.</p>
+          <PlayoffWeeks bracket={bracket} isTitle={false} kind="consolation" />
+        </section>
       )}
-      {bracket.map((board) => (
-        <div key={board.week}>
-          <h3 className="replay-bracket__week">Week {board.week}</h3>
-          <GameTable caption={`Week ${board.week} playoff games`}
-            board={{ ...board, results: board.results.filter((game) => game.label !== 'Consolation') }} />
-        </div>
-      ))}
-    </section>
+    </>
   );
 }
 

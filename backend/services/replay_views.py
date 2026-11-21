@@ -31,7 +31,8 @@ Shared pieces
   Side       TeamRef + {projected, points, record: Record}    projected: null for a week not reached yet
   Record     {wins, losses, ties, rank, points_for, points_against, place}    place: final finish, else null
   GameRow    {home: Side, away: Side, winner: team_id | null, label}
-      label         null | "Semi-final" | "Championship" | "Third place" | "Consolation"
+      label         null | "Semi-final" | "Championship" | "Third place" | "Consolation" | "<N>th place"
+                    (playoff week 2: the consolation games decide 5th, 7th, 9th... in pairs, e.g. "5th place")
   Event      {id, week, kind, team: TeamRef | null, text, players: PlayerRef[]}
       kind          draft | add | drop | claim | trade | ir | result | playoffs | champion
       an add or claim with a drop is ONE event (no separate "drop"): players = [added, dropped]
@@ -42,11 +43,15 @@ Shared pieces
       "give" is always what the USER sends. percent: (get - give) / the larger, a fraction; above 0 the
       user gets more. fair_label: fair | slight_win | big_win | slight_loss | big_loss (for the user).
       your_gain / their_gain: season-weighted lineup points each side gains.
+  Usage      {games, snap_pct, targets, target_share, carries}    a skill player's role, averaged over `games`
+      snap_pct      % of offensive snaps (1 decimal), null where snap counts are not loaded; target_share a 0-1
+                    fraction (3 decimals), null when unknown; targets, carries per game (1 decimal)
 
 GET  /seasons                     {results: Readiness[], prepare: PrepareStatus | null}
       Readiness {season, ready, has_stats, has_schedule, has_kdst, adp_players, projection_weeks, kickers, defenses,
                  injury_weeks}      injury_weeks: weeks with injury tags stored (`ready` does not need it)
-      PrepareStatus {season, status: running | done | failed, step, error, updated_at?}    step may be "injuries"
+      PrepareStatus {season, status: running | done | failed, step, error, updated_at?}
+                    step may be "game_results" | "snaps" | "adp" | "projections" | "injuries"
 POST /seasons/{season}/prepare?force=    PrepareStatus of the import now running (maybe another season's)
 GET  /games                       {results: [{id, name, season, phase, week, teams, scoring, champion: name | null,
                                               created_at, updated_at}]}, most recently played first
@@ -61,11 +66,16 @@ GET  /games/{id}                  Summary
                ir_blocked: PlayerRef[], has_injuries: bool}
       ir_blocked    the USER's IR players who lost their tag (non-empty = adds, claims and trades refused)
       has_injuries  injury tags are loaded for this season
+      waiver_mode   wednesday | faab | none (faab: blind bids from a $100 budget, see claims)
 Every POST under /games answers {game: Summary, events: Event[], ...extras}: `events` is what the action
 caused, oldest first (the CPUs' picks, the waiver run, the week's results). Extras:
-  POST /games (create; season may be "random"), .../draft/pick, draft/auto?whole_draft=&overall=, claims,
-       claims/{id}/cancel, claims/reorder, add-drop, drop, ir/place {player_id},
+  POST /games (create; season may be "random"; waiver_mode wednesday | faab | none), .../draft/pick,
+       draft/auto?whole_draft=&overall=, claims {add, drop?, bid?}, claims/{id}/bid {bid},
+       claims/{id}/cancel, claims/reorder, add-drop {add, drop?}, drop, ir/place {player_id},
        ir/activate {player_id, drop?, swap?}          none
+       claims bid: whole dollars 0..100 and at most the budget left; required in FAAB leagues, refused
+       otherwise. claims/{id}/bid changes a pending claim's bid (FAAB, before the waiver run). A FAAB
+       claim's event text names the winning bid ("... claimed X for $12").
        draft/pick body {player_id, overall?} and draft/auto ?overall=: optional, the pick number the page
        shows; 409 when the draft is at another pick (a double click or retry never picks twice)
   POST /games/{id}/delete         instead of the above: {deleted: id}
@@ -97,18 +107,24 @@ GET  .../schedule?team_id=        {team: TeamRef, results: [{week, playoff, play
 GET  .../activity?kind=&limit=&offset=     Page of Event, newest first; kind may list several ("add,drop,ir")
 GET  .../players?position=&search=&status=&sort=&limit=&offset=     Page of WireRow + {week}
       WireRow = PlayerRow + {status: rostered | waivers | free_agent, owner: TeamRef | null, season_points,
-                last_points}      season_points / last_points: real points in weeks already played
+                last_points, usage: Usage | null}      season_points / last_points: real points in weeks already played
+      usage         his last 3 games BEFORE the current week (games 1-3); null for K, DST or before his first game
       position: QB | RB | WR | TE | K | DST | FLEX. status: available (default) | waivers | free_agent |
       rostered | all. sort: value (default) | projection | ros_ppg | adp | points | name.
 GET  .../players/{player_id}      {player: WireRow, weeks: [{week, played, team, opponent, bye, out, projection,
-                                   points, ros_ppg, value, trade_value, rank, pos_rank, injury: Injury | null}]}
-      injury: that week's tag (weeks 1..current).
+                                   points, ros_ppg, value, trade_value, rank, pos_rank, injury: Injury | null,
+                                   usage: Usage | null}]}
+      injury: that week's tag (weeks 1..current). usage: that week's own game (games 1) once played, else null.
       weeks from the first one he was in the pool (a late arrival has no rows before his first projection
       or game) to the current one. points: null when the week is unplayed or he did not play.
 GET  .../claims                   {phase, can_claim, priority, waiver_order: TeamRef[],
-                                   results: [{id, order, add: PlayerRow, drop: PlayerRow | null}]}
-GET  .../trades                   {open, deadline_week, max_players, offers: [Offer + {verdict, note}],
+                                   results: [{id, order, add: PlayerRow, drop: PlayerRow | null, bid}],
+                                   faab: {budget, left, teams: [{team: TeamRef, left}]} | null}
+      bid: the claim's whole-dollar bid (0 outside FAAB). faab: null unless waiver_mode is faab; left is the
+      user's budget left, teams every team's (current waiver order). Other teams' pending bids are never shown.
+GET  .../trades                   {open, deadline_week, max_players, out_discount, offers: [Offer + {verdict, note}],
                                    results: Offer[]}
+      out_discount: what a CPU counts a player who is out this week at when it receives him (0.8)
       Offer {id, week, status: pending | accepted | declined | expired, from_team: TeamRef, to_team: TeamRef,
              give: PlayerRef[] (what from_team sends), get: PlayerRef[]}
       offers: CPU offers the user can answer, each with a preview Verdict from the user's side (or null
@@ -129,7 +145,6 @@ NEXT_STEP = {"draft": "pick", "waivers": "wednesday", "open": "play", "complete"
 SETTING_KEYS = ("teams", "scoring", "bench", "roster_size", "draft_slot", "waiver_mode", "difficulty",
                 "regular_season_weeks", "playoff_teams", "trade_deadline_week")
 RECORD_KEYS = ("wins", "losses", "ties", "rank", "points_for", "points_against")
-PLAYOFF_LABELS = (("Semi-final", "Semi-final"), ("Championship", "Third place"))    # by playoff week, by game
 Lineup = Mapping[str, Sequence[int]]
 
 
@@ -294,10 +309,15 @@ def winner(game: Game, pair: Sequence[int], week: int) -> int | None:
 
 
 def label(settings: Settings, week: int, index: int) -> str | None:
+    """A playoff game's name. Week 2: game 0 decides 1st, game 1 3rd, then each pair of games 5th and 7th,
+    9th and 11th... (the leftover pair of 10 and 14 teams too)."""
     if not replay_season.is_playoff_week(settings, week):
         return None
-    names = PLAYOFF_LABELS[week - settings.regular_season_weeks - 1]
-    return names[index] if index < len(names) else "Consolation"
+    if week == settings.regular_season_weeks + 1:
+        return "Semi-final" if index < 2 else "Consolation"
+    if index < 2:
+        return ("Championship", "Third place")[index]
+    return f"{4 * (index // 2) + 1 + 2 * (index % 2)}th place"
 
 
 def game_row(game: Game, pair: Sequence[int], week: int, index: int) -> dict:

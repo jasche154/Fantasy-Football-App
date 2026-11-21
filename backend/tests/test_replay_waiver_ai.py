@@ -199,7 +199,7 @@ def test_a_second_claim_is_planned_on_the_roster_left_by_the_first():
     pool = ai.candidates(knowledge, replay_waivers.available_players(state, knowledge))
     roster = values(state, CPUS[-1], 6)
 
-    (first_add, first_drop), *rest = ai._plan_claims(roster, pool, ctx)
+    (first_add, first_drop, _), *rest = ai._plan_claims(roster, pool, ctx)
 
     after_first = [v for v in roster if v.player_id != first_drop] + [knowledge.by_id[first_add]]
     assert rest == ai._plan_claims(after_first, [v for v in pool if v.player_id != first_add], ctx)[:1]
@@ -420,7 +420,8 @@ def test_waiver_activity_is_modest(season, record_property):
     record_property("free_agent_moves_per_week", sum(moves) / len(season))
 
     assert 0.5 <= sum(won) / len(season) <= 10
-    assert max(filed) <= ai.MAX_CLAIMS * len(CPUS) / 2
+    assert sum(filed) / len(season) <= len(CPUS) / 2
+    assert max(filed) <= ai.MAX_CLAIMS * len(CPUS) * 3 / 4   # a breakout draws a claim from most CPUs; one wins
     assert 1 <= (sum(won) + sum(moves)) / len(season) <= 12
 
 
@@ -690,3 +691,12 @@ def test_cpu_decisions_are_identical_when_everything_after_this_week_is_differen
     assert real_claims == blind_claims
     assert rs.to_json(real) == rs.to_json(blind)
     assert changed is not know(week)
+
+
+@pytest.mark.parametrize("teams, protected", [(12, 100), (8, 66), (14, 116)])
+def test_the_protected_top_scales_with_league_size(teams, protected):
+    settings = fakes.fake_settings(teams=teams)
+
+    ctx = ai._context(fakes.fake_knowledge(3, settings), settings)
+
+    assert ai.protected_rank(settings) == protected and len(ctx.protected) == protected

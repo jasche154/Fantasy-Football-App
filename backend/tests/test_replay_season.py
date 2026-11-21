@@ -131,21 +131,43 @@ def test_tied_regular_season_game_counts_as_a_tie_for_both_teams():
     assert len(results) == 6 and all(e.team_id is None and "tied 9.00-9.00" in e.text for e in results)
 
 
-def test_final_standings_put_the_title_bracket_first_then_the_rest_in_season_order():
+def test_final_standings_place_every_group_by_its_second_week_games():
     settings, done = _settings(), _played(12, FINAL)
     seeds, final = season.playoff_seeds(done), done.results[-1]
 
     table = season.final_standings(done, settings)
 
     order = [row["team_id"] for row in table]
-    assert [row["place"] for row in table] == list(range(1, 13))
-    assert order[0] == done.champion and set(order[:2]) == set(final.matchups[0])
-    assert set(order[2:4]) == set(final.matchups[1]) and set(order[:4]) == set(seeds[:4])
-    assert final.scores[order[2]] >= final.scores[order[3]]
-    assert tuple(order[4:]) == seeds[4:]
-    assert [row["rank"] for row in table[4:]] == list(range(5, 13))
+    assert [row["place"] for row in table] == list(range(1, 13)) and order[0] == done.champion
+    for index, game in enumerate(final.matchups):               # winners' game, losers' game, group by group
+        assert order[2 * index:2 * index + 2] == sorted(game, key=lambda t: (-final.scores[t], seeds.index(t)))
+    assert set(order[4:8]) == set(seeds[4:8]) and set(order[8:]) == set(seeds[8:])
+    assert table[0] == {**next(row for row in rs.standings(done) if row["team_id"] == order[0]), "place": 1}
     before_final = season.final_standings(_played(12, SEMIS), settings)      # no final yet: season order
     assert tuple(row["team_id"] for row in before_final) == seeds
+
+
+@pytest.mark.parametrize("pair_by", ["points", "seed"])
+@pytest.mark.parametrize("teams", SIZES)
+def test_consolation_upsets_move_places_and_a_split_pair_goes_by_points_then_seed(teams, pair_by):
+    settings, regular = _settings(teams), _played(teams, REGULAR)
+    s = season.playoff_seeds(regular)
+    groups = [s[i:i + 4] for i in range(0, teams - teams % 4, 4)]
+    upsets = {**dict.fromkeys(s, 1.0), **{group[3]: 3.0 for group in groups}}   # each 4th seed wins twice
+    first, second = dict(upsets), dict(upsets)                  # 2 v 3, then the losers' game: tied
+    high, low = s[-2:]
+    if teams % 4:                                               # the pair splits its games
+        first[low], second[high] = (5.0, 2.0) if pair_by == "points" else (3.0, 3.0)
+
+    done = _week_with_points(_week_with_points(regular, settings, first), settings, second)
+
+    expected = [t for group in groups for t in (group[3], group[1], group[0], group[2])]
+    if teams % 4:
+        expected += [low, high] if pair_by == "points" else [high, low]      # 6 v 3 points; 4 v 4: the seed
+    table = season.final_standings(done, settings)
+    assert [row["team_id"] for row in table] == expected and done.champion == s[3]
+    assert [row["place"] for row in table] == list(range(1, teams + 1))
+    assert table[4]["team_id"] == s[7]                          # seed 8 won its ladder: 5th
 
 
 # ---------------- playoffs ----------------
@@ -377,7 +399,7 @@ def test_lineup_is_repaired_when_a_starter_leaves_the_roster():
 
 # ---------------- the end of a week ----------------
 
-@pytest.mark.parametrize("mode, phase", [("wednesday", "waivers"), ("none", "open")])
+@pytest.mark.parametrize("mode, phase", [("wednesday", "waivers"), ("faab", "waivers"), ("none", "open")])
 def test_week_ends_in_the_next_phase_with_offers_expired(mode, phase):
     settings, data = _settings(waiver_mode=mode), fakes.fake_season()
     offers = (Offer(1, 1, 2, 1, (5,), (6,), "pending"), Offer(2, 1, 3, 4, (7,), (8,), "accepted"),

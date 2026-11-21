@@ -3,7 +3,8 @@
     python -m services.replay_data --seasons 2018-2025 [--force]
 
 prepare_season makes one season playable, skipping whatever is already stored (unless forced):
-1. game results from nflverse: weekly player stats, schedule, kicker games and team game stats;
+1. game results from nflverse: weekly player stats, schedule, kicker games and team game stats, then
+   ("snaps") its snap counts into the shared player_snap_counts_weekly (optional: a failure never blocks);
 2. the 32 team-defense pseudo-players;
 3. preseason ADP (Fantasy Football Calculator, then MyFantasyLeague for the players it lacks) into replay_adp;
 4. ESPN's and Sleeper's pre-game projections for every regular-season week into replay_projections;
@@ -27,7 +28,8 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from database.models import (
-    KickerGame, NflGame, Player, PlayerStatsWeekly, ReplayAdp, ReplayProjection, TeamGameStats,
+    KickerGame, NflGame, Player, PlayerSnapCountsWeekly, PlayerStatsWeekly, ReplayAdp, ReplayProjection,
+    TeamGameStats,
 )
 from integrations import adp_history, espn_history, sleeper_projections
 from integrations.adp_history import PAUSE_SECONDS, AdpEntry, HistoryClient, HistoryError, SeasonMatcher, name_key
@@ -114,6 +116,30 @@ def load_game_results(session: Session, season: int, force: bool = False) -> dic
         raise ReplayDataError(f"nflverse data for {season} is missing: {', '.join(missing)}.")
     return {**counts, "loaded": loaded, "games_renamed": renamed,
             "team_games_without_score": _missing_scores(session, season), "errors": errors}
+
+
+def load_snaps(session: Session, season: int, force: bool = False) -> dict:
+    """Step 1b. Snap counts (the Players screen's snap %). Every reader of the shared table filters by season
+    and seasons before FIRST_SEASON are never read live. Any failure is reported, never raised."""
+    from database import populate_stats as ps
+
+    def stored() -> int:
+        return session.scalar(select(func.count()).select_from(PlayerSnapCountsWeekly).where(
+            PlayerSnapCountsWeekly.season == season)) or 0
+
+    try:
+        # A live season's rows belong to the live loader: --force here must not wipe them on a bad download.
+        if stored() and (not force or season >= ps.FIRST_SEASON):
+            return {"rows": stored(), "skipped": "already loaded"}
+        ps.load_snap_counts(session, [season], ps.PlayerIndex(session))     # keeps the old rows if it fails
+        rows = stored()
+        if rows and season >= ps.FIRST_SEASON:
+            ps.record_load(session, [season])
+        return {"rows": rows, "errors": {} if rows else {"snaps": "NoRows"}}
+    except Exception as exc:                            # optional data: the season stays playable without it
+        log.warning("snaps %s: failed (%s)", season, type(exc).__name__)
+        session.rollback()
+        return {"errors": {"snaps": type(exc).__name__}}
 
 
 def ensure_defenses(session: Session) -> int:
@@ -304,8 +330,10 @@ def prepare_season(session: Session, season: int, http: httpx.Client | None = No
         run("game_results", lambda: load_game_results(session, season, force))
         summary["defenses"] = ensure_defenses(session)
         if "crosswalk" in summary["errors"]:          # nothing is stored without ids; the next run retries
-            summary["adp"] = summary["projections"] = summary["injuries"] = {"skipped": "player ids not synced"}
+            skipped = {"skipped": "player ids not synced"}       # snap counts match players by their PFR id
+            summary["snaps"] = summary["adp"] = summary["projections"] = summary["injuries"] = skipped
         else:
+            run("snaps", lambda: load_snaps(session, season, force))
             run("adp", lambda: load_adp(session, season, client, force))
             run("projections", lambda: load_projections(session, season, client, force))
             # Reloaded whenever ADP was: that step may have created players the tags must be matched to.

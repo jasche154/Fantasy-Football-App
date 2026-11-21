@@ -31,7 +31,7 @@ function offer(overrides: Partial<ReplayPendingOffer> = {}): ReplayPendingOffer 
 }
 
 function trades(overrides: Partial<ReplayTrades> = {}): ReplayTrades {
-  return { open: true, deadline_week: 11, max_players: 3, offers: [], results: [], ...overrides };
+  return { open: true, deadline_week: 11, max_players: 3, out_discount: 0.8, offers: [], results: [], ...overrides };
 }
 
 const answered = (accepted: boolean, expired = false, message: string | null = null) =>

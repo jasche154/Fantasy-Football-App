@@ -3,8 +3,11 @@
 A week has two parts. While the phase is "waivers" every unrostered player is on waivers: teams put in
 claims, and `process_claims` awards them by rolling priority (the first team in `state.waiver_order` with a
 claim that still works gets its player and goes to the back of the line; the list is never reset). Once the
-phase is "open" the players left are free agents, first come first served (`add_drop`), except those dropped
-since the last waiver run (`state.locked`), who wait for the next one.
+phase is "open" the players left are free agents, first come first served (`add_drop`, free in every mode),
+except those dropped since the last waiver run (`state.locked`), who wait for the next one.
+
+In "faab" leagues every claim carries a blind bid (whole dollars, `rs.FAAB_BUDGET` per team per season): the
+run awards the highest bid first (ties: rolling priority, then the team's own order) and the winner pays it.
 
 Every drop goes through `replay_state.release`, so a dropped player is always locked. Nothing here changes
 the phase: the orchestrator (services/replay_game.py) owns the week flow. CPU decisions are in
@@ -83,12 +86,12 @@ def _problem(state: State, settings: Settings, know: Knowledge, team_id: int, ad
 
 
 def execute_move(state: State, settings: Settings, know: Knowledge, team_id: int, add: int,
-                 drop: int | None = None, kind: str = "add") -> State:
+                 drop: int | None = None, kind: str = "add", bid: int | None = None) -> State:
     """Put an unrostered player on a team, releasing `drop` first (he goes on waivers). No phase or
     waiver-status check: `add_drop`, `process_claims` and the CPU free-agency pass do their own.
 
-    Logs one `kind` event ("add" or "claim") naming both players (ids: add, then drop); the release
-    itself logs nothing, so a move is one line in the activity log."""
+    Logs one `kind` event ("add" or "claim") naming both players (ids: add, then drop; a winning FAAB `bid`
+    is shown, nothing is paid here); the release itself logs nothing, so a move is one line in the log."""
     problem = _problem(state, settings, know, team_id, add, drop)
     if problem:
         raise ValueError(problem)
@@ -97,18 +100,36 @@ def execute_move(state: State, settings: Settings, know: Knowledge, team_id: int
     team = rs.team(state, team_id)
     state = rs.with_team(state, replace(team, roster=(*team.roster, add)))
     verb = "claimed" if kind == "claim" else "added"
+    price = f" for ${bid}" if bid is not None else ""
     dropped = f", dropping {_name(know, drop)}" if drop is not None else ""
-    return rs.add_event(state, kind, team_id, f"{team.name} {verb} {_name(know, add)}{dropped}",
+    return rs.add_event(state, kind, team_id, f"{team.name} {verb} {_name(know, add)}{price}{dropped}",
                         (add,) if drop is None else (add, drop))
 
 
 # ---------------- the user's claims ----------------
 
-def submit_claim(state: State, settings: Settings, know: Knowledge, add: int, drop: int | None) -> State:
+NO_FAAB = "This league has no FAAB bidding: leave the bid out."
+
+
+def _checked_bid(state: State, settings: Settings, bid: int | None) -> int:
+    """The user's bid as stored on a Claim: 0..budget left in "faab" leagues, absent (0) in the others."""
+    if settings.waiver_mode != "faab":
+        if bid is not None:
+            raise ValueError(NO_FAAB)
+        return 0
+    left = rs.faab_left(state, rs.user_team(state).id)
+    if isinstance(bid, bool) or not isinstance(bid, int) or not 0 <= bid <= left:
+        raise ValueError(f"Enter a bid: $0 to ${left} (your budget left).")
+    return bid
+
+
+def submit_claim(state: State, settings: Settings, know: Knowledge, add: int, drop: int | None,
+                 bid: int | None = None) -> State:
     """The user's waiver claim, added last in their preference order. Phase "waivers" only.
 
     `drop` may be None only while the roster has room. Several claims may name the same drop: the first one
-    that is awarded uses him, the others are then skipped."""
+    that is awarded uses him, the others are then skipped. In "faab" leagues `bid` is required; claims may
+    together bid more than the budget left (blind bids): the run skips one the team can no longer pay."""
     if state.phase != "waivers":
         raise ValueError("Waiver claims can only be made before the weekly waiver run. "
                          "Once it has run, add free agents directly.")
@@ -118,8 +139,20 @@ def submit_claim(state: State, settings: Settings, know: Knowledge, add: int, dr
         raise ValueError(problem)
     if any(claim.add == add for claim in state.claims):
         raise ValueError(f"You already have a claim in for {_name(know, add)}.")
-    claim = Claim(id=state.next_id, team_id=user.id, add=add, drop=drop)
+    claim = Claim(id=state.next_id, team_id=user.id, add=add, drop=drop, bid=_checked_bid(state, settings, bid))
     return replace(state, claims=(*state.claims, claim), next_id=state.next_id + 1)
+
+
+def set_claim_bid(state: State, settings: Settings, claim_id: int, bid: int) -> State:
+    """Change a pending claim's FAAB bid; it keeps its place in the order."""
+    if state.phase != "waivers":
+        raise ValueError("Bids can only be changed before the weekly waiver run.")
+    if all(claim.id != claim_id for claim in state.claims):
+        raise ValueError(f"There is no pending claim {claim_id}.")
+    if settings.waiver_mode != "faab":
+        raise ValueError(NO_FAAB)
+    bid = _checked_bid(state, settings, bid)
+    return replace(state, claims=tuple(replace(c, bid=bid) if c.id == claim_id else c for c in state.claims))
 
 
 def cancel_claim(state: State, claim_id: int) -> State:
@@ -150,6 +183,9 @@ def _refusal(state: State, settings: Settings, know: Knowledge, claim: Claim) ->
     """Why this claim can't be awarded now; None when it can. A CPU is never left without a legal lineup
     (its second claim was planned on top of its first, which may have failed); the user may do that."""
     problem = _problem(state, settings, know, claim.team_id, claim.add, claim.drop)
+    left = rs.faab_left(state, claim.team_id)
+    if problem is None and settings.waiver_mode == "faab" and claim.bid > left:
+        problem = f"Not enough FAAB budget left (${left})."
     if problem is not None or rs.team(state, claim.team_id).is_user:
         return problem
     return None if _keeps_lineup(state, settings, know, claim) else "It would leave the team without a lineup."
@@ -168,17 +204,22 @@ def _next_award(state: State, settings: Settings, know: Knowledge,
                 queues: dict[int, list[Claim]]) -> tuple[Claim | None, list[tuple[Claim, str]]]:
     """(the claim to award next, the claims skipped on the way with the reason). Takes them off the queues.
 
-    A skipped claim never comes back: within one run a taken player stays taken and a full roster stays full."""
+    The next claim tried: rolling priority (the first team in the order, its first claim); in "faab" leagues
+    the highest bid, ties by priority, then the team's own order. A skipped claim never comes back: within
+    one run a taken player stays taken, a full roster stays full and budgets only shrink."""
     skipped: list[tuple[Claim, str]] = []
-    for team_id in state.waiver_order:
-        queue = queues.get(team_id, [])
-        while queue:
-            claim = queue.pop(0)
-            reason = _refusal(state, settings, know, claim)
-            if reason is None:
-                return claim, skipped
-            skipped.append((claim, reason))
-    return None, skipped
+    rank = {team_id: place for place, team_id in enumerate(state.waiver_order)}
+    while True:
+        tried = [(-claim.bid if settings.waiver_mode == "faab" else 0, rank[team_id], place, team_id)
+                 for team_id, queue in queues.items() if team_id in rank for place, claim in enumerate(queue)]
+        if not tried:
+            return None, skipped
+        *_, place, team_id = min(tried)
+        claim = queues[team_id].pop(place)
+        reason = _refusal(state, settings, know, claim)
+        if reason is None:
+            return claim, skipped
+        skipped.append((claim, reason))
 
 
 def _log_failures(state: State, know: Knowledge, skipped: Sequence[tuple[Claim, str]]) -> State:
@@ -192,20 +233,25 @@ def _log_failures(state: State, know: Knowledge, skipped: Sequence[tuple[Claim, 
 
 def process_claims(state: State, settings: Settings, know: Knowledge,
                    claims_by_team: Mapping[int, Sequence[Claim]]) -> State:
-    """The weekly waiver run, by rolling priority.
+    """The weekly waiver run, by rolling priority (in "faab" leagues by bid first, see `_next_award`).
 
     Repeatedly: the first team in `state.waiver_order` that has a claim which still works (the player is
-    unrostered, the drop is still on its roster or there is room) gets that player and moves to the end of
-    the order. A team's claims are tried in its own order; one that no longer works is skipped. The user's
-    claims are `state.claims`, the CPUs' come in `claims_by_team` ({team id: claims, best first}).
-    Clears `state.claims`; does not change the phase or `state.locked`."""
-    queues = _queues(state, claims_by_team)
+    unrostered, the drop is still on its roster or there is room, the bid is within its FAAB budget left)
+    gets that player, pays its bid and moves to the end of the order. A team's claims are tried in its own
+    order; one that no longer works is skipped. The user's claims are `state.claims`, the CPUs' come in
+    `claims_by_team` ({team id: claims, best first}). Clears `state.claims`; does not change the phase or
+    `state.locked`."""
+    queues, faab = _queues(state, claims_by_team), settings.waiver_mode == "faab"
     while True:
         claim, skipped = _next_award(state, settings, know, queues)
         state = _log_failures(state, know, skipped)
         if claim is None:
             return replace(state, claims=())
-        state = execute_move(state, settings, know, claim.team_id, claim.add, claim.drop, kind="claim")
+        state = execute_move(state, settings, know, claim.team_id, claim.add, claim.drop, kind="claim",
+                             bid=claim.bid if faab else None)
+        if faab:
+            spent = state.faab_spent.get(claim.team_id, 0) + claim.bid
+            state = replace(state, faab_spent={**state.faab_spent, claim.team_id: spent})
         order = state.waiver_order
         state = replace(state, waiver_order=(*(t for t in order if t != claim.team_id), claim.team_id))
 

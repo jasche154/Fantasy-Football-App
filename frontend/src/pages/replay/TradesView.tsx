@@ -96,7 +96,7 @@ export function TradesView({ game, version, act, isBusy, openPlayer }: ReplayVie
               actions={actions} openPlayer={openPlayer} />
             {trades.open && (
               <Card title="Propose a trade" eyebrow={`Open through week ${trades.deadline_week}`}>
-                <TradeBuilder game={game} version={version} roster={mine.results} maxPlayers={trades.max_players}
+                <TradeBuilder game={game} version={version} roster={mine.results} maxPlayers={trades.max_players} outDiscount={trades.out_discount}
                   initialPartner={parsePositiveInt(query.with)} initialWant={parsePositiveInt(query.want)}
                   actions={actions} openPlayer={openPlayer} />
               </Card>

@@ -21,7 +21,7 @@ SEED = 7
 USER = SETTINGS.draft_slot
 PLAYER_ROW = {"player", "opponent", "bye", "out", "projection", "points", "ros_ppg", "value", "trade_value", "rank",
               "pos_rank", "adp", "games", "ppg", "trade_locked"}
-WIRE_ROW = PLAYER_ROW | {"status", "owner", "season_points", "last_points"}
+WIRE_ROW = PLAYER_ROW | {"status", "owner", "season_points", "last_points", "usage"}
 SIDE = {"team_id", "name", "is_user", "projected", "points", "record"}
 RECORD = {"wins", "losses", "ties", "rank", "points_for", "points_against", "place"}
 PLAYER_REF = {"id", "name", "position", "team", "injury"}
@@ -82,10 +82,12 @@ def changed(state: rs.State, data) -> list[str]:
 
 
 def hidden_changed(week: int):
-    """The season with everything a league in `week` must not know changed: real points from that week on,
-    projections after it."""
+    """The season with everything a league in `week` must not know changed: real points and usage from that
+    week on, projections after it."""
     shaken = fakes.future_changed(DATA, after_week=week)
-    return fakes.patched(shaken, actual={key: points + 7.5 for key, points in DATA.actual.items() if key[1] == week})
+    usage = {key: replace(u, targets=u.targets + 5) if key[1] == week else u for key, u in shaken.usage.items()}
+    return replace(fakes.patched(shaken, actual={key: points + 7.5 for key, points in DATA.actual.items()
+                                                 if key[1] == week}), usage=usage)
 
 
 # ---------------- no hindsight ----------------
@@ -109,6 +111,9 @@ def test_the_probe_is_live_a_played_week_and_this_weeks_projection_do_show():
 
     assert {"teams", "matchups", "players", "details"} <= set(changed(state, last_week))
     assert {"summary", "teams", "matchups", "scoreboards", "players", "details"} <= set(changed(state, this_week))
+    used = replace(DATA, usage={key: replace(u, carries=u.carries + 9) if key[1] == 4 else u
+                                for key, u in DATA.usage.items()})
+    assert set(changed(state, used)) == {"players", "details"}
     starter = next(pid for ids in state.results[3].starters[1].values() for pid in ids    # team 1's, week 4
                    if pid in state.teams[0].roster)
     tag_now, tag_before = (fakes.tagged(DATA, {(starter, week): fakes.Injury("Q")}) for week in (5, 4))
@@ -282,8 +287,8 @@ def test_standings_run_from_seeds_to_the_final_order_with_the_bracket():
     assert sorted(row["seed"] for row in done["results"][:4]) == [1, 2, 3, 4]
     assert [board["week"] for board in done["bracket"]] == [15, 16]
     assert [row["label"] for row in done["bracket"][0]["results"]] == ["Semi-final"] * 2 + ["Consolation"] * 4
-    assert [row["label"] for row in done["bracket"][1]["results"]][:3] == ["Championship", "Third place",
-                                                                         "Consolation"]
+    assert [row["label"] for row in done["bracket"][1]["results"]] == ["Championship", "Third place", "5th place",
+                                                                     "7th place", "9th place", "11th place"]
     assert done["bracket"][1]["results"][0]["winner"] == finished().champion
 
 
@@ -393,7 +398,7 @@ def test_player_page_has_his_weeks_so_far_and_who_owns_him():
     assert detail["player"]["owner"]["team_id"] == USER and detail["player"]["status"] == "rostered"
     assert [row["week"] for row in weeks] == [1, 2, 3, 4, 5, 6]
     assert set(weeks[0]) == {"week", "played", "team", "opponent", "bye", "out", "projection", "points", "ros_ppg",
-                             "value", "trade_value", "rank", "pos_rank", "injury"}
+                             "value", "trade_value", "rank", "pos_rank", "injury", "usage"}
     assert [row["played"] for row in weeks] == [True] * 5 + [False] and weeks[5]["points"] is None
     assert all(row["points"] == DATA.actual.get((owned, row["week"])) for row in weeks[:5])
     assert all(row["projection"] == round(DATA.projection(owned, row["week"]), 2) for row in weeks)
@@ -413,10 +418,11 @@ def test_claims_are_listed_in_the_users_order_with_the_waiver_priority():
 
     listed, idle = league.claims(game(claimed)), league.claims(game(at(4)))
 
-    assert set(listed) == {"phase", "can_claim", "priority", "waiver_order", "results"}
+    assert set(listed) == {"phase", "can_claim", "priority", "waiver_order", "faab", "results"}
     assert [row["add"]["player"]["id"] for row in listed["results"]] == wire
     assert [row["order"] for row in listed["results"]] == [1, 2] and listed["can_claim"] is True
-    assert set(listed["results"][0]) == {"id", "order", "add", "drop"}
+    assert set(listed["results"][0]) == {"id", "order", "add", "drop", "bid"}
+    assert listed["faab"] is None and [row["bid"] for row in listed["results"]] == [0, 0]
     assert set(listed["results"][0]["add"]) == PLAYER_ROW
     assert listed["results"][0]["drop"]["player"]["id"] == drop
     assert listed["waiver_order"][listed["priority"] - 1]["team_id"] == USER and len(listed["waiver_order"]) == 12
@@ -457,7 +463,8 @@ def test_trades_show_pending_offers_with_a_preview_and_the_history_newest_first(
     screen = league.trades(game(declined))
 
     offer = screen["offers"][0]
-    assert set(screen) == {"open", "deadline_week", "max_players", "offers", "results"}
+    assert set(screen) == {"open", "deadline_week", "max_players", "out_discount", "offers", "results"}
+    assert screen["out_discount"] == replay_trades.OUT_RISK_DISCOUNT == 0.8
     assert set(offer) == {"id", "week", "status", "from_team", "to_team", "give", "get", "verdict", "note"}
     assert (offer["status"], offer["from_team"]["team_id"], offer["to_team"]["is_user"]) == ("pending", 9, True)
     assert [p["id"] for p in offer["give"]] == theirs and [p["id"] for p in offer["get"]] == mine

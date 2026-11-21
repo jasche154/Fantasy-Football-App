@@ -389,18 +389,55 @@ def defense_of(state: rs.State, know, team_id: int) -> int:
 
 
 class TestExploits:
-    def test_nobody_deals_for_a_player_who_just_got_hurt_cpus_included(self):
+    def test_a_cpu_counts_an_out_player_it_receives_at_a_discount_cpus_included(self, monkeypatch):
         state, know = league(week=6)
         seller = as_user(state, DEEP_AT_WR)                 # the user owns the injured star, knows he is out a month
+        star = know.by_id[fakes.INJURED_STAR_ID]
 
         between_cpus = rt.evaluate(state, SETTINGS, know, DEEP_AT_WR, RICH, *STAR_SALE)
         with_user = rt.evaluate(seller, SETTINGS, know, DEEP_AT_WR, RICH, *STAR_SALE)
         bought = rt.evaluate(state, SETTINGS, know, RICH, DEEP_AT_WR, STAR_SALE[1], STAR_SALE[0])
+        monkeypatch.setattr(rt, "OUT_RISK_DISCOUNT", 1.0)           # as if he were healthy at the same value
+        healthy = rt.evaluate(state, SETTINGS, know, DEEP_AT_WR, RICH, *STAR_SALE)
 
-        assert know.by_id[fakes.INJURED_STAR_ID].out
+        quarterback = know.by_id[STAR_SALE[1][0]].market_value
+        assert star.out and star.injury.tag == "O" and healthy.accepted      # the gap is inside 20%
         for verdict in (between_cpus, with_user, bought):           # on either side, with or without the user
-            assert not verdict.accepted
-            assert said(verdict, "They won't deal for or away a player who is out right now: Injured Star.")
+            assert not verdict.accepted and verdict.reasons == (
+                f"Value is too far apart: CPU 2 would give {quarterback:.1f} points of value and get "
+                f"{star.market_value * 0.8:.1f} back. They count Injured Star at 80% of value while out.",)
+        assert between_cpus.value_give == star.market_value == between_cpus.give_values[0][1]   # CPU 5 sends in full
+        assert with_user.value_give == star.market_value and bought.get_values[0][1] == star.market_value
+
+    def test_out_and_suspended_players_on_the_active_roster_are_judged_not_refused(self):
+        suspended = P("WR", 22)                             # CPU 5's receiver: no known length, same absence model
+        know = fakes.fake_knowledge(1, data=fakes.tagged(fakes.fake_season(), {(suspended, 1): fakes.Injury("SUS")}))
+        state, plain = league()
+
+        bought = rt.evaluate(state, SETTINGS, know, USER, DEEP_AT_WR, [RB14], [suspended])
+        sold = rt.evaluate(as_user(state, DEEP_AT_WR), SETTINGS, know, DEEP_AT_WR, NEEDS_RB, [suspended], [TE7])
+        between_cpus = rt.evaluate(state, SETTINGS, know, DEEP_AT_WR, NEEDS_RB, [suspended], [TE7])
+
+        assert know.by_id[suspended].out and not plain.by_id[suspended].out
+        assert 0 < know.by_id[suspended].market_value < plain.by_id[suspended].market_value
+        assert bought.accepted and bought.get_values == ((suspended, know.by_id[suspended].market_value),)
+        for verdict in (sold, between_cpus):
+            assert said(verdict, "They count Replay WR22 at 80% of value while out.") and not said(verdict, "right now")
+        with pytest.raises(ValueError, match="On IR, so not tradable until activated: Replay WR22."):
+            rt.evaluate(on_ir(state, DEEP_AT_WR, suspended), SETTINGS, know, USER, DEEP_AT_WR, [RB14], [suspended])
+
+    def test_a_cpu_wont_take_an_out_player_that_leaves_a_starting_slot_idle(self):
+        know = hurt(1, RB14)                                # the user's back is out this week
+        state = league()[0]
+        backs = (P("RB", 32), P("RB", 36))                  # CPU 9's two starting backs
+
+        deal = (USER, NEEDS_RB, [RB14, RB23], [*backs, P("RB", 41)], [SCRUB])
+        stranded = rt.evaluate(state, SETTINGS, know, *deal)
+        healthy = rt.evaluate(state, SETTINGS, fakes.fake_knowledge(1), *deal)
+
+        assert rt.strands_a_starter(SETTINGS, know, rs.team(state, NEEDS_RB), [*backs, P("RB", 41)], [RB14, RB23], [])
+        assert said(stranded, "It would leave CPU 9 without a starter this week at RB.")
+        assert not said(healthy, "without a starter this week")
 
     def test_an_elite_free_agent_defense_buys_no_skill_value(self):
         state, know = league()
@@ -447,14 +484,35 @@ class TestExploits:
                 named = next(v.player_id for v in fakes.fake_knowledge(1).values if text == f"Add {v.name} to make this fair.")
                 assert named not in judge(to_team, [give, named], [get]).their_drops
 
-    def test_the_user_cannot_buy_an_injured_star_cheaply_before_he_returns(self):
+    def test_a_user_buying_an_injured_star_pays_his_market_value_while_he_is_out(self):
         state, know = league(week=fakes.INJURED_WEEKS[-1])
         buyer = as_user(state, RICH)                        # the user knows he is back next week
+        star = know.by_id[fakes.INJURED_STAR_ID]
 
         verdict = rt.evaluate(buyer, SETTINGS, know, RICH, DEEP_AT_WR, [P("QB", 2)], [fakes.INJURED_STAR_ID])
 
-        assert said(verdict, "They won't deal for or away a player who is out right now: Injured Star.")
-        assert not verdict.accepted
+        assert star.out and verdict.get_values == ((star.player_id, star.market_value),)
+        assert verdict.value_get == star.market_value               # the CPU sends him at full market value
+        assert star.market_value > trade.FAIR_POINTS_PER_WEEK * star.games_left     # not a roster-spot giveaway
+
+    def test_a_cpu_wont_sell_the_user_an_out_star_below_its_floor_of_his_healthy_value(self):
+        week = fakes.INJURED_WEEKS[-1]                      # the user remembers he is back next week
+        state, know = league(week=week)
+        star, buyer = know.by_id[fakes.INJURED_STAR_ID], 3
+        cheap = (P("QB", 10), P("QB", 12))                  # worth more than his market value, less than the floor
+        changed = fakes.fake_knowledge(week, data=fakes.future_changed(fakes.fake_season(), after_week=week))
+
+        sold = rt.evaluate(as_user(state, buyer), SETTINGS, know, buyer, DEEP_AT_WR, cheap, [star.player_id])
+        between_cpus = rt.evaluate(state, SETTINGS, know, buyer, DEEP_AT_WR, cheap, [star.player_id])
+
+        floor = rt.OUT_SELL_SHARE * star.healthy_value
+        assert star.out and star.market_value < rt.package_value(know, cheap) < floor
+        assert sold.reasons == (f"Value is too far apart: CPU 5 would give {floor:.1f} points of value and get "
+                                f"{rt.package_value(know, cheap):.1f} back. They won't let Injured Star go for less "
+                                f"than 75% of healthy value while out.",)
+        assert sold.get_values == ((star.player_id, star.market_value),)          # the user's view is unchanged
+        assert not said(between_cpus, "healthy value")      # CPUs trade on the absence model with each other
+        assert rt.evaluate(as_user(state, buyer), SETTINGS, changed, buyer, DEEP_AT_WR, cheap, [star.player_id]) == sold
 
     def test_a_cpu_cannot_be_stripped_of_its_only_kicker_and_defense(self):
         with_throw_ins = judge(NEEDS_RB, [RB14], [TE7, P("K", 10), P("DST", 4)], [SCRUB, SCRUB2])

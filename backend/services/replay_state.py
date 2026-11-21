@@ -25,7 +25,8 @@ from services.scoring import POINTS_PER_RECEPTION
 
 SLOTS = ("QB", "RB", "WR", "TE", "FLEX", "K", "DST")
 DEFAULT_STARTERS = MappingProxyType({"QB": 1, "RB": 2, "WR": 2, "TE": 1, "FLEX": 1, "K": 1, "DST": 1})
-WAIVER_MODES = ("wednesday", "none")
+WAIVER_MODES = ("wednesday", "faab", "none")
+FAAB_BUDGET = 100                         # whole dollars per team per season ("faab" waivers)
 PLAYOFF_WEEKS = 2
 VALID_TEAMS = (8, 10, 12, 14)
 USER_TRADE_MULTIPLE = MappingProxyType({"normal": 1.00, "hard": 1.08})   # value a CPU needs back from the USER
@@ -65,7 +66,7 @@ class Settings(_Record):
     starters: Mapping[str, int] = field(default_factory=lambda: DEFAULT_STARTERS, hash=False)
     bench: int = 6
     draft_slot: int = 1                      # the user's first-round pick, 1-based
-    waiver_mode: str = "wednesday"           # "wednesday" | "none" (always free agency)
+    waiver_mode: str = "wednesday"           # "wednesday" | "faab" | "none" (always free agency)
     regular_season_weeks: int = 14
     playoff_teams: int = 4                   # playoffs are the 2 weeks after the regular season
     trade_deadline_week: int = 11            # no trades once state.week > this
@@ -140,6 +141,7 @@ class Claim(_Record):
     team_id: int
     add: int
     drop: int | None
+    bid: int = 0                              # whole dollars; always 0 outside FAAB
 
 
 @dataclass(frozen=True)
@@ -181,6 +183,7 @@ class State(_Record):
     traded: Mapping[int, int] = field(hash=False)          # player id -> week he was last traded
     champion: int | None = None
     next_id: int = 1                          # the next Claim / Offer / Event id
+    faab_spent: Mapping[int, int] = field(default_factory=dict, hash=False)   # team id -> FAAB dollars spent
 
 
 # ---------------- JSON ----------------
@@ -302,6 +305,10 @@ def add_event(state: State, kind: str, team_id: int | None, text: str, player_id
     event = Event(id=state.next_id, week=state.week, kind=kind, team_id=team_id, text=text,
                   player_ids=tuple(player_ids))
     return replace(state, events=(*state.events, event), next_id=state.next_id + 1)
+
+
+def faab_left(state: State, team_id: int) -> int:
+    return FAAB_BUDGET - state.faab_spent.get(team_id, 0)
 
 
 def has_traded_this_week(state: State, team_id: int) -> bool:

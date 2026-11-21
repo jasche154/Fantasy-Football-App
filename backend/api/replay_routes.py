@@ -137,7 +137,7 @@ class CreateBody(BaseModel):
     teams: int = Field(12, ge=min(rs.VALID_TEAMS), le=max(rs.VALID_TEAMS))
     scoring: Scoring = "half"
     draft_slot: int | None = Field(None, ge=1, le=max(rs.VALID_TEAMS))     # None: drawn from the seed
-    waiver_mode: Literal["wednesday", "none"] = "wednesday"
+    waiver_mode: Literal["wednesday", "faab", "none"] = "wednesday"
     difficulty: Literal["normal", "hard"] = "normal"
     seed: int | None = Field(None, ge=0, le=MAX_SEED)
 
