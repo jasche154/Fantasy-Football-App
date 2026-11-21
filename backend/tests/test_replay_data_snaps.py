@@ -70,3 +70,12 @@ def test_only_a_season_the_live_model_reads_stamps_a_data_load_for_its_snaps(db,
 
     assert snap_rows(db, season) == 1
     assert db.scalar(select(func.count()).select_from(DataLoad)) == int(live)
+
+
+def test_force_never_reloads_a_live_seasons_snaps(db, loaders):
+    from database import populate_stats as ps
+
+    replay_data.load_snaps(db, ps.FIRST_SEASON)
+    forced = replay_data.load_snaps(db, ps.FIRST_SEASON, force=True)
+
+    assert forced["skipped"] == "already loaded" and loaders == ["snaps"]     # the live loader owns those rows

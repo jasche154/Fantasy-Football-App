@@ -128,7 +128,8 @@ def load_snaps(session: Session, season: int, force: bool = False) -> dict:
             PlayerSnapCountsWeekly.season == season)) or 0
 
     try:
-        if stored() and not force:
+        # A live season's rows belong to the live loader: --force here must not wipe them on a bad download.
+        if stored() and (not force or season >= ps.FIRST_SEASON):
             return {"rows": stored(), "skipped": "already loaded"}
         ps.load_snap_counts(session, [season], ps.PlayerIndex(session))     # keeps the old rows if it fails
         rows = stored()

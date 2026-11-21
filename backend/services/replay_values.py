@@ -229,6 +229,8 @@ def clear_cache() -> None:
     _knowledge.cache_clear()
     _priors.cache_clear()
     projector.cache_clear()
+    from services import replay_claim_ai                # its hot_rates cache holds Knowledge objects too
+    replay_claim_ai.hot_rates.cache_clear()
 
 
 def league_settings(settings: "replay_state.Settings") -> LeagueSettings:
