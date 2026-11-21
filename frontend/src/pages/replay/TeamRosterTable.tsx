@@ -47,12 +47,11 @@ interface IrButtonProps {
 /** "Move to IR" for an active player tagged O, IR or PUP; "Swap to IR" when the slot is taken. */
 function IrButton({ name, playerId, irName, editing }: IrButtonProps) {
   const isPending = editing.pending === `ir:${playerId}`;
-  const [text, label, busy] = irName
-    ? ['Swap to IR', `Move ${name} to IR and activate ${irName}`, 'Swapping…']
-    : ['Move to IR', `Move ${name} to IR`, 'Moving…'];
+  const [text, busy] = irName ? ['Swap to IR', 'Swapping…'] : ['Move to IR', 'Moving…'];
+  // The name starts with the visible text (WCAG 2.5.3), so speech input and the pending text both work.
   return (
-    <button type="button" className="btn btn--ghost btn--sm" aria-label={label} disabled={editing.isDisabled} onClick={() => editing.onIr(playerId)}>
-      {isPending ? busy : text}
+    <button type="button" className="btn btn--ghost btn--sm" disabled={editing.isDisabled} onClick={() => editing.onIr(playerId)}>
+      {isPending ? busy : text}{' '}<span className="sr-only">{name}{irName ? `, activating ${irName}` : ''}</span>
     </button>
   );
 }
@@ -135,9 +134,8 @@ function IrRow({ row, openPlayer, editing }: { row: ReplayPlayerRow | undefined;
         <td className="replay-roster__actions">
           {player && !editing.source && (
             <>
-              <button type="button" className="btn btn--ghost btn--sm" aria-label={`Activate ${player.name}`} disabled={editing.isDisabled}
-                onClick={() => editing.onActivate(player.id)}>
-                {editing.pending === `activate:${player.id}` ? 'Activating…' : 'Activate'}
+              <button type="button" className="btn btn--ghost btn--sm" disabled={editing.isDisabled} onClick={() => editing.onActivate(player.id)}>
+                {editing.pending === `activate:${player.id}` ? 'Activating…' : 'Activate'}{' '}<span className="sr-only">{player.name}</span>
               </button>
               <DropButton key={player.id} playerId={player.id} name={player.name} editing={editing} />
             </>

@@ -622,6 +622,56 @@ def test_claims_and_free_agency_plan_each_team_with_its_own_ir_player(monkeypatc
         assert (SETTINGS.roster_size - 1, ()) not in found
 
 
+def test_covering_a_slot_with_a_full_roster_does_not_count_the_ir_player_against_the_limit():
+    week, team_id = 3, 8
+    quarterbacks = at(league(week), team_id, "QB", week)
+    third = replay_waivers.available_players(league(week), know(week), "QB")[0].player_id
+    data = fakes.tagged(fakes.patched(fakes.fake_season(), projected={(pid, week): None for pid in quarterbacks}),
+                        {(third, week): fakes.Injury("O")})
+    knowledge = fakes.fake_knowledge(week, SETTINGS, data)
+    state = edited(league(week), team_id, ir=(third,))
+    roster = [knowledge.by_id[pid] for pid in rs.team(state, team_id).roster]
+    ctx = ai._for_team(ai._context(knowledge, SETTINGS), rs.team(state, team_id))
+    free = replay_waivers.available_players(state, knowledge)
+
+    move = ai._cover(roster, free, ctx)
+
+    assert len(quarterbacks) == 2 and len(roster) == SETTINGS.roster_size and ctx.stash[0].player_id == third
+    assert rv.idle_slots(knowledge, [v.player_id for v in roster], SETTINGS) == ["QB"]
+    assert move is not None and knowledge.by_id[move[0]].position == "QB" and knowledge.by_id[move[0]].projection > 0
+    assert move[1] in {v.player_id for v in ai._spare(roster, knowledge, ctx.protected)}
+
+
+def test_a_cpu_with_its_ir_slot_taken_may_drop_a_long_term_injured_player_to_cover_a_slot():
+    week, team_id = 3, 6
+    state = league(week)
+    tight_ends = at(state, team_id, "TE", week)
+    stashed = replay_waivers.available_players(state, know(week), "RB")[0].player_id
+    others = frozenset(v.player_id for v in values(state, team_id, week) if v.player_id not in tight_ends)
+
+    def cover(tag: str = "IR", ir: tuple[int, ...] = (stashed,), protected: frozenset[int] = others):
+        data = fakes.patched(fakes.fake_season(), projected={(pid, week): None for pid in tight_ends})
+        data = fakes.tagged(data, {**{(pid, week): fakes.Injury(tag) for pid in tight_ends},
+                                   (stashed, week): fakes.Injury("O")})
+        knowledge = fakes.fake_knowledge(week, SETTINGS, data)
+        team = rs.team(edited(state, team_id, ir=ir), team_id)
+        ctx = replace(ai._context(knowledge, SETTINGS), protected=protected)
+        roster = [knowledge.by_id[pid] for pid in team.roster]
+        free = replay_waivers.available_players(edited(state, team_id, ir=ir), knowledge)
+        return knowledge, roster, ctx, ai._cover(roster, free, ai._for_team(ctx, team))
+
+    knowledge, roster, ctx, move = cover()
+
+    hurt = sorted((knowledge.by_id[pid] for pid in tight_ends), key=lambda v: v.healthy_value)
+    assert len(hurt) == 2 and all(v.last_projection > knowledge.replacement["TE"] for v in hurt)
+    assert ai._spare(roster, knowledge, ctx.protected) == [] and len(roster) == SETTINGS.roster_size
+    assert move is not None and move[1] == hurt[0].player_id
+    assert knowledge.by_id[move[0]].position == "TE" and knowledge.by_id[move[0]].projection > 0
+    assert cover(protected=others | set(tight_ends))[3] is None          # never a top player
+    assert cover(tag="O")[3] is None                                    # an O tag may be back soon
+    assert cover(ir=())[3] is None                                      # he could go on IR instead
+
+
 # ---------------- no hindsight ----------------
 
 @pytest.mark.parametrize("week", [1, 4, 6, 9])

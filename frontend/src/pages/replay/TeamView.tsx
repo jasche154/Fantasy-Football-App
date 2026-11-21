@@ -18,15 +18,15 @@ interface RosterProps extends Omit<ReplayViewProps, 'version' | 'actError'> {
 
 function Roster({ team, isStale, game, act, isBusy, openPlayer }: RosterProps) {
   const [movingKey, setMovingKey] = useState<string | null>(null);
-  // An object, so each drop is a new identity and refocuses the status line.
-  const [dropped, setDropped] = useState<{ name: string } | null>(null);
+  // What the last drop or IR action did. An object, so each one is a new identity and refocuses the status line.
+  const [done, setDone] = useState<{ text: string } | null>(null);
   // The IR player being activated onto a full roster: the drop chooser is open.
   const [activating, setActivating] = useState<ReplayPlayerRef | null>(null);
   const statusRef = useRef<HTMLParagraphElement>(null);
   const keyed = useKeyedAct(act, isBusy);
   const { pendingKey: pending, failure } = keyed;
   const send: typeof keyed.send = (key, run) => {
-    setDropped(null);
+    setDone(null);
     return keyed.send(key, run);
   };
   const isCurrent = team.week === game.week && !team.played;
@@ -43,39 +43,50 @@ function Roster({ team, isStale, game, act, isBusy, openPlayer }: RosterProps) {
     return () => window.removeEventListener('keydown', onKey);
   }, [movingKey]);
 
-  // The pressed Drop button leaves with its row: put focus on the line that says what happened.
+  // The pressed Drop, IR or Activate button leaves with its row: put focus on the line that says what happened.
   useEffect(() => {
-    if (dropped) statusRef.current?.focus({ preventScroll: true });
-  }, [dropped]);
+    if (done) statusRef.current?.focus({ preventScroll: true });
+  }, [done]);
+
+  const nameOf = (playerId: number) => [...team.results, ...team.ir].find((row) => row.player.id === playerId)?.player.name;
 
   const drop = async (playerId: number) => {
-    const name = [...team.results, ...team.ir].find((row) => row.player.id === playerId)?.player.name;
-    if (await send(`drop:${playerId}`, () => replayDrop(game.id, playerId)) && name) setDropped({ name });
+    const name = nameOf(playerId);
+    if (await send(`drop:${playerId}`, () => replayDrop(game.id, playerId)) && name) setDone({ text: `Dropped ${name}.` });
+  };
+
+  const toIr = async (playerId: number) => {
+    const name = nameOf(playerId);
+    const sent = await send(`ir:${playerId}`, () => (onIr
+      ? replayIrActivate(game.id, onIr.id, { swap: playerId })
+      : replayIrPlace(game.id, playerId)));
+    if (sent && name) setDone({ text: onIr ? `Moved ${name} to IR and activated ${onIr.name}.` : `Moved ${name} to IR.` });
   };
 
   const move = (spot: LineupSpot) => {
-    setDropped(null);
+    setDone(null);
     setMovingKey(source || !spot.row ? null : spot.key);
     if (source && spot.key !== source.key) void send(`move:${spot.key}`, () => setReplayLineup(game.id, swappedLineup(spots, source, spot)));
   };
 
-  const activate = (player: ReplayPlayerRef) => {
+  const activate = async (player: ReplayPlayerRef) => {
     if (team.results.length >= game.settings.roster_size) return setActivating(player);
-    void send(`activate:${player.id}`, () => replayIrActivate(game.id, player.id));
+    if (await send(`activate:${player.id}`, () => replayIrActivate(game.id, player.id))) setDone({ text: `Activated ${player.name}.` });
   };
 
   const activateAndDrop = async (drop: ReplayPlayerRef | null) => {
     if (!activating || !drop) return;
-    if (await send(DIALOG_KEY, () => replayIrActivate(game.id, activating.id, { drop: drop.id }))) setActivating(null);
+    if (!await send(DIALOG_KEY, () => replayIrActivate(game.id, activating.id, { drop: drop.id }))) return;
+    // Same commit: the drawer's cleanup refocuses its opener first, then the status effect moves focus here.
+    setActivating(null);
+    setDone({ text: `Activated ${activating.name}, dropping ${drop.name}.` });
   };
 
   const editing = canEdit ? {
     source, pending, isDisabled: isBusy || isStale, onMove: move,
     onDrop: (playerId: number) => void drop(playerId),
-    onIr: (playerId: number) => void send(`ir:${playerId}`, () => (onIr
-      ? replayIrActivate(game.id, onIr.id, { swap: playerId })
-      : replayIrPlace(game.id, playerId))),
-    onActivate: () => { if (onIr) activate(onIr); },
+    onIr: (playerId: number) => void toIr(playerId),
+    onActivate: () => { if (onIr) void activate(onIr); },
   } : undefined;
 
   return (
@@ -99,7 +110,7 @@ function Roster({ team, isStale, game, act, isBusy, openPlayer }: RosterProps) {
           <p ref={statusRef} tabIndex={-1} className="hint" role="status">
             {source?.row
               ? `Moving ${source.row.player.name}: choose a highlighted spot, or press Escape to cancel.`
-              : `${dropped ? `Dropped ${dropped.name}. ` : ''}Press Move on a player, then choose the spot to swap him into.`}
+              : `${done ? `${done.text} ` : ''}Press Move on a player, then choose the spot to swap him into.`}
           </p>
         </div>
       )}

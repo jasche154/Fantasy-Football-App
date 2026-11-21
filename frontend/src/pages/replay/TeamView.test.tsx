@@ -203,6 +203,11 @@ function injured(tag: 'O' | 'Q' | 'SUS' = 'O', ir: ReplayIrRow[] = []) {
   return team({ results, ir });
 }
 const lastRow = async () => within(await table()).getAllByRole('row').at(-1)!;
+/** The pressed button may leave with its row: focus lands on the lineup status line, which says what happened. */
+async function expectStatus(text: string) {
+  await expect.poll(() => screen.getByRole('status')).toHaveFocus();
+  expect(screen.getByRole('status')).toHaveTextContent(text);
+}
 
 describe('TeamView injuries and IR', () => {
   it('shows an empty IR slot in the current week, and no IR section for a past week', async () => {
@@ -223,15 +228,28 @@ describe('TeamView injuries and IR', () => {
     await table();
     expect(within(rowOf('Chris Olave')).getByText('O')).toBeInTheDocument();
     expect(within(rowOf('Chris Olave')).queryByText('Out')).not.toBeInTheDocument();         // the tag already says it
-    await user.click(screen.getByRole('button', { name: 'Move Chris Olave to IR' }));
+    await user.click(screen.getByRole('button', { name: 'Move to IR Chris Olave' }));
     expect(api.callsTo(PLACE_PATH, 'POST')[0].body).toEqual({ player_id: OLAVE.id });
+    await expectStatus('Moved Chris Olave to IR.');
+  });
+
+  it('names the IR button by its visible text, pending text included', async () => {
+    let finish: (reply: MockReply) => void = () => undefined;
+    const reply = () => new Promise<MockReply>((resolve) => { finish = resolve; });
+    const { user } = renderTeam(injured('O'), {}, [{ method: 'POST', path: PLACE_PATH, reply }]);
+    await table();
+    await user.click(screen.getByRole('button', { name: 'Move to IR Chris Olave' }));
+    expect(await screen.findByRole('button', { name: 'Moving… Chris Olave' })).toBeInTheDocument();
+    finish(json(actionResult()));
+    await expectStatus('Moved Chris Olave to IR.');
   });
 
   it('swaps a tagged player with the one on IR', async () => {
     const { api, user } = renderTeam(injured('O', [irRow()]), {}, [{ method: 'POST', path: ACTIVATE_PATH, reply: json(actionResult()) }]);
     expect(await lastRow()).toHaveTextContent('Raheem Mostert');
-    await user.click(screen.getByRole('button', { name: 'Move Chris Olave to IR and activate Raheem Mostert' }));
+    await user.click(screen.getByRole('button', { name: 'Swap to IR Chris Olave, activating Raheem Mostert' }));
     expect(api.callsTo(ACTIVATE_PATH, 'POST')[0].body).toEqual({ player_id: MOSTERT.id, swap: OLAVE.id });
+    await expectStatus('Moved Chris Olave to IR and activated Raheem Mostert.');
   });
 
   it('offers no IR move for a suspended or questionable player', async () => {
@@ -250,6 +268,7 @@ describe('TeamView injuries and IR', () => {
     expect(within(await lastRow()).queryByRole('button', { name: /^Move Raheem/ })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Activate Raheem Mostert' }));
     expect(api.callsTo(ACTIVATE_PATH, 'POST')[0].body).toEqual({ player_id: MOSTERT.id });
+    await expectStatus('Activated Raheem Mostert.');
   });
 
   it('asks who to drop when the roster is full, and shows a refusal inside the dialog', async () => {
@@ -276,6 +295,7 @@ describe('TeamView injuries and IR', () => {
     expect(api.callsTo(ACTIVATE_PATH, 'POST').map((call) => call.body)).toEqual([
       { player_id: MOSTERT.id, drop: OLAVE.id }, { player_id: MOSTERT.id, drop: OLAVE.id },
     ]);
+    await expectStatus('Activated Raheem Mostert, dropping Chris Olave.');
   });
 
   it('drops a player from IR and says so', async () => {
@@ -321,7 +341,7 @@ describe('TeamView injuries and IR', () => {
     expect(screen.queryByRole('button', { name: /to IR|^Activate|^Drop/ })).not.toBeInTheDocument();
     await user.keyboard('{Escape}');
     expect(screen.getByRole('button', { name: 'Activate Raheem Mostert' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Move Chris Olave to IR and activate Raheem Mostert' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Swap to IR Chris Olave, activating Raheem Mostert' })).toBeInTheDocument();
   });
 
   it('keeps the IR warning off another team\'s roster', async () => {

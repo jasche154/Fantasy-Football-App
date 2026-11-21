@@ -36,7 +36,8 @@ def rows(reports=(), rosters=(), last_week=LAST) -> dict[tuple[int, int], tuple]
 @pytest.mark.parametrize(("status", "abbr", "tag"), [
     ("PUP", None, "PUP"), ("RES", "R04", "PUP"), ("SUS", None, "SUS"), ("RES", "R40", "SUS"), ("RES", "R33", "SUS"),
     ("RES", "R30", "SUS"), ("RES", "R01", "IR"), ("RES", None, "IR"), ("RES", "R48", "IR"), ("RSN", None, "IR"),
-    ("RES", "R02", None), ("NWT", None, None), ("ACT", None, None), ("INA", None, None), ("CUT", None, None),
+    ("RES", "R02", None), ("RES", "R03", None), ("RES", "R06", None), ("RES", "R62", None), ("RES", "R59", "IR"),
+    ("NWT", None, None), ("ACT", None, None), ("INA", None, None), ("CUT", None, None),
     ("RET", None, None), (None, None, None)])
 def test_roster_tag(status, abbr, tag):
     assert ri.roster_tag(status, abbr) == tag
@@ -134,6 +135,43 @@ def test_a_reserve_tag_is_carried_over_a_bye_by_its_roster_team_in_todays_code()
     out = ri.injury_rows(SEASON, [], [roster(week=3, team="OAK")], IDS, playing, LAST)
 
     assert [(r["week"], r["tag"]) for r in out] == [(3, "IR"), (4, "IR")]
+
+
+def test_a_left_squad_row_has_no_tag_and_last_weeks_hard_tag_is_not_carried_onto_it():
+    got = rows([report(week=1, status="Out", text="Knee")], [roster(week=2, abbr="R06")])
+
+    assert got == {(1, 1): ("O", None, "Knee")}
+
+
+def test_text_naming_no_injury_is_never_carried_but_stays_on_its_own_week():
+    got = rows([report(week=1, status="Note", text="Not injury related - resting player"),
+                report(gsis="00-B", week=1, status="Out", text="Not Injury Related")],
+               [roster(week=2), roster(week=3), roster(gsis="00-B", week=2)], last_week=3)
+
+    assert got[(1, 2)] == ("IR", None, None) and got[(1, 3)] == ("IR", None, None)
+    assert got[(2, 1)] == ("O", None, "Not Injury Related") and got[(2, 2)] == ("IR", None, None)
+
+
+def test_text_naming_no_injury_is_not_carried_on_after_a_bye():
+    # NYJ rests in week 4
+    got = rows([report(week=3, status="Out", text="Not injury related - personal matter")], [roster(week=5)])
+
+    assert got[(1, 4)] == ("O", None, "Not injury related - personal matter") and got[(1, 5)] == ("IR", None, None)
+
+
+@pytest.mark.parametrize(("text", "carried"), [("Rest", None), ("Coach's decision", None), ("Knee", "Knee")])
+def test_rest_and_coach_decisions_are_not_carried_but_an_injury_is(text, carried):
+    got = rows([report(week=1, status="Out", text=text)], [roster(week=2)])
+
+    assert got[(1, 2)] == ("IR", None, carried)
+
+
+@pytest.mark.parametrize(("rosters", "tag"), [([roster(status="ACT")], None), ([], "O"),
+                                               ([roster(status="ACT", team="GB")], "O")])
+def test_another_clubs_report_is_dropped_when_he_is_on_a_roster_of_a_different_club(rosters, tag):
+    got = rows([report(team="GB")], rosters)
+
+    assert got.get((1, 1), (None,))[0] == tag
 
 
 def test_nothing_is_carried_past_the_last_week():

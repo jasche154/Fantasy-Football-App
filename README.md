@@ -858,27 +858,36 @@ that week's games on; only scoring a week reads its real points.
   tail again while a season has none.
 - **Injuries and IR:** Q, D and O come from the official injury report; IR, PUP and SUS from the weekly
   roster status (PUP = status PUP or reserve code R04; suspended = SUS or R40/R33/R30; every other
-  reserve list = IR; retired players and holdouts get no tag; the game-day inactive list is not used).
-  A roster status wins over a report tag, and a hard tag is carried over the player's bye. O, IR, PUP
-  and SUS mean "out" this week even if a stale projection exists; Q and D are information only.
+  reserve list = IR, except the lists that are not an injury (retired R02, did not report R03, left squad
+  R06, the 2020 opt-outs R62), which get no tag, like holdouts; the game-day inactive list is not used).
+  A report from a club that is not on the player's roster rows that week is ignored (a player traded
+  after his game). An O, IR or PUP tag without text takes last week's injury text unless that text names
+  no injury (rest, personal, "not injury related"). A roster status wins over a report tag, and a hard
+  tag is carried over the player's bye. O, IR, PUP and SUS mean "out" this week even if a stale
+  projection exists; Q and D are information only.
   IR rules: one slot per team; a player is eligible by his tag only (O, IR or PUP: not a suspension,
   not just "no projection"); he does not count against the roster, can't start and can't be traded; he
   can swap places with another eligible player; a team whose IR player lost his tag can't add, claim or
-  trade until it activates (dropping someone if full) or drops him. CPUs stash an injured player worth
-  keeping, swap or cut to bring one back, and still count an IR player for their positional limits and
-  their view of the rest of the season. A week's final report and roster status are shown from the
-  start of that week (before its waiver run), like its projection. The draft shows no tags: it is held
-  with what the ADP knew, and some week-1 statuses came later. Week-1 tags appear when the draft ends,
-  and the CPUs make their week-1 moves first, as they do every week.
+  trade until it activates (dropping someone if full) or drops him, and a CPU in that state declines every
+  trade. CPUs stash an injured player worth keeping, swap or cut to bring one back as soon as a week's
+  tags are known (when the waiver phase opens, again at the waiver run and at the start of the week), and
+  still count an IR player for their positional limits and their view of the rest of the season. A
+  week's final report and roster status are shown from the start of that week (before its waiver run),
+  like its projection. The draft shows no tags: it is held with what the ADP knew, and some week-1
+  statuses came later. Week-1 tags appear when the draft ends, and the CPUs make their week-1 moves
+  first, as they do every week.
 - **Draft:** a snake draft, 15 rounds by default (QB, 2 RB, 2 WR, TE, FLEX, K, DST, 6 bench). CPUs follow
   ADP: each takes the lowest `(ADP + noise) x need x taste` among the best players left, with position
   caps, K and DST in the last rounds, and never reaches further than a round of picks past the current
   pick in rounds 1-4, a round and a half in rounds 5-9, and 25 picks after that (never more than 25).
   "Hard" halves the noise.
 - **CPU rosters:** at most 2 QB, 2 TE, 1 K, 1 DST, 6 RB and 7 WR. A CPU takes one extra only while nobody
-  it has at that starting slot plays that week, and trims it afterwards. It streams kickers and defenses:
-  a unit that plays is swapped only for one projected `replay_waiver_ai.STREAM_EDGE` (4) points better;
-  one on a bye or without a projection is always replaced.
+  it has at that starting slot plays that week, and trims it afterwards. A CPU never drops a top-100
+  player, and drops an injured player it would otherwise keep only in one case: a starting slot has nobody
+  who plays, its IR slot is taken, and the player is on IR or PUP and outside the top 100; he then goes
+  for a free agent who plays. It streams kickers and defenses: a unit that plays is swapped only for one
+  projected `replay_waiver_ai.STREAM_EDGE` (4) points better; one on a bye or without a projection is
+  always replaced.
 - **Values:** `ros_ppg` is the weighted mean (4, 3, 2, 1) of a player's last four pre-game projections,
   with a preseason rate (the ADP order mapped onto the week-1 projection curve) filling the slots that
   do not exist yet. Trade value is points over replacement x games left x the share of them he is

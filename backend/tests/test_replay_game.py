@@ -385,6 +385,33 @@ def test_cpus_make_their_ir_moves_first_at_the_waiver_run_and_at_the_start_of_th
     assert calls[0][1] is calls[1][1]                        # the same Knowledge
 
 
+@pytest.mark.parametrize("league_index, expected", [(0, ["cpu_ir"]), (1, ["cpu_ir", "cpu_free_agency"])])
+def test_playing_a_week_makes_the_cpus_ir_moves_on_the_new_weeks_tags(monkeypatch, league_index, expected):
+    settings = LEAGUES[league_index]
+    open_week = next(step.state for step in simulate(*IDLE[league_index]).steps
+                     if step.state.phase == "open" and step.state.week == 5)
+    calls = []
+    for name in ("cpu_ir", "cpu_claims", "cpu_free_agency"):
+        original = getattr(rg.replay_waiver_ai, name)
+        monkeypatch.setattr(rg.replay_waiver_ai, name,
+                            lambda *args, _name=name, _call=original: calls.append((_name, args[2])) or _call(*args))
+
+    played = rg.advance(open_week, settings, DATA, 1, rg.PLAY)
+
+    assert [name for name, _ in calls] == expected
+    assert all(know.week == played.week == open_week.week + 1 for _, know in calls)
+
+
+def test_no_cpu_is_blocked_by_its_ir_while_the_user_acts_in_the_waiver_phase():
+    settings, run = LEAGUES[0], simulate(*IDLE[0])
+
+    blocked = [(step.state.week, team.id) for step in run.steps if step.state.phase == "waivers"
+               for team in step.state.teams if not team.is_user and replay_ir.blocked_reason(
+                   step.state, rg.knowledge(step.state, settings, DATA), team.id)]
+
+    assert blocked == []
+
+
 def test_the_users_ir_actions_pass_through_to_the_users_team():
     settings, run = LEAGUES[0], simulate(*IDLE[0])
     state = next(step.state for step in run.steps if (step.state.week, step.state.phase) == (6, "open"))

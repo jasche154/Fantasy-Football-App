@@ -287,6 +287,21 @@ describe('TradesView injuries and IR', () => {
     await waitFor(() => expect(within(card).getByRole('button', { name: /Accept/ })).toBeEnabled());
   });
 
+  it('lists a partner\'s IR player from a link as untradable instead of dropping him', async () => {
+    const hurt = tagged(ETIENNE, 'IR', null, 'Knee');
+    const irRow = { ...rosterRow(hurt, 'BN', { out: true, projection: 0 }), slot: 'IR' as const, starting: false as const };
+    const reply = (request: MockRequest) => (Number(request.url.searchParams.get('team_id')) === 2
+      ? json(team({ team: teamRef(2), results: [rosterRow(MOSTERT, 'RB', { value: 35 })], ir: [irRow] })) : teamReply(request));
+    const { api } = renderTrades(trades(), [{ path: `${PATH}/team`, reply }], { hash: `#/replay?game=${GAME_ID}&view=trades&with=2&want=${hurt.id}` });
+
+    const box = await screen.findByRole('checkbox', { name: "Get Travis Etienne (can't be traded: on IR)" });
+    expect(box).toBeDisabled();
+    expect(box).not.toBeChecked();
+    expect(within(box.closest('tr')!).getByText('On IR')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Propose trade' })).toBeDisabled();
+    expect(api.callsTo(EVALUATE_PATH, 'POST')).toHaveLength(0);
+  });
+
   it('shows the tag on an offer\'s player', async () => {
     const hurt = tagged(MOSTERT, 'Q', 'LP', 'Hamstring');
     renderTrades(trades({ offers: [offer({ give: [hurt], verdict: verdict({ get: [{ player: hurt, value: 35 }] }) })] }));

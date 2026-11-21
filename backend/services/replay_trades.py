@@ -12,6 +12,7 @@ its reasons. Every CPU team in the deal must pass all of these, on point-in-time
 2. Lineup. Its rest-of-season lineup points (`lineup_gain`, skill positions, after any forced drop) rise by at
    least MIN_TRADE_GAIN. This is what stops a team with six bench receivers taking a seventh.
 3. One accepted trade per CPU per week.
+   A CPU blocked by its IR (`replay_ir.blocked_reason`) declines every trade.
 4. Depth. It never ends up with more players at a position it is already full at (`replay_values.crowded`:
    2 QB, 6 RB, 7 WR, 2 TE, 1 K, 1 DST, unless nobody it has there plays this week).
 
@@ -204,6 +205,8 @@ def _rule_reasons(state: State, know: Knowledge, sender: Team, receiver: Team, m
         reasons.append(f"They won't deal for or away a player who is out right now: {_names(know, out)}.")
     reasons.extend(f"{team.name} has already made a trade this week." for team in (sender, receiver)
                    if not team.is_user and rs.has_traded_this_week(state, team.id))
+    reasons.extend(reason for team in (sender, receiver)
+                   if not team.is_user and (reason := replay_ir.blocked_reason(state, know, team.id)))
     return reasons
 
 

@@ -21,7 +21,9 @@ log = logging.getLogger(__name__)
 POSITIONS = ("QB", "RB", "WR", "TE", "K")
 REPORT_TAGS = {"Questionable": "Q", "Doubtful": "D", "Out": "O"}
 SUSPENDED = ("R40", "R33", "R30")
-NO_CARRY = ("R05", "R27", "R59", "R62")     # non-football injury or illness, COVID lists: no carried injury text
+NO_TAG = ("R02", "R03", "R06", "R62")       # retired, did not report, left squad, 2020 COVID opt-out: not hurt
+NO_CARRY = ("R05", "R27", "R59")            # non-football injury or illness, COVID list: no carried injury text
+NOT_INJURY = ("not injury related", "rest", "personal", "coach")   # report text naming no injury: never carried
 ACTIVE = ("ACT", "INA")
 MAX_TEXT = 60
 REPORT_COLUMNS = ["season", "week", "game_type", "gsis_id", "team", "report_status", "practice_status",
@@ -37,12 +39,13 @@ def _practice(text: str | None) -> str | None:
 
 
 def roster_tag(status: str | None, abbr: str | None) -> str | None:
-    """The tag a weekly roster status gives (None for active, cut, retired, holdouts and the like)."""
+    """The tag a weekly roster status gives (None for active, cut, holdouts and the reserve lists in NO_TAG:
+    retired, did not report, left squad, 2020 opt-out)."""
     if status == "PUP" or (status == "RES" and abbr == "R04"):
         return "PUP"
     if status == "SUS" or (status == "RES" and abbr in SUSPENDED):
         return "SUS"
-    if status in ("RES", "RSN") and abbr != "R02":            # R02: retired
+    if status in ("RES", "RSN") and abbr not in NO_TAG:
         return "IR"
     return None
 
@@ -86,16 +89,21 @@ def injury_rows(season: int, reports: list[dict], rosters: list[dict], player_id
         for pid in sorted({pid for pid, w in (*report_rows, *roster_rows) if w == week}):
             key = (pid, week)
             report = (report_rows.get(key) or [None])[0]                          # D2: the first row wins
+            # A new club's report after a trade (Ertz 2021 week 6) says nothing about the game he already played.
+            if report and key in roster_rows and normalize_team(report.get("team")) not in {
+                    normalize_team(row.get("team")) for row in roster_rows[key]}:
+                report = None
             roster_tag_, roster = _roster(roster_rows[key]) if key in roster_rows else (None, None)
             tag = roster_tag_ or REPORT_TAGS.get((report or {}).get("report_status"))      # D4
             teams[key] = normalize_team((roster or {}).get("team") or (report or {}).get("team"))
-            texts[key] = _text(report)
+            own = _text(report)
+            texts[key] = None if own and own.lower().startswith(NOT_INJURY) else own    # what next week may carry
             if tag is None:
                 continue
             practice = injury = None
             if tag != "SUS":                                                      # D5
                 practice = _practice((report or {}).get("practice_status"))
-                injury = texts[key]
+                injury = own
                 if injury is None and tag in IR_TAGS and (roster or {}).get("status_description_abbr") not in NO_CARRY:
                     injury = texts[key] = texts.get((pid, week - 1))
             tags[key] = {"season": season, "week": week, "player_id": pid, "tag": tag,
@@ -105,7 +113,7 @@ def injury_rows(season: int, reports: list[dict], rosters: list[dict], player_id
             if (prior == week - 1 and row["tag"] in HARD_TAGS and key not in report_rows and key not in roster_rows
                     and team is not None and (team, week) not in playing):
                 tags[key] = {**row, "week": week, "practice": None}
-                texts[key], teams[key] = row["injury"], team
+                texts[key], teams[key] = texts.get((pid, prior)), team
     return sorted(tags.values(), key=lambda row: (row["week"], row["player_id"]))
 
 

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { evaluateReplayTrade, getReplayTeam, proposeReplayTrade } from '../../api/replay';
-import type { ReplayRosterRow, ReplaySummary, ReplayTradeBody, ReplayVerdict } from '../../api/types';
+import type { ReplayIrRow, ReplayRosterRow, ReplaySummary, ReplayTradeBody, ReplayVerdict } from '../../api/types';
 import { AsyncView } from '../../components/AsyncView';
 import { Skeleton, TableSkeleton } from '../../components/StatusViews';
 import { useAsync } from '../../hooks/useAsync';
@@ -12,13 +12,17 @@ import { ReplayPlayerCell, TeamSelect } from './shared';
 const EVALUATE_DELAY_MS = 300;
 const PROPOSE_KEY = 'propose';
 
+/** A partner's IR players are listed too, but can't be ticked. */
+type PickerRow = ReplayRosterRow | ReplayIrRow;
+
 /** Why he can't be in a deal with the user (the rules in backend/services/replay_trades.py), or null. */
-function blockedReason(row: ReplayRosterRow): string | null {
+function blockedReason(row: PickerRow): string | null {
+  if (row.slot === 'IR') return 'on IR';
   if (row.trade_locked) return 'traded in the last two weeks';
   return row.out ? 'out right now' : null;
 }
 
-function tradableIds(rows: readonly ReplayRosterRow[], ids: readonly number[]): number[] {
+function tradableIds(rows: readonly PickerRow[], ids: readonly number[]): number[] {
   return ids.filter((id) => rows.some((row) => row.player.id === id && blockedReason(row) === null));
 }
 
@@ -27,7 +31,7 @@ interface RosterPickerProps {
   caption: string;
   /** "Give" or "Get": the start of each checkbox's name. */
   verb: string;
-  rows: readonly ReplayRosterRow[];
+  rows: readonly PickerRow[];
   selected: readonly number[];
   max: number;
   onToggle: (playerId: number) => void;
@@ -60,7 +64,10 @@ function RosterPicker({ title, caption, verb, rows, selected, max, onToggle, ope
                     <input type="checkbox" checked={isChecked} disabled={reason !== null || (!isChecked && selected.length >= max)}
                       aria-label={`${verb} ${player.name}${reason ? ` (can't be traded: ${reason})` : ''}`} onChange={() => onToggle(player.id)} />
                   </td>
-                  <td className="td--player"><ReplayPlayerCell player={player} info={{ out: row.out, trade_locked: row.trade_locked }} onOpen={openPlayer} /></td>
+                  <td className="td--player">
+                    <ReplayPlayerCell player={player} info={{ out: row.out, trade_locked: row.trade_locked }} onOpen={openPlayer} />
+                    {row.slot === 'IR' && <span className="status-badge status-badge--missing">On IR</span>}
+                  </td>
                   <td className="num">{formatNumber(row.value)}</td>
                 </tr>
               );
@@ -97,7 +104,7 @@ export function TradeBuilder({ game, version, roster, maxPlayers, initialPartner
   const theirs = useAsync((signal) => getReplayTeam(game.id, { team_id: partnerId }, signal), [game.id, partnerId, version]);
   const partner = partners.find((team) => team.team_id === partnerId)?.name ?? 'That team';
   // While another partner's roster loads, the previous one must not be offered.
-  const theirRows = theirs.data?.team.team_id === partnerId ? theirs.data.results : [];
+  const theirRows: PickerRow[] = theirs.data?.team.team_id === partnerId ? [...theirs.data.results, ...theirs.data.ir] : [];
 
   const giveIds = tradableIds(roster, give);
   const getIds = tradableIds(theirRows, get);

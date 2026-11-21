@@ -9,8 +9,9 @@ each other.
   dropped player comes off waivers and the phase is "open".
 - `advance("wednesday")` (phase "waivers"): CPU IR moves, then CPU claims plus the user's, awarded by rolling
   priority, then `start_week`.
-- `advance("play")` (phase "open"): the week is scored. With waivers the phase becomes "waivers"; without
-  them the next week starts at once (CPUs move first, then the user can take anyone left).
+- `advance("play")` (phase "open"): the week is scored. With waivers the phase becomes "waivers" and the CPUs
+  make their IR moves on the new week's tags (so none is blocked while the user acts); without them the
+  next week starts at once (CPUs move first, then the user can take anyone left).
 
 No hindsight, by construction: every step here hands the engine `data.as_of(state.week)` or a Knowledge
 built from it. The only call that receives the full season is `replay_season.play_week`, which reads it
@@ -128,6 +129,8 @@ def _play(state: State, settings: Settings, data: SeasonData, seed: int) -> Stat
     if state.phase != "open":
         raise ValueError(f"Run week {state.week}'s waivers before playing it.")
     played = replay_season.play_week(state, settings, data, knowledge(state, settings, data), seed)
+    if played.phase == "waivers":       # CPUs' IR moves as the waiver phase opens: none is blocked while the user acts
+        return replay_waiver_ai.cpu_ir(played, settings, knowledge(played, settings, data), seed)
     # Without waivers the next week starts right away: CPUs move first, then the user can grab anyone.
     return start_week(played, settings, data, seed) if played.phase == "open" else played
 

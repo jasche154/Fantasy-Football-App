@@ -561,6 +561,38 @@ def test_a_blocked_user_cannot_accept_an_offer_which_stays_pending_but_may_decli
     assert declined.offers[0].status == "declined"
 
 
+def least_valuable_skill(state: rs.State, know, team_id: int, besides: tuple[int, ...]) -> int:
+    team = rs.team(state, team_id)
+    return min((pid for pid in team.roster if know.by_id[pid].position in SKILL and pid not in besides),
+               key=lambda pid: (know.by_id[pid].market_value, pid))
+
+
+def test_a_cpu_blocked_by_its_ir_declines_every_trade():
+    state, know = league()
+    healthy = least_valuable_skill(state, know, NEEDS_RB, FAIR[2])
+    blocked = on_ir(state, NEEDS_RB, healthy)              # no tag this week: he blocks CPU 9
+
+    verdict = rt.evaluate(blocked, SETTINGS, know, USER, *FAIR)
+    after, proposed = rt.propose(blocked, SETTINGS, know, *FAIR)
+    tagged = rt.evaluate(blocked, SETTINGS, hurt(1, healthy), USER, *FAIR)
+
+    assert not verdict.accepted and any(B1 in r and "CPU 9" in r for r in verdict.reasons)
+    assert not proposed.accepted and [t.roster for t in after.teams] == [t.roster for t in blocked.teams]
+    assert not said(tagged, B1)
+
+
+@pytest.mark.parametrize("blocked_side", ["from", "to"])
+def test_a_trade_between_two_cpus_is_turned_down_when_either_is_blocked(blocked_side):
+    state, know = league()
+    give, get = [P("WR", 24)], [TE7]                        # CPU 5's receiver for CPU 9's tight end
+    team_id = DEEP_AT_WR if blocked_side == "from" else NEEDS_RB
+    blocked = on_ir(state, team_id, least_valuable_skill(state, know, team_id, (*give, *get)))
+
+    with pytest.raises(ValueError, match=f"turned down.*{B1}"):
+        rt.execute(blocked, SETTINGS, know, DEEP_AT_WR, NEEDS_RB, give, get)
+    assert not said(rt.evaluate(state, SETTINGS, know, DEEP_AT_WR, NEEDS_RB, give, get), B1)
+
+
 def test_a_cpu_values_a_back_the_same_whether_its_injured_star_is_on_ir_or_its_bench():
     week, star = fakes.INJURED_WEEKS[0], fakes.INJURED_STAR_ID
     state, know = league(week)

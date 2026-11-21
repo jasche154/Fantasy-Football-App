@@ -10,9 +10,10 @@ numbers for the current week), so no CPU ever sees a result or a projection from
   that costs later. Then, up to MAX_FREE_AGENT_MOVES moves in all: fill an empty roster spot, get back
   under a positional limit, and swap a kicker or defense who does play only for STREAM_EDGE projected points.
 - A CPU never drops a top-PROTECTED_RANK player (by HEALTHY value) or an injured player who was above
-  replacement, and never into a roster that can't field a lineup. For a claim or an open spot it drops only
-  one of its DROPPABLE_COUNT least valuable skill players. A kicker or defense is only ever swapped for
-  another one.
+  replacement (except, to cover a slot nobody plays in while its IR slot is taken, one tagged IR or PUP
+  outside the top PROTECTED_RANK), and never into a roster that can't field a lineup. For a claim or an
+  open spot it drops only one of its DROPPABLE_COUNT least valuable skill players. A kicker or defense is
+  only ever swapped for another one.
 - No add takes a CPU over its positional limit (`replay_values.crowded`: 2 QB, 2 TE, 1 K, 1 DST, 6 RB,
   7 WR) unless nobody it has there plays this week, and it lets the extra one go again afterwards.
 - `cpu_ir` (before claims and free agency): a CPU brings back an IR player who lost his tag (into an open
@@ -43,6 +44,7 @@ STREAM_EDGE = 4.0                 # projected points a free-agent K / DST must b
                                   # seasons: a league's CPUs make about 56 such swaps a season at 2.0, nearly
                                   # all of them defenses chasing a matchup, 28 at 3.0 and 12 at 4.0)
 STREAMED = ("K", "DST")
+LONG_TAGS = ("IR", "PUP")         # out for most of what is left (replay_values.IR_OUT_SHARE)
 
 Move = tuple[int, int | None]     # (player id to add, player id to drop)
 
@@ -241,9 +243,17 @@ def _cover(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: _Con
     """A starting slot nobody on the roster can fill with a projection this week gets the best free agent
     for it, whatever that costs later. He replaces the team's own kicker or defense, or takes an open
     roster spot, or the place of the least valuable player it can spare whose going leaves one slot fewer
-    without a starter (so never a swap that only moves the gap)."""
+    without a starter (so never a swap that only moves the gap). When its IR slot is taken, a player tagged
+    LONG_TAGS outside the top players may go too, after those it can spare."""
     ids = [v.player_id for v in roster]
     idle = rv.idle_slots(ctx.know, ids, ctx.settings)
+    spare = _spare(roster, ctx.know, ctx.protected)
+    gone = sorted((v for v in roster if ctx.stash and v.position in SKILL and v.player_id not in ctx.protected
+                   and v not in spare and v.injury is not None and v.injury.tag in LONG_TAGS),
+                  key=lambda v: (v.healthy_value, v.ros_ppg, -v.player_id))
+    # Not counting ctx.stash in either branch: this slot has nobody who plays, and an IR player there would
+    # use up crowded's allowance for it (two QBs on bye and one on IR would leave the slot empty).
+    bare = replace(ctx, stash=())
     for slot in idle:
         eligible = rv.FLEX_POSITIONS if slot == "FLEX" else (slot,)
         best = (_top(v for v in free if v.position == position and v.projection > 0) for position in eligible)
@@ -252,12 +262,10 @@ def _cover(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: _Con
             if own:
                 return add.player_id, own.player_id
             if len(roster) < ctx.settings.roster_size:
-                # Not counting ctx.stash here: this slot has nobody who plays, and an IR player there would use
-                # up crowded's allowance for it (two QBs on bye and one on IR would leave the slot empty).
                 if rv.crowded(roster, [add], add.position, ctx.settings):
                     continue
                 return add.player_id, None
-            for out in _legal_drops(roster, add, _spare(roster, ctx.know, ctx.protected), ctx):
+            for out in _legal_drops(roster, add, [*spare, *gone], bare):
                 after = [pid for pid in ids if pid != out.player_id] + [add.player_id]
                 if len(rv.idle_slots(ctx.know, after, ctx.settings)) < len(idle):
                     return add.player_id, out.player_id

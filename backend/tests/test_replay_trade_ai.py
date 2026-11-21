@@ -3,6 +3,7 @@
 `seasons` plays cpu_trades for weeks 1-11 on fakes.drafted_state() for several seeds. Nothing else touches
 the rosters, so every change in those states is a trade the CPUs made.
 """
+import sys
 import time
 from collections import Counter
 from dataclasses import dataclass, replace
@@ -293,6 +294,7 @@ def test_a_player_on_ir_is_never_searched_or_offered(monkeypatch):
     searched = []
     tradable = ai._tradable
     monkeypatch.setattr(ai, "_tradable", lambda *args: searched.append(found := tradable(*args)) or found)
+    monkeypatch.setattr(rt.replay_ir, "blocked_reason", lambda *args: None)     # untagged on IR would block every CPU
 
     after = [ai.cpu_trades(state, SETTINGS, know, seed) for seed in SEEDS]
 
@@ -302,6 +304,10 @@ def test_a_player_on_ir_is_never_searched_or_offered(monkeypatch):
 
 
 def test_cpu_trades_stays_within_its_time_budget(seasons):
+    # A coverage tracer makes this pure-Python loop about 4x slower, so the wall-clock budget only means something without one.
+    monitoring = getattr(sys, "monitoring", None)       # Python 3.12+: coverage may use it instead of a trace function
+    if sys.gettrace() is not None or (monitoring and monitoring.get_tool(monitoring.COVERAGE_ID) is not None):
+        pytest.skip("timing is not meaningful under a tracer")
     slowest = max(week.seconds for season in seasons.values() for week in season)
 
     assert slowest < BUDGET_SECONDS, slowest
