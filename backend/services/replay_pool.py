@@ -243,7 +243,7 @@ def readiness(session: Session, season: int) -> dict:
     return {"season": season, "ready": ready, "has_stats": has_stats, "has_schedule": bool(teams),
             "has_kdst": has_kdst, "adp_players": adp_players, "projection_weeks": projection_weeks,
             "kickers": kickers, "defenses": defenses, "injury_weeks": injury_weeks,
-            "expert_snapshots": expert_snapshots}
+            "expert_snapshots": expert_snapshots, "last_week": last_week}
 
 
 def ready_seasons(session: Session) -> list[int]:

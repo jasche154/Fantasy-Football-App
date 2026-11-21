@@ -56,6 +56,17 @@ describe('GameHub header', () => {
     expect(screen.getByRole('link', { name: 'All leagues' })).toHaveAttribute('href', '#/replay');
   });
 
+  it('says when the user has no game this week, and names a quarter-final', async () => {
+    renderHub(summary({ matchup: null }));
+    expect((await screen.findByText(/2nd of 12/)).closest('p')).toHaveTextContent('No game this week');
+  });
+
+  it('names a quarter-final in the header', async () => {
+    const game = summary();
+    renderHub(summary({ matchup: { ...game.matchup!, playoff: true, label: 'Quarter-final' } }));
+    expect((await screen.findByText(/2nd of 12/)).closest('p')).toHaveTextContent('Quarter-final vs Sunday Scaries');
+  });
+
   it('says so when the league cannot be opened', async () => {
     mockFetch([META_ROUTE, { path: GAME_PATH, reply: json({ detail: 'There is no league 7.' }, 404) }]);
     renderWithProviders(<GameHub gameId={GAME_ID} view="team" />);

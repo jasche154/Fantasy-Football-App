@@ -2,7 +2,7 @@ import { useEffect, useId, useState, type FormEvent } from 'react';
 import { errorMessage } from '../../api/client';
 import { createReplayGame, getReplaySeasons, prepareReplaySeason } from '../../api/replay';
 import type {
-  ReplayDifficulty, ReplayPrepareStatus, ReplayReadiness, ReplaySeasons, ReplaySummary, ReplayWaiverMode, Scoring,
+  ReplayDifficulty, ReplayPlayoffEndWeek, ReplayPrepareStatus, ReplayReadiness, ReplaySeasons, ReplaySummary, ReplayWaiverMode, Scoring,
 } from '../../api/types';
 import { AsyncView } from '../../components/AsyncView';
 import { SelectField } from '../../components/SelectField';
@@ -13,7 +13,14 @@ import { SCORING_OPTIONS } from '../../state/leagueSettings';
 
 const POLL_MS = 3000;
 const RANDOM = 'random';
-const TEAM_COUNTS = [8, 10, 12, 14];
+const TEAM_COUNTS = [4, 6, 8, 10, 12, 14, 16];
+/** Championship week -> the playoff weeks' label; week 18 needs a season with games in week 18. */
+const PLAYOFF_WINDOWS: readonly { value: ReplayPlayoffEndWeek; label: string }[] = [
+  { value: 16, label: 'Weeks 14-16' }, { value: 17, label: 'Weeks 15-17' }, { value: 18, label: 'Weeks 16-18' },
+];
+const DEFAULT_PLAYOFF_END: ReplayPlayoffEndWeek = 17;
+const MIN_PLAYOFF_TEAMS = 4;
+const MAX_PLAYOFF_TEAMS = 8;
 const MAX_NAME_LENGTH = 60;
 const STEP_LABELS: Record<string, string> = { starting: 'starting', game_results: 'game results', adp: 'ADP', projections: 'projections',
   injuries: 'injury reports', snaps: 'snap counts' };
@@ -27,6 +34,18 @@ const DIFFICULTIES: readonly { value: ReplayDifficulty; title: string; text: str
   { value: 'normal', title: 'Normal', text: 'CPU managers reach and slide around ADP in the draft, and trade with you at even value.' },
   { value: 'hard', title: 'Hard', text: 'CPU managers stick closer to ADP (half the randomness) and want about 8% more value back in a trade with you.' },
 ];
+
+/** The backend's default: 4 below 10 teams, 6 below 14, else 8. */
+function defaultPlayoffTeams(teams: number): number {
+  if (teams < 10) return 4;
+  return teams < 14 ? 6 : 8;
+}
+
+/** "6 teams (top 2 get a bye)": byes fill the bracket up to 4 or 8. */
+function playoffTeamsLabel(count: number): string {
+  const byes = (count <= 4 ? 4 : 8) - count;
+  return byes === 0 ? `${count} teams` : `${count} teams (top ${byes} get${byes === 1 ? 's' : ''} a bye)`;
+}
 
 function prepareText(prepare: ReplayPrepareStatus): string {
   if (prepare.status === 'running') {
@@ -126,6 +145,8 @@ export function SetupForm({ onCreated }: { onCreated: (game: ReplaySummary) => v
   const [season, setSeason] = useState('');
   const [name, setName] = useState('');
   const [teams, setTeams] = useState(12);
+  const [playoffEnd, setPlayoffEnd] = useState<ReplayPlayoffEndWeek>(DEFAULT_PLAYOFF_END);
+  const [playoffTeams, setPlayoffTeams] = useState<number | null>(null);         // null: the league size's default
   const [scoring, setScoring] = useState<Scoring>('half');
   const [slot, setSlot] = useState(RANDOM);
   const [waiverMode, setWaiverMode] = useState<ReplayWaiverMode>('wednesday');
@@ -154,6 +175,11 @@ export function SetupForm({ onCreated }: { onCreated: (game: ReplaySummary) => v
         // Until the user picks one, the newest ready season.
         const chosen = season === RANDOM || ready.includes(season) ? season : (ready[ready.length - 1] ?? '');
         const chosenSlot = slot !== RANDOM && Number(slot) > teams ? RANDOM : slot;
+        const lastWeek = data.results.find((row) => String(row.season) === chosen)?.last_week ?? 0;
+        const windows = PLAYOFF_WINDOWS.filter((option) => option.value < 18 || lastWeek >= 18);
+        const chosenEnd = windows.some((option) => option.value === playoffEnd) ? playoffEnd : DEFAULT_PLAYOFF_END;
+        const chosenPlayoffTeams = playoffTeams ?? defaultPlayoffTeams(teams);
+        const playoffCounts = Array.from({ length: Math.min(MAX_PLAYOFF_TEAMS, teams) - MIN_PLAYOFF_TEAMS + 1 }, (_, index) => MIN_PLAYOFF_TEAMS + index);
         const submit = async (event: FormEvent) => {
           event.preventDefault();
           const result = await create.run({
@@ -164,6 +190,9 @@ export function SetupForm({ onCreated }: { onCreated: (game: ReplaySummary) => v
             draft_slot: chosenSlot === RANDOM ? undefined : Number(chosenSlot),
             waiver_mode: waiverMode,
             difficulty,
+            // A random season's length is unknown here: the server's default window fits every season.
+            playoff_end_week: chosen === RANDOM ? undefined : chosenEnd,
+            playoff_teams: chosenPlayoffTeams,
           });
           if (result) onCreated(result.game);
         };
@@ -180,11 +209,17 @@ export function SetupForm({ onCreated }: { onCreated: (game: ReplaySummary) => v
                 <input id={nameId} className="input" value={name} maxLength={MAX_NAME_LENGTH} placeholder="e.g. Sunday Replay"
                   onChange={(event) => setName(event.target.value)} />
               </div>
-              <SelectField label="Teams" value={teams} onChange={(value) => setTeams(Number(value))}
+              <SelectField label="Teams" value={teams} onChange={(value) => { setTeams(Number(value)); setPlayoffTeams(null); }}
                 options={TEAM_COUNTS.map((count) => ({ value: count, label: `${count} teams` }))} />
               <SelectField label="Scoring" value={scoring} onChange={(value) => setScoring(value as Scoring)} options={SCORING_OPTIONS} />
               <SelectField label="Draft slot" value={chosenSlot} onChange={setSlot}
                 options={[{ value: RANDOM, label: 'Random' }, ...Array.from({ length: teams }, (_, index) => ({ value: String(index + 1), label: `Pick ${index + 1}` }))]} />
+              {chosen !== RANDOM && (
+                <SelectField label="Playoffs" value={chosenEnd} onChange={(value) => setPlayoffEnd(Number(value) as ReplayPlayoffEndWeek)}
+                  options={windows} />
+              )}
+              <SelectField label="Playoff teams" value={chosenPlayoffTeams} onChange={(value) => setPlayoffTeams(Number(value))}
+                options={playoffCounts.map((count) => ({ value: count, label: playoffTeamsLabel(count) }))} />
             </div>
             <UnpreparedSeasons seasons={data.results} prepare={data.prepare} isStarting={prepare.status === 'pending'}
               wasStartedHere={prepare.status === 'success'} onPrepare={startPrepare} />

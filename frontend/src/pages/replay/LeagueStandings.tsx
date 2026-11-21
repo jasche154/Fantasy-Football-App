@@ -8,7 +8,7 @@ import { GameTable } from './LeagueScoreboard';
 import { formatPoints, formatRecord, type ReplayViewProps } from './shared';
 
 function StandingsTable({ standings }: { standings: ReplayStandings }) {
-  const { results, playoff_teams: playoffTeams, seeds_final: seedsFinal } = standings;
+  const { results, playoff_teams: playoffTeams, playoff_weeks: playoffWeeks, byes, seeds_final: seedsFinal } = standings;
   const isOver = results.some((row) => row.place !== null);         // rows are then in final order
   return (
     <>
@@ -45,16 +45,17 @@ function StandingsTable({ standings }: { standings: ReplayStandings }) {
         </table>
       </div>
       <p className="hint">
-        The line is the playoff cut: the top {playoffTeams} seeds play for the title.{' '}
+        The line is the playoff cut: the top {playoffTeams} seeds play for the title in weeks {playoffWeeks[0]}-{playoffWeeks.at(-1)}
+        {byes > 0 && `, and the top ${byes} skip${byes === 1 ? 's' : ''} the first round`}.{' '}
         {seedsFinal ? 'The seeds are final.' : `Seeds lock after week ${standings.regular_season_weeks}.`}
       </p>
     </>
   );
 }
 
-const TITLE_GAMES: readonly (string | null)[] = ['Semi-final', 'Championship', 'Third place'];
+const TITLE_GAMES: readonly (string | null)[] = ['Quarter-final', 'Semi-final', 'Championship', 'Third place'];
 
-/** The playoff weeks cut to the title games or to the rest (the consolation ladder that decides places 5..N). */
+/** The playoff weeks cut to the title games or to the rest (the consolation games that decide the places below). */
 function PlayoffWeeks({ bracket, isTitle, kind }: { bracket: ReplayStandings['bracket']; isTitle: boolean; kind: string }) {
   return bracket.map((board) => {
     const results = board.results.filter((game) => TITLE_GAMES.includes(game.label) === isTitle);
@@ -68,7 +69,7 @@ function PlayoffWeeks({ bracket, isTitle, kind }: { bracket: ReplayStandings['br
   });
 }
 
-/** The playoff games known so far (semi-finals, then the championship and third place), the champion, then the consolation games. */
+/** The playoff games known so far (quarter- and semi-finals, then the championship and third place), the champion, then the consolation games. */
 function Bracket({ standings }: { standings: ReplayStandings }) {
   const { bracket, champion } = standings;
   if (bracket.length === 0) return null;
@@ -85,7 +86,7 @@ function Bracket({ standings }: { standings: ReplayStandings }) {
       {hasConsolation && (
         <section aria-label="Consolation games">
           <h2 className="section-title">Consolation</h2>
-          <p className="hint">The other teams play for places 5 and down; the final standings follow these games.</p>
+          <p className="hint">Teams out of the title race play for the places below it; the final standings follow these games.</p>
           <PlayoffWeeks bracket={bracket} isTitle={false} kind="consolation" />
         </section>
       )}

@@ -297,7 +297,7 @@ def test_create_game_makes_the_cpu_picks_up_to_the_users_first_turn():
 @pytest.mark.parametrize("settings, message", [
     (fakes.fake_settings(regular_season_weeks=16), "too long"),
     (fakes.fake_settings(scoring="ppr"), "ppr scoring"),
-    (fakes.fake_settings(playoff_teams=6), "4-team playoff"),
+    (fakes.fake_settings(playoff_teams=6, regular_season_weeks=15), "playoffs in weeks 16-18 is too long"),
 ])
 def test_create_game_refuses_a_league_the_season_cannot_hold(settings, message):
     with pytest.raises(ValueError, match=message):
@@ -589,6 +589,42 @@ def test_a_whole_season_keeps_every_invariant_and_crowns_a_champion(settings, se
     assert (final.week, len(final.results)) == (settings.end_week, settings.end_week)
     assert all(len(result.scores) == settings.teams and min(result.scores.values()) >= 0 for result in final.results)
     assert sum(event.kind == "champion" for event in final.events) == 1
+
+
+def _whole_season(settings: rs.Settings, data) -> rs.State:
+    """Create, auto-draft and sim a league to its champion, checking every invariant after each step."""
+    state = rg.auto_draft(rg.create_game(settings, data, 5), settings, data, 5)
+    while state.phase != "complete":
+        before = state
+        step = rg.WEDNESDAY if state.phase == "waivers" else rg.PLAY
+        state = rg.advance(state, settings, data, 5, step)
+        assert problems(state, settings, before) == []
+    return state
+
+
+@pytest.mark.parametrize("end_week", [16, 17, 18])
+def test_every_playoff_window_plays_to_a_champion_on_an_18_week_season(end_week):
+    playoff_teams = rs.default_playoff_teams(12)
+    settings = fakes.fake_settings(playoff_teams=playoff_teams,
+                                   regular_season_weeks=end_week - rs.playoff_rounds(playoff_teams))
+
+    done = _whole_season(settings, fakes.fake_season(weeks=18))
+
+    assert (done.week, len(done.results), settings.end_week) == (end_week, end_week, end_week)
+    assert [r.playoff for r in done.results].count(True) == 3
+    places = replay_season.final_standings(done, settings)
+    assert places[0]["team_id"] == done.champion in replay_season.playoff_seeds(done)[:playoff_teams]
+
+
+@pytest.mark.parametrize("teams", [4, 6, 16])
+def test_small_and_big_leagues_play_to_a_champion(teams):
+    settings = fakes.fake_settings(teams=teams, playoff_teams=rs.default_playoff_teams(teams))
+
+    done = _whole_season(settings, DATA)
+
+    places = replay_season.final_standings(done, settings)
+    assert done.phase == "complete" and len(done.results) == settings.end_week
+    assert [row["place"] for row in places] == list(range(1, teams + 1)) and places[0]["team_id"] == done.champion
 
 
 def test_the_active_user_really_used_every_action():

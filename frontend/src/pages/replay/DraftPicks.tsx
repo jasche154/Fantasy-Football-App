@@ -52,6 +52,7 @@ function PickLog({ draft, openPlayer }: DraftPicksProps) {
         <caption className="sr-only">Picks so far, most recent first</caption>
         <thead>
           <tr>
+            <th scope="col" className="num">Rd</th>
             <th scope="col" className="num">Pick</th>
             <th scope="col">Team</th>
             <th scope="col">Player</th>
@@ -60,6 +61,7 @@ function PickLog({ draft, openPlayer }: DraftPicksProps) {
         <tbody>
           {[...draft.picks].reverse().map((pick) => (
             <tr key={pick.overall} className={pick.team.is_user ? 'row--mine replay-draft__mine' : undefined}>
+              <td className="num">{pick.round}</td>
               <td className="num">{pickLabel(pick, draft.order.length)}</td>
               <td>{pick.team.name}{pick.team.is_user && <> <span className="sr-only">(you)</span></>}</td>
               <td className="td--player"><ReplayPlayerCell player={pick.player} onOpen={openPlayer} /></td>

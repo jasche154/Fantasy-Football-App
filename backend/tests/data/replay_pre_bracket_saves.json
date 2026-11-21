@@ -1,0 +1,1431 @@
+{
+ "_note": "An 8-team replay league saved by the code before playoff sizes and pools (commit 9295427): mid-playoffs (week 3 played) and complete.",
+ "settings": {
+  "season": 2021,
+  "teams": 8,
+  "scoring": "half",
+  "starters": {
+   "QB": 1
+  },
+  "bench": 0,
+  "draft_slot": 1,
+  "waiver_mode": "wednesday",
+  "regular_season_weeks": 2,
+  "playoff_teams": 4,
+  "trade_deadline_week": 1,
+  "season_hidden": false,
+  "difficulty": "normal"
+ },
+ "mid_playoffs": {
+  "v": 1,
+  "phase": "waivers",
+  "week": 4,
+  "teams": [
+   {
+    "id": 1,
+    "name": "You",
+    "is_user": true,
+    "roster": [
+     10001
+    ],
+    "chaos": 1.0,
+    "lean": {
+     "QB": 1.0,
+     "RB": 1.0,
+     "WR": 1.0,
+     "TE": 1.0,
+     "K": 1.0,
+     "DST": 1.0
+    },
+    "ir": [],
+    "persona": "balanced"
+   },
+   {
+    "id": 2,
+    "name": "CPU 2",
+    "is_user": false,
+    "roster": [
+     10004
+    ],
+    "chaos": 1.0,
+    "lean": {
+     "QB": 1.0,
+     "RB": 1.0,
+     "WR": 1.0,
+     "TE": 1.0,
+     "K": 1.0,
+     "DST": 1.0
+    },
+    "ir": [],
+    "persona": "balanced"
+   },
+   {
+    "id": 3,
+    "name": "CPU 3",
+    "is_user": false,
+    "roster": [
+     10005
+    ],
+    "chaos": 1.0,
+    "lean": {
+     "QB": 1.0,
+     "RB": 1.0,
+     "WR": 1.0,
+     "TE": 1.0,
+     "K": 1.0,
+     "DST": 1.0
+    },
+    "ir": [],
+    "persona": "balanced"
+   },
+   {
+    "id": 4,
+    "name": "CPU 4",
+    "is_user": false,
+    "roster": [
+     10008
+    ],
+    "chaos": 1.0,
+    "lean": {
+     "QB": 1.0,
+     "RB": 1.0,
+     "WR": 1.0,
+     "TE": 1.0,
+     "K": 1.0,
+     "DST": 1.0
+    },
+    "ir": [],
+    "persona": "balanced"
+   },
+   {
+    "id": 5,
+    "name": "CPU 5",
+    "is_user": false,
+    "roster": [
+     10002
+    ],
+    "chaos": 1.0,
+    "lean": {
+     "QB": 1.0,
+     "RB": 1.0,
+     "WR": 1.0,
+     "TE": 1.0,
+     "K": 1.0,
+     "DST": 1.0
+    },
+    "ir": [],
+    "persona": "balanced"
+   },
+   {
+    "id": 6,
+    "name": "CPU 6",
+    "is_user": false,
+    "roster": [
+     10010
+    ],
+    "chaos": 1.0,
+    "lean": {
+     "QB": 1.0,
+     "RB": 1.0,
+     "WR": 1.0,
+     "TE": 1.0,
+     "K": 1.0,
+     "DST": 1.0
+    },
+    "ir": [],
+    "persona": "balanced"
+   },
+   {
+    "id": 7,
+    "name": "CPU 7",
+    "is_user": false,
+    "roster": [
+     10013
+    ],
+    "chaos": 1.0,
+    "lean": {
+     "QB": 1.0,
+     "RB": 1.0,
+     "WR": 1.0,
+     "TE": 1.0,
+     "K": 1.0,
+     "DST": 1.0
+    },
+    "ir": [],
+    "persona": "balanced"
+   },
+   {
+    "id": 8,
+    "name": "CPU 8",
+    "is_user": false,
+    "roster": [
+     10003
+    ],
+    "chaos": 1.0,
+    "lean": {
+     "QB": 1.0,
+     "RB": 1.0,
+     "WR": 1.0,
+     "TE": 1.0,
+     "K": 1.0,
+     "DST": 1.0
+    },
+    "ir": [],
+    "persona": "balanced"
+   }
+  ],
+  "draft_order": [
+   1,
+   2,
+   3,
+   4,
+   5,
+   6,
+   7,
+   8
+  ],
+  "picks": [
+   {
+    "overall": 1,
+    "round": 1,
+    "team_id": 1,
+    "player_id": 10001
+   },
+   {
+    "overall": 2,
+    "round": 1,
+    "team_id": 2,
+    "player_id": 10004
+   },
+   {
+    "overall": 3,
+    "round": 1,
+    "team_id": 3,
+    "player_id": 10005
+   },
+   {
+    "overall": 4,
+    "round": 1,
+    "team_id": 4,
+    "player_id": 10008
+   },
+   {
+    "overall": 5,
+    "round": 1,
+    "team_id": 5,
+    "player_id": 10002
+   },
+   {
+    "overall": 6,
+    "round": 1,
+    "team_id": 6,
+    "player_id": 10010
+   },
+   {
+    "overall": 7,
+    "round": 1,
+    "team_id": 7,
+    "player_id": 10013
+   },
+   {
+    "overall": 8,
+    "round": 1,
+    "team_id": 8,
+    "player_id": 10003
+   }
+  ],
+  "schedule": [
+   [
+    [
+     1,
+     4
+    ],
+    [
+     5,
+     6
+    ],
+    [
+     7,
+     2
+    ],
+    [
+     8,
+     3
+    ]
+   ],
+   [
+    [
+     6,
+     1
+    ],
+    [
+     7,
+     4
+    ],
+    [
+     5,
+     3
+    ],
+    [
+     8,
+     2
+    ]
+   ]
+  ],
+  "results": [
+   {
+    "week": 1,
+    "matchups": [
+     [
+      1,
+      4
+     ],
+     [
+      5,
+      6
+     ],
+     [
+      7,
+      2
+     ],
+     [
+      8,
+      3
+     ]
+    ],
+    "scores": {
+     "1": 19.2,
+     "2": 13.7,
+     "3": 19.8,
+     "4": 20.4,
+     "5": 10.8,
+     "6": 29.2,
+     "7": 15.2,
+     "8": 35.0
+    },
+    "starters": {
+     "1": {
+      "QB": [
+       10001
+      ]
+     },
+     "2": {
+      "QB": [
+       10004
+      ]
+     },
+     "3": {
+      "QB": [
+       10005
+      ]
+     },
+     "4": {
+      "QB": [
+       10008
+      ]
+     },
+     "5": {
+      "QB": [
+       10002
+      ]
+     },
+     "6": {
+      "QB": [
+       10010
+      ]
+     },
+     "7": {
+      "QB": [
+       10013
+      ]
+     },
+     "8": {
+      "QB": [
+       10003
+      ]
+     }
+    },
+    "points": {
+     "10001": 19.2,
+     "10004": 13.7,
+     "10005": 19.8,
+     "10008": 20.4,
+     "10002": 10.8,
+     "10010": 29.2,
+     "10013": 15.2,
+     "10003": 35.0
+    },
+    "playoff": false
+   },
+   {
+    "week": 2,
+    "matchups": [
+     [
+      6,
+      1
+     ],
+     [
+      7,
+      4
+     ],
+     [
+      5,
+      3
+     ],
+     [
+      8,
+      2
+     ]
+    ],
+    "scores": {
+     "1": 0.0,
+     "2": 19.9,
+     "3": 25.1,
+     "4": 33.2,
+     "5": 6.8,
+     "6": 21.6,
+     "7": 27.9,
+     "8": 20.1
+    },
+    "starters": {
+     "1": {
+      "QB": [
+       10001
+      ]
+     },
+     "2": {
+      "QB": [
+       10004
+      ]
+     },
+     "3": {
+      "QB": [
+       10005
+      ]
+     },
+     "4": {
+      "QB": [
+       10008
+      ]
+     },
+     "5": {
+      "QB": [
+       10002
+      ]
+     },
+     "6": {
+      "QB": [
+       10010
+      ]
+     },
+     "7": {
+      "QB": [
+       10013
+      ]
+     },
+     "8": {
+      "QB": [
+       10003
+      ]
+     }
+    },
+    "points": {
+     "10001": 0.0,
+     "10004": 19.9,
+     "10005": 25.1,
+     "10008": 33.2,
+     "10002": 6.8,
+     "10010": 21.6,
+     "10013": 27.9,
+     "10003": 20.1
+    },
+    "playoff": false
+   },
+   {
+    "week": 3,
+    "matchups": [
+     [
+      8,
+      3
+     ],
+     [
+      4,
+      6
+     ],
+     [
+      7,
+      5
+     ],
+     [
+      2,
+      1
+     ]
+    ],
+    "scores": {
+     "1": 22.7,
+     "2": 4.2,
+     "3": 10.1,
+     "4": 22.0,
+     "5": 15.4,
+     "6": 2.6,
+     "7": 20.0,
+     "8": 11.8
+    },
+    "starters": {
+     "1": {
+      "QB": [
+       10001
+      ]
+     },
+     "2": {
+      "QB": [
+       10004
+      ]
+     },
+     "3": {
+      "QB": [
+       10005
+      ]
+     },
+     "4": {
+      "QB": [
+       10008
+      ]
+     },
+     "5": {
+      "QB": [
+       10002
+      ]
+     },
+     "6": {
+      "QB": [
+       10010
+      ]
+     },
+     "7": {
+      "QB": [
+       10013
+      ]
+     },
+     "8": {
+      "QB": [
+       10003
+      ]
+     }
+    },
+    "points": {
+     "10001": 22.7,
+     "10004": 4.2,
+     "10005": 10.1,
+     "10008": 22.0,
+     "10002": 15.4,
+     "10010": 2.6,
+     "10013": 20.0,
+     "10003": 11.8
+    },
+    "playoff": true
+   }
+  ],
+  "waiver_order": [
+   8,
+   7,
+   6,
+   5,
+   4,
+   3,
+   2,
+   1
+  ],
+  "claims": [],
+  "locked": [],
+  "lineup": null,
+  "offers": [],
+  "events": [
+   {
+    "id": 1,
+    "week": 1,
+    "kind": "result",
+    "team_id": 4,
+    "text": "CPU 4 beat You 20.40-19.20",
+    "player_ids": []
+   },
+   {
+    "id": 2,
+    "week": 1,
+    "kind": "result",
+    "team_id": 6,
+    "text": "CPU 6 beat CPU 5 29.20-10.80",
+    "player_ids": []
+   },
+   {
+    "id": 3,
+    "week": 1,
+    "kind": "result",
+    "team_id": 7,
+    "text": "CPU 7 beat CPU 2 15.20-13.70",
+    "player_ids": []
+   },
+   {
+    "id": 4,
+    "week": 1,
+    "kind": "result",
+    "team_id": 8,
+    "text": "CPU 8 beat CPU 3 35.00-19.80",
+    "player_ids": []
+   },
+   {
+    "id": 5,
+    "week": 2,
+    "kind": "result",
+    "team_id": 6,
+    "text": "CPU 6 beat You 21.60-0.00",
+    "player_ids": []
+   },
+   {
+    "id": 6,
+    "week": 2,
+    "kind": "result",
+    "team_id": 4,
+    "text": "CPU 4 beat CPU 7 33.20-27.90",
+    "player_ids": []
+   },
+   {
+    "id": 7,
+    "week": 2,
+    "kind": "result",
+    "team_id": 3,
+    "text": "CPU 3 beat CPU 5 25.10-6.80",
+    "player_ids": []
+   },
+   {
+    "id": 8,
+    "week": 2,
+    "kind": "result",
+    "team_id": 8,
+    "text": "CPU 8 beat CPU 2 20.10-19.90",
+    "player_ids": []
+   },
+   {
+    "id": 9,
+    "week": 2,
+    "kind": "playoffs",
+    "team_id": null,
+    "text": "Playoffs: CPU 8 v CPU 3, CPU 4 v CPU 6",
+    "player_ids": []
+   },
+   {
+    "id": 10,
+    "week": 3,
+    "kind": "result",
+    "team_id": 8,
+    "text": "CPU 8 beat CPU 3 11.80-10.10",
+    "player_ids": []
+   },
+   {
+    "id": 11,
+    "week": 3,
+    "kind": "result",
+    "team_id": 4,
+    "text": "CPU 4 beat CPU 6 22.00-2.60",
+    "player_ids": []
+   },
+   {
+    "id": 12,
+    "week": 3,
+    "kind": "result",
+    "team_id": 7,
+    "text": "CPU 7 beat CPU 5 20.00-15.40",
+    "player_ids": []
+   },
+   {
+    "id": 13,
+    "week": 3,
+    "kind": "result",
+    "team_id": 1,
+    "text": "You beat CPU 2 22.70-4.20",
+    "player_ids": []
+   },
+   {
+    "id": 14,
+    "week": 3,
+    "kind": "playoffs",
+    "team_id": null,
+    "text": "Championship game: CPU 8 v CPU 4",
+    "player_ids": []
+   }
+  ],
+  "traded": {},
+  "champion": null,
+  "next_id": 15,
+  "faab_spent": {},
+  "counter_searched": {}
+ },
+ "complete": {
+  "v": 1,
+  "phase": "complete",
+  "week": 4,
+  "teams": [
+   {
+    "id": 1,
+    "name": "You",
+    "is_user": true,
+    "roster": [
+     10001
+    ],
+    "chaos": 1.0,
+    "lean": {
+     "QB": 1.0,
+     "RB": 1.0,
+     "WR": 1.0,
+     "TE": 1.0,
+     "K": 1.0,
+     "DST": 1.0
+    },
+    "ir": [],
+    "persona": "balanced"
+   },
+   {
+    "id": 2,
+    "name": "CPU 2",
+    "is_user": false,
+    "roster": [
+     10004
+    ],
+    "chaos": 1.0,
+    "lean": {
+     "QB": 1.0,
+     "RB": 1.0,
+     "WR": 1.0,
+     "TE": 1.0,
+     "K": 1.0,
+     "DST": 1.0
+    },
+    "ir": [],
+    "persona": "balanced"
+   },
+   {
+    "id": 3,
+    "name": "CPU 3",
+    "is_user": false,
+    "roster": [
+     10005
+    ],
+    "chaos": 1.0,
+    "lean": {
+     "QB": 1.0,
+     "RB": 1.0,
+     "WR": 1.0,
+     "TE": 1.0,
+     "K": 1.0,
+     "DST": 1.0
+    },
+    "ir": [],
+    "persona": "balanced"
+   },
+   {
+    "id": 4,
+    "name": "CPU 4",
+    "is_user": false,
+    "roster": [
+     10008
+    ],
+    "chaos": 1.0,
+    "lean": {
+     "QB": 1.0,
+     "RB": 1.0,
+     "WR": 1.0,
+     "TE": 1.0,
+     "K": 1.0,
+     "DST": 1.0
+    },
+    "ir": [],
+    "persona": "balanced"
+   },
+   {
+    "id": 5,
+    "name": "CPU 5",
+    "is_user": false,
+    "roster": [
+     10002
+    ],
+    "chaos": 1.0,
+    "lean": {
+     "QB": 1.0,
+     "RB": 1.0,
+     "WR": 1.0,
+     "TE": 1.0,
+     "K": 1.0,
+     "DST": 1.0
+    },
+    "ir": [],
+    "persona": "balanced"
+   },
+   {
+    "id": 6,
+    "name": "CPU 6",
+    "is_user": false,
+    "roster": [
+     10010
+    ],
+    "chaos": 1.0,
+    "lean": {
+     "QB": 1.0,
+     "RB": 1.0,
+     "WR": 1.0,
+     "TE": 1.0,
+     "K": 1.0,
+     "DST": 1.0
+    },
+    "ir": [],
+    "persona": "balanced"
+   },
+   {
+    "id": 7,
+    "name": "CPU 7",
+    "is_user": false,
+    "roster": [
+     10013
+    ],
+    "chaos": 1.0,
+    "lean": {
+     "QB": 1.0,
+     "RB": 1.0,
+     "WR": 1.0,
+     "TE": 1.0,
+     "K": 1.0,
+     "DST": 1.0
+    },
+    "ir": [],
+    "persona": "balanced"
+   },
+   {
+    "id": 8,
+    "name": "CPU 8",
+    "is_user": false,
+    "roster": [
+     10003
+    ],
+    "chaos": 1.0,
+    "lean": {
+     "QB": 1.0,
+     "RB": 1.0,
+     "WR": 1.0,
+     "TE": 1.0,
+     "K": 1.0,
+     "DST": 1.0
+    },
+    "ir": [],
+    "persona": "balanced"
+   }
+  ],
+  "draft_order": [
+   1,
+   2,
+   3,
+   4,
+   5,
+   6,
+   7,
+   8
+  ],
+  "picks": [
+   {
+    "overall": 1,
+    "round": 1,
+    "team_id": 1,
+    "player_id": 10001
+   },
+   {
+    "overall": 2,
+    "round": 1,
+    "team_id": 2,
+    "player_id": 10004
+   },
+   {
+    "overall": 3,
+    "round": 1,
+    "team_id": 3,
+    "player_id": 10005
+   },
+   {
+    "overall": 4,
+    "round": 1,
+    "team_id": 4,
+    "player_id": 10008
+   },
+   {
+    "overall": 5,
+    "round": 1,
+    "team_id": 5,
+    "player_id": 10002
+   },
+   {
+    "overall": 6,
+    "round": 1,
+    "team_id": 6,
+    "player_id": 10010
+   },
+   {
+    "overall": 7,
+    "round": 1,
+    "team_id": 7,
+    "player_id": 10013
+   },
+   {
+    "overall": 8,
+    "round": 1,
+    "team_id": 8,
+    "player_id": 10003
+   }
+  ],
+  "schedule": [
+   [
+    [
+     1,
+     4
+    ],
+    [
+     5,
+     6
+    ],
+    [
+     7,
+     2
+    ],
+    [
+     8,
+     3
+    ]
+   ],
+   [
+    [
+     6,
+     1
+    ],
+    [
+     7,
+     4
+    ],
+    [
+     5,
+     3
+    ],
+    [
+     8,
+     2
+    ]
+   ]
+  ],
+  "results": [
+   {
+    "week": 1,
+    "matchups": [
+     [
+      1,
+      4
+     ],
+     [
+      5,
+      6
+     ],
+     [
+      7,
+      2
+     ],
+     [
+      8,
+      3
+     ]
+    ],
+    "scores": {
+     "1": 19.2,
+     "2": 13.7,
+     "3": 19.8,
+     "4": 20.4,
+     "5": 10.8,
+     "6": 29.2,
+     "7": 15.2,
+     "8": 35.0
+    },
+    "starters": {
+     "1": {
+      "QB": [
+       10001
+      ]
+     },
+     "2": {
+      "QB": [
+       10004
+      ]
+     },
+     "3": {
+      "QB": [
+       10005
+      ]
+     },
+     "4": {
+      "QB": [
+       10008
+      ]
+     },
+     "5": {
+      "QB": [
+       10002
+      ]
+     },
+     "6": {
+      "QB": [
+       10010
+      ]
+     },
+     "7": {
+      "QB": [
+       10013
+      ]
+     },
+     "8": {
+      "QB": [
+       10003
+      ]
+     }
+    },
+    "points": {
+     "10001": 19.2,
+     "10004": 13.7,
+     "10005": 19.8,
+     "10008": 20.4,
+     "10002": 10.8,
+     "10010": 29.2,
+     "10013": 15.2,
+     "10003": 35.0
+    },
+    "playoff": false
+   },
+   {
+    "week": 2,
+    "matchups": [
+     [
+      6,
+      1
+     ],
+     [
+      7,
+      4
+     ],
+     [
+      5,
+      3
+     ],
+     [
+      8,
+      2
+     ]
+    ],
+    "scores": {
+     "1": 0.0,
+     "2": 19.9,
+     "3": 25.1,
+     "4": 33.2,
+     "5": 6.8,
+     "6": 21.6,
+     "7": 27.9,
+     "8": 20.1
+    },
+    "starters": {
+     "1": {
+      "QB": [
+       10001
+      ]
+     },
+     "2": {
+      "QB": [
+       10004
+      ]
+     },
+     "3": {
+      "QB": [
+       10005
+      ]
+     },
+     "4": {
+      "QB": [
+       10008
+      ]
+     },
+     "5": {
+      "QB": [
+       10002
+      ]
+     },
+     "6": {
+      "QB": [
+       10010
+      ]
+     },
+     "7": {
+      "QB": [
+       10013
+      ]
+     },
+     "8": {
+      "QB": [
+       10003
+      ]
+     }
+    },
+    "points": {
+     "10001": 0.0,
+     "10004": 19.9,
+     "10005": 25.1,
+     "10008": 33.2,
+     "10002": 6.8,
+     "10010": 21.6,
+     "10013": 27.9,
+     "10003": 20.1
+    },
+    "playoff": false
+   },
+   {
+    "week": 3,
+    "matchups": [
+     [
+      8,
+      3
+     ],
+     [
+      4,
+      6
+     ],
+     [
+      7,
+      5
+     ],
+     [
+      2,
+      1
+     ]
+    ],
+    "scores": {
+     "1": 22.7,
+     "2": 4.2,
+     "3": 10.1,
+     "4": 22.0,
+     "5": 15.4,
+     "6": 2.6,
+     "7": 20.0,
+     "8": 11.8
+    },
+    "starters": {
+     "1": {
+      "QB": [
+       10001
+      ]
+     },
+     "2": {
+      "QB": [
+       10004
+      ]
+     },
+     "3": {
+      "QB": [
+       10005
+      ]
+     },
+     "4": {
+      "QB": [
+       10008
+      ]
+     },
+     "5": {
+      "QB": [
+       10002
+      ]
+     },
+     "6": {
+      "QB": [
+       10010
+      ]
+     },
+     "7": {
+      "QB": [
+       10013
+      ]
+     },
+     "8": {
+      "QB": [
+       10003
+      ]
+     }
+    },
+    "points": {
+     "10001": 22.7,
+     "10004": 4.2,
+     "10005": 10.1,
+     "10008": 22.0,
+     "10002": 15.4,
+     "10010": 2.6,
+     "10013": 20.0,
+     "10003": 11.8
+    },
+    "playoff": true
+   },
+   {
+    "week": 4,
+    "matchups": [
+     [
+      8,
+      4
+     ],
+     [
+      6,
+      3
+     ],
+     [
+      7,
+      1
+     ],
+     [
+      2,
+      5
+     ]
+    ],
+    "scores": {
+     "1": 14.1,
+     "2": 20.2,
+     "3": 18.4,
+     "4": 15.7,
+     "5": 17.0,
+     "6": 21.3,
+     "7": 10.9,
+     "8": 27.4
+    },
+    "starters": {
+     "1": {
+      "QB": [
+       10001
+      ]
+     },
+     "2": {
+      "QB": [
+       10004
+      ]
+     },
+     "3": {
+      "QB": [
+       10005
+      ]
+     },
+     "4": {
+      "QB": [
+       10008
+      ]
+     },
+     "5": {
+      "QB": [
+       10002
+      ]
+     },
+     "6": {
+      "QB": [
+       10010
+      ]
+     },
+     "7": {
+      "QB": [
+       10013
+      ]
+     },
+     "8": {
+      "QB": [
+       10003
+      ]
+     }
+    },
+    "points": {
+     "10001": 14.1,
+     "10004": 20.2,
+     "10005": 18.4,
+     "10008": 15.7,
+     "10002": 17.0,
+     "10010": 21.3,
+     "10013": 10.9,
+     "10003": 27.4
+    },
+    "playoff": true
+   }
+  ],
+  "waiver_order": [
+   8,
+   7,
+   6,
+   5,
+   4,
+   3,
+   2,
+   1
+  ],
+  "claims": [],
+  "locked": [],
+  "lineup": null,
+  "offers": [],
+  "events": [
+   {
+    "id": 1,
+    "week": 1,
+    "kind": "result",
+    "team_id": 4,
+    "text": "CPU 4 beat You 20.40-19.20",
+    "player_ids": []
+   },
+   {
+    "id": 2,
+    "week": 1,
+    "kind": "result",
+    "team_id": 6,
+    "text": "CPU 6 beat CPU 5 29.20-10.80",
+    "player_ids": []
+   },
+   {
+    "id": 3,
+    "week": 1,
+    "kind": "result",
+    "team_id": 7,
+    "text": "CPU 7 beat CPU 2 15.20-13.70",
+    "player_ids": []
+   },
+   {
+    "id": 4,
+    "week": 1,
+    "kind": "result",
+    "team_id": 8,
+    "text": "CPU 8 beat CPU 3 35.00-19.80",
+    "player_ids": []
+   },
+   {
+    "id": 5,
+    "week": 2,
+    "kind": "result",
+    "team_id": 6,
+    "text": "CPU 6 beat You 21.60-0.00",
+    "player_ids": []
+   },
+   {
+    "id": 6,
+    "week": 2,
+    "kind": "result",
+    "team_id": 4,
+    "text": "CPU 4 beat CPU 7 33.20-27.90",
+    "player_ids": []
+   },
+   {
+    "id": 7,
+    "week": 2,
+    "kind": "result",
+    "team_id": 3,
+    "text": "CPU 3 beat CPU 5 25.10-6.80",
+    "player_ids": []
+   },
+   {
+    "id": 8,
+    "week": 2,
+    "kind": "result",
+    "team_id": 8,
+    "text": "CPU 8 beat CPU 2 20.10-19.90",
+    "player_ids": []
+   },
+   {
+    "id": 9,
+    "week": 2,
+    "kind": "playoffs",
+    "team_id": null,
+    "text": "Playoffs: CPU 8 v CPU 3, CPU 4 v CPU 6",
+    "player_ids": []
+   },
+   {
+    "id": 10,
+    "week": 3,
+    "kind": "result",
+    "team_id": 8,
+    "text": "CPU 8 beat CPU 3 11.80-10.10",
+    "player_ids": []
+   },
+   {
+    "id": 11,
+    "week": 3,
+    "kind": "result",
+    "team_id": 4,
+    "text": "CPU 4 beat CPU 6 22.00-2.60",
+    "player_ids": []
+   },
+   {
+    "id": 12,
+    "week": 3,
+    "kind": "result",
+    "team_id": 7,
+    "text": "CPU 7 beat CPU 5 20.00-15.40",
+    "player_ids": []
+   },
+   {
+    "id": 13,
+    "week": 3,
+    "kind": "result",
+    "team_id": 1,
+    "text": "You beat CPU 2 22.70-4.20",
+    "player_ids": []
+   },
+   {
+    "id": 14,
+    "week": 3,
+    "kind": "playoffs",
+    "team_id": null,
+    "text": "Championship game: CPU 8 v CPU 4",
+    "player_ids": []
+   },
+   {
+    "id": 15,
+    "week": 4,
+    "kind": "result",
+    "team_id": 8,
+    "text": "CPU 8 beat CPU 4 27.40-15.70",
+    "player_ids": []
+   },
+   {
+    "id": 16,
+    "week": 4,
+    "kind": "result",
+    "team_id": 6,
+    "text": "CPU 6 beat CPU 3 21.30-18.40",
+    "player_ids": []
+   },
+   {
+    "id": 17,
+    "week": 4,
+    "kind": "result",
+    "team_id": 1,
+    "text": "You beat CPU 7 14.10-10.90",
+    "player_ids": []
+   },
+   {
+    "id": 18,
+    "week": 4,
+    "kind": "result",
+    "team_id": 2,
+    "text": "CPU 2 beat CPU 5 20.20-17.00",
+    "player_ids": []
+   },
+   {
+    "id": 19,
+    "week": 4,
+    "kind": "champion",
+    "team_id": 8,
+    "text": "CPU 8 won the championship",
+    "player_ids": []
+   }
+  ],
+  "traded": {},
+  "champion": 8,
+  "next_id": 20,
+  "faab_spent": {},
+  "counter_searched": {}
+ }
+}

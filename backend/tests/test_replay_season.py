@@ -9,7 +9,7 @@ from services.replay_state import Offer, Settings, State
 from tests import replay_fakes as fakes
 
 SEED = 7
-SIZES = (8, 10, 12, 14)
+SIZES = (8, 10, 12, 14)                 # with the default 4-team playoff
 REGULAR, SEMIS, FINAL = 14, 15, 16      # the default settings: last regular-season week, then the playoffs
 
 
@@ -131,7 +131,7 @@ def test_tied_regular_season_game_counts_as_a_tie_for_both_teams():
     assert len(results) == 6 and all(e.team_id is None and "tied 9.00-9.00" in e.text for e in results)
 
 
-def test_final_standings_place_every_group_by_its_second_week_games():
+def test_final_standings_are_the_final_the_third_place_game_then_the_consolation_pool():
     settings, done = _settings(), _played(12, FINAL)
     seeds, final = season.playoff_seeds(done), done.results[-1]
 
@@ -139,68 +139,38 @@ def test_final_standings_place_every_group_by_its_second_week_games():
 
     order = [row["team_id"] for row in table]
     assert [row["place"] for row in table] == list(range(1, 13)) and order[0] == done.champion
-    for index, game in enumerate(final.matchups):               # winners' game, losers' game, group by group
+    for index, game in enumerate(final.matchups[:2]):            # the final, then the third-place game
         assert order[2 * index:2 * index + 2] == sorted(game, key=lambda t: (-final.scores[t], seeds.index(t)))
-    assert set(order[4:8]) == set(seeds[4:8]) and set(order[8:]) == set(seeds[8:])
+    assert set(order[:4]) == set(seeds[:4]) and set(order[4:]) == set(seeds[4:])
     assert table[0] == {**next(row for row in rs.standings(done) if row["team_id"] == order[0]), "place": 1}
     before_final = season.final_standings(_played(12, SEMIS), settings)      # no final yet: season order
     assert tuple(row["team_id"] for row in before_final) == seeds
 
 
-@pytest.mark.parametrize("pair_by", ["points", "seed"])
-@pytest.mark.parametrize("teams", SIZES)
-def test_consolation_upsets_move_places_and_a_split_pair_goes_by_points_then_seed(teams, pair_by):
-    settings, regular = _settings(teams), _played(teams, REGULAR)
-    s = season.playoff_seeds(regular)
-    groups = [s[i:i + 4] for i in range(0, teams - teams % 4, 4)]
-    upsets = {**dict.fromkeys(s, 1.0), **{group[3]: 3.0 for group in groups}}   # each 4th seed wins twice
-    first, second = dict(upsets), dict(upsets)                  # 2 v 3, then the losers' game: tied
-    high, low = s[-2:]
-    if teams % 4:                                               # the pair splits its games
-        first[low], second[high] = (5.0, 2.0) if pair_by == "points" else (3.0, 3.0)
-
-    done = _week_with_points(_week_with_points(regular, settings, first), settings, second)
-
-    expected = [t for group in groups for t in (group[3], group[1], group[0], group[2])]
-    if teams % 4:
-        expected += [low, high] if pair_by == "points" else [high, low]      # 6 v 3 points; 4 v 4: the seed
-    table = season.final_standings(done, settings)
-    assert [row["team_id"] for row in table] == expected and done.champion == s[3]
-    assert [row["place"] for row in table] == list(range(1, teams + 1))
-    assert table[4]["team_id"] == s[7]                          # seed 8 won its ladder: 5th
-
-
 # ---------------- playoffs ----------------
 
 @pytest.mark.parametrize("teams", SIZES)
-def test_first_playoff_week_is_one_v_four_and_two_v_three_in_every_group_of_four(teams):
+def test_first_playoff_week_is_one_v_four_two_v_three_and_the_rest_paired_by_seed(teams):
     settings, regular = _settings(teams), _played(teams, REGULAR)
     s = season.playoff_seeds(regular)
 
     games = season.matchups_for_week(regular, settings, SEMIS)
 
-    expected = [game for i in range(0, teams - teams % 4, 4) for game in ((s[i], s[i + 3]), (s[i + 1], s[i + 2]))]
-    if teams % 4:
-        expected.append((s[-2], s[-1]))                          # the leftover pair
-    assert list(games) == expected
+    assert list(games) == [(s[0], s[3]), (s[1], s[2])] + [(s[i], s[i + 1]) for i in range(4, teams, 2)]
     assert (regular.phase, regular.week) == ("waivers", SEMIS)
     assert [e.week for e in regular.events if e.kind == "playoffs"] == [REGULAR]
 
 
 @pytest.mark.parametrize("teams", SIZES)
-def test_second_playoff_week_pairs_winners_and_losers_and_replays_the_leftover_pair(teams):
+def test_second_playoff_week_is_the_final_and_the_third_place_game(teams):
     done = _played(teams, FINAL)
     semis, final = done.results[-2], done.results[-1]
     seeds = season.playoff_seeds(done)
 
-    for group in range(teams // 4):
-        first, second = semis.matchups[2 * group:2 * group + 2]
-        winners = {max(game, key=lambda t: (semis.scores[t], -seeds.index(t))) for game in (first, second)}
-        losers = set(first + second) - winners
-        assert set(final.matchups[2 * group]) == winners
-        assert set(final.matchups[2 * group + 1]) == losers
-    if teams % 4:
-        assert final.matchups[-1] == semis.matchups[-1] == seeds[-2:]
+    decided = [max(game, key=lambda t: (semis.scores[t], -seeds.index(t))) for game in semis.matchups[:2]]
+    assert final.matchups[0] == tuple(sorted(decided, key=seeds.index))
+    assert set(final.matchups[1]) == set(seeds[:4]) - set(decided)
+    assert {t for game in final.matchups[2:] for t in game} == set(seeds[4:])
 
 
 def test_tied_playoff_games_go_to_the_higher_seed():
@@ -210,9 +180,9 @@ def test_tied_playoff_games_go_to_the_higher_seed():
     semis = _week_with_points(regular, settings, dict.fromkeys(range(1, 13), 1.0))
     done = _week_with_points(semis, settings, dict.fromkeys(range(1, 13), 1.0))
 
-    assert season.matchups_for_week(semis, settings, FINAL) == tuple((s[i], s[i + 1]) for i in range(0, 12, 2))
+    assert season.matchups_for_week(semis, settings, FINAL)[:2] == ((s[0], s[1]), (s[2], s[3]))
     assert done.champion == s[0]
-    assert [row["team_id"] for row in season.final_standings(done, settings)] == list(s)
+    assert [row["team_id"] for row in season.final_standings(done, settings)][:5] == list(s[:5])
     assert sum("as the higher seed" in e.text for e in done.events if e.kind == "result") == 12
 
 

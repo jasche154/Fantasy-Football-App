@@ -95,8 +95,8 @@ export interface ReplaySide extends ReplayTeamRef {
   record: ReplayRecord;
 }
 
-/** Week-2 consolation games are '5th place', '7th place', ... */
-export type ReplayGameLabel = 'Semi-final' | 'Championship' | 'Third place' | 'Consolation' | `${number}th place`;
+/** Title games are named by round; every game for places outside the title (5th and down, or out of the playoffs) is 'Consolation'. */
+export type ReplayGameLabel = 'Quarter-final' | 'Semi-final' | 'Championship' | 'Third place' | 'Consolation';
 
 export interface ReplayGameRow {
   home: ReplaySide;
@@ -176,6 +176,8 @@ export interface ReplayReadiness {
   defenses: number;
   /** Weeks with injury tags stored (`ready` does not need it). */
   injury_weeks: number;
+  /** The season's last week with games (17 or 18): a week-18 championship needs 18. */
+  last_week: number;
 }
 
 export interface ReplayPrepareStatus {
@@ -219,8 +221,14 @@ export interface ReplayCreateBody {
   draft_slot?: number;
   waiver_mode?: ReplayWaiverMode;
   difficulty?: ReplayDifficulty;
+  /** The championship week; the regular season is what the playoff rounds leave before it. Default 17. */
+  playoff_end_week?: ReplayPlayoffEndWeek;
+  /** 4..min(8, teams); left out: the default for the league size. */
+  playoff_teams?: number;
   seed?: number;
 }
+
+export type ReplayPlayoffEndWeek = 16 | 17 | 18;
 
 // ---------------- the game ----------------
 
@@ -302,6 +310,11 @@ export interface ReplayDraftRow {
   adp: number | null;
   pos_rank: string;
   rank: number;
+  /** Overall preseason rank (experts interleaved on ADP, else ADP order); null when unranked. */
+  pre_rank: number | null;
+  /** Draft round his preseason rank implies; null when unranked. */
+  round: number | null;
+  /** Raw preseason points a game. */
   projection: number;
 }
 
@@ -328,9 +341,15 @@ export interface ReplayDraft extends ReplayPage<ReplayDraftRow> {
   roster: Record<ReplayPosition, ReplayPlayerRef[]>;
 }
 
+export type ReplayDraftSort = 'rank' | 'adp' | 'projection';
+
 export interface ReplayDraftQuery extends ReplayPagination {
   position?: ReplayPositionFilter;
   search?: string;
+  /** Default rank; unranked players (nulls) always come last. */
+  sort?: ReplayDraftSort;
+  /** Default asc for rank and adp, desc for projection. */
+  direction?: 'asc' | 'desc';
 }
 
 // ---------------- team and matchup ----------------

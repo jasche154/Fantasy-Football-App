@@ -450,7 +450,7 @@ def test_readiness_reports_a_loaded_season_as_ready(seeded_db):
     assert replay_pool.readiness(seeded_db, fakes.SEASON) == {
         "season": fakes.SEASON, "ready": True, "has_stats": True, "has_schedule": True, "has_kdst": True,
         "adp_players": 220, "projection_weeks": 17, "kickers": 32, "defenses": 32, "injury_weeks": 14,
-        "expert_snapshots": 18}
+        "expert_snapshots": 18, "last_week": 17}
     assert replay_pool.ready_seasons(seeded_db) == [fakes.SEASON]
 
 
@@ -476,7 +476,7 @@ def test_an_unloaded_season_is_not_ready_and_cannot_be_loaded(seeded_db):
 
     assert status == {"season": 2019, "ready": False, "has_stats": False, "has_schedule": False,
                       "has_kdst": False, "adp_players": 0, "projection_weeks": 0, "kickers": 0, "defenses": 0,
-                      "injury_weeks": 0, "expert_snapshots": 0}
+                      "injury_weeks": 0, "expert_snapshots": 0, "last_week": 0}
     with pytest.raises(NoDataError):
         replay_pool.load_season_data(seeded_db, 2019, "half")
 

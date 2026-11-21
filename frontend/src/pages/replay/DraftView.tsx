@@ -1,7 +1,8 @@
 import { useRef, useState, type ReactNode, type RefObject } from 'react';
 import { getReplayDraft, replayDraftAuto, replayDraftPick } from '../../api/replay';
-import type { ReplayActionResult, ReplayDraft } from '../../api/types';
+import type { ReplayActionResult, ReplayDraft, ReplayDraftSort } from '../../api/types';
 import { AsyncView } from '../../components/AsyncView';
+import { nextSort, type SortDirection, type SortState } from '../../components/SortableHeader';
 import { Skeleton } from '../../components/StatusViews';
 import { useAsync } from '../../hooks/useAsync';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
@@ -14,6 +15,10 @@ const PAGE_SIZE = 50;
 // Upgrade to offset paging if a board of 200 rows ever isn't enough.
 const MAX_PAGE_SIZE = 200;
 const SEARCH_DELAY_MS = 250;
+
+const DEFAULT_SORT: SortState<ReplayDraftSort> = { key: 'rank', direction: 'asc' };
+/** Best first: low rank and ADP, high projection. */
+const sortDirection = (key: ReplayDraftSort): SortDirection => (key === 'projection' ? 'desc' : 'asc');
 
 /** The control pressed last: an auto button or a player's Draft button. */
 type Pressed = 'auto' | 'rest' | number;
@@ -53,12 +58,15 @@ export function DraftView({ game, version, act, isBusy, actError, openPlayer }: 
   const [position, setPosition] = useState<ReplayPositionTab>('ALL');
   const [search, setSearch] = useState('');
   const [limit, setLimit] = useState(PAGE_SIZE);
+  const [sort, setSort] = useState(DEFAULT_SORT);
   const [pressed, setPressed] = useState<Pressed | null>(null);
   const statusRef = useRef<HTMLDivElement>(null);
   const query = useDebouncedValue(search.trim(), SEARCH_DELAY_MS);
   const draft = useAsync(
-    (signal) => getReplayDraft(game.id, { position: positionParam(position), search: query || undefined, limit }, signal),
-    [game.id, version, position, query, limit],
+    (signal) => getReplayDraft(game.id, {
+      position: positionParam(position), search: query || undefined, sort: sort.key, direction: sort.direction, limit,
+    }, signal),
+    [game.id, version, position, query, sort, limit],
   );
 
   const run = async (what: Pressed, request: () => Promise<ReplayActionResult>) => {
@@ -84,10 +92,11 @@ export function DraftView({ game, version, act, isBusy, actError, openPlayer }: 
                 label={isPending('rest') ? 'Drafting the rest…' : 'Auto-draft the rest'}
                 onConfirm={() => run('rest', () => replayDraftAuto(game.id, true, data.overall))} />
             </Clock>
-            <DraftBoard draft={data} position={position} search={search} canDraft={canAct} isBusy={isBusy}
+            <DraftBoard draft={data} rankSource={game.rank_source} position={position} search={search} sort={sort} canDraft={canAct} isBusy={isBusy}
               pressedId={typeof pressed === 'number' ? pressed : null} error={actError} openPlayer={openPlayer}
               onPosition={(next) => { setPosition(next); setLimit(PAGE_SIZE); }}
               onSearch={(next) => { setSearch(next); setLimit(PAGE_SIZE); }}
+              onSort={(key) => { setSort(nextSort(sort, key, sortDirection)); setLimit(PAGE_SIZE); }}
               onShowMore={hasMore ? () => setLimit(limit + PAGE_SIZE) : undefined}
               onDraft={(playerId) => run(playerId, () => replayDraftPick(game.id, playerId, data.overall))} />
             <div className="replay-draft__side">

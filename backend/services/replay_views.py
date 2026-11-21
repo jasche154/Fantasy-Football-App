@@ -37,8 +37,9 @@ Shared pieces
   Side       TeamRef + {projected, points, record: Record}    projected: null for a week not reached yet
   Record     {wins, losses, ties, rank, points_for, points_against, place}    place: final finish, else null
   GameRow    {home: Side, away: Side, winner: team_id | null, label}
-      label         null | "Semi-final" | "Championship" | "Third place" | "Consolation" | "<N>th place"
-                    (playoff week 2: the consolation games decide 5th, 7th, 9th... in pairs, e.g. "5th place")
+      label         null | "Quarter-final" | "Semi-final" | "Championship" | "Third place" | "Consolation"
+                    (title bracket games by round; every other playoff-week game, for 5th place and down, is
+                    "Consolation")
   Event      {id, week, kind, team: TeamRef | null, text, players: PlayerRef[]}
       kind          draft | add | drop | claim | trade | ir | result | playoffs | champion
       an add or claim with a drop is ONE event (no separate "drop"): players = [added, dropped]
@@ -55,7 +56,8 @@ Shared pieces
 
 GET  /seasons                     {results: Readiness[], prepare: PrepareStatus | null}
       Readiness {season, ready, has_stats, has_schedule, has_kdst, adp_players, projection_weeks, kickers, defenses,
-                 injury_weeks}      injury_weeks: weeks with injury tags stored (`ready` does not need it)
+                 injury_weeks, expert_snapshots, last_week}      injury_weeks: weeks with injury tags stored (`ready`
+                 does not need it); last_week: the season's last week with games (a week-18 final needs 18)
       PrepareStatus {season, status: running | done | failed, step, error, updated_at?}
                     step may be "game_results" | "snaps" | "adp" | "projections" | "injuries" | "experts"
 POST /seasons/{season}/prepare?force=    PrepareStatus of the import now running (maybe another season's)
@@ -98,9 +100,12 @@ caused, oldest first (the CPUs' picks, the waiver run, the week's results). Extr
   POST .../trades/offers/{id}/respond   accepted, expired, message: string | null, verdict: Verdict | null
       an offer that no longer stands answers 200 with expired true and the reason in message
 
-GET  .../draft?position=&search=&limit=&offset=      Page of {player: PlayerRef, adp, pos_rank, rank, projection}
-      (undrafted players in draft order; empty after the draft) + {phase, on_the_clock, is_user_turn, round,
-      overall, rounds, total_picks, order: TeamRef[], picks: [{overall, round, team: TeamRef, player: PlayerRef}],
+GET  .../draft?position=&search=&sort=&direction=&limit=&offset=
+      Page of {player: PlayerRef, adp, pos_rank, rank, pre_rank, round, projection} (undrafted players; empty after
+      the draft). sort: rank (pre_rank, default) | adp | projection; direction asc | desc (default asc, desc for
+      projection); players without that number come last either way. round: the round pre_rank implies,
+      ceil(pre_rank / teams), or null. projection: raw preseason points a game.
+      + {phase, on_the_clock, is_user_turn, round, overall, rounds, total_picks, order: TeamRef[], picks: [{overall, round, team: TeamRef, player: PlayerRef}],
       roster: {position: PlayerRef[]}}     round / overall: the pick now on the clock, null when done
 GET  .../team?team_id=&week=      Team {team: TeamRef, week, played, manual_lineup, projected_total, actual_total,
                                         record: Record, results: [PlayerRow + {slot, starting}],
@@ -109,13 +114,18 @@ GET  .../team?team_id=&week=      Team {team: TeamRef, week, played, manual_line
       slot: QB | RB | WR | TE | FLEX | K | DST | BN, starters first in slot order. A past week lists only what
       was started (its bench is not kept). An empty starting slot has no row: compare with settings.starters.
 GET  .../matchup?week=&team_id=   {week, played, playoff, label, winner, home: Team, away: Team}
+      without team_id: the user's game, else (a bye week) the week's first game; 422 when team_id has no game
 GET  .../scoreboard?week=         {week, played, playoff, results: GameRow[]}    any week of the season
 GET  .../standings                {results: [Record + TeamRef + {seed, in_playoffs}], regular_season_weeks,
-                                   playoff_teams, seeds_final, bracket: Scoreboard[], champion: TeamRef | null}
-      rows are in final order once the season is over, else by seed. bracket: one scoreboard per playoff
-      week whose games are known.
-GET  .../schedule?team_id=        {team: TeamRef, results: [{week, playoff, played, opponent: TeamRef | null,
+                                   playoff_teams, playoff_weeks: int[], byes, seeds_final, bracket: Scoreboard[],
+                                   champion: TeamRef | null}
+      rows are in final order once the season is over, else by seed. in_playoffs: seed <= playoff_teams.
+      byes: how many top seeds skip round one (2 ** rounds - playoff_teams). bracket: one scoreboard per
+      playoff week whose games are known.
+GET  .../schedule?team_id=        {team: TeamRef, results: [{week, playoff, played, idle, opponent: TeamRef | null,
                                    points, opponent_points, result: W | L | T | null}]}
+      idle          the week's games are known and the team has none (a playoff bye, or the odd team out of
+                    a pool): opponent, opponent_points and result are null
 GET  .../activity?kind=&limit=&offset=     Page of Event, newest first; kind may list several ("add,drop,ir")
 GET  .../players?position=&search=&status=&sort=&limit=&offset=     Page of WireRow + {week}
       WireRow = PlayerRow + {status: rostered | waivers | free_agent, owner: TeamRef | null, season_points,
@@ -335,21 +345,14 @@ def winner(game: Game, pair: Sequence[int], week: int) -> int | None:
     return min(pair, key=replay_season.playoff_seeds(game.state).index) if result.playoff else None
 
 
-def label(settings: Settings, week: int, index: int) -> str | None:
-    """A playoff game's name. Week 2: game 0 decides 1st, game 1 3rd, then each pair of games 5th and 7th,
-    9th and 11th... (the leftover pair of 10 and 14 teams too)."""
-    if not replay_season.is_playoff_week(settings, week):
-        return None
-    if week == settings.regular_season_weeks + 1:
-        return "Semi-final" if index < 2 else "Consolation"
-    if index < 2:
-        return ("Championship", "Third place")[index]
-    return f"{4 * (index // 2) + 1 + 2 * (index % 2)}th place"
+def label(game: Game, week: int, pair: Sequence[int]) -> str | None:
+    """A playoff game's name (replay_season.game_label); None in the regular season."""
+    return replay_season.game_label(game.state, game.settings, week, pair)
 
 
-def game_row(game: Game, pair: Sequence[int], week: int, index: int) -> dict:
+def game_row(game: Game, pair: Sequence[int], week: int) -> dict:
     return {"home": side(game, pair[0], week), "away": side(game, pair[1], week),
-            "winner": winner(game, pair, week), "label": label(game.settings, week, index)}
+            "winner": winner(game, pair, week), "label": label(game, week, pair)}
 
 
 def scoreboard(game: Game, week: int | None = None) -> dict:
@@ -358,7 +361,7 @@ def scoreboard(game: Game, week: int | None = None) -> dict:
     pairs = replay_season.matchups_for_week(game.state, game.settings, week)
     return {"week": week, "played": result_of(game.state, week) is not None,
             "playoff": replay_season.is_playoff_week(game.settings, week),
-            "results": [game_row(game, pair, week, index) for index, pair in enumerate(pairs)]}
+            "results": [game_row(game, pair, week) for pair in pairs]}
 
 
 def team(game: Game, team_id: int | None = None, week: int | None = None) -> dict:
@@ -380,17 +383,18 @@ def team(game: Game, team_id: int | None = None, week: int | None = None) -> dic
 
 
 def matchup(game: Game, week: int | None = None, team_id: int | None = None) -> dict:
-    """Both lineups of one game, side by side (default: the user's game this week)."""
+    """Both lineups of one game, side by side (default: the user's game this week, else the week's first game
+    when the user has none, e.g. a playoff bye)."""
     week = week_of(game, week)
     wanted = rs.team(game.state, game.user.id if team_id is None else team_id).id
     pairs = replay_season.matchups_for_week(game.state, game.settings, week)
-    index = next((i for i, pair in enumerate(pairs) if wanted in pair), None)
-    if index is None:
+    pair = next((pair for pair in pairs if wanted in pair), pairs[0] if team_id is None and pairs else None)
+    if pair is None:
         raise ValueError(f"There is no game for that team in week {week}.")
-    home, away = pairs[index]
+    home, away = pair
     return {"week": week, "played": result_of(game.state, week) is not None,
             "playoff": replay_season.is_playoff_week(game.settings, week),
-            "label": label(game.settings, week, index), "winner": winner(game, pairs[index], week),
+            "label": label(game, week, pair), "winner": winner(game, pair, week),
             "home": team(game, home, week), "away": team(game, away, week)}
 
 
@@ -409,12 +413,12 @@ def _headline(game: Game) -> dict | None:
         return None
     week, settings = game.state.week, game.settings
     pairs = replay_season.matchups_for_week(game.state, settings, week)
-    index = next((i for i, pair in enumerate(pairs) if game.user.id in pair), None)
-    if index is None:
+    pair = next((pair for pair in pairs if game.user.id in pair), None)
+    if pair is None:
         return None
-    you, opponent = sorted(pairs[index], key=lambda team_id: team_id != game.user.id)
+    you, opponent = sorted(pair, key=lambda team_id: team_id != game.user.id)
     return {"week": week, "playoff": replay_season.is_playoff_week(settings, week),
-            "label": label(settings, week, index), "you": side(game, you, week),
+            "label": label(game, week, pair), "you": side(game, you, week),
             "opponent": side(game, opponent, week)}
 
 
@@ -438,23 +442,39 @@ def summary(game: Game) -> dict:
     }
 
 
-def _board_row(value: ReplayValue) -> dict:
+DRAFT_SORTS = {"rank": lambda v: v.pre_rank, "adp": lambda v: v.adp, "projection": lambda v: v.projection}
+
+
+def _board_row(value: ReplayValue, teams: int) -> dict:
     return {"player": player_ref(value), "adp": value.adp, "pos_rank": value.pos_rank, "rank": value.rank,
+            "pre_rank": value.pre_rank, "round": -(-value.pre_rank // teams) if value.pre_rank else None,
             "projection": round(value.projection, 2)}
 
 
+def sorted_board(board: Sequence[ReplayValue], sort: str, direction: str | None) -> list[ReplayValue]:
+    """The board by `sort` (rank | adp | projection), unknowns last whatever the direction; ties keep draft order.
+    direction None: asc for rank and adp, desc for projection."""
+    if sort not in DRAFT_SORTS:
+        raise ValueError(f"Unknown sort '{sort}'. Valid: {list(DRAFT_SORTS)}")
+    key = DRAFT_SORTS[sort]
+    descending = (direction or ("desc" if sort == "projection" else "asc")) == "desc"
+    known = [v for v in board if key(v) is not None]
+    return [*sorted(known, key=key, reverse=descending), *(v for v in board if key(v) is None)]
+
+
 def draft(game: Game, position: str | None = None, search: str | None = None, limit: int = DEFAULT_PAGE,
-          offset: int = 0) -> dict:
-    """The draft room: picks so far, the order, the user's roster, and who is left (in draft order)."""
+          offset: int = 0, sort: str = "rank", direction: str | None = None) -> dict:
+    """The draft room: picks so far, the order, the user's roster, and who is left (by `sorted_board`)."""
     state, settings, know = game.state, game.settings, game.know_at(0)
     wanted, teams = positions_for(position), {t.id: team_ref(game, t) for t in state.teams}
     drafting = replay_draft.on_the_clock(state, settings) is not None
     left = replay_draft.available(state, game.full_season.as_of(0)) if drafting else []
-    board = [know.by_id[p.player_id] for p in left if p.position in wanted and name_matches(search, p.name)]
+    found = [know.by_id[p.player_id] for p in left if p.position in wanted and name_matches(search, p.name)]
+    board = sorted_board(found, sort, direction)
     overall = len(state.picks) + 1 if drafting else None
     mine = [pick.player_id for pick in state.picks if pick.team_id == game.user.id]
     return {
-        **page(board, limit, offset, _board_row), "phase": state.phase,
+        **page(board, limit, offset, lambda value: _board_row(value, settings.teams)), "phase": state.phase,
         "on_the_clock": replay_draft.on_the_clock(state, settings),
         "is_user_turn": replay_draft.on_the_clock(state, settings) == game.user.id,
         "round": (overall - 1) // settings.teams + 1 if overall else None, "overall": overall,

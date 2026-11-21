@@ -76,6 +76,18 @@ def test_settings_accept_every_league_size(teams):
     assert settings.teams == teams and rs.VALID_TEAMS == (4, 6, 8, 10, 12, 14, 16)
 
 
+@pytest.mark.parametrize("teams, default", [(4, 4), (6, 4), (8, 4), (10, 6), (12, 6), (14, 8), (16, 8)])
+def test_playoff_size_follows_league_size(teams, default):
+    assert rs.default_playoff_teams(teams) == default
+
+
+@pytest.mark.parametrize("playoff_teams, rounds", [(4, 2), (5, 3), (6, 3), (7, 3), (8, 3)])
+def test_a_four_team_playoff_is_two_weeks_and_bigger_ones_three(playoff_teams, rounds):
+    settings = Settings(season=2021, teams=12, playoff_teams=playoff_teams, regular_season_weeks=14)
+
+    assert rs.playoff_rounds(playoff_teams) == rounds and settings.end_week == 14 + rounds
+
+
 def test_difficulty_sets_what_a_cpu_asks_of_the_user_and_its_draft_chaos():
     normal, hard = Settings(season=2021), Settings(season=2021, difficulty="hard")
 

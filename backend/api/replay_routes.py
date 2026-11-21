@@ -135,6 +135,8 @@ class CreateBody(BaseModel):
     season: int | Literal["random"]
     name: str | None = Field(None, max_length=MAX_NAME_LENGTH)
     teams: int = Field(12, ge=min(rs.VALID_TEAMS), le=max(rs.VALID_TEAMS))
+    playoff_end_week: Literal[16, 17, 18] = 17            # the championship week
+    playoff_teams: int | None = Field(None, ge=rs.PLAYOFF_TEAMS_RANGE[0], le=rs.PLAYOFF_TEAMS_RANGE[1])  # None: default
     scoring: Scoring = "half"
     draft_slot: int | None = Field(None, ge=1, le=max(rs.VALID_TEAMS))     # None: drawn from the seed
     waiver_mode: Literal["wednesday", "faab", "none"] = "wednesday"
@@ -166,8 +168,10 @@ def create_game(body: CreateBody, session: Session = Depends(get_session)) -> di
     with errors():
         season = _season(session, body.season, seed)
         slot = body.draft_slot or int(rs.rng(seed, "slot").integers(1, body.teams + 1))
+        playoff_teams = body.playoff_teams or rs.default_playoff_teams(body.teams)
         settings = Settings(season=season, teams=body.teams, scoring=body.scoring, draft_slot=slot,
-                            waiver_mode=body.waiver_mode, difficulty=body.difficulty)
+                            waiver_mode=body.waiver_mode, difficulty=body.difficulty, playoff_teams=playoff_teams,
+                            regular_season_weeks=body.playoff_end_week - rs.playoff_rounds(playoff_teams))
         data = replay_pool.load_season_data(session, season, body.scoring)
         state = rg.create_game(settings, data, seed)
         name = (body.name or "").strip() or f"{season} Replay"
@@ -191,8 +195,10 @@ def delete_game(game_id: GameId, session: Session = Depends(get_session)) -> dic
 
 @router.get("/games/{game_id}/draft")
 def draft_board(game_id: GameId, position: str | None = None, search: str | None = Query(None, max_length=60),
+                sort: Literal["rank", "adp", "projection"] = "rank",
+                direction: Literal["asc", "desc"] | None = None,          # None: asc for rank/adp, desc for projection
                 limit: int = Limit, offset: int = Offset, session: Session = Depends(get_session)) -> dict:
-    return show(session, game_id, lambda game: views.draft(game, position, search, limit, offset))
+    return show(session, game_id, lambda game: views.draft(game, position, search, limit, offset, sort, direction))
 
 
 @router.get("/games/{game_id}/team")

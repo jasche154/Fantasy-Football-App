@@ -42,9 +42,10 @@ def standings(game: Game) -> dict:
     teams = {t.id: t for t in state.teams}
     playoff_weeks = range(settings.regular_season_weeks + 1, settings.end_week + 1)
     rows = [{**team_ref(game, teams[row["team_id"]]), **record(game, row["team_id"]), "seed": row["rank"],
-             "in_playoffs": row["rank"] <= replay_season.BRACKET_SIZE} for row in game.table]
+             "in_playoffs": row["rank"] <= settings.playoff_teams} for row in game.table]
     return {"results": rows, "regular_season_weeks": settings.regular_season_weeks,
-            "playoff_teams": replay_season.BRACKET_SIZE,
+            "playoff_teams": settings.playoff_teams, "playoff_weeks": list(playoff_weeks),
+            "byes": 2 ** rs.playoff_rounds(settings.playoff_teams) - settings.playoff_teams,
             "seeds_final": result_of(state, settings.regular_season_weeks) is not None,
             "bracket": [scoreboard(game, week) for week in playoff_weeks
                         if state.phase != "draft" and replay_season.matchups_for_week(state, settings, week)],
@@ -53,13 +54,15 @@ def standings(game: Game) -> dict:
 
 def _schedule_row(game: Game, owner: Team, week: int) -> dict:
     state, result = game.state, result_of(game.state, week)
-    pair = replay_season.matchup_for(state, game.settings, owner.id, week)
+    known = replay_season.matchups_for_week(state, game.settings, week)
+    pair = next((teams for teams in known if owner.id in teams), None)
     opponent = next((rs.team(state, team_id) for team_id in pair or () if team_id != owner.id), None)
     won = winner(game, pair, week) if pair and result else None
-    outcome = None if result is None else "T" if won is None else "W" if won == owner.id else "L"
+    outcome = None if result is None or pair is None else "T" if won is None else "W" if won == owner.id else "L"
     return {"week": week, "playoff": replay_season.is_playoff_week(game.settings, week),
-            "played": result is not None, "opponent": team_ref(game, opponent) if opponent else None,
-            "points": result.scores[owner.id] if result else None,
+            "played": result is not None, "idle": bool(known) and pair is None,
+            "opponent": team_ref(game, opponent) if opponent else None,
+            "points": result.scores.get(owner.id) if result else None,
             "opponent_points": result.scores[opponent.id] if result and opponent else None, "result": outcome}
 
 

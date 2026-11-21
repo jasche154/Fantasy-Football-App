@@ -24,6 +24,7 @@ DATA = fakes.fake_season()
 SEASON, API = fakes.SEASON, "/api/replay"
 SEED, SLOT, PARTNER = 32, 5, 9          # with this seed the CPUs send the user several trade offers
 LEAK_WEEK = 4
+OLD_PLAYOFFS = {"playoff_end_week": 16, "playoff_teams": 4}     # the pre-PR-2 league: 14 weeks + a 4-team bracket
 SKILL = ("QB", "RB", "WR", "TE")
 
 
@@ -83,7 +84,7 @@ def _ids(rows: list[dict], slot: str) -> list[int]:
 def _draft(client: TestClient, seen: dict) -> str:
     seen["seasons"] = get(client, "/seasons")
     seen["created"] = post(client, "/games", {"season": SEASON, "seed": SEED, "draft_slot": SLOT,
-                                              "name": "  Route league "})
+                                              "name": "  Route league ", **OLD_PLAYOFFS})
     game = f"/games/{seen['created']['game']['id']}"
     seen["board"] = get(client, game + "/draft", limit=5)
     seen["pick_taken"] = refused(client, game + "/draft/pick", {"player_id": seen["board"]["picks"][0]["player"]["id"]})
@@ -189,7 +190,9 @@ def test_seasons_report_which_can_be_played(story):
 
     assert [row["season"] for row in seasons["results"]] == list(replay_pool.SUPPORTED_SEASONS)
     assert [row["season"] for row in seasons["results"] if row["ready"]] == [SEASON]
-    assert set(seasons["results"][0]) >= {"season", "ready", "has_stats", "adp_players", "projection_weeks"}
+    assert set(seasons["results"][0]) >= {"season", "ready", "has_stats", "adp_players", "projection_weeks",
+                                          "last_week"}
+    assert next(row for row in seasons["results"] if row["season"] == SEASON)["last_week"] == 17
     assert seasons["prepare"] is None
 
 
@@ -330,8 +333,9 @@ def test_responses_have_the_documented_keys(story):
     assert set(final["team"]["results"][0]) == PLAYER_ROW | {"slot", "starting"}
     assert set(final["matchup"]) == {"week", "played", "playoff", "label", "winner", "home", "away"}
     assert set(final["scoreboard"]["results"][0]["home"]) == SIDE
-    assert set(final["standings"]) == {"results", "regular_season_weeks", "playoff_teams", "seeds_final", "bracket",
-                                       "champion"}
+    assert set(final["standings"]) == {"results", "regular_season_weeks", "playoff_teams", "playoff_weeks", "byes",
+                                       "seeds_final", "bracket", "champion"}
+    assert (final["standings"]["playoff_weeks"], final["standings"]["byes"]) == ([15, 16], 0)
     assert set(final["activity"]) == {"total", "limit", "offset", "results"} and final["activity"]["limit"] == 50
     assert set(final["players"]["results"][0]) == WIRE_ROW and final["players"]["week"] == 16
     assert set(final["claims"]) == {"phase", "can_claim", "priority", "waiver_order", "results", "faab"}
@@ -379,6 +383,51 @@ def test_create_says_what_is_wrong_with_a_league(client, monkeypatch):
     assert create(scoring="ppr")[0] == 200                       # the same season in another scoring
     monkeypatch.setattr(replay_pool, "ready_seasons", lambda session: [])
     assert create(season="random") == (503, "No season is ready to play yet: prepare one first.")
+
+
+@pytest.mark.parametrize("body, regular, playoff_teams, end", [
+    ({}, 14, 6, 17),                                             # 12 teams: 6 make it, final in week 17
+    ({"playoff_teams": 4}, 15, 4, 17), ({"playoff_teams": 6}, 14, 6, 17),
+    ({"playoff_end_week": 16, "playoff_teams": 8}, 13, 8, 16), ({"teams": 4}, 15, 4, 17),
+    ({"teams": 16, "playoff_end_week": 16}, 13, 8, 16), ({"teams": 8, "playoff_teams": 5}, 14, 5, 17),
+])
+def test_the_playoff_window_sets_the_regular_season(client, body, regular, playoff_teams, end):
+    game = post(client, "/games", {"season": SEASON, "seed": 1, **body})["game"]
+
+    shown = game["settings"]
+    assert (shown["regular_season_weeks"], shown["playoff_teams"], game["end_week"]) == (regular, playoff_teams, end)
+
+
+def test_a_playoff_window_the_season_cannot_hold_is_refused(client):
+    def create(**body) -> tuple[int, str]:
+        return refused(client, "/games", {"season": SEASON, **body})
+
+    too_long = create(playoff_end_week=18)                       # the fake season ends in week 17
+    assert too_long[0] == 422 and "has 17 weeks" in too_long[1] and "too long" in too_long[1]
+    assert create(playoff_end_week=15)[0] == create(playoff_teams=3)[0] == create(playoff_teams=9)[0] == 422
+    assert create(teams=6, playoff_teams=8) == (422, "Playoff teams must be between 4 and 6.")
+
+
+def test_the_draft_board_sorts_by_rank_adp_or_projection(client):
+    game = "/games/%d" % post(client, "/games", {"season": SEASON, "seed": 1, "teams": 10})["game"]["id"]
+
+    def board(**params) -> list[dict]:
+        return get(client, game + "/draft", limit=200, **params)["results"]
+
+    ranked, by_adp, best, worst = board(), board(sort="adp"), board(sort="projection"), board(
+        sort="projection", direction="asc")
+    ranks = [row["pre_rank"] for row in ranked]
+    known = [rank for rank in ranks if rank is not None]
+    assert known == sorted(known) and ranks[:len(known)] == known
+    assert all(row["round"] == -(-row["pre_rank"] // 10) for row in ranked if row["pre_rank"])
+    adps = [row["adp"] for row in by_adp if row["adp"] is not None]
+    assert adps == sorted(adps) and len(adps) > 100
+    assert [row["projection"] for row in best] == sorted((row["projection"] for row in best), reverse=True)
+    assert [row["projection"] for row in worst] == sorted(row["projection"] for row in worst)
+    late = [row["adp"] for row in board(sort="adp", direction="desc")]
+    assert late == sorted(late, reverse=True) and late[0] > max(adps)          # the first page by ADP stops early
+    assert refused(client, game + "/draft", method="GET", sort="value")[0] == 422
+    assert refused(client, game + "/draft", method="GET", direction="up")[0] == 422
 
 
 def test_unknown_games_players_and_teams_are_reported(client, story):

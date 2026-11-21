@@ -66,7 +66,15 @@ function SideTable({ side, spots, openPlayer }: SideTableProps) {
   );
 }
 
-function FaceOff({ matchup, starters, openPlayer }: { matchup: ReplayMatchup; starters: ReplaySettings['starters']; openPlayer: (playerId: number) => void }) {
+interface FaceOffProps {
+  matchup: ReplayMatchup;
+  starters: ReplaySettings['starters'];
+  /** The user's own game was asked for, but he has none this week (a bye): the server sent the week's first game. */
+  isUserIdle: boolean;
+  openPlayer: (playerId: number) => void;
+}
+
+function FaceOff({ matchup, starters, isUserIdle, openPlayer }: FaceOffProps) {
   // The user's team goes on the left when it is his game.
   const [left, right] = matchup.away.team.is_user ? [matchup.away, matchup.home] : [matchup.home, matchup.away];
   const kind = matchup.label ?? (matchup.playoff ? 'Playoffs' : 'Regular season');
@@ -74,6 +82,7 @@ function FaceOff({ matchup, starters, openPlayer }: { matchup: ReplayMatchup; st
   return (
     <>
       <p className="sr-only" role="status">Showing {left.team.name} against {right.team.name}, week {matchup.week}.</p>
+      {isUserIdle && <p className="hint">No game this week for your team. Here is another game; pick any from the scoreboard below.</p>}
       <div className="replay-headline">
         <p className="replay-headline__label">{kind} · Week {matchup.week} · {matchup.played ? (isTie ? 'Final, a tie' : 'Final') : 'Not played yet'}</p>
         <HeadlineSide side={left} matchup={matchup} />
@@ -110,7 +119,10 @@ export function MatchupView({ game, version, openPlayer }: ReplayViewProps) {
       </div>
       <section ref={faceOffRef} className="replay-matchup" tabIndex={-1} aria-label="Face-off">
         <AsyncView state={matchup} loading={<TableSkeleton rows={9} columns={4} label="Loading the matchup…" />} errorTitle="Couldn't load this matchup">
-          {(data) => <FaceOff matchup={data} starters={game.settings.starters} openPlayer={openPlayer} />}
+          {(data) => (
+            <FaceOff matchup={data} starters={game.settings.starters} openPlayer={openPlayer}
+              isUserIdle={teamId === undefined && !data.home.team.is_user && !data.away.team.is_user} />
+          )}
         </AsyncView>
       </section>
       <AsyncView state={scoreboard} loading={<Skeleton lines={4} label="Loading the scoreboard…" />} errorTitle="Couldn't load the scoreboard">

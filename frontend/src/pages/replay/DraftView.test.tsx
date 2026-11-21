@@ -17,14 +17,15 @@ const PICK_PATH = `${DRAFT_PATH}/pick`;
 const AUTO_PATH = `${DRAFT_PATH}/auto`;
 
 function boardRow(player: ReplayPlayerRef, overrides: Partial<ReplayDraftRow> = {}): ReplayDraftRow {
-  return { player, adp: 21.4, pos_rank: `${player.position}3`, rank: 18, projection: 17.25, ...overrides };
+  return { player, adp: 21.4, pos_rank: `${player.position}3`, rank: 18, pre_rank: 20, round: 2, projection: 17.25, ...overrides };
 }
 
 /** GET draft in round 2 of a 12-team draft: the user (slot 4) is up at 2.09 with McCaffrey already on the roster. */
 function draft(overrides: Partial<ReplayDraft> = {}): ReplayDraft {
   return {
     total: 3, limit: 50, offset: 0,
-    results: [boardRow(MAHOMES, { rank: 9, pos_rank: 'QB1' }), boardRow(MOSTERT), boardRow(TUCKER, { adp: null, projection: 8.4 })],
+    results: [boardRow(MAHOMES, { rank: 9, pre_rank: 13, round: 2, pos_rank: 'QB1' }), boardRow(MOSTERT),
+      boardRow(TUCKER, { adp: null, pre_rank: null, round: null, projection: 8.4 })],
     phase: 'draft', on_the_clock: USER_TEAM_ID, is_user_turn: true, round: 2, overall: 21, rounds: 15, total_picks: 180, order: TEAMS,
     picks: [
       { overall: 4, round: 1, team: teamRef(USER_TEAM_ID), player: MCCAFFREY },
@@ -39,10 +40,10 @@ function draft(overrides: Partial<ReplayDraft> = {}): ReplayDraft {
 const FINISHED = draft({ total: 0, results: [], phase: 'open', on_the_clock: null, is_user_turn: false, round: null, overall: null });
 
 /** The screen on its own: `act` sends the request but nothing is updated. */
-function renderDraft(board: ReplayDraft | MockReply = draft(), routes: MockRoute[] = [], openPlayer = vi.fn()) {
+function renderDraft(board: ReplayDraft | MockReply = draft(), routes: MockRoute[] = [], openPlayer = vi.fn(), game = draftSummary()) {
   const reply = 'total' in board ? json(board) : board;
   const api = mockFetch([META_ROUTE, ...routes, { path: DRAFT_PATH, reply }]);
-  renderWithProviders(<DraftView {...viewProps({ game: draftSummary(), openPlayer })} />);
+  renderWithProviders(<DraftView {...viewProps({ game, openPlayer })} />);
   return { api, user: userEvent.setup(), openPlayer, lastQuery: () => api.callsTo(DRAFT_PATH).at(-1)?.url.searchParams };
 }
 
@@ -65,25 +66,54 @@ function renderRoom(routes: MockRoute[]) {
   return { api, user: userEvent.setup() };
 }
 
-const board = () => screen.findByRole('table', { name: 'Available players in draft order' });
+const board = () => screen.findByRole('table', { name: 'Available players' });
+const DEFAULT_QUERY = 'sort=rank&direction=asc&limit=50';
 
 describe('DraftView', () => {
-  it('shows the pick on the clock, the board in draft order and the attribution', async () => {
+  it('shows the pick on the clock, the board by rank with its round, and the attribution', async () => {
     const { lastQuery } = renderDraft();
     const rows = within(await board()).getAllByRole('row');
 
     expect(screen.getByText("You're on the clock").closest('[role="status"]')).toHaveTextContent('Round 2, pick 9 · 21 of 180 overall');
     expect(rows).toHaveLength(4);
-    expect(rows[1]).toHaveTextContent('1Patrick MahomesQBKCQB121.417.25Draft Patrick Mahomes');
-    // The board is in ADP order, so the first column is the row's place in it, not the value rank (9, 18, 18).
-    expect(within(rows[0]).getAllByRole('columnheader')[0]).toHaveTextContent(/^#$/);
-    expect(rows.slice(1).map((row) => within(row).getAllByRole('cell')[0].textContent)).toEqual(['1', '2', '3']);
-    expect(within(rows[3]).getByText('—')).toBeInTheDocument();                  // no ADP for the kicker
+    // Preseason rank 13 in a 12-team league is a 2nd-round pick.
+    expect(rows[1]).toHaveTextContent('132Patrick MahomesQBKCQB121.417.25Draft Patrick Mahomes');
+    expect(within(rows[0]).getAllByRole('columnheader').map((cell) => cell.textContent)).toEqual(
+      ['Rank▲', 'Rd', 'Player', 'Pos rank', 'ADP↕', 'Proj↕', 'Draft']);
+    expect(rows.slice(1).map((row) => within(row).getAllByRole('cell')[0].textContent)).toEqual(['13', '20', '—']);
+    expect(within(rows[3]).getAllByText('—')).toHaveLength(3);                // no rank, round or ADP for the kicker
+    expect(screen.getByRole('columnheader', { name: /Rank/ })).toHaveAttribute('title', 'Preseason expert rank');
+    expect(screen.getByRole('columnheader', { name: /Proj/ })).toHaveAttribute('title', expect.stringMatching(/^Preseason projection: raw points a game/));
     expect(within(rows[2]).getByRole('button', { name: 'Draft Raheem Mostert' })).toBeEnabled();
     expect(screen.getByText('Showing 3 of 3 players')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Show more' })).not.toBeInTheDocument();
     expect(screen.getByText('ADP: Fantasy Football Calculator')).toBeInTheDocument();
-    expect(lastQuery()?.toString()).toBe('limit=50');
+    expect(lastQuery()?.toString()).toBe(DEFAULT_QUERY);
+  });
+
+  it('sorts by ADP or projection from the column headers, toggles direction and starts over at the first page', async () => {
+    const { user, lastQuery } = renderDraft(draft({ total: 120 }));
+    const rank = await screen.findByRole('columnheader', { name: /Rank/ });
+    expect(rank).toHaveAttribute('aria-sort', 'ascending');
+    await user.click(screen.getByRole('button', { name: 'Show more' }));
+    await waitFor(() => expect(lastQuery()?.get('limit')).toBe('100'));
+
+    await user.click(screen.getByRole('button', { name: /Proj/ }));
+    await waitFor(() => expect(lastQuery()?.toString()).toBe('sort=projection&direction=desc&limit=50'));
+    expect(screen.getByRole('columnheader', { name: /Proj/ })).toHaveAttribute('aria-sort', 'descending');
+    expect(screen.getByRole('columnheader', { name: /Rank/ })).toHaveAttribute('aria-sort', 'none');
+    expect(screen.getByRole('region', { name: 'Available players' })).toHaveTextContent('By projection');
+
+    screen.getByRole('button', { name: /ADP/ }).focus();
+    await user.keyboard('{Enter}');
+    await waitFor(() => expect(lastQuery()?.toString()).toBe('sort=adp&direction=asc&limit=50'));
+    await user.keyboard(' ');
+    await waitFor(() => expect(lastQuery()?.toString()).toBe('sort=adp&direction=desc&limit=50'));
+  });
+
+  it('says the rank is ADP order when the season has no expert ranks', async () => {
+    renderDraft(draft(), [], vi.fn(), draftSummary({ rank_source: 'model' }));
+    expect(await screen.findByRole('columnheader', { name: /Rank/ })).toHaveAttribute('title', 'ADP order (no expert ranks for this season)');
   });
 
   it('lists my roster by position against the lineup, and the picks most recent first', async () => {
@@ -94,8 +124,9 @@ describe('DraftView', () => {
     expect(roster).toHaveTextContent('Lineup: 1 QB, 2 RB, 2 WR, 1 TE, 1 FLEX, 1 K, 1 DST and 6 bench spots.');
 
     const log = within(screen.getByRole('table', { name: 'Picks so far, most recent first' })).getAllByRole('row');
-    expect(log[1]).toHaveTextContent('2.08Hail MarysTravis Kelce');
-    expect(log[3]).toHaveTextContent('1.04Your Team (you)Christian McCaffrey');
+    expect(within(log[0]).getAllByRole('columnheader').map((cell) => cell.textContent)).toEqual(['Rd', 'Pick', 'Team', 'Player']);
+    expect(log[1]).toHaveTextContent('22.08Hail MarysTravis Kelce');
+    expect(log[3]).toHaveTextContent('11.04Your Team (you)Christian McCaffrey');
     expect(log[3]).toHaveClass('row--mine');
     expect(screen.getByRole('region', { name: 'Picks' })).toHaveTextContent('3 of 180 made');
   });
@@ -122,11 +153,11 @@ describe('DraftView', () => {
     await waitFor(() => expect(lastQuery()?.get('limit')).toBe('100'));
 
     await user.click(screen.getByRole('button', { name: 'K' }));
-    await waitFor(() => expect(lastQuery()?.toString()).toBe('position=K&limit=50'));
+    await waitFor(() => expect(lastQuery()?.toString()).toBe('position=K&sort=rank&direction=asc&limit=50'));
     expect(screen.getByRole('button', { name: 'K' })).toHaveAttribute('aria-pressed', 'true');
 
     await user.type(screen.getByRole('searchbox', { name: 'Search' }), ' tuck ');
-    await waitFor(() => expect(lastQuery()?.toString()).toBe('position=K&search=tuck&limit=50'));
+    await waitFor(() => expect(lastQuery()?.toString()).toBe('position=K&search=tuck&sort=rank&direction=asc&limit=50'));
   });
 
   it('says so when the longest page still leaves players out', async () => {
