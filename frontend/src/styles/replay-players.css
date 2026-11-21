@@ -38,3 +38,7 @@
 .replay-bid { margin-bottom: var(--space-3); }
 .replay-bid__input { width: 6rem; }
 .replay-claims__bid { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-1); font-size: var(--text-sm); }
+
+/* ---------- Table ---------- */
+.replay-players__opp { white-space: nowrap; }
+.replay-players__opp .game-chip { margin-inline-start: var(--space-2); }

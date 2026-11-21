@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { AppShell } from './layout/AppShell';
+import { GameShell } from './layout/GameShell';
 import { AskPage } from './pages/ask/AskPage';
 import { DashboardPage } from './pages/dashboard/DashboardPage';
 import { MarketPage } from './pages/market/MarketPage';
@@ -7,7 +8,7 @@ import { OddsPage } from './pages/odds/OddsPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { PlayerPage } from './pages/player/PlayerPage';
 import { RankingsPage } from './pages/rankings/RankingsPage';
-import { ReplayPage } from './pages/replay/ReplayPage';
+import { PlayPage, ReplayPage } from './pages/replay/ReplayPage';
 import { SettingsPage } from './pages/settings/SettingsPage';
 import { StatsPage } from './pages/stats/StatsPage';
 import { TradePage } from './pages/trade/TradePage';
@@ -55,8 +56,9 @@ function renderRoute(location: HashLocation): ReactNode {
     case 'ask':
       return <AskPage />;
     case 'replay':
-    case 'play': // shortcut: renders the replay page until GameShell lands
       return <ReplayPage query={query} />;
+    case 'play':
+      return <PlayPage query={query} />;
     case 'settings':
       return <SettingsPage />;
     case 'notFound':
@@ -66,10 +68,16 @@ function renderRoute(location: HashLocation): ReactNode {
 
 function Routes() {
   const location = useHashLocation();
-  // Replay's home and each league share one path, so the league id is part of the page for focus handling.
-  const pageKey = location.route.name === 'replay' || location.route.name === 'play' ? `${location.path}?game=${location.query.game ?? ''}` : location.path;
+  if (location.route.name === 'play') {
+    // The game is full screen: its own shell, with Exit back to the dashboard's #/replay.
+    return (
+      <GameShell gameKey={location.query.game ?? ''} viewKey={location.query.view ?? ''}>
+        {renderRoute(location)}
+      </GameShell>
+    );
+  }
   return (
-    <AppShell route={location.route} pageKey={pageKey}>
+    <AppShell route={location.route} pageKey={location.path}>
       {renderRoute(location)}
     </AppShell>
   );

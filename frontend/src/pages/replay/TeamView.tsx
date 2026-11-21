@@ -7,7 +7,7 @@ import { TableSkeleton } from '../../components/StatusViews';
 import { useAsync } from '../../hooks/useAsync';
 import { Chooser, DIALOG_KEY } from './PlayersDropDialog';
 import { EDIT_PHASES, ReplayDrawer, ReplayIrBlockedNotice, TeamSelect, useKeyedAct, type ReplayViewProps } from './shared';
-import { lineupSpots, lineupWarnings, swappedLineup, weekOptions, type LineupSpot } from './teamLineup';
+import { BENCH_NOT_SAVED, lineupSpots, lineupWarnings, swappedLineup, weekOptions, type LineupSpot } from './teamLineup';
 import { TeamRosterTable } from './TeamRosterTable';
 
 interface RosterProps extends Omit<ReplayViewProps, 'version' | 'actError'> {
@@ -84,6 +84,7 @@ function Roster({ team, isStale, game, act, isBusy, openPlayer }: RosterProps) {
 
   const editing = canEdit ? {
     source, pending, isDisabled: isBusy || isStale, onMove: move,
+    onPick: (spot: LineupSpot | null) => setMovingKey(spot?.key ?? null),
     onDrop: (playerId: number) => void drop(playerId),
     onIr: (playerId: number) => void toIr(playerId),
     onActivate: () => { if (onIr) void activate(onIr); },
@@ -124,7 +125,7 @@ function Roster({ team, isStale, game, act, isBusy, openPlayer }: RosterProps) {
       <TeamRosterTable team={team} spots={spots} openPlayer={openPlayer} editing={editing} showIr={isCurrent} />
       <p className="hint">
         {team.played
-          ? `What started in week ${team.week}, with the real points. A dash means he did not play.`
+          ? `Week ${team.week} as it was played, with the real points. A dash means he did not play.${team.bench_recorded ? '' : ` ${BENCH_NOT_SAVED}`}`
           : 'Proj is this week’s pre-game projection; Pts fills in once the week is played.'}
         {isCurrent && ' A player tagged O, IR or PUP can go on IR, which frees his roster spot.'}
       </p>

@@ -5,29 +5,10 @@ import { AsyncView } from '../../components/AsyncView';
 import { SelectField } from '../../components/SelectField';
 import { Skeleton, TableSkeleton } from '../../components/StatusViews';
 import { useAsync } from '../../hooks/useAsync';
+import { MatchupHero } from './MatchupHero';
 import { MatchupScoreboard } from './MatchupScoreboard';
-import { formatPoints, formatRecord, ordinal, ReplayPlayerCell, type ReplayViewProps } from './shared';
-import { lineupSpots, weekOptions, type LineupSpot } from './teamLineup';
-
-function teamName(side: ReplayTeam): string {
-  return side.team.is_user ? `${side.team.name} (you)` : side.team.name;
-}
-
-function HeadlineSide({ side, matchup }: { side: ReplayTeam; matchup: ReplayMatchup }) {
-  const isWinner = matchup.winner === side.team.team_id;
-  return (
-    <div className={`replay-headline__side${isWinner ? ' is-winner' : ''}`}>
-      <p className="replay-headline__team">
-        <strong>{teamName(side)}</strong>
-        {isWinner && <span className="status-badge status-badge--ok">Winner</span>}
-      </p>
-      <p className="hint">{formatRecord(side.record)} · {ordinal(side.record.rank)}</p>
-      {/* Real points only once the week is played; before that the big number is the projection. */}
-      <p className="replay-headline__score">{formatPoints(matchup.played ? side.actual_total : side.projected_total)}</p>
-      <p className="hint">{matchup.played ? `Projected ${formatPoints(side.projected_total)}` : 'Projected'}</p>
-    </div>
-  );
-}
+import { formatPoints, ReplayPlayerCell, type ReplayViewProps } from './shared';
+import { BENCH_NOT_SAVED, lineupSpots, weekOptions, type LineupSpot } from './teamLineup';
 
 interface SideTableProps {
   side: ReplayTeam;
@@ -37,6 +18,18 @@ interface SideTableProps {
 
 /** One team's lineup, in the My Team column order on both sides so a stacked phone layout reads the same twice. */
 function SideTable({ side, spots, openPlayer }: SideTableProps) {
+  const starters = spots.filter((spot) => spot.slot !== 'BN');
+  const bench = spots.filter((spot) => spot.slot === 'BN');
+  const spotRow = ({ key, slot, row }: LineupSpot) => (
+    <tr key={key}>
+      <td className="td--pos"><span className="replay-slot">{slot}</span></td>
+      <td className="td--player">
+        {row ? <ReplayPlayerCell player={row.player} info={row} onOpen={openPlayer} /> : <span className="muted">Empty</span>}
+      </td>
+      <td className="num">{formatPoints(row?.projection)}</td>
+      <td className="num">{formatPoints(row?.points)}</td>
+    </tr>
+  );
   return (
     <div className="table-wrap">
       <table className="data-table data-table--compact replay-faceoff__table">
@@ -49,18 +42,21 @@ function SideTable({ side, spots, openPlayer }: SideTableProps) {
             <th scope="col" className="num">Pts</th>
           </tr>
         </thead>
-        <tbody>
-          {spots.map(({ key, slot, row }) => (
-            <tr key={key} className={slot === 'BN' ? 'replay-faceoff__bench' : undefined}>
-              <td className="td--pos">{slot}</td>
-              <td className="td--player">
-                {row ? <ReplayPlayerCell player={row.player} info={row} onOpen={openPlayer} /> : <span className="muted">Empty</span>}
-              </td>
-              <td className="num">{formatPoints(row?.projection)}</td>
-              <td className="num">{formatPoints(row?.points)}</td>
+        <tbody>{starters.map(spotRow)}</tbody>
+        {bench.length > 0 && (
+          <tbody className="replay-faceoff__bench">
+            <tr>
+              <th scope="colgroup" colSpan={4} className="game-subhead">Bench</th>
             </tr>
-          ))}
-        </tbody>
+            {bench.map(spotRow)}
+            {side.bench_total !== null && (
+              <tr className="replay-faceoff__total">
+                <th scope="row" colSpan={3}>Bench total</th>
+                <td className="num">{formatPoints(side.bench_total)}</td>
+              </tr>
+            )}
+          </tbody>
+        )}
       </table>
     </div>
   );
@@ -77,22 +73,17 @@ interface FaceOffProps {
 function FaceOff({ matchup, starters, isUserIdle, openPlayer }: FaceOffProps) {
   // The user's team goes on the left when it is his game.
   const [left, right] = matchup.away.team.is_user ? [matchup.away, matchup.home] : [matchup.home, matchup.away];
-  const kind = matchup.label ?? (matchup.playoff ? 'Playoffs' : 'Regular season');
-  const isTie = matchup.played && matchup.winner === null;
+  const isBenchMissing = matchup.played && !(left.bench_recorded && right.bench_recorded);
   return (
     <>
       <p className="sr-only" role="status">Showing {left.team.name} against {right.team.name}, week {matchup.week}.</p>
       {isUserIdle && <p className="hint">No game this week for your team. Here is another game; pick any from the scoreboard below.</p>}
-      <div className="replay-headline">
-        <p className="replay-headline__label">{kind} · Week {matchup.week} · {matchup.played ? (isTie ? 'Final, a tie' : 'Final') : 'Not played yet'}</p>
-        <HeadlineSide side={left} matchup={matchup} />
-        <span className="replay-headline__vs" aria-hidden="true">vs</span>
-        <HeadlineSide side={right} matchup={matchup} />
-      </div>
+      <MatchupHero matchup={matchup} left={left} right={right} />
       <div className="replay-faceoff">
         <SideTable side={left} spots={lineupSpots(left.results, starters)} openPlayer={openPlayer} />
         <SideTable side={right} spots={lineupSpots(right.results, starters)} openPlayer={openPlayer} />
       </div>
+      {isBenchMissing && <p className="hint">{BENCH_NOT_SAVED}</p>}
     </>
   );
 }

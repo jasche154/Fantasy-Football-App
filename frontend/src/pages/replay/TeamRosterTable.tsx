@@ -1,7 +1,9 @@
 import type { ReplayPlayerRow, ReplayTeam } from '../../api/types';
 import { EMPTY_VALUE, formatNumber } from '../../lib/format';
+import { DefenseChip } from './gameUi';
 import { canGoOnIr, ConfirmButton, formatPoints, ReplayPlayerCell } from './shared';
-import { canSwap, type LineupSpot } from './teamLineup';
+import { canSwap, spotState, type LineupSpot } from './teamLineup';
+import { lineupDragProps } from './useLineupDrag';
 
 /** Lineup editing, passed only when the user may change this roster. */
 export interface RosterEditing {
@@ -11,6 +13,8 @@ export interface RosterEditing {
   pending: string | null;
   isDisabled: boolean;
   onMove: (spot: LineupSpot) => void;
+  /** Picks a spot up for dragging (null puts it down) without moving anyone. */
+  onPick: (spot: LineupSpot | null) => void;
   onDrop: (playerId: number) => void;
   /** Moves an active player to IR (swapping him with the player there, if any). */
   onIr: (playerId: number) => void;
@@ -87,7 +91,9 @@ function PlayerCells({ row, openPlayer }: { row: ReplayPlayerRow; openPlayer: (p
     <>
       {/* The Opp column carries the opponent and the bye, so the cell only adds the tag, Out and Trade-locked. */}
       <td className="td--player"><ReplayPlayerCell player={row.player} info={{ out: row.out, trade_locked: row.trade_locked }} onOpen={openPlayer} /></td>
-      <td>{row.opponent ?? EMPTY_VALUE}</td>
+      <td className="replay-roster__opp">
+        {row.opponent ?? EMPTY_VALUE}{row.defense && ' '}<DefenseChip rating={row.defense} position={row.player.position} />
+      </td>
       <td className="num">{formatPoints(row.projection)}</td>
       <td className="num">{formatPoints(row.points)}</td>
       <td className="num">{row.games > 0 ? formatPoints(row.ppg) : EMPTY_VALUE}</td>
@@ -110,13 +116,12 @@ interface SpotRowProps {
 
 function SpotRow({ spot, openPlayer, editing, irName }: SpotRowProps) {
   const { row } = spot;
-  const source = editing?.source ?? null;
-  const isTarget = source !== null && canSwap(source, spot);
-  const className = [spot.key === source?.key ? 'replay-roster__row--moving' : '', isTarget ? 'replay-roster__row--target' : '',
+  const state = spotState(editing?.source ?? null, spot);
+  const className = [state ? `replay-roster__row--${state}` : '', editing && row && !editing.isDisabled ? 'replay-roster__row--grab' : '',
     row?.starting && (row.bye || row.out || row.player.injury) ? 'replay-roster__row--warn' : ''].filter(Boolean).join(' ');
   return (
-    <tr className={className || undefined}>
-      <td className="td--pos">{spot.slot}</td>
+    <tr className={className || undefined} {...lineupDragProps(spot, editing)}>
+      <td className="td--pos"><span className="replay-slot">{spot.slot}</span></td>
       {rowCells(row, openPlayer)}
       {editing && <Actions spot={spot} editing={editing} irName={irName} />}
     </tr>
@@ -127,8 +132,8 @@ function SpotRow({ spot, openPlayer, editing, irName }: SpotRowProps) {
 function IrRow({ row, openPlayer, editing }: { row: ReplayPlayerRow | undefined; openPlayer: (playerId: number) => void; editing?: RosterEditing }) {
   const player = row?.player;
   return (
-    <tr>
-      <td className="td--pos">IR</td>
+    <tr className={editing?.source ? 'replay-roster__row--dim' : undefined}>
+      <td className="td--pos"><span className="replay-slot">IR</span></td>
       {rowCells(row, openPlayer)}
       {editing && (
         <td className="replay-roster__actions">
@@ -178,7 +183,18 @@ export function TeamRosterTable({ team, spots, openPlayer, editing, showIr = fal
             <td colSpan={editing ? 4 : 3} />
           </tr>
         </tbody>
-        {bench.length > 0 && <tbody>{bench.map(row)}</tbody>}
+        {bench.length > 0 && (
+          <tbody>
+            {bench.map(row)}
+            {team.bench_total !== null && (
+              <tr className="replay-roster__total replay-roster__total--bench">
+                <th scope="row" colSpan={4}>Bench total</th>
+                <td className="num">{formatPoints(team.bench_total)}</td>
+                <td colSpan={editing ? 4 : 3} />
+              </tr>
+            )}
+          </tbody>
+        )}
         {showIr && <tbody><IrRow row={team.ir[0]} openPlayer={openPlayer} editing={editing} /></tbody>}
       </table>
     </div>

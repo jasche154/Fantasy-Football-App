@@ -1,6 +1,8 @@
-"""Replay League box lines: copied from a game line, summed and averaged."""
+"""Replay League box lines: copied from a game line, summed and averaged, and carried in SeasonData."""
 from services import replay_box as rb
 from services.projections import GameLine
+from tests import replay_fakes as fakes
+from tests.test_replay_pool import loaded, seeded_db  # noqa: F401  (fixtures)
 
 
 def game(**stats) -> GameLine:
@@ -28,3 +30,21 @@ def test_total_sums_and_mean_averages_to_one_decimal():
 
 def test_no_games_total_zero_and_mean_none():
     assert rb.total([]) == rb.BoxLine() and rb.mean([]) is None
+
+
+# ---------------- box lines in SeasonData ----------------
+
+def test_every_skill_game_of_the_fake_season_has_a_box_line_and_load_reads_it_back(loaded):
+    data = fakes.fake_season()
+    skill = {key for key in data.actual if data.players[key[0]].position in ("QB", "RB", "WR", "TE")}
+
+    assert set(data.box) == skill and dict(loaded.box) == dict(data.box)
+    assert loaded.defense_prior == {}                       # the season before isn't loaded
+
+
+def test_as_of_keeps_box_lines_of_played_weeks_only_and_ignores_the_future():
+    data = fakes.fake_season()
+    later = fakes.future_changed(data, 6)
+
+    assert dict(data.as_of(7).box) == {key: b for key, b in data.box.items() if key[1] < 7}
+    assert later.as_of(7).box == data.as_of(7).box and later.as_of(8).box != data.as_of(8).box

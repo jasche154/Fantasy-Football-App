@@ -1,0 +1,43 @@
+/**
+ * Drag a lineup row onto another spot to swap them: a thin layer over the Move buttons. The picked spot lives in React
+ * state (the same `source` the Move button sets), never in dataTransfer, so a drop and a tap-move post the same lineup.
+ * Touch screens don't fire HTML5 drag events; there the Move button is the way.
+ */
+import type { DragEvent, HTMLAttributes } from 'react';
+import { canSwap, type LineupSpot } from './teamLineup';
+
+export interface LineupDragHandlers {
+  /** The spot being moved, if any. */
+  source: LineupSpot | null;
+  isDisabled: boolean;
+  /** Picks a spot up (or puts it down with null) without moving anyone. */
+  onPick: (spot: LineupSpot | null) => void;
+  /** Moves the picked player into `spot` (the Move button's second press). */
+  onMove: (spot: LineupSpot) => void;
+}
+
+/** The drag attributes for one roster row; none when the lineup can't be changed. */
+export function lineupDragProps(spot: LineupSpot, editing: LineupDragHandlers | undefined): HTMLAttributes<HTMLTableRowElement> {
+  if (!editing || editing.isDisabled) return {};
+  const { source } = editing;
+  const isLegal = source !== null && canSwap(source, spot);
+  return {
+    draggable: spot.row !== null,
+    onDragStart: (event: DragEvent) => {
+      // Firefox only starts a drag that carries data; jsdom has no dataTransfer at all.
+      event.dataTransfer?.setData('text/plain', spot.row?.player.name ?? '');
+      if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+      editing.onPick(spot);
+    },
+    onDragOver: (event: DragEvent) => {
+      if (!isLegal) return;            // not cancelling dragover is what tells the browser "no drop here"
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+    },
+    onDrop: (event: DragEvent) => {
+      event.preventDefault();
+      if (isLegal) editing.onMove(spot);
+    },
+    onDragEnd: () => editing.onPick(null),
+  };
+}

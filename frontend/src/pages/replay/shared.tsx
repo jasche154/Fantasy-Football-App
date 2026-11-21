@@ -19,7 +19,7 @@
  *
  * Pieces: ReplayPlayerCell, ReplayInjuryBadge (+ isHardTag, canGoOnIr, injuryLabel), ReplayIrBlockedNotice, ReplayPositionChip, PositionTabs (+ positionParam), TeamSelect, ConfirmButton,
  * useKeyedAct (act with a pending state and a refusal per button), ReplayDrawer (the dialog frame),
- * EventList (+ groupEvents), formatPoints, formatRecord, ordinal, goToView, REPLAY_VIEWS.
+ * EventList (+ groupEvents), formatPoints, formatRecord, ordinal, goToView, viewHash, REPLAY_VIEWS.
  */
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { errorMessage } from '../../api/client';
@@ -40,7 +40,7 @@ import type {
 import { Icon } from '../../components/Icon';
 import { SelectField } from '../../components/SelectField';
 import { formatNumber } from '../../lib/format';
-import { paths } from '../../router/routes';
+import { buildHash, paths } from '../../router/routes';
 import { navigate } from '../../router/useHashLocation';
 
 export type ReplayAct = <T extends ReplayActionResult>(run: () => Promise<T>) => Promise<T | undefined>;
@@ -66,9 +66,14 @@ export const REPLAY_VIEWS: readonly { value: ReplayView; label: string }[] = [
   { value: 'league', label: 'League' },
 ];
 
-/** Switches the hub's tab (#/replay?game=ID&view=...). */
+/** The game screen's URL for a tab (#/play?game=ID&view=...). */
+export function viewHash(gameId: number, view: ReplayView): string {
+  return buildHash(paths.play, { game: gameId, view });
+}
+
+/** Switches the game's tab (#/play?game=ID&view=...). */
 export function goToView(gameId: number, view: ReplayView): void {
-  navigate(paths.replay, { game: gameId, view });
+  navigate(paths.play, { game: gameId, view });
 }
 
 // ---------------- formatting ----------------
@@ -299,12 +304,14 @@ interface ReplayDrawerProps {
   /** The dialog's accessible name when it should say more than the title. */
   label?: string;
   closeLabel?: string;
+  /** 'wide': room for a player card's tables (a bottom sheet on phones). */
+  size?: 'wide';
   onClose: () => void;
   children: ReactNode;
 }
 
 /** A right-hand dialog on the house .news-panel frame: focus moves in, Escape closes, focus goes back to the opener. */
-export function ReplayDrawer({ eyebrow, title, label, closeLabel = 'Close', onClose, children }: ReplayDrawerProps) {
+export function ReplayDrawer({ eyebrow, title, label, closeLabel = 'Close', size, onClose, children }: ReplayDrawerProps) {
   const titleId = useId();
   const closeRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -321,7 +328,7 @@ export function ReplayDrawer({ eyebrow, title, label, closeLabel = 'Close', onCl
   return (
     <>
       <div className="news-panel__backdrop" onClick={onClose} aria-hidden="true" />
-      <aside className="news-panel" role="dialog" aria-modal="true" aria-label={label} aria-labelledby={label ? undefined : titleId}>
+      <aside className={size === 'wide' ? 'news-panel replay-drawer--wide' : 'news-panel'} role="dialog" aria-modal="true" aria-label={label} aria-labelledby={label ? undefined : titleId}>
         <header className="news-panel__head">
           <div>
             <p className="news-panel__eyebrow">{eyebrow}</p>

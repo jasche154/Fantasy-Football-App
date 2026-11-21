@@ -15,3 +15,16 @@
 .replay-bracket__week { margin: var(--space-3) 0 var(--space-1); font-size: var(--text-sm); }
 
 .replay-pager { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+
+/* ---------- Scoreboard tiles (the league scoreboard and the playoff weeks) ---------- */
+.game-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.game-tile { display: grid; gap: var(--space-1); padding: var(--space-2) var(--space-3) var(--space-3); border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm); background: var(--color-surface-1); }
+.game-tile--mine { border-color: var(--color-accent); box-shadow: inset 0 2px 0 var(--color-accent); }
+.game-tile__head { margin: 0 0 2px; }
+.game-tile__side { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: var(--space-2); margin: 0;
+  color: var(--color-text-muted); font-size: var(--text-sm); }
+.game-tile__side.is-winner { color: var(--color-text); font-weight: 750; }
+.game-tile__won { color: var(--color-pos); font-size: var(--text-2xs); font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; }
+.game-tile__score { grid-column: 3; color: var(--color-text-muted); font: italic 700 var(--text-lg) / 1 var(--font-display); font-variant-numeric: tabular-nums; }
+.game-tile__side.is-winner .game-tile__score { color: var(--game-led, var(--color-text)); }

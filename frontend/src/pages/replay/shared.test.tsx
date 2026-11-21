@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { event, MOSTERT, NINERS, OPPONENT_TEAM_ID, playerRow, RESULT_EVENTS, summary, tagged, TUCKER, USER_TEAM_ID } from './fixtures';
 import {
   canGoOnIr, ConfirmButton, EventList, formatPoints, formatRecord, groupEvents, injuryLabel, isHardTag, ordinal, PositionTabs, positionParam,
-  ReplayInjuryBadge, ReplayIrBlockedNotice, ReplayPlayerCell, TeamSelect,
+  ReplayDrawer, ReplayInjuryBadge, ReplayIrBlockedNotice, ReplayPlayerCell, TeamSelect, viewHash,
 } from './shared';
 
 describe('formatting', () => {
@@ -150,5 +150,19 @@ describe('events', () => {
     expect(pick).toHaveTextContent('DraftPick 1');
     expect(result).toHaveTextContent('Wk 5Your Team beat Sunday Scaries 121.46-98.20');
     expect(result).toHaveClass('replay-events__item--mine');
+  });
+});
+
+describe('the game screen', () => {
+  it('builds each tab\'s #/play URL', () => {
+    expect(viewHash(7, 'trades')).toBe('#/play?game=7&view=trades');
+  });
+
+  it('opens a wide drawer only when asked', () => {
+    const { unmount } = render(<ReplayDrawer eyebrow="Player" title="Raheem Mostert" size="wide" onClose={vi.fn()}>card</ReplayDrawer>);
+    expect(screen.getByRole('dialog', { name: 'Raheem Mostert' })).toHaveClass('news-panel', 'replay-drawer--wide');
+    unmount();
+    render(<ReplayDrawer eyebrow="Player" title="Raheem Mostert" onClose={vi.fn()}>card</ReplayDrawer>);
+    expect(screen.getByRole('dialog', { name: 'Raheem Mostert' })).not.toHaveClass('replay-drawer--wide');
   });
 });

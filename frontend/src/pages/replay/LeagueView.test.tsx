@@ -35,6 +35,13 @@ function renderLeague(routes: MockRoute[], props: Partial<ReplayViewProps> = {})
   return { api, user: userEvent.setup() };
 }
 
+/** The scoreboard tile (a list item) that mentions `name`. */
+function tile(list: HTMLElement, name: RegExp): HTMLElement {
+  const found = within(list).getAllByRole('listitem').filter((item) => name.test(item.textContent ?? ''));
+  expect(found).toHaveLength(1);
+  return found[0];
+}
+
 async function openPage(user: ReturnType<typeof userEvent.setup>, name: string) {
   await user.click(screen.getByRole('button', { name }));
   expect(screen.getByRole('button', { name })).toHaveAttribute('aria-pressed', 'true');
@@ -47,13 +54,23 @@ describe('LeagueView standings', () => {
     const mine = within(table).getByRole('row', { name: /Your Team/ });
 
     expect(screen.getByRole('button', { name: 'Standings' })).toHaveAttribute('aria-pressed', 'true');
-    expect(mine).toHaveTextContent('4Your Teamyou3-1478.34431.10');
+    expect(mine).toHaveTextContent('4Your Team (you)3-1478.34431.10');
     expect(mine).toHaveClass('row--mine', 'replay-standings__cut');
     expect(within(table).getByRole('row', { name: /Hail Marys/ })).not.toHaveClass('replay-standings__cut');
     expect(within(table).getByRole('columnheader', { name: 'Seed' })).toBeInTheDocument();
     expect(screen.queryByText('In playoffs')).not.toBeInTheDocument();
     expect(screen.getByText(/the top 4 seeds play for the title in weeks 15-16\. Seeds lock after week 14\./)).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Playoff bracket' })).not.toBeInTheDocument();
+  });
+
+  it('shows each CPU\'s trading tendency under its name, never the user\'s', async () => {
+    const base = standings();
+    const results = base.results.map((row) => ({ ...row, tendency: row.team_id === 2 || row.is_user ? 'Loves running backs' : null }));
+    renderLeague([{ path: `${PATH}/standings`, reply: json({ ...base, results }) }]);
+    const table = await screen.findByRole('table', { name: 'League standings' });
+    expect(within(table).getByRole('row', { name: /Blitz Brigade/ })).toHaveTextContent('Blitz BrigadeLoves running backs');
+    expect(within(table).getAllByText('Loves running backs')).toHaveLength(1);
+    expect(within(table).getByRole('row', { name: /Your Team/ }).querySelector('[data-team="4"]')).not.toBeNull();
   });
 
   it('marks the playoff teams once the seeds are final and shows the bracket with projections, scores and the champion', async () => {
@@ -75,12 +92,11 @@ describe('LeagueView standings', () => {
 
     const bracket = screen.getByRole('region', { name: 'Playoff bracket' });
     expect(within(bracket).getByText(/Champion:/)).toHaveTextContent('Champion: Your Team');
-    const played = within(bracket).getByRole('table', { name: 'Week 15 playoff games' });
-    expect(within(played).getByRole('row', { name: /Your Team/ })).toHaveTextContent('Semi-finalGridiron Ghosts120.50Your TeamWon131.02');
+    const played = within(bracket).getByRole('list', { name: 'Week 15 playoff games' });
+    expect(tile(played, /Your Team/)).toHaveTextContent('Semi-final · FinalGridiron Ghosts120.50Your Team (you)Won131.02');
     expect(within(played).queryByText('Consolation')).not.toBeInTheDocument();
-    const ahead = within(bracket).getByRole('table', { name: 'Week 16 playoff games' });
-    expect(within(ahead).getAllByRole('columnheader', { name: 'Proj' })).toHaveLength(2);
-    expect(within(ahead).getByRole('row', { name: /Championship/ })).toHaveTextContent('ChampionshipYour Team111.11Blitz Brigade109.90');
+    const ahead = within(bracket).getByRole('list', { name: 'Week 16 playoff games' });
+    expect(tile(ahead, /Championship/)).toHaveTextContent('Championship · ProjectedYour Team (you)111.11Blitz Brigade109.90');
     expect(within(ahead).queryByText('Won')).not.toBeInTheDocument();
   });
 
@@ -97,8 +113,8 @@ describe('LeagueView standings', () => {
     expect(await screen.findByText(/the top 6 seeds play for the title in weeks 15-17, and the top 2 skip the first round\. The seeds are final\./))
       .toBeInTheDocument();
     const bracket = screen.getByRole('region', { name: 'Playoff bracket' });
-    expect(within(within(bracket).getByRole('table', { name: 'Week 15 playoff games' })).getAllByText('Quarter-final')).toHaveLength(2);
-    expect(within(screen.getByRole('region', { name: 'Consolation games' })).getByRole('table', { name: 'Week 15 consolation games' })).toHaveTextContent('Red Zone Rebels');
+    expect(within(within(bracket).getByRole('list', { name: 'Week 15 playoff games' })).getAllByText(/^Quarter-final ·/)).toHaveLength(2);
+    expect(within(screen.getByRole('region', { name: 'Consolation games' })).getByRole('list', { name: 'Week 15 consolation games' })).toHaveTextContent('Red Zone Rebels');
     expect(screen.getByText(/Teams out of the title race play for the places below it/)).toBeInTheDocument();
   });
 
@@ -116,15 +132,15 @@ describe('LeagueView standings', () => {
     renderLeague([{ path: `${PATH}/standings`, reply: json(standings({ seeds_final: true, bracket: [semis, final], champion: teamRef(USER_TEAM_ID) })) }]);
 
     const bracket = await screen.findByRole('region', { name: 'Playoff bracket' });
-    const title = within(bracket).getByRole('table', { name: 'Week 16 playoff games' });
-    expect(within(title).getAllByRole('row')).toHaveLength(3);                       // header, Championship, Third place
+    const title = within(bracket).getByRole('list', { name: 'Week 16 playoff games' });
+    expect(within(title).getAllByRole('listitem')).toHaveLength(2);                  // Championship, Third place
     expect(within(bracket).queryByText('Consolation')).not.toBeInTheDocument();
 
     const consolation = screen.getByRole('region', { name: 'Consolation games' });
-    expect(within(consolation).getByRole('table', { name: 'Week 15 consolation games' })).toHaveTextContent('ConsolationHail MarysWon80.00');
-    const places = within(consolation).getByRole('table', { name: 'Week 16 consolation games' });
-    expect(within(places).getByRole('row', { name: /Hail Marys/ })).toHaveTextContent('ConsolationHail MarysWon90.00Fourth and Long85.00');
-    expect(within(places).getByRole('row', { name: /Pigskin Pros/ })).toHaveTextContent('ConsolationPigskin Pros70.00Red Zone RebelsWon75.00');
+    expect(within(consolation).getByRole('list', { name: 'Week 15 consolation games' })).toHaveTextContent('Consolation · FinalHail MarysWon80.00');
+    const places = within(consolation).getByRole('list', { name: 'Week 16 consolation games' });
+    expect(tile(places, /Hail Marys/)).toHaveTextContent('Consolation · FinalHail MarysWon90.00Fourth and Long85.00');
+    expect(tile(places, /Pigskin Pros/)).toHaveTextContent('Consolation · FinalPigskin Pros70.00Red Zone RebelsWon75.00');
     expect(within(consolation).queryByText('Championship')).not.toBeInTheDocument();
   });
 
@@ -188,23 +204,23 @@ describe('LeagueView scoreboard', () => {
     const { api, user } = renderLeague([{ path: `${PATH}/standings`, reply: json(standings()) }, { path: `${PATH}/scoreboard`, reply: scoreboardReply }]);
     await openPage(user, 'Scoreboard');
 
-    const now = await screen.findByRole('table', { name: 'Week 5 scoreboard' });
+    const now = await screen.findByRole('list', { name: 'Week 5 scoreboard' });
     expect(screen.getByText('Week 5. Not played yet: these are pre-game projections.')).toBeInTheDocument();
-    expect(within(now).getByRole('row', { name: /Your Team/ })).toHaveTextContent('Your Team118.40Sunday Scaries104.75');
-    expect(within(now).getByRole('row', { name: /Your Team/ })).toHaveClass('row--mine');
+    expect(tile(now, /Your Team/)).toHaveTextContent('ProjectedYour Team (you)118.40Sunday Scaries104.75');
+    expect(tile(now, /Your Team/)).toHaveClass('game-tile--mine');
+    expect(tile(now, /Gridiron Ghosts/)).not.toHaveClass('game-tile--mine');
     const picker = screen.getByRole('combobox', { name: 'Week' });
     expect(within(picker).getAllByRole('option')).toHaveLength(16);
     expect(within(picker).getByRole('option', { name: 'Week 15 (playoffs)' })).toBeInTheDocument();
 
     await user.selectOptions(picker, 'Week 4');
-    const past = await screen.findByRole('table', { name: 'Week 4 scoreboard' });
-    expect(within(past).getByRole('row', { name: /Your Team/ })).toHaveTextContent('Your TeamWon121.46Gridiron Ghosts98.20');
+    const past = await screen.findByRole('list', { name: 'Week 4 scoreboard' });
+    expect(tile(past, /Your Team/)).toHaveTextContent('FinalYour Team (you)Won121.46Gridiron Ghosts98.20');
 
     await user.selectOptions(picker, 'Week 9');
-    const ahead = await screen.findByRole('table', { name: 'Week 9 scoreboard' });
+    const ahead = await screen.findByRole('list', { name: 'Week 9 scoreboard' });
     expect(screen.getByText('Week 9. Not played yet: the pairings only.')).toBeInTheDocument();
-    expect(within(ahead).getByRole('row', { name: /Your Team/ })).toHaveTextContent(/^Your TeamBlitz Brigade$/);
-    expect(within(ahead).queryByRole('columnheader', { name: /Proj|Pts/ })).not.toBeInTheDocument();
+    expect(tile(ahead, /Your Team/)).toHaveTextContent(/^UpcomingYour Team \(you\)Blitz Brigade$/);
 
     await user.selectOptions(picker, 'Week 16 (playoffs)');
     expect(await screen.findByText('No games set yet')).toBeInTheDocument();

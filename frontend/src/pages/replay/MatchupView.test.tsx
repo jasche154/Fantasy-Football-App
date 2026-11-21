@@ -8,6 +8,7 @@ import { META_ROUTE, renderWithProviders } from '../../test/render';
 import {
   COLLINS, GAME_ID, KELCE, MAHOMES, MOSTERT, OPPONENT_TEAM_ID, record, rosterRow, side, summary, team, teamRef, USER_TEAM_ID, viewProps,
 } from './fixtures';
+import { playedTeam } from './fixturesTeam';
 import { MatchupView } from './MatchupView';
 import type { ReplayViewProps } from './shared';
 
@@ -45,11 +46,12 @@ describe('MatchupView', () => {
     expect(mine).toHaveAccessibleName('Your Team lineup, week 5');
     expect(theirs).toHaveAccessibleName('Sunday Scaries lineup, week 5');
     expect(faceOff()).toHaveTextContent('Regular season · Week 5 · Not played yet');
-    expect(faceOff()).toHaveTextContent('Your Team (you)3-1 · 2nd118.40Projected');
-    expect(faceOff()).toHaveTextContent('Sunday Scaries2-2 · 6th104.75Projected');
+    // The score is read once (label and value) and drawn once (the digits), hence the number twice.
+    expect(faceOff()).toHaveTextContent('Your Team (you)3-1 · 2ndYour score: 118.40118.40Projected');
+    expect(faceOff()).toHaveTextContent('Sunday Scaries2-2 · 6thSunday Scaries score: 104.75104.75Projected');
     expect(within(faceOff()).queryByText('Winner')).not.toBeInTheDocument();
 
-    const headers = (table: HTMLElement) => within(table).getAllByRole('columnheader').map((cell) => cell.textContent);
+    const headers = (table: HTMLElement) => within(within(table).getAllByRole('row')[0]).getAllByRole('columnheader').map((cell) => cell.textContent);
     // Same column order on both sides, so a stacked phone layout reads the same way twice.
     expect(headers(mine)).toEqual(['Slot', 'Player', 'Proj', 'Pts']);
     expect(headers(theirs)).toEqual(['Slot', 'Player', 'Proj', 'Pts']);
@@ -59,8 +61,11 @@ describe('MatchupView', () => {
     expect(cells(mine, 1).slice(2)).toEqual(['21.30', '—']);
     expect(cells(theirs, 1)).toEqual(['QB', 'Empty', '—', '—']);                        // an empty slot still gets its row
     expect(cells(theirs, 2)[0]).toBe('RB');
-    expect(within(mine).getAllByRole('row')).toHaveLength(12);                         // header, 9 starters, 2 on the bench
-    expect(within(theirs).getAllByRole('row')).toHaveLength(11);
+    expect(within(mine).getAllByRole('row')).toHaveLength(13);                         // header, 9 starters, Bench, 2 on the bench
+    expect(within(theirs).getAllByRole('row')).toHaveLength(12);
+    expect(within(mine).getByRole('columnheader', { name: 'Bench' })).toBeInTheDocument();
+    expect(within(mine).queryByRole('rowheader', { name: 'Bench total' })).not.toBeInTheDocument();     // nothing scored yet
+    expect(screen.queryByText(/bench wasn.t saved/)).not.toBeInTheDocument();
 
     await user.click(within(mine).getByRole('button', { name: 'Patrick Mahomes' }));
     expect(openPlayer).toHaveBeenCalledWith(MAHOMES.id);
@@ -73,10 +78,31 @@ describe('MatchupView', () => {
     renderMatchup([{ path: MATCHUP_PATH, reply: json(played) }]);
     await screen.findAllByRole('table');
     expect(faceOff()).toHaveTextContent('Semi-final · Week 5 · Final');
-    expect(faceOff()).toHaveTextContent('Your Team (you)Winner3-1 · 2nd121.46Projected 118.40');
-    expect(faceOff()).toHaveTextContent('Sunday Scaries2-2 · 6th98.20Projected 104.75');
+    expect(faceOff()).toHaveTextContent('Your Team (you)Winner3-1 · 2ndYour score: 121.46121.46Projected 118.40');
+    expect(faceOff()).toHaveTextContent('Sunday Scaries2-2 · 6thSunday Scaries score: 98.2098.20Projected 104.75');
     expect(within(faceOff()).getAllByText('Winner')).toHaveLength(1);
     expect(screen.getByRole('row', { name: /Travis Kelce/ })).toHaveTextContent('17.40');
+  });
+
+  it("shows a played week's bench with its real points and total", async () => {
+    const home = playedTeam({ team: teamRef(OPPONENT_TEAM_ID), results: [rosterRow(MOSTERT, 'RB', { points: 9.9 }), rosterRow(COLLINS, 'BN', { points: 21.3 })],
+      bench_total: 21.3 });
+    renderMatchup([{ path: MATCHUP_PATH, reply: json(matchup({ week: 3, played: true, winner: USER_TEAM_ID, home, away: playedTeam() })) }]);
+    const [mine, theirs] = await screen.findAllByRole('table');
+    expect(within(mine).getByRole('row', { name: /James Cook/ })).toHaveTextContent('14.20');
+    expect(within(mine).getByRole('row', { name: /Chris Olave/ })).toHaveTextContent('4.80');
+    expect(within(mine).getByRole('row', { name: /Bench total/ })).toHaveTextContent('Bench total19.00');
+    expect(within(theirs).getByRole('row', { name: /Nico Collins/ })).toHaveTextContent('21.30');
+    expect(within(theirs).getByRole('row', { name: /Bench total/ })).toHaveTextContent('21.30');
+    expect(screen.queryByText(/bench wasn.t saved/)).not.toBeInTheDocument();
+  });
+
+  it('says the bench was not saved for a week played before the update', async () => {
+    const old = (side: ReplayMatchup['home']) => ({ ...side, results: side.results.filter((row) => row.starting), bench_total: null, bench_recorded: false });
+    renderMatchup([{ path: MATCHUP_PATH, reply: json(matchup({ week: 3, played: true, home: old(playedTeam({ team: teamRef(OPPONENT_TEAM_ID) })), away: old(playedTeam()) })) }]);
+    const [mine] = await screen.findAllByRole('table');
+    expect(within(mine).queryByRole('columnheader', { name: 'Bench' })).not.toBeInTheDocument();
+    expect(screen.getByText('The bench wasn’t saved for weeks played before this update.')).toBeInTheDocument();
   });
 
   it('calls a played game without a winner a tie', async () => {

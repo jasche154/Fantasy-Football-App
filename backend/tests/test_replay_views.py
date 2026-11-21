@@ -22,7 +22,7 @@ SEED = 7
 USER = SETTINGS.draft_slot
 PLAYER_ROW = {"player", "opponent", "bye", "out", "projection", "points", "ros_ppg", "value", "rank", "pos_rank",
               "adp", "pre_rank", "expert_rank", "news", "games", "ppg", "trade_locked", "defense"}
-WIRE_ROW = PLAYER_ROW | {"status", "owner", "season_points", "last_points", "usage"}
+WIRE_ROW = PLAYER_ROW | {"status", "owner", "season_points", "last_points", "usage", "line"}
 SIDE = {"team_id", "name", "is_user", "tendency", "projected", "points", "record"}
 RECORD = {"wins", "losses", "ties", "rank", "points_for", "points_against", "place"}
 PLAYER_REF = {"id", "name", "position", "team", "injury"}
@@ -70,6 +70,11 @@ def every_view(state: rs.State, data=DATA) -> dict[str, str]:
         "standings": league.standings(shown), "schedule": league.schedule(shown),
         "activity": league.activity(shown, limit=10_000),
         "players": [league.players(shown, status="all", sort=sort, limit=10_000) for sort in league.SORTS],
+        "stat_lines": [league.players(shown, status="all", sort=sort, direction=direction, stats=stats,
+                                      stat_week=stat_week, limit=10_000)
+                       for stats, stat_week in (("last4", None), *(("week", w) for w in range(1, week + 1)))
+                       for sort, direction in (("line_points", "desc"), ("line_projection", "asc"),
+                                               ("rush_yds", "desc"))],
         "details": [league.player(shown, pid) for pid in (*rostered[:40], *fakes.STORY_IDS)],
         "claims": league.claims(shown), "trades": league.trades(shown),
     }
@@ -84,12 +89,13 @@ def changed(state: rs.State, data) -> list[str]:
 
 
 def hidden_changed(week: int):
-    """The season with everything a league in `week` must not know changed: real points and usage from that
-    week on, projections after it."""
+    """The season with everything a league in `week` must not know changed: real points, usage and box lines
+    from that week on, projections after it."""
     shaken = fakes.future_changed(DATA, after_week=week)
     usage = {key: replace(u, targets=u.targets + 5) if key[1] == week else u for key, u in shaken.usage.items()}
+    box = {key: replace(b, rec=b.rec + 3) if key[1] == week else b for key, b in shaken.box.items()}
     return replace(fakes.patched(shaken, actual={key: points + 7.5 for key, points in DATA.actual.items()
-                                                 if key[1] == week}), usage=usage)
+                                                 if key[1] == week}), usage=usage, box=box)
 
 
 # ---------------- no hindsight ----------------
@@ -115,7 +121,9 @@ def test_the_probe_is_live_a_played_week_and_this_weeks_projection_do_show():
     assert {"summary", "teams", "matchups", "scoreboards", "players", "details"} <= set(changed(state, this_week))
     used = replace(DATA, usage={key: replace(u, carries=u.carries + 9) if key[1] == 4 else u
                                 for key, u in DATA.usage.items()})
-    assert set(changed(state, used)) == {"players", "details"}
+    assert set(changed(state, used)) == {"players", "stat_lines", "details"}
+    boxed = replace(DATA, box={key: replace(b, rec=b.rec + 3) if key[1] == 4 else b for key, b in DATA.box.items()})
+    assert set(changed(state, boxed)) == {"players", "stat_lines", "details"}
     starter = next(pid for ids in state.results[3].starters[1].values() for pid in ids    # team 1's, week 4
                    if pid in state.teams[0].roster)
     tag_now, tag_before = (fakes.tagged(DATA, {(starter, week): fakes.Injury("Q")}) for week in (5, 4))
@@ -267,10 +275,32 @@ def test_team_in_a_past_week_shows_what_was_started_and_what_it_scored():
     past = views.team(game(state), team_id=2, week=3)
 
     started = [pid for ids in result.starters[2].values() for pid in ids]
-    assert [row["player"]["id"] for row in past["results"]] == started and past["played"] is True
+    starting, bench = ([row for row in past["results"] if row["starting"] is flag] for flag in (True, False))
+    assert [row["player"]["id"] for row in starting] == started and past["played"] is True
     assert past["actual_total"] == result.scores[2]
-    assert sum(row["points"] or 0.0 for row in past["results"]) == pytest.approx(result.scores[2], abs=0.01)
+    assert sum(row["points"] or 0.0 for row in starting) == pytest.approx(result.scores[2], abs=0.01)
     assert all(row["projection"] == round(DATA.projection(row["player"]["id"], 3), 2) for row in past["results"])
+    assert sorted(row["player"]["id"] for row in bench) == sorted(result.bench[2]) and len(bench) == 6
+    assert {row["slot"] for row in bench} == {"BN"} and past["bench_recorded"] is True
+    assert past["bench_total"] == pytest.approx(sum(DATA.points(pid, 3) for pid in result.bench[2]), abs=0.01)
+    assert [row["points"] for row in bench] == [DATA.actual.get((row["player"]["id"], 3)) for row in bench]
+
+
+def test_every_week_played_saves_each_teams_bench_and_an_old_save_shows_none():
+    state = at(6)
+    old = replace(state, results=tuple(replace(result, bench={}) for result in state.results))
+
+    shown, unsaved, now = (views.team(game(old), team_id=2, week=3), views.matchup(game(old), week=3),
+                           views.team(game(old), team_id=2))
+
+    for result in state.results:
+        team_ids = set(result.bench)
+        assert team_ids == {team.id for team in state.teams}
+        assert all(not set(result.bench[t]) & {p for ids in result.starters[t].values() for p in ids} for t in team_ids)
+    assert (shown["bench_recorded"], shown["bench_total"]) == (False, None)
+    assert all(row["starting"] for side in ("home", "away") for row in unsaved[side]["results"])
+    assert (now["bench_recorded"], now["bench_total"]) == (False, None)        # the current week: not played
+    assert any(not row["starting"] for row in now["results"])
 
 
 def test_a_manual_lineup_is_flagged_and_shown():
@@ -399,7 +429,7 @@ def test_players_default_to_the_available_ones_best_value_first():
     taken = league.players(shown, status="rostered", limit=1000)
 
     rostered = rs.rostered(state)
-    assert set(wire) == PAGE | {"week"} and set(wire["results"][0]) == WIRE_ROW
+    assert set(wire) == PAGE | {"week", "stats", "stat_week"} and set(wire["results"][0]) == WIRE_ROW
     known = len(DATA.as_of(6).players)                     # the pool as known in week 6, not the whole season's
     assert wire["total"] == known - 180 and everyone["total"] == known < len(DATA.players)
     assert all(row["status"] == "waivers" and row["owner"] is None for row in wire["results"])
@@ -448,11 +478,12 @@ def test_player_page_has_his_weeks_so_far_and_who_owns_him():
     detail, never = league.player(game(state), owned), league.player(game(state), fakes.NEVER_PLAYED_ID)
 
     weeks = detail["weeks"]
-    assert set(detail) == {"player", "weeks"} and set(detail["player"]) == WIRE_ROW
+    assert set(detail) == {"player", "weeks", "upcoming", "defense_basis"} and set(detail["player"]) == WIRE_ROW
     assert detail["player"]["owner"]["team_id"] == USER and detail["player"]["status"] == "rostered"
     assert [row["week"] for row in weeks] == [1, 2, 3, 4, 5, 6]
     assert set(weeks[0]) == {"week", "played", "team", "opponent", "bye", "out", "projection", "points", "ros_ppg",
-                             "value", "rank", "pos_rank", "expert_rank", "news", "injury", "usage"}
+                             "value", "rank", "pos_rank", "expert_rank", "news", "injury", "usage", "away", "defense",
+                             "box"}
     assert [row["played"] for row in weeks] == [True] * 5 + [False] and weeks[5]["points"] is None
     assert all(row["points"] == DATA.actual.get((owned, row["week"])) for row in weeks[:5])
     assert all(row["projection"] == round(DATA.projection(owned, row["week"]), 2) for row in weeks)

@@ -1,9 +1,11 @@
-import type { ReplaySummary, ReplayWireRow } from '../../api/types';
+import type { ReplayPlayerSort, ReplaySummary, ReplayWireRow } from '../../api/types';
+import { SortableHeader, type SortState } from '../../components/SortableHeader';
 import { EMPTY_VALUE, formatNumber } from '../../lib/format';
 import { buildHash, paths } from '../../router/routes';
+import { DefenseChip } from './gameUi';
+import type { StatColumn } from './playerColumns';
 import type { PlayerMoves } from './PlayersMoves';
-import { formatPoints, irBlockedText, ReplayPlayerCell } from './shared';
-import { UsageCells, UsageHeaders } from './usage';
+import { irBlockedText, ReplayPlayerCell } from './shared';
 
 /** The key of a direct "Add" (the one move a table row sends itself). */
 export function addKey(playerId: number): string {
@@ -38,7 +40,7 @@ function RowAction({ game, row, hasClaim, moves, onAdd, onClaim }: RowActionProp
   if (owner) {
     if (game.week > game.settings.trade_deadline_week) return null;
     // The Trades tab reads `with` (team id) and `want` (player id) from the query.
-    return <a href={buildHash(paths.replay, { game: game.id, view: 'trades', with: owner.team_id, want: player.id })}>Trade{' '}<span className="sr-only">for {player.name}</span></a>;
+    return <a href={buildHash(paths.play, { game: game.id, view: 'trades', with: owner.team_id, want: player.id })}>Trade{' '}<span className="sr-only">for {player.name}</span></a>;
   }
   // The server refuses adds and claims while an IR player has lost his tag; the banner says why.
   const blocked = irBlockedText(game) ?? undefined;
@@ -60,6 +62,10 @@ interface PlayersTableProps {
   game: ReplaySummary;
   week: number;
   rows: readonly ReplayWireRow[];
+  /** The stat columns for the chosen span and position (playerColumns.statColumns). */
+  columns: readonly StatColumn[];
+  sort: SortState<ReplayPlayerSort>;
+  onSort: (key: ReplayPlayerSort) => void;
   /** Players the user already has a claim in for. */
   claimedIds: ReadonlySet<number>;
   moves: PlayerMoves;
@@ -69,26 +75,23 @@ interface PlayersTableProps {
 }
 
 /**
- * The waiver wire. Every points and usage column is from weeks already played (usage: his last 3 games); Proj is
- * this week's pre-game projection. The table scrolls inside its wrapper on a phone.
+ * The waiver wire. Clicking a header sorts on the server (every page, not just this one). The stat columns
+ * follow the Stats picker; Opp carries how that defense treats his position. Scrolls inside its wrapper on a phone.
  */
-export function PlayersTable({ game, week, rows, claimedIds, moves, onAdd, onClaim, openPlayer }: PlayersTableProps) {
+export function PlayersTable({ game, week, rows, columns, sort, onSort, claimedIds, moves, onAdd, onClaim, openPlayer }: PlayersTableProps) {
   return (
     <div className="table-wrap">
-      <table className="data-table data-table--compact">
+      <table className="data-table data-table--compact replay-players__table">
         <caption className="sr-only">Players, week {week}</caption>
         <thead>
           <tr>
-            <th scope="col">Player</th>
+            <SortableHeader columnKey="name" sort={sort} onSort={onSort} align="start">Player</SortableHeader>
             <th scope="col">Status</th>
-            <th scope="col">Opp</th>
-            <th scope="col" className="num th--end" title={`Week ${week} projection`}>Proj</th>
-            <th scope="col" className="num th--end" title="Points in the last week played">Last</th>
-            <th scope="col" className="num th--end" title="Points this season">Season</th>
-            <th scope="col" className="num th--end" title="Points per game played">PPG</th>
-            <th scope="col" className="num th--end" title="Expected points per game for the rest of the season">ROS</th>
-            <th scope="col" className="num th--end" title="Trade chart value, 0-1000">Value</th>
-            <UsageHeaders span="last 3 games" />
+            <th scope="col" title={`Week ${week} opponent and how that defense treats his position`}>Opp</th>
+            {columns.map((column) => (column.sort
+              ? <SortableHeader key={column.id} columnKey={column.sort} sort={sort} onSort={onSort} title={column.title}>{column.label}</SortableHeader>
+              : <th key={column.id} scope="col" className="num th--end"><abbr title={column.title}>{column.label}</abbr></th>))}
+            <SortableHeader columnKey="value" sort={sort} onSort={onSort} title="Trade chart value, 0-1000">Value</SortableHeader>
             <th scope="col"><span className="sr-only">Action</span></th>
           </tr>
         </thead>
@@ -102,14 +105,12 @@ export function PlayersTable({ game, week, rows, claimedIds, moves, onAdd, onCla
                   {row.player.injury && row.news && <p className="hint">{row.news.text}</p>}
                 </td>
                 <td><StatusCell row={row} /></td>
-                <td>{row.bye ? 'BYE' : (row.opponent ?? EMPTY_VALUE)}</td>
-                <td className="num">{formatPoints(row.projection)}</td>
-                <td className="num">{formatPoints(row.last_points)}</td>
-                <td className="num">{formatPoints(row.season_points)}</td>
-                <td className="num">{row.games > 0 ? formatPoints(row.ppg) : EMPTY_VALUE}</td>
-                <td className="num">{formatPoints(row.ros_ppg)}</td>
+                <td className="replay-players__opp">
+                  {row.bye ? 'BYE' : (row.opponent ?? EMPTY_VALUE)}
+                  {!row.bye && <DefenseChip rating={row.defense} position={row.player.position} />}
+                </td>
+                {columns.map((column) => <td key={column.id} className="num">{column.text(row)}</td>)}
                 <td className="num">{formatNumber(row.value)}</td>
-                <UsageCells usage={row.usage} />
                 <td className="replay-players__action">
                   <RowAction game={game} row={row} hasClaim={claimedIds.has(row.player.id)} moves={moves} onAdd={onAdd} onClaim={onClaim} />
                   {/* The hub's alert announces it; this copy sits where the user is looking. */}

@@ -1,1 +1,26 @@
-/* Replay player card. Filled in by the player-card work. */
+/* Replay player card (inside the player drawer). Game Night tokens when the drawer sits in the .game shell,
+   the dashboard's own tokens otherwise. */
+.replay-card { display: grid; gap: var(--space-4); }
+.replay-card__head { display: grid; gap: var(--space-1); }
+.replay-card__head .replay-drawer__status { margin: 0; }
+.replay-card__injury { margin: 0; font-weight: 700; color: var(--color-neg); }
+.replay-card__news { margin: 0; max-width: 60ch; color: var(--game-ink-dim, var(--color-text-muted)); font-size: var(--text-sm); }
+.replay-card__usage { margin: 0; color: var(--game-ink-dim, var(--color-text-muted)); font-size: var(--text-sm); }
+
+/* Five stat tiles: the number is the loudest thing, the label sits under it. */
+.replay-card__tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(5.5rem, 1fr)); gap: 1px; margin: 0;
+  overflow: hidden; border: 1px solid var(--game-line, var(--color-border)); border-radius: var(--radius-sm);
+  background: var(--game-line, var(--color-border)); }
+.replay-card__tile { display: flex; flex-direction: column-reverse; gap: 2px; padding: var(--space-2) var(--space-3);
+  background: var(--game-panel-2, var(--color-surface-2)); }
+.replay-card__tile dt { color: var(--game-ink-dim, var(--color-text-muted)); font-size: var(--text-2xs); font-weight: 800;
+  letter-spacing: 0.1em; text-transform: uppercase; }
+.replay-card__tile dd { margin: 0; font-family: var(--font-display); font-size: var(--text-xl); font-style: italic; font-weight: 700;
+  line-height: 1; font-variant-numeric: tabular-nums; color: var(--game-ink, var(--color-text)); }
+
+.replay-card__section { display: grid; gap: var(--space-2); }
+.replay-card__section .hint { margin: 0; }
+.replay-card__subhead { margin: 0; }
+.replay-card__table td, .replay-card__table th { white-space: nowrap; }
+.replay-card__opp .game-chip { margin-inline-start: var(--space-2); }
+.replay-card__pts { font-weight: 750; }

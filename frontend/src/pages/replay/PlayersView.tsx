@@ -3,13 +3,16 @@ import { getReplayClaims, getReplayPlayers, getReplayTeam, replayAddDrop, submit
 import type { ReplayPlayerRef, ReplayPlayerSort, ReplayStatusFilter, ReplaySummary, ReplayWireRow } from '../../api/types';
 import { AsyncView } from '../../components/AsyncView';
 import { SelectField } from '../../components/SelectField';
+import { nextSort, type SortState } from '../../components/SortableHeader';
 import { EmptyState, TableSkeleton } from '../../components/StatusViews';
 import { useAsync } from '../../hooks/useAsync';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { ClaimsPanel } from './ClaimsPanel';
 import { DIALOG_KEY, PlayersDropDialog, type DropTarget } from './PlayersDropDialog';
 import { usePlayerMoves } from './PlayersMoves';
+import { DEFAULT_SORT, sortDirection, statColumns, visibleSort } from './playerColumns';
 import { addKey, PlayersTable } from './PlayersTable';
+import { SEASON_STATS, StatsPicker, type StatsChoice } from './StatsPicker';
 import { positionParam, PositionTabs, ReplayIrBlockedNotice, type ReplayPositionTab, type ReplayViewProps } from './shared';
 
 const PAGE_SIZE = 25;
@@ -22,15 +25,6 @@ const STATUS_OPTIONS: readonly { value: ReplayStatusFilter; label: string }[] = 
   { value: 'waivers', label: 'On waivers' },
   { value: 'rostered', label: 'Rostered' },
   { value: 'all', label: 'All players' },
-];
-
-const SORT_OPTIONS: readonly { value: ReplayPlayerSort; label: string }[] = [
-  { value: 'value', label: 'Value' },
-  { value: 'projection', label: 'Projection' },
-  { value: 'ros_ppg', label: 'Rest of season' },
-  { value: 'points', label: 'Season points' },
-  { value: 'adp', label: 'ADP' },
-  { value: 'name', label: 'Name' },
 ];
 
 /** Where the week stands for roster moves, worded from services/replay_waivers.py. */
@@ -67,10 +61,15 @@ function Pager({ total, offset, onChange }: PagerProps) {
 export function PlayersView({ game, version, act, isBusy, openPlayer }: ReplayViewProps) {
   const [tab, setTab] = useState<ReplayPositionTab>('ALL');
   const [status, setStatus] = useState<ReplayStatusFilter>('available');
-  const [sort, setSort] = useState<ReplayPlayerSort>('value');
+  const [chosenSort, setSort] = useState<SortState<ReplayPlayerSort>>(DEFAULT_SORT);
+  const [stats, setStats] = useState<StatsChoice>(SEASON_STATS);
   const [search, setSearch] = useState('');
   const query = useDebouncedValue(search.trim(), SEARCH_DELAY_MS);
-  const filterKey = [tab, status, sort, query].join('|');
+  // A week past the current one can't be asked for (a new game after a reload): fall back to the season.
+  const shown = stats.span === 'week' && (stats.week ?? 0) > game.week ? SEASON_STATS : stats;
+  const columns = statColumns(shown.span, shown.week, tab);
+  const sort = visibleSort(chosenSort, columns);       // a hidden column never sorts the table
+  const filterKey = [tab, status, sort.key, sort.direction, shown.span, shown.week, query].join('|');
   const [page, setPage] = useState({ filterKey, offset: 0 });
   const offset = page.filterKey === filterKey ? page.offset : 0;      // a new filter starts on its first page
   const [target, setTarget] = useState<DropTarget | null>(null);
@@ -82,7 +81,10 @@ export function PlayersView({ game, version, act, isBusy, openPlayer }: ReplayVi
   // In FAAB leagues the panel also shows every team's budget, so it stays after each waiver run.
   const showClaims = game.phase === 'waivers' || game.pending.claims > 0 || (isFaab && game.phase !== 'draft');
   const players = useAsync(
-    (signal) => getReplayPlayers(game.id, { position: positionParam(tab), search: query, status, sort, limit: PAGE_SIZE, offset }, signal),
+    (signal) => getReplayPlayers(game.id, {
+      position: positionParam(tab), search: query, status, sort: sort.key, dir: sort.direction, stats: shown.span,
+      stat_week: shown.week ?? undefined, limit: PAGE_SIZE, offset,
+    }, signal),
     [game.id, version, filterKey, offset],
   );
   const claims = useAsync(showClaims ? (signal) => getReplayClaims(game.id, signal) : null, [game.id, version]);
@@ -128,7 +130,7 @@ export function PlayersView({ game, version, act, isBusy, openPlayer }: ReplayVi
       <div className="weekly-controls replay-players__filters">
         <PositionTabs value={tab} onChange={setTab} withFlex />
         <SelectField label="Show" isInline value={status} options={STATUS_OPTIONS} onChange={(value) => setStatus(value as ReplayStatusFilter)} />
-        <SelectField label="Sort by" isInline value={sort} options={SORT_OPTIONS} onChange={(value) => setSort(value as ReplayPlayerSort)} />
+        <StatsPicker game={game} value={shown} onChange={setStats} />
         <div className="field field--inline replay-players__search">
           <label className="field__label" htmlFor={searchId}>Search</label>
           <input id={searchId} type="search" className="input" placeholder="Player name" maxLength={MAX_SEARCH_LENGTH} value={search} onChange={(event) => setSearch(event.target.value)} />
@@ -141,7 +143,8 @@ export function PlayersView({ game, version, act, isBusy, openPlayer }: ReplayVi
             {data.results.length === 0
               ? <EmptyState title="No players match">Try another position, status or name.</EmptyState>
               : (
-                <PlayersTable game={game} week={data.week} rows={data.results} claimedIds={claimedIds} moves={moves}
+                <PlayersTable game={game} week={data.week} rows={data.results} columns={columns} sort={sort}
+                  onSort={(key) => setSort(nextSort(sort, key, sortDirection))} claimedIds={claimedIds} moves={moves}
                   onAdd={add} onClaim={(row) => setTarget({ row, kind: 'claim' })} openPlayer={openPlayer} />
               )}
             <Pager total={data.total} offset={data.offset} onChange={(next) => setPage({ filterKey, offset: next })} />
