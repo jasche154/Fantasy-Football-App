@@ -69,9 +69,9 @@ function renderRoute(location: HashLocation): ReactNode {
 function Routes() {
   const location = useHashLocation();
   if (location.route.name === 'play') {
-    // The game is full screen: its own shell, with Exit back to the dashboard's #/replay.
+    // The game is full screen: its own shell, with Exit back to the dashboard's #/replay. No view is the team view.
     return (
-      <GameShell gameKey={location.query.game ?? ''} viewKey={location.query.view ?? ''}>
+      <GameShell gameKey={location.query.game ?? ''} viewKey={location.query.view || 'team'}>
         {renderRoute(location)}
       </GameShell>
     );

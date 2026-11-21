@@ -6,7 +6,7 @@
 
 /* ---------- Tokens ---------- */
 .game,
-body:has(.game) {
+html:has(.game) {
   --game-bg: light-dark(#eef1ef, #07090d);
   --game-field: light-dark(#e3e9e4, #0c1411);
   --game-panel: light-dark(#ffffff, #12161d);
@@ -27,9 +27,13 @@ body:has(.game) {
 
   --game-max: 1180px;
   --game-dock: 60px;
-  /* How far below the top a focused screen must land to clear the sticky scorebug. */
+  /* How far below the top a focused screen must land to clear the sticky scorebug, and above the bottom the phone dock. */
   --game-top-clearance: 12rem;
+  --game-bottom-clearance: calc(var(--game-dock) + env(safe-area-inset-bottom));
 }
+
+/* Keyboard focus and in-page scrolls stop clear of the sticky scorebug and the dock (WCAG 2.4.11). */
+html:has(.game) { scroll-padding-top: var(--game-top-clearance); scroll-padding-bottom: var(--game-bottom-clearance); }
 
 body:has(.game) {
   background: var(--game-bg);
@@ -57,23 +61,23 @@ body:has(.game) {
 .game ::selection { background: var(--game-led); color: var(--game-bg); }
 
 /* Fantasy-team accents (bars, dots, hero edges; never the only sign of who is who). 3:1 on the panels in both themes. */
-[data-team='1'] { --team: light-dark(#4f46c8, #9b96ff); }
-[data-team='2'] { --team: light-dark(#1f5fbf, #5c9dff); }
-[data-team='3'] { --team: light-dark(#1d7a3a, #4fd17a); }
-[data-team='4'] { --team: light-dark(#b45309, #ffa24a); }
-[data-team='5'] { --team: light-dark(#7c3aed, #c4a1ff); }
-[data-team='6'] { --team: light-dark(#0f7c80, #3fd0d6); }
-[data-team='7'] { --team: light-dark(#b0287a, #ff6fc0); }
-[data-team='8'] { --team: light-dark(#5f6d10, #c3d43c); }
-[data-team='9'] { --team: light-dark(#8a5a2b, #d9a066); }
-[data-team='10'] { --team: light-dark(#28388f, #8c9cff); }
-[data-team='11'] { --team: light-dark(#a61e4d, #ff8fab); }
-[data-team='12'] { --team: light-dark(#4c5d70, #9fb3c8); }
-[data-team='13'] { --team: light-dark(#7d6200, #f0c93a); }
-[data-team='14'] { --team: light-dark(#0a6aa1, #43b8f0); }
-[data-team='15'] { --team: light-dark(#2e6b4f, #7fcfa6); }
-[data-team='16'] { --team: light-dark(#8b2fa8, #e08cff); }
-.game-team--you { --team: var(--game-you); }
+.game [data-team='1'] { --team: light-dark(#4f46c8, #9b96ff); }
+.game [data-team='2'] { --team: light-dark(#1f5fbf, #5c9dff); }
+.game [data-team='3'] { --team: light-dark(#1d7a3a, #4fd17a); }
+.game [data-team='4'] { --team: light-dark(#b45309, #ffa24a); }
+.game [data-team='5'] { --team: light-dark(#7c3aed, #c4a1ff); }
+.game [data-team='6'] { --team: light-dark(#0f7c80, #3fd0d6); }
+.game [data-team='7'] { --team: light-dark(#b0287a, #ff6fc0); }
+.game [data-team='8'] { --team: light-dark(#5f6d10, #c3d43c); }
+.game [data-team='9'] { --team: light-dark(#8a5a2b, #d9a066); }
+.game [data-team='10'] { --team: light-dark(#28388f, #8c9cff); }
+.game [data-team='11'] { --team: light-dark(#a61e4d, #ff8fab); }
+.game [data-team='12'] { --team: light-dark(#4c5d70, #9fb3c8); }
+.game [data-team='13'] { --team: light-dark(#7d6200, #f0c93a); }
+.game [data-team='14'] { --team: light-dark(#0a6aa1, #43b8f0); }
+.game [data-team='15'] { --team: light-dark(#2e6b4f, #7fcfa6); }
+.game [data-team='16'] { --team: light-dark(#8b2fa8, #e08cff); }
+.game .game-team--you { --team: var(--game-you); }
 
 /* ---------- Pieces ---------- */
 .game-panel { border: 1px solid var(--game-line); border-radius: var(--radius-md); background: var(--game-panel); }
@@ -146,7 +150,7 @@ body:has(.game) {
   font: italic 700 var(--text-base) / 1.1 var(--font-display); letter-spacing: 0.02em; text-transform: uppercase; white-space: normal; text-align: center; }
 
 @media (min-width: 900px) {
-  .game, body:has(.game) { --game-top-clearance: 9rem; }
+  .game, html:has(.game) { --game-top-clearance: 9rem; --game-bottom-clearance: 0px; }
   .scorebug { grid-template-columns: auto minmax(10rem, 1fr) auto auto auto auto auto; grid-template-areas: 'exit league week game record theme advance';
     gap: var(--space-4); padding-block: var(--space-3); }
   .scorebug__game { justify-items: end; text-align: end; }
@@ -178,6 +182,12 @@ body:has(.game) {
   .game-nav__tab[aria-current='page'] { box-shadow: inset 0 -2px 0 var(--game-led); }
   .game-nav__tab .icon { width: 16px; height: 16px; }
   .game-nav__badge { position: static; }
+}
+
+/* A short landscape phone: the scorebug scrolls away instead of covering half the screen. */
+@media (max-height: 500px) {
+  .game-top { position: static; }
+  .game, html:has(.game) { --game-top-clearance: 0px; }
 }
 
 .game-body { display: grid; gap: var(--space-4); max-width: var(--game-max); margin: 0 auto;

@@ -7,7 +7,7 @@ import pytest
 
 from services import replay_box, replay_defense, replay_views_players as wire
 from tests import replay_fakes as fakes
-from tests.test_replay_views import DATA, at, finished, game, hidden_changed
+from tests.test_replay_views import DATA, at, drafting, finished, game, hidden_changed
 
 STAT_LINE = {"span", "week", "games", "points", "projection", "box"}
 UPCOMING = {"week", "opponent", "away", "bye", "estimate", "defense", "out_expected"}
@@ -124,6 +124,13 @@ def test_bad_sort_direction_stats_or_week_are_refused(query, message):
         wire.players(game(at(6)), **query)
 
 
+def test_a_stat_week_before_the_season_says_no_week_is_played():
+    for query in ({"stats": "week"}, {"stat_week": 1}):
+        with pytest.raises(ValueError, match="No weeks have been played yet"):
+            wire.players(game(drafting()), **query)
+    assert wire.players(game(drafting()), limit=1)["stat_week"] is None
+
+
 # ---------------- defense ratings on rows ----------------
 
 def test_rows_carry_the_rating_of_that_weeks_opponent_as_known_before_it():
@@ -156,6 +163,22 @@ def test_player_weeks_show_box_defense_and_road_games():
     assert weeks[0]["defense"] is None and weeks[3]["defense"] is not None
     roads = {row["away"] for rank in range(1, 11) for row in wire.player(game(state), fakes.player_id("RB", rank))["weeks"]}
     assert roads == {True, False}             # (the fake schedule keeps each team home, or away, all season)
+
+
+def test_a_played_week_after_a_trade_shows_his_new_team_and_its_opponent():
+    """Known after the game: the week he first played for his new team names that team's opponent and defense."""
+    pid, week = fakes.TRADED_ID, fakes.TRADED_WEEK
+    old, new = DATA.team_at(pid, week), dict(DATA.team_by_week[pid])[week]
+    assert old != new
+
+    row = next(r for r in wire.player(game(at(week + 1)), pid)["weeks"] if r["week"] == week)
+    before = next(r for r in wire.player(game(at(week)), pid)["weeks"] if r["week"] == week)
+
+    opponent = DATA.schedule.opponent(new, week)
+    assert (row["team"], row["opponent"]) == (new, opponent)
+    assert row["defense"] == replay_defense.ratings(DATA.as_of(week)).rating(opponent, "WR")
+    assert row["away"] == (DATA.schedule.game(new, week).away_team == new)
+    assert before["team"] == old             # not played yet: still the team known before the week
 
 
 def test_upcoming_weeks_estimate_from_the_rest_of_season_rate_and_the_defense():

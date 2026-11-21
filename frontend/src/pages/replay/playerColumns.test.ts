@@ -9,7 +9,7 @@ const labels = (span: Parameters<typeof statColumns>[0], tab: Parameters<typeof 
 describe('playerColumns', () => {
   it('picks the span columns, then the box columns for the position tab', () => {
     expect(labels('season', 'ALL')).toEqual(['Pts', 'PPG', 'GP', 'ROS', 'Car', 'RuYd', 'Tgt', 'Rec', 'ReYd']);
-    expect(labels('last4', 'QB')).toEqual(['Pts/G', 'Snap %', 'PaYd', 'PaTD', 'INT', 'RuYd']);
+    expect(labels('last4', 'QB')).toEqual(['Pts/G', 'Snap % (last 3)', 'PaYd', 'PaTD', 'INT', 'RuYd']);
     expect(labels('week', 'WR')).toEqual(['Proj', 'Pts', 'Tgt', 'Rec', 'ReYd', 'ReTD']);
     expect(labels('week', 'TE')).toEqual(labels('week', 'WR'));
     expect(labels('season', 'FLEX')).toEqual(labels('season', 'RB'));

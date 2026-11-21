@@ -40,11 +40,12 @@
 .replay-roster__row--grab { cursor: grab; }
 .replay-roster__row--grab:active { cursor: grabbing; }
 .replay-roster tbody > .replay-roster__row--moving > * { background: var(--color-accent-soft); }
-.replay-roster__row--moving { transform: scale(1.02); box-shadow: var(--shadow-pop); position: relative; z-index: 1; }
+/* An outline, not a box-shadow: shadows on <tr> are drawn unreliably across browsers. */
+.replay-roster__row--moving { transform: scale(1.02); outline: 2px solid var(--color-accent); outline-offset: -2px; position: relative; z-index: 1; }
 .replay-roster tbody > .replay-roster__row--target > * { background: var(--color-pos-soft); }
 .replay-roster__row--target > :first-child { box-shadow: inset 2px 0 0 var(--color-pos); }
-/* Nothing in a dimmed row can be pressed during a move: its buttons are gone. */
-.replay-roster__row--dim { opacity: 0.35; }
+/* Nothing in a dimmed row can be pressed during a move: its buttons are gone and the name is plain text. */
+.replay-roster__row--dim { opacity: 0.6; }
 @media (prefers-reduced-motion: no-preference) {
   .replay-roster tbody > tr { transition: opacity var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-out); }
 }
@@ -62,15 +63,21 @@
 .replay-hero__label { grid-column: 1 / -1; color: var(--game-ink-dim, var(--color-text-muted)); }
 .replay-hero__side { display: grid; gap: 2px; min-width: 0; padding-top: var(--space-2);
   box-shadow: inset 0 3px 0 var(--team, var(--color-border-strong)); }
-.replay-hero__side:last-child { text-align: end; justify-items: end; }
+.replay-hero__side:last-of-type { text-align: end; justify-items: end; }
 .replay-hero__team { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); overflow-wrap: anywhere;
   font-family: var(--font-display); font-weight: 700; font-size: 1.0625rem; }
-.replay-hero__side:last-child .replay-hero__team { justify-content: flex-end; }
+.replay-hero__side:last-of-type .replay-hero__team { justify-content: flex-end; }
 .replay-hero__record,
 .replay-hero__sub { color: var(--game-ink-dim, var(--color-text-muted)); font-size: var(--text-sm); }
-.replay-hero .game-score { color: var(--game-led, var(--color-text)); }
+/* Capped so two six-character scores and "vs" fit side by side down to 480px; below that the sides stack. */
+.replay-hero .game-score { color: var(--game-led, var(--color-text)); font-size: clamp(1.75rem, 0.9rem + 6vw, 6.5rem); }
 .replay-hero__vs { align-self: center; color: var(--game-ink-dim, var(--color-text-subtle)); font-family: var(--font-display); font-style: italic;
   font-weight: 700; text-transform: uppercase; }
+@media (max-width: 479.98px) {
+  .replay-hero { grid-template-columns: minmax(0, 1fr); }
+  .replay-hero__side:last-of-type { text-align: start; justify-items: start; }
+  .replay-hero__side:last-of-type .replay-hero__team { justify-content: flex-start; }
+}
 
 /* Two tables: side by side only once both fit whole (each is about 370px at its narrowest), stacked otherwise. */
 .replay-faceoff { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr)); gap: var(--space-3); align-items: start; }
@@ -79,7 +86,8 @@
    Each row carries its own slot, so nothing relies on the two tables lining up. */
 .replay-faceoff__table tbody td { height: 3.4rem; }
 .replay-faceoff__bench td { background: var(--game-panel-2, var(--color-surface-2)); }
-.replay-faceoff__bench .game-subhead { padding-top: var(--space-3); text-align: start; }
+.replay-faceoff__benchhead { padding-top: var(--space-3); text-align: start; }
+.replay-faceoff__benchhead .game-subhead { margin: 0; }
 .replay-faceoff__table tbody .replay-faceoff__total td { height: auto; }
 .replay-faceoff__total > * { font-weight: 750; }
 .replay-faceoff__total th { text-align: start; font-family: var(--font-display); font-size: var(--text-2xs); letter-spacing: 0.12em; text-transform: uppercase; }

@@ -89,8 +89,10 @@ export function PlayersTable({ game, week, rows, columns, sort, onSort, claimedI
             <th scope="col">Status</th>
             <th scope="col" title={`Week ${week} opponent and how that defense treats his position`}>Opp</th>
             {columns.map((column) => (column.sort
-              ? <SortableHeader key={column.id} columnKey={column.sort} sort={sort} onSort={onSort} title={column.title}>{column.label}</SortableHeader>
-              : <th key={column.id} scope="col" className="num th--end"><abbr title={column.title}>{column.label}</abbr></th>))}
+              ? <SortableHeader key={column.id} columnKey={column.sort} sort={sort} onSort={onSort} title={column.title}>
+                  {column.label}<span className="sr-only">{`, ${column.title}`}</span>
+                </SortableHeader>
+              : <th key={column.id} scope="col" className="num th--end"><abbr title={column.title}>{column.label}</abbr><span className="sr-only">{`, ${column.title}`}</span></th>))}
             <SortableHeader columnKey="value" sort={sort} onSort={onSort} title="Trade chart value, 0-1000">Value</SortableHeader>
             <th scope="col"><span className="sr-only">Action</span></th>
           </tr>

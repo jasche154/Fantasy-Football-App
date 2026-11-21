@@ -65,7 +65,7 @@ function spanColumns(span: ReplayStatsSpan, week: number | null): StatColumn[] {
     return [
       { id: 'pts', label: 'Pts/G', title: 'Points a game, last 4 games played', sort: 'line_points', text: (row) => formatPoints(row.line.points) },
       {
-        id: 'snap', label: 'Snap %', title: 'Share of offensive snaps, last 3 games', sort: null,
+        id: 'snap', label: 'Snap % (last 3)', title: 'Share of offensive snaps, last 3 games', sort: null,
         text: (row) => formatPercentValue(row.usage?.snap_pct ?? null, 0),
       },
     ];

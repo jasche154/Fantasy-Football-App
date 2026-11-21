@@ -124,7 +124,8 @@ describe('TeamView drag and drop', () => {
     const cook = rowOf('James Cook');
     expect(cook).toHaveAttribute('draggable', 'true');
     fireEvent.dragStart(cook);
-    expect(cook).toHaveClass('replay-roster__row--moving');
+    expect(cook).not.toHaveClass('replay-roster__row--moving');                     // the pick waits a frame (Chrome drag)
+    await waitFor(() => expect(cook).toHaveClass('replay-roster__row--moving'));
     expect(rowOf('Isiah Pacheco')).toHaveClass('replay-roster__row--target');
     expect(rowOf('Patrick Mahomes')).toHaveClass('replay-roster__row--dim');          // illegal spots dim while dragging
     expect(rowOf('Chris Olave')).toHaveClass('replay-roster__row--dim');
@@ -164,6 +165,7 @@ describe('TeamView drag and drop', () => {
     expect(rowOf('Patrick Mahomes')).not.toHaveClass('replay-roster__row--dim');
 
     fireEvent.dragStart(rowOf('James Cook'));
+    await waitFor(() => expect(rowOf('James Cook')).toHaveClass('replay-roster__row--moving'));
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('button', { name: /^Swap/ })).not.toBeInTheDocument();
     expect(rowOf('Isiah Pacheco')).not.toHaveClass('replay-roster__row--target');

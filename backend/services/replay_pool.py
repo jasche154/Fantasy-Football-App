@@ -184,6 +184,7 @@ def clear_cache() -> None:
     with _cache_lock:
         _cache.clear()
     _as_of.cache_clear()
+    replay_defense.ratings.cache_clear()
 
 
 def load_season_data(session: Session, season: int, scoring: str) -> SeasonData:

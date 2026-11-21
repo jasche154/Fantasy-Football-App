@@ -147,7 +147,7 @@ class WeekResult(_Record):
     starters: Mapping[int, Mapping[str, tuple[int, ...]]] = field(hash=False)    # team id -> slot -> players
     points: Mapping[int, float] = field(hash=False)        # player id -> real points, every team's starters only
     playoff: bool = False
-    bench: Mapping[int, tuple[int, ...]] = field(default_factory=dict, hash=False)   # team id -> bench; {} = not saved
+    bench: Mapping[int, tuple[int, ...]] = field(default_factory=lambda: MappingProxyType({}), hash=False)  # {} = not saved
 
 
 @dataclass(frozen=True)

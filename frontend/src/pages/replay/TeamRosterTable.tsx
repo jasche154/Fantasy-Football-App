@@ -86,7 +86,7 @@ function Actions({ spot, editing, irName }: { spot: LineupSpot; editing: RosterE
 }
 
 /** The seven columns after Slot, the same for every row. */
-function PlayerCells({ row, openPlayer }: { row: ReplayPlayerRow; openPlayer: (playerId: number) => void }) {
+function PlayerCells({ row, openPlayer }: { row: ReplayPlayerRow; openPlayer: ((playerId: number) => void) | undefined }) {
   return (
     <>
       {/* The Opp column carries the opponent and the bye, so the cell only adds the tag, Out and Trade-locked. */}
@@ -103,7 +103,8 @@ function PlayerCells({ row, openPlayer }: { row: ReplayPlayerRow; openPlayer: (p
   );
 }
 
-function rowCells(row: ReplayPlayerRow | null | undefined, openPlayer: (playerId: number) => void) {
+/** `openPlayer` undefined: the name is plain text (a row dimmed during a move). */
+function rowCells(row: ReplayPlayerRow | null | undefined, openPlayer: ((playerId: number) => void) | undefined) {
   return row ? <PlayerCells row={row} openPlayer={openPlayer} /> : <td className="muted" colSpan={7}>Empty</td>;
 }
 
@@ -122,7 +123,7 @@ function SpotRow({ spot, openPlayer, editing, irName }: SpotRowProps) {
   return (
     <tr className={className || undefined} {...lineupDragProps(spot, editing)}>
       <td className="td--pos"><span className="replay-slot">{spot.slot}</span></td>
-      {rowCells(row, openPlayer)}
+      {rowCells(row, state === 'dim' ? undefined : openPlayer)}
       {editing && <Actions spot={spot} editing={editing} irName={irName} />}
     </tr>
   );
@@ -134,7 +135,7 @@ function IrRow({ row, openPlayer, editing }: { row: ReplayPlayerRow | undefined;
   return (
     <tr className={editing?.source ? 'replay-roster__row--dim' : undefined}>
       <td className="td--pos"><span className="replay-slot">IR</span></td>
-      {rowCells(row, openPlayer)}
+      {rowCells(row, editing?.source ? undefined : openPlayer)}
       {editing && (
         <td className="replay-roster__actions">
           {player && !editing.source && (

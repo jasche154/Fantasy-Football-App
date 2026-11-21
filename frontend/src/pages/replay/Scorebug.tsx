@@ -2,7 +2,7 @@ import type { ReplaySummary } from '../../api/types';
 import { ThemeToggle } from '../../layout/ThemeToggle';
 import { buildHash, paths } from '../../router/routes';
 import { scoringLabel } from '../../state/leagueSettings';
-import { ScoreNumber } from './gameUi';
+import { ScoreNumber, useFinalArrived } from './gameUi';
 import { formatRecord, ordinal } from './shared';
 
 function weekChip(game: ReplaySummary): string {
@@ -13,9 +13,10 @@ function weekChip(game: ReplaySummary): string {
 /** YOU x – y OPP: projections until the week is final. */
 function Score({ game }: { game: ReplaySummary }) {
   const { matchup } = game;
+  const isFinal = matchup != null && matchup.you.points != null && matchup.opponent.points != null;
+  const arrived = useFinalArrived(String(matchup?.week ?? ''), isFinal);
   if (game.phase === 'draft') return null;
-  if (!matchup) return <p className="scorebug__game scorebug__idle">No game this week</p>;
-  const isFinal = matchup.you.points != null && matchup.opponent.points != null;
+  if (!matchup) return <p className="scorebug__game scorebug__idle">{game.phase === 'complete' ? 'Season over' : 'No game this week'}</p>;
   const mine = isFinal ? matchup.you.points : matchup.you.projected;
   const theirs = isFinal ? matchup.opponent.points : matchup.opponent.projected;
   return (
@@ -23,9 +24,9 @@ function Score({ game }: { game: ReplaySummary }) {
       <p className="game-label scorebug__status">{matchup.label ?? `Week ${matchup.week}`} · {isFinal ? 'Final' : 'Projected'}</p>
       <p className="scorebug__score">
         <span className="scorebug__side" aria-hidden="true">You</span>
-        <ScoreNumber size="sm" value={mine} label={isFinal ? 'Your score' : 'You, projected'} />
+        <ScoreNumber size="sm" value={mine} label={isFinal ? 'Your score' : 'You, projected'} countUp={arrived} />
         <span className="scorebug__dash" aria-hidden="true">–</span>
-        <ScoreNumber size="sm" value={theirs} label={`${matchup.opponent.name}${isFinal ? '' : ', projected'}`} />
+        <ScoreNumber size="sm" value={theirs} label={`${matchup.opponent.name}${isFinal ? '' : ', projected'}`} countUp={arrived} />
         <span className="scorebug__side" aria-hidden="true">Opp</span>
       </p>
       <p className="scorebug__vs">vs {matchup.opponent.name} ({formatRecord(matchup.opponent.record)})</p>

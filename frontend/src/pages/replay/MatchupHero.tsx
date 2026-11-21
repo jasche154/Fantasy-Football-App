@@ -1,8 +1,8 @@
 import type { ReplayMatchup, ReplayTeam } from '../../api/types';
-import { ScoreNumber, TeamBadge } from './gameUi';
+import { ScoreNumber, TeamBadge, useFinalArrived } from './gameUi';
 import { formatPoints, formatRecord, ordinal } from './shared';
 
-function HeroSide({ side, matchup }: { side: ReplayTeam; matchup: ReplayMatchup }) {
+function HeroSide({ side, matchup, countUp }: { side: ReplayTeam; matchup: ReplayMatchup; countUp: boolean }) {
   const isWinner = matchup.winner === side.team.team_id;
   return (
     <div className={`replay-hero__side${isWinner ? ' is-winner' : ''}`} data-team={side.team.team_id}>
@@ -12,7 +12,8 @@ function HeroSide({ side, matchup }: { side: ReplayTeam; matchup: ReplayMatchup 
       </p>
       <p className="replay-hero__record">{formatRecord(side.record)} · {ordinal(side.record.rank)}</p>
       {/* Real points only once the week is played; before that the big number is the projection. */}
-      <ScoreNumber value={matchup.played ? side.actual_total : side.projected_total} label={side.team.is_user ? 'Your score' : `${side.team.name} score`} />
+      <ScoreNumber value={matchup.played ? side.actual_total : side.projected_total} label={side.team.is_user ? 'Your score' : `${side.team.name} score`}
+        countUp={countUp} />
       <p className="replay-hero__sub">{matchup.played ? `Projected ${formatPoints(side.projected_total)}` : 'Projected'}</p>
     </div>
   );
@@ -22,12 +23,17 @@ function HeroSide({ side, matchup }: { side: ReplayTeam; matchup: ReplayMatchup 
 export function MatchupHero({ matchup, left, right }: { matchup: ReplayMatchup; left: ReplayTeam; right: ReplayTeam }) {
   const kind = matchup.label ?? (matchup.playoff ? 'Playoffs' : 'Regular season');
   const isTie = matchup.played && matchup.winner === null;
+  // Counts up only when this game's final lands while it is on screen (just played), not when a final is opened.
+  const arrived = useFinalArrived(`${matchup.week}:${left.team.team_id}:${right.team.team_id}`, matchup.played);
   return (
     <div className="replay-hero">
-      <p className="replay-hero__label game-label">{kind} · Week {matchup.week} · {matchup.played ? (isTie ? 'Final, a tie' : 'Final') : 'Not played yet'}</p>
-      <HeroSide side={left} matchup={matchup} />
+      <p className="replay-hero__label game-label">{kind} · Week {matchup.week} · {matchup.played ? (isTie ? 'Final, a tie' : 'Final') : 'Projected'}</p>
+      <HeroSide side={left} matchup={matchup} countUp={arrived} />
       <span className="replay-hero__vs" aria-hidden="true">vs</span>
-      <HeroSide side={right} matchup={matchup} />
+      <HeroSide side={right} matchup={matchup} countUp={arrived} />
+      <p className="sr-only" aria-live="polite">
+        {arrived ? `Final: ${left.team.name} ${formatPoints(left.actual_total)}, ${right.team.name} ${formatPoints(right.actual_total)}.` : ''}
+      </p>
     </div>
   );
 }

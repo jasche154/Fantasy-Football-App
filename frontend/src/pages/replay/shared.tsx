@@ -310,14 +310,39 @@ interface ReplayDrawerProps {
   children: ReactNode;
 }
 
-/** A right-hand dialog on the house .news-panel frame: focus moves in, Escape closes, focus goes back to the opener. */
+/** Makes every element outside `keep` (and its ancestors) inert, so Tab can't leave a modal; returns the undo. */
+function inertOutside(keep: readonly Element[]): () => void {
+  const changed: Element[] = [];
+  const onPath = new Set<Element>(keep);
+  for (let parent = keep[0]?.parentElement; parent && parent !== document.documentElement; parent = parent.parentElement) {
+    for (const child of Array.from(parent.children)) {
+      if (onPath.has(child) || child.hasAttribute('inert')) continue;
+      child.setAttribute('inert', '');
+      changed.push(child);
+    }
+    onPath.add(parent);
+  }
+  return () => changed.forEach((element) => element.removeAttribute('inert'));
+}
+
+/**
+ * A right-hand dialog on the house .news-panel frame: focus moves in, the rest of the page is inert while it is open,
+ * Escape closes, focus goes back to the opener.
+ */
 export function ReplayDrawer({ eyebrow, title, label, closeLabel = 'Close', size, onClose, children }: ReplayDrawerProps) {
   const titleId = useId();
   const closeRef = useRef<HTMLButtonElement>(null);
+  const backdropRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLElement>(null);
   useEffect(() => {
     const opener = document.activeElement;
+    const keep = [panelRef.current, backdropRef.current].filter((element): element is HTMLElement => element !== null);
+    const restore = inertOutside(keep);
     closeRef.current?.focus();
-    return () => { if (opener instanceof HTMLElement) opener.focus(); };
+    return () => {
+      restore();                      // first: an inert opener can't take focus back
+      if (opener instanceof HTMLElement) opener.focus();
+    };
   }, []);
   useEffect(() => {
     // Capture phase and preventDefault: Escape closes only the drawer, not also what is behind it (a lineup move).
@@ -327,8 +352,8 @@ export function ReplayDrawer({ eyebrow, title, label, closeLabel = 'Close', size
   }, [onClose]);
   return (
     <>
-      <div className="news-panel__backdrop" onClick={onClose} aria-hidden="true" />
-      <aside className={size === 'wide' ? 'news-panel replay-drawer--wide' : 'news-panel'} role="dialog" aria-modal="true" aria-label={label} aria-labelledby={label ? undefined : titleId}>
+      <div ref={backdropRef} className="news-panel__backdrop" onClick={onClose} aria-hidden="true" />
+      <aside ref={panelRef} className={size === 'wide' ? 'news-panel replay-drawer--wide' : 'news-panel'} role="dialog" aria-modal="true" aria-label={label} aria-labelledby={label ? undefined : titleId}>
         <header className="news-panel__head">
           <div>
             <p className="news-panel__eyebrow">{eyebrow}</p>

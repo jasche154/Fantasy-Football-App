@@ -45,7 +45,7 @@ describe('MatchupView', () => {
     expect(api.callsTo(MATCHUP_PATH)[0].url.search).toBe('?week=5');
     expect(mine).toHaveAccessibleName('Your Team lineup, week 5');
     expect(theirs).toHaveAccessibleName('Sunday Scaries lineup, week 5');
-    expect(faceOff()).toHaveTextContent('Regular season · Week 5 · Not played yet');
+    expect(faceOff()).toHaveTextContent('Regular season · Week 5 · Projected');
     // The score is read once (label and value) and drawn once (the digits), hence the number twice.
     expect(faceOff()).toHaveTextContent('Your Team (you)3-1 · 2ndYour score: 118.40118.40Projected');
     expect(faceOff()).toHaveTextContent('Sunday Scaries2-2 · 6thSunday Scaries score: 104.75104.75Projected');
@@ -63,7 +63,7 @@ describe('MatchupView', () => {
     expect(cells(theirs, 2)[0]).toBe('RB');
     expect(within(mine).getAllByRole('row')).toHaveLength(13);                         // header, 9 starters, Bench, 2 on the bench
     expect(within(theirs).getAllByRole('row')).toHaveLength(12);
-    expect(within(mine).getByRole('columnheader', { name: 'Bench' })).toBeInTheDocument();
+    expect(within(mine).getByRole('rowheader', { name: 'Bench' })).toBeInTheDocument();
     expect(within(mine).queryByRole('rowheader', { name: 'Bench total' })).not.toBeInTheDocument();     // nothing scored yet
     expect(screen.queryByText(/bench wasn.t saved/)).not.toBeInTheDocument();
 
@@ -133,7 +133,7 @@ describe('MatchupView', () => {
     expect(api.callsTo(MATCHUP_PATH).at(-1)!.url.search).toBe(`?week=5&team_id=${OPPONENT_TEAM_ID}`);
   });
 
-  it('goes back to the user\'s game when the week moves on', async () => {
+  it('stays on the week just played, back on the user\'s game, when the week moves on', async () => {
     const api = mockFetch([META_ROUTE, { path: MATCHUP_PATH, reply: json(matchup()) }, { path: SCOREBOARD_PATH, reply: json(scoreboard()) }]);
     const user = userEvent.setup();
     const { rerender } = renderWithProviders(<MatchupView {...viewProps()} />);
@@ -141,8 +141,28 @@ describe('MatchupView', () => {
     await user.click(within(board).getAllByRole('button')[1]);
     await vi.waitFor(() => expect(api.callsTo(MATCHUP_PATH).at(-1)!.url.search).toBe('?week=5&team_id=1'));
 
-    rerender(<AppProviders><MatchupView {...viewProps({ game: summary({ week: 6 }) })} /></AppProviders>);
-    await vi.waitFor(() => expect(api.callsTo(MATCHUP_PATH).at(-1)!.url.search).toBe('?week=6'));
+    rerender(<AppProviders><MatchupView {...viewProps({ game: summary({ week: 6 }), version: 2 })} /></AppProviders>);
+    await vi.waitFor(() => expect(api.callsTo(MATCHUP_PATH).at(-1)!.url.search).toBe('?week=5'));
+    expect(screen.getByLabelText('Week')).toHaveValue('5');
+    await user.selectOptions(screen.getByLabelText('Week'), '6');
+    expect(api.callsTo(MATCHUP_PATH).at(-1)!.url.search).toBe('?week=6');
+  });
+
+  it('counts the final up and announces it once when the week on screen is played', async () => {
+    let isPlayed = false;
+    const final = () => matchup({ played: true, winner: USER_TEAM_ID, away: team({ actual_total: 121.46 }),
+      home: { ...matchup().home, actual_total: 98.2 } });
+    mockFetch([META_ROUTE, { path: MATCHUP_PATH, reply: () => json(isPlayed ? final() : matchup()) },
+      { path: SCOREBOARD_PATH, reply: json(scoreboard()) }]);
+    const { rerender } = renderWithProviders(<MatchupView {...viewProps()} />);
+    await screen.findAllByRole('table');
+    const live = faceOff().querySelector('[aria-live="polite"]');
+    expect(live).toHaveTextContent('');
+
+    isPlayed = true;
+    rerender(<AppProviders><MatchupView {...viewProps({ game: summary({ week: 6 }), version: 2 })} /></AppProviders>);
+    await vi.waitFor(() => expect(live).toHaveTextContent('Final: Your Team 121.46, Sunday Scaries 98.20.'));
+    expect(faceOff()).toHaveTextContent('Regular season · Week 5 · Final');
   });
 
   it('shows final scores and the winner on a played scoreboard', async () => {
@@ -171,7 +191,7 @@ describe('MatchupView', () => {
     const quarter = matchup({ playoff: true, label: 'Quarter-final', home: team({ team: teamRef(3) }), away: team({ team: teamRef(6) }) });
     renderMatchup([{ path: MATCHUP_PATH, reply: json(quarter) }]);
     expect(await screen.findByText(/No game this week for your team\./)).toBeInTheDocument();
-    expect(faceOff()).toHaveTextContent('Quarter-final · Week 5 · Not played yet');
+    expect(faceOff()).toHaveTextContent('Quarter-final · Week 5 · Projected');
   });
 
   it("does not call another week's game the user's bye while this week loads", async () => {

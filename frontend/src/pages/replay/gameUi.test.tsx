@@ -1,6 +1,7 @@
-import { act, render, screen } from '@testing-library/react';
+import { StrictMode } from 'react';
+import { act, render, renderHook, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DefenseChip, ScoreNumber, TeamBadge } from './gameUi';
+import { DefenseChip, ScoreNumber, TeamBadge, useFinalArrived } from './gameUi';
 import { teamRef } from './fixtures';
 
 function setReducedMotion(reduce: boolean) {
@@ -47,6 +48,46 @@ describe('ScoreNumber', () => {
     expect(digits(container)).toBe('100.00');
   });
 
+  function fakeFrames() {
+    setReducedMotion(false);
+    let now = 0;
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => frames.push(callback));
+    vi.stubGlobal('cancelAnimationFrame', () => {});
+    return (ms: number) => act(() => { now = ms; frames.splice(0).forEach((frame) => frame(ms)); });
+  }
+
+  it('still counts up under StrictMode', () => {
+    const step = fakeFrames();
+    const { container } = render(<StrictMode><ScoreNumber value={100} label="Your score" countUp /></StrictMode>);
+    expect(digits(container)).toBe('0.00');
+    step(300);
+    expect(Number(digits(container))).toBeGreaterThan(50);
+    step(600);
+    expect(digits(container)).toBe('100.00');
+  });
+
+  it('counts from the number on screen when the target changes mid-count', () => {
+    const step = fakeFrames();
+    const { container, rerender } = render(<ScoreNumber value={100} label="Your score" countUp />);
+    step(300);
+    const shown = Number(digits(container));
+    rerender(<ScoreNumber value={50} label="Your score" countUp />);
+    expect(Number(digits(container))).toBeCloseTo(shown, 1);
+    step(1000);
+    expect(digits(container)).toBe('50.00');
+  });
+
+  it('counts from the projection on screen once the final arrives', () => {
+    const step = fakeFrames();
+    const { container, rerender } = render(<ScoreNumber value={90} label="Your score" />);
+    rerender(<ScoreNumber value={120} label="Your score" countUp />);
+    expect(digits(container)).toBe('90.00');
+    step(600);
+    expect(digits(container)).toBe('120.00');
+  });
+
   it('does not animate without countUp', () => {
     setReducedMotion(false);
     const { container } = render(<ScoreNumber value={98.2} size="sm" label="Opponent" />);
@@ -88,5 +129,20 @@ describe('DefenseChip', () => {
   it('says "Tough" in text for the bottom quarter', () => {
     render(<DefenseChip position="WR" rating={{ rank: 29, of: 32, tier: 'tough', factor: 0.84, allowed: 18 }} />);
     expect(screen.getByText('Tough · 29th')).toHaveClass('game-chip--tough');
+  });
+});
+
+describe('useFinalArrived', () => {
+  it('is true only when the same game turns final on screen', () => {
+    const { result, rerender } = renderHook(({ key, isFinal }) => useFinalArrived(key, isFinal), { initialProps: { key: '5', isFinal: true } });
+    expect(result.current).toBe(false);                                     // opened already final
+    rerender({ key: '6', isFinal: false });
+    expect(result.current).toBe(false);
+    rerender({ key: '6', isFinal: true });
+    expect(result.current).toBe(true);
+    rerender({ key: '6', isFinal: true });
+    expect(result.current).toBe(true);                                      // stays while the game is on screen
+    rerender({ key: '7', isFinal: true });
+    expect(result.current).toBe(false);
   });
 });

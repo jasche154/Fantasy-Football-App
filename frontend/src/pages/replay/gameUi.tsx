@@ -12,34 +12,45 @@ function prefersReducedMotion(): boolean {
   return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
-/** The number to draw: `target` at once, or (with `enabled`) counting up to it from the last value shown (0 at first). */
+/**
+ * The number to draw: `target` at once, or (with `enabled`) counting up to it from the frame last drawn (0 at first).
+ * The last frame lives in a ref, so a StrictMode re-run or a new target mid-count carries on from what is on screen.
+ */
 function useCountUp(target: number | null, enabled: boolean): number | null {
   const run = enabled && target !== null && !prefersReducedMotion();
-  const shown = useRef(0);
-  const [frame, setFrame] = useState<number | null>(run ? 0 : null);
+  const drawn = useRef(0);
+  const [frame, setFrame] = useState<number | null>(null);
   useLayoutEffect(() => {
-    if (!run || target === null) return undefined;
-    const origin = shown.current;
+    if (!run || target === null) {
+      if (target !== null) drawn.current = target;
+      return undefined;
+    }
+    const origin = drawn.current;
     const start = performance.now();
     let id = 0;
     const tick = (now: number) => {
       const t = Math.min(1, (now - start) / COUNT_UP_MS);
-      const eased = 1 - (1 - t) ** 3;
-      if (t < 1) {
-        setFrame(origin + (target - origin) * eased);
-        id = requestAnimationFrame(tick);
-      } else {
-        setFrame(null);
-      }
+      drawn.current = origin + (target - origin) * (1 - (1 - t) ** 3);
+      setFrame(t < 1 ? drawn.current : null);
+      if (t < 1) id = requestAnimationFrame(tick);
     };
     setFrame(origin);
     id = requestAnimationFrame(tick);
-    return () => {
-      cancelAnimationFrame(id);
-      shown.current = target;
-    };
+    return () => cancelAnimationFrame(id);
   }, [run, target]);
   return run && frame !== null ? frame : target;
+}
+
+/**
+ * True from the render in which `isFinal` turns true for the same `key` (a game's result arriving on screen) until
+ * the key changes: a game opened already final, or a projection moving, never counts.
+ */
+export function useFinalArrived(key: string, isFinal: boolean): boolean {
+  const [seen, setSeen] = useState({ key, isFinal, arrived: false });
+  if (seen.key === key && seen.isFinal === isFinal) return seen.arrived;
+  const arrived = seen.key === key && !seen.isFinal && isFinal;
+  setSeen({ key, isFinal, arrived });       // React's "adjust state while rendering" pattern
+  return arrived;
 }
 
 interface ScoreNumberProps {
@@ -47,7 +58,7 @@ interface ScoreNumberProps {
   size?: 'hero' | 'sm';
   /** Who or what the number is, for screen readers ("Your score"). */
   label: string;
-  /** Count up to the value (from 0, then from the last value) over 600ms: pass it when a week's result arrives. */
+  /** Count up to the value (from 0, or from the number on screen) over 600ms: pass it when a week's result arrives. */
   countUp?: boolean;
 }
 

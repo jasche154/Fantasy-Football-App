@@ -4,7 +4,7 @@
 (per-game rates, 1 decimal; None for no games).
 """
 from collections.abc import Iterable
-from dataclasses import astuple, dataclass, fields
+from dataclasses import dataclass, fields
 
 from services.projections import GameLine
 
@@ -32,14 +32,16 @@ def line(game: GameLine) -> BoxLine:
 
 
 def total(lines: Iterable[BoxLine]) -> BoxLine:
-    sums = [0] * len(KEYS)
+    sums = dict.fromkeys(KEYS, 0)
     for box in lines:
-        sums = [a + b for a, b in zip(sums, astuple(box), strict=True)]
-    return BoxLine(*sums)
+        for key in KEYS:
+            sums[key] += getattr(box, key)
+    return BoxLine(**sums)
 
 
 def mean(lines: Iterable[BoxLine]) -> BoxLine | None:
     lines = list(lines)
     if not lines:
         return None
-    return BoxLine(*(round(value / len(lines), 1) for value in astuple(total(lines))))
+    summed = total(lines)
+    return BoxLine(**{key: round(getattr(summed, key) / len(lines), 1) for key in KEYS})

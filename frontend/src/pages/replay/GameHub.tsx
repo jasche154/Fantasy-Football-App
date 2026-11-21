@@ -77,7 +77,7 @@ export function GameHub({ gameId, view }: GameHubProps) {
     return (
       <>
         <header className="game-top"><Scorebug game={null} /></header>
-        <div className="game-body">
+        <main id="main-content" className="game-body game-main" tabIndex={-1}>
           <AsyncView state={loaded} loading={<Skeleton lines={5} label="Loading your league…" />}
             renderError={(error, retry) => (
               <>
@@ -87,7 +87,7 @@ export function GameHub({ gameId, view }: GameHubProps) {
             )}>
             {() => null}
           </AsyncView>
-        </div>
+        </main>
       </>
     );
   }
@@ -110,7 +110,7 @@ export function GameHub({ gameId, view }: GameHubProps) {
         <Scorebug game={game} advanceLabel={isAdvancing ? pendingLabel : label} isAdvanceDisabled={isBusy || step === 'done'} onAdvance={press} />
         {!isDraft && <GameNav game={game} view={view} />}
       </header>
-      <div className="game-body">
+      <main id="main-content" className="game-body game-main" tabIndex={-1}>
         <ChampionBanner game={game} />
         {actError && <p className="error-text replay-alert" role="alert">{actError}</p>}
         <p className="sr-only" role="status">{announce(game, events)}</p>
@@ -118,7 +118,7 @@ export function GameHub({ gameId, view }: GameHubProps) {
         <section ref={viewRef} key={isDraft ? 'draft' : view} className="game-view" tabIndex={-1} aria-label={viewLabel} data-game-view>
           <View game={game} version={version} act={act} isBusy={isBusy} actError={actError} openPlayer={setPlayerId} />
         </section>
-      </div>
+      </main>
       {playerId !== null && <PlayerDrawer key={playerId} gameId={game.id} playerId={playerId} version={version} onClose={closePlayer} />}
     </>
   );

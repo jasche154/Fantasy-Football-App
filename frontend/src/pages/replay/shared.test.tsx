@@ -158,6 +158,25 @@ describe('the game screen', () => {
     expect(viewHash(7, 'trades')).toBe('#/play?game=7&view=trades');
   });
 
+  it('makes the rest of the page inert while the drawer is open, and gives focus back on close', () => {
+    const { unmount } = render(
+      <>
+        <button type="button">Open card</button>
+        <main><p>Behind</p></main>
+      </>,
+    );
+    const opener = screen.getByRole('button', { name: 'Open card' });
+    opener.focus();
+    const drawer = render(<ReplayDrawer eyebrow="Player" title="Raheem Mostert" onClose={vi.fn()}>card</ReplayDrawer>);
+    expect(screen.getByRole('button', { name: 'Close' })).toHaveFocus();
+    expect(opener.parentElement).toHaveAttribute('inert');
+    expect(screen.getByRole('dialog').parentElement).not.toHaveAttribute('inert');
+    drawer.unmount();
+    expect(opener.parentElement).not.toHaveAttribute('inert');
+    expect(opener).toHaveFocus();
+    unmount();
+  });
+
   it('opens a wide drawer only when asked', () => {
     const { unmount } = render(<ReplayDrawer eyebrow="Player" title="Raheem Mostert" size="wide" onClose={vi.fn()}>card</ReplayDrawer>);
     expect(screen.getByRole('dialog', { name: 'Raheem Mostert' })).toHaveClass('news-panel', 'replay-drawer--wide');

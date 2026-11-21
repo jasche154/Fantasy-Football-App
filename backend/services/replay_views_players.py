@@ -37,7 +37,7 @@ GET  .../players/{player_id}      {player: WireRow, weeks: [{week, played, team,
       defense_basis what the ratings rest on now: played weeks this season, and whether last season is blended
 """
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 from statistics import mean
 
@@ -51,6 +51,7 @@ AVAILABLE = "available"
 STATUSES = (AVAILABLE, *replay_waivers.STATUS_FILTERS)
 SORTS = ("value", "projection", "ros_ppg", "adp", "points", "name", "ppg", "last", "line_points",
          "line_projection", *replay_box.KEYS)
+LINE_SORTS = ("line_points", "line_projection", *replay_box.KEYS)    # the sorts that need every row's StatLine
 ASCENDING = ("name", "adp")             # the sorts whose default direction is asc
 DIRECTIONS = ("asc", "desc")
 SPANS = ("season", "last4", "week")
@@ -104,11 +105,12 @@ def _box(box: replay_box.BoxLine | None) -> dict | None:
 
 
 def stat_line(game: Game, value: ReplayValue, weeks: Sequence[int], stats: str = "season",
-              stat_week: int | None = None) -> dict:
-    """The StatLine of one player; `weeks` are the weeks he played (from `_played_weeks`)."""
+              stat_week: int | None = None, known_then: Mapping[int, ReplayValue] | None = None) -> dict:
+    """The StatLine of one player; `weeks` are the weeks he played (from `_played_weeks`). `known_then`: the
+    pool as known before `stat_week` ("week" only), passed in when building many lines."""
     data, pid = game.data, value.player_id
     if stats == "week":
-        then = game.know_at(stat_week).by_id.get(pid)
+        then = (known_then if known_then is not None else game.know_at(stat_week).by_id).get(pid)
         return {"span": stats, "week": stat_week, "games": int((pid, stat_week) in data.actual),
                 "points": data.actual.get((pid, stat_week)), "box": _box(data.box.get((pid, stat_week))),
                 "projection": round(then.projection, 2) if then else None}
@@ -135,14 +137,15 @@ def _wire_row(game: Game, player_id: int, owners: dict[int, Team], totals: dict[
 
 def _sort_key(game: Game, sort: str, totals: dict[int, float], lines: dict[int, dict], order: dict[int, int]):
     def key(v: ReplayValue):
-        line = lines[v.player_id]
         if sort in replay_box.KEYS:
-            return line["box"][sort] if line["box"] else None
+            box = lines[v.player_id]["box"]
+            return box[sort] if box else None
+        if sort in LINE_SORTS:
+            return lines[v.player_id][sort.removeprefix("line_")]
         return {"value": lambda: -order[v.player_id], "projection": lambda: v.projection,
                 "ros_ppg": lambda: v.ros_ppg, "adp": lambda: v.adp, "points": lambda: totals.get(v.player_id, 0.0),
                 "name": lambda: v.name.lower(), "ppg": lambda: v.ppg,
-                "last": lambda: game.data.actual.get((v.player_id, game.played)),
-                "line_points": lambda: line["points"], "line_projection": lambda: line["projection"]}[sort]()
+                "last": lambda: game.data.actual.get((v.player_id, game.played))}[sort]()
     return key
 
 
@@ -166,12 +169,12 @@ def _span(game: Game, stats: str | None, stat_week: int | None) -> tuple[str, in
     if stats not in SPANS:
         raise ValueError(f"Unknown stats '{stats}'. Valid: {list(SPANS)}")
     current = game.state.week
+    if (stats == "week" or stat_week is not None) and current < 1:
+        raise ValueError("No weeks have been played yet: the season starts after the draft.")
     if stat_week is not None and not 1 <= stat_week <= current:
         raise ValueError(f"Week {stat_week} can't be shown: pick a week from 1 to {current}.")
     if stats != "week":
         return stats, None
-    if current < 1:
-        raise ValueError("There are no weeks to show before the season starts.")
     return stats, stat_week or current
 
 
@@ -188,10 +191,16 @@ def players(game: Game, position: str | None = None, search: str | None = None, 
     found = replay_waivers.available_players(game.state, game.know, None, search,
                                              None if status == AVAILABLE else status)
     values, played = [value for value in found if value.position in wanted], _played_weeks(game)
-    lines = {v.player_id: stat_line(game, v, played.get(v.player_id, ()), stats, stat_week) for v in values}
+    known_then = game.know_at(stat_week).by_id if stats == "week" else None
+
+    def line_of(v: ReplayValue) -> dict:
+        return stat_line(game, v, played.get(v.player_id, ()), stats, stat_week, known_then)
+
+    # Every row's StatLine only when the sort needs it; otherwise just the page's.
+    lines = {v.player_id: line_of(v) for v in values} if sort in LINE_SORTS else {}
     ordered = _sorted(game, values, sort, direction, totals, lines)
-    rows = page(ordered, limit, offset, lambda v: _wire_row(game, v.player_id, owners, totals, usage,
-                                                            lines[v.player_id]))
+    rows = page(ordered, limit, offset, lambda v: _wire_row(
+        game, v.player_id, owners, totals, usage, lines[v.player_id] if v.player_id in lines else line_of(v)))
     return {**rows, "week": game.state.week, "stats": stats, "stat_week": stat_week}
 
 
@@ -202,8 +211,16 @@ def _away(game: Game, team: str | None, week: int) -> bool:
 
 def _history_row(game: Game, player_id: int, week: int) -> dict:
     row, usage = player_row(game, game.know_at(week), player_id), game.data.usage.get((player_id, week))
-    return {"week": week, "played": week <= game.played, "team": row["player"]["team"],
-            "injury": row["player"]["injury"], "away": _away(game, row["player"]["team"], week),
+    team = row["player"]["team"]
+    # A played game's team is known after it (`Game.data`): a mid-season move shows his real opponent that week.
+    played_for = dict(game.data.team_by_week.get(player_id, ())).get(week)
+    if played_for is not None and played_for != team:
+        team, opponent = played_for, game.data.schedule.opponent(played_for, week)
+        ratings = replay_defense.ratings(game.full_season.as_of(week))
+        row = {**row, "opponent": opponent, "bye": False,
+               "defense": ratings.rating(opponent, row["player"]["position"])}
+    return {"week": week, "played": week <= game.played, "team": team,
+            "injury": row["player"]["injury"], "away": _away(game, team, week),
             **{key: row[key] for key in ("opponent", "bye", "out", "projection", "points", "ros_ppg", "value",
                                          "rank", "pos_rank", "expert_rank", "news", "defense")},
             "usage": _usage([usage] if usage else []),           # played weeks only: `Game.data`

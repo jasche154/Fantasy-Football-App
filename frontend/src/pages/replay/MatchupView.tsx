@@ -46,7 +46,7 @@ function SideTable({ side, spots, openPlayer }: SideTableProps) {
         {bench.length > 0 && (
           <tbody className="replay-faceoff__bench">
             <tr>
-              <th scope="colgroup" colSpan={4} className="game-subhead">Bench</th>
+              <th scope="rowgroup" colSpan={4} className="replay-faceoff__benchhead"><span className="game-subhead">Bench</span></th>
             </tr>
             {bench.map(spotRow)}
             {side.bench_total !== null && (
@@ -94,6 +94,15 @@ export function MatchupView({ game, version, openPlayer }: ReplayViewProps) {
   // A game picked from the scoreboard, kept with its week: another week (picked, or reached by playing) is the user's game again.
   const [picked, setPicked] = useState<{ week: number; teamId: number } | null>(null);
   const faceOffRef = useRef<HTMLElement>(null);
+  const [seenWeek, setSeenWeek] = useState(game.week);
+  if (seenWeek !== game.week) {
+    setSeenWeek(game.week);
+    // Playing the week on screen moves the game on: stay on it, back on the user's game, so its final lands here.
+    if (pickedWeek === null && game.week === seenWeek + 1) {
+      setPickedWeek(seenWeek);
+      setPicked(null);
+    }
+  }
   const week = Math.min(pickedWeek ?? game.week, game.week);
   const teamId = picked?.week === week ? picked.teamId : undefined;
   const matchup = useAsync((signal) => getReplayMatchup(game.id, { week, team_id: teamId }, signal), [game.id, week, teamId, version]);

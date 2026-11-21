@@ -240,11 +240,12 @@ def activity(game_id: GameId, kind: str | None = Query(None, max_length=80), lim
 @router.get("/games/{game_id}/players")
 def players(game_id: GameId, position: str | None = None, search: str | None = Query(None, max_length=60),
             status: str | None = None, sort: str = "value", limit: int = Limit, offset: int = Offset,
-            dir: str | None = None, stats: str | None = None, stat_week: int | None = Query(None, ge=1, le=22),
+            direction: str | None = Query(None, alias="dir"), stats: str | None = None,
+            stat_week: int | None = Query(None, ge=1, le=22),
             session: Session = Depends(get_session)) -> dict:
     """The waiver wire: the whole pool, filtered, sorted and paged, with the chosen stat columns."""
     return show(session, game_id, lambda game: league_views.players(game, position, search, status, sort, limit,
-                                                                    offset, dir, stats, stat_week))
+                                                                    offset, direction, stats, stat_week))
 
 
 @router.get("/games/{game_id}/players/{player_id}")

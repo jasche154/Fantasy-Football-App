@@ -314,10 +314,11 @@ def lineup_of(game: Game, owner: Team, week: int) -> tuple[Lineup, list[int]]:
     lineup = (result.starters[owner.id] if result is not None
               else replay_season.starters_for(game.state, game.settings, game.know_at(week), owner.id))
     started = {pid for ids in lineup.values() for pid in ids}
-    by_id = game.know.by_id
+    # A played week's bench in that week's projection order; values known then (or now, for anyone not yet in the pool).
+    then, now = (game.know_at(week) if result is not None else game.know).by_id, game.know.by_id
     held = result.bench.get(owner.id, ()) if result is not None else owner.roster if week == game.state.week else ()
     bench = sorted((pid for pid in held if pid not in started),
-                   key=lambda pid: (ALL_POSITIONS.index(by_id[pid].position), -by_id[pid].projection, pid))
+                   key=lambda pid: (ALL_POSITIONS.index((v := then.get(pid) or now[pid]).position), -v.projection, pid))
     return lineup, bench
 
 

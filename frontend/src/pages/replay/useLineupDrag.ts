@@ -16,6 +16,9 @@ export interface LineupDragHandlers {
   onMove: (spot: LineupSpot) => void;
 }
 
+// One drag at a time on the page: the pick waiting for the next frame, if any.
+let pendingPick = 0;
+
 /** The drag attributes for one roster row; none when the lineup can't be changed. */
 export function lineupDragProps(spot: LineupSpot, editing: LineupDragHandlers | undefined): HTMLAttributes<HTMLTableRowElement> {
   if (!editing || editing.isDisabled) return {};
@@ -27,7 +30,9 @@ export function lineupDragProps(spot: LineupSpot, editing: LineupDragHandlers | 
       // Firefox only starts a drag that carries data; jsdom has no dataTransfer at all.
       event.dataTransfer?.setData('text/plain', spot.row?.player.name ?? '');
       if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
-      editing.onPick(spot);
+      // Next frame: Chrome aborts a drag whose source changes in the dragstart handler itself (the dim/target classes).
+      cancelAnimationFrame(pendingPick);
+      pendingPick = requestAnimationFrame(() => editing.onPick(spot));
     },
     onDragOver: (event: DragEvent) => {
       if (!isLegal) return;            // not cancelling dragover is what tells the browser "no drop here"
@@ -38,6 +43,9 @@ export function lineupDragProps(spot: LineupSpot, editing: LineupDragHandlers | 
       event.preventDefault();
       if (isLegal) editing.onMove(spot);
     },
-    onDragEnd: () => editing.onPick(null),
+    onDragEnd: () => {
+      cancelAnimationFrame(pendingPick);
+      editing.onPick(null);
+    },
   };
 }
