@@ -14,8 +14,8 @@ from database.models import (
 from services.insights import player_signals
 from services.labels import label
 from services.league import POSITIONS, LeagueSettings
-from services.player_index import ACTIVE_SEASONS, TYPO_CUTOFF, get_index, normalize
-from services.projections import GameLine, PlayerSeason, load_game_lines
+from services.player_index import TYPO_CUTOFF, get_index, normalize
+from services.projections import FIRST_SEASON, GameLine, PlayerSeason, load_game_lines
 from services.valuation import build_valuation
 
 FUZZY_CUTOFF = 0.75
@@ -67,14 +67,13 @@ def _latest_seasons(session: Session, player_ids: list[int]) -> dict[int, int]:
 
 
 def _active(session: Session, refs: list[PlayerRef]) -> list[PlayerRef]:
-    """Of several namesakes, drop those whose last game is older than ACTIVE_SEASONS before the newest
-    loaded season (a back loaded only for Replay League does not make an active player ambiguous).
-    A player with no games at all (a rookie) is kept."""
+    """Of several namesakes, drop those whose last game is in a season loaded only for Replay League
+    (before FIRST_SEASON), so such a season never makes a live player ambiguous. Nothing else changes:
+    two namesakes inside the live seasons stay ambiguous. A player with no games (a rookie) is kept."""
     if len(refs) < 2:
         return refs
-    newest = session.scalar(select(func.max(PlayerStatsWeekly.season))) or 0
     seasons = _latest_seasons(session, [r.id for r in refs])
-    return [r for r in refs if seasons.get(r.id, newest) > newest - ACTIVE_SEASONS]
+    return [r for r in refs if seasons.get(r.id, FIRST_SEASON) >= FIRST_SEASON]
 
 
 def search_players(session: Session, query: str, position: str | None = None,

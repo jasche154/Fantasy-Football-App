@@ -74,6 +74,17 @@ def test_a_name_resolves_to_the_active_player_over_a_replay_only_namesake(sessio
     assert resolve_player(session, "antonio williams").id == active
 
 
+def test_a_namesake_last_seen_in_an_old_live_season_is_still_ambiguous(session):
+    recent = _add_player(session, "Jordan Mason", "RB", "MIN")
+    hurt = _add_player(session, "Jordan Mason", "WR", "DAL")       # last played in the first live season
+    session.execute(insert(PlayerStatsWeekly), [stat_row(recent, CURRENT, 1, "RB", 9.0, 3),
+                                                stat_row(hurt, FIRST, 1, "WR", 6.0)])
+    session.commit()
+
+    with pytest.raises(AmbiguousPlayer):
+        resolve_player(session, "Jordan Mason")
+
+
 def test_two_active_namesakes_are_still_ambiguous(session):
     with pytest.raises(AmbiguousPlayer):
         resolve_player(session, "Mike Williams")
