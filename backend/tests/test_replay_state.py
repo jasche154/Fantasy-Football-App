@@ -143,6 +143,23 @@ def test_round_trip_keeps_a_missing_lineup_and_a_champion():
     assert restored.lineup is None and restored.champion == 3
 
 
+def test_an_old_save_without_bench_decodes_with_an_empty_bench():
+    saved = json.loads(rs.to_json(make_state()))
+    for result in saved["results"]:
+        del result["bench"]
+
+    restored = rs.state_from_json(json.dumps(saved))
+
+    assert restored.results[0].bench == {} and restored == make_state()
+
+
+def test_round_trip_keeps_a_week_bench():
+    week = replace(make_state().results[0], bench={1: (14, 15), 2: ()})
+    state = make_state(results=(week,))
+
+    assert rs.state_from_json(rs.to_json(state)).results[0].bench == {1: (14, 15), 2: ()}
+
+
 def test_state_mappings_are_read_only_and_lists_become_tuples():
     state = make_state(locked=[5, 6], traded={1: 2})
     team = Team(9, "Listy", False, [1, 2], 1.0, {"QB": 1.0})

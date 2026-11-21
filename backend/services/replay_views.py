@@ -19,7 +19,7 @@ Shared pieces
                     PlayerRow built for another week (team / matchup with ?week=) carries that week's tag. Always null
                     in the draft room. O, IR, PUP and SUS mean he does not play; O, IR and PUP may go on IR.
   PlayerRow  {player: PlayerRef, opponent, bye, out, projection, points, ros_ppg, value, rank, pos_rank, adp,
-              pre_rank, expert_rank, news: {back, text} | null, games, ppg, trade_locked}
+              pre_rank, expert_rank, news: {back, text} | null, games, ppg, trade_locked, defense}
       opponent      NFL team code, "BYE" or null (unknown team, or draft time)
       projection    that week's pre-game projection (0 on a bye or when out; at draft time the preseason rate)
       points        real points in that week; null when the week is unplayed or he did not play
@@ -34,6 +34,7 @@ Shared pieces
       out           no projection in his team's latest game week (this one, or the one before a bye), or an
                     O / IR / PUP / SUS tag this week
       trade_locked  traded in the last two weeks
+      defense       DefenseRating of that week's opponent vs his position, or null (always null for now)
   Side       TeamRef + {projected, points, record: Record}    projected: null for a week not reached yet
   Record     {wins, losses, ties, rank, points_for, points_against, place}    place: final finish, else null
   GameRow    {home: Side, away: Side, winner: team_id | null, label}
@@ -109,6 +110,7 @@ GET  .../draft?position=&search=&sort=&direction=&limit=&offset=
       roster: {position: PlayerRef[]}}     round / overall: the pick now on the clock, null when done
 GET  .../team?team_id=&week=      Team {team: TeamRef, week, played, manual_lineup, projected_total, actual_total,
                                         record: Record, results: [PlayerRow + {slot, starting}],
+                                       bench_total: null, bench_recorded: false (filled in by the bench work),
                                         ir: [PlayerRow + {slot: "IR", starting: false}]}
       ir: the team's IR players, current week only (else []). results never holds an IR player.
       slot: QB | RB | WR | TE | FLEX | K | DST | BN, starters first in slot order. A past week lists only what
@@ -282,7 +284,7 @@ def player_row(game: Game, know: Knowledge, player_id: int) -> dict:
             "projection": round(value.projection, 2), "points": points, "ros_ppg": value.ros_ppg,
             "value": round(value.chart), "rank": value.rank, "pos_rank": value.pos_rank, "adp": value.adp,
             "pre_rank": value.pre_rank, "expert_rank": value.expert_rank, "news": news(value),
-            "games": value.games, "ppg": value.ppg,
+            "games": value.games, "ppg": value.ppg, "defense": None,
             "trade_locked": week == game.state.week and rs.retrade_locked(game.state, player_id)}
 
 
@@ -378,7 +380,7 @@ def team(game: Game, team_id: int | None = None, week: int | None = None) -> dic
             "manual_lineup": owner.is_user and result is None and game.state.lineup is not None,
             "projected_total": rv.lineup_points(know, [pid for ids in lineup.values() for pid in ids]),
             "actual_total": result.scores[owner.id] if result else None, "record": record(game, owner.id),
-            "results": rows,
+            "results": rows, "bench_total": None, "bench_recorded": False,
             "ir": [{"slot": "IR", "starting": False, **player_row(game, know, pid)} for pid in injured]}
 
 

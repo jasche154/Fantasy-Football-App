@@ -1,6 +1,8 @@
 /** Replay League: the league, players, waivers and trades screens (the shared pieces are in ./replay). */
 import type {
   ReplayActionResult,
+  ReplayBoxLine,
+  ReplayDefenseRating,
   ReplayGameRow,
   ReplayInjury,
   ReplayNews,
@@ -71,7 +73,35 @@ export interface ReplayActivityQuery extends ReplayPagination {
 
 export type ReplayPlayerStatus = 'rostered' | 'waivers' | 'free_agent';
 export type ReplayStatusFilter = 'available' | 'waivers' | 'free_agent' | 'rostered' | 'all';
-export type ReplayPlayerSort = 'value' | 'projection' | 'ros_ppg' | 'adp' | 'points' | 'name';
+export type ReplayBoxKey = keyof ReplayBoxLine;
+export type ReplayPlayerSort =
+  | 'value'
+  | 'projection'
+  | 'ros_ppg'
+  | 'adp'
+  | 'points'
+  | 'name'
+  | 'ppg'
+  | 'last'
+  | 'line_points'
+  | 'line_projection'
+  | ReplayBoxKey;
+export type ReplaySortDir = 'asc' | 'desc';
+export type ReplayStatsSpan = 'season' | 'last4' | 'week';
+
+/** The stat columns of a wire row, for the chosen span. */
+export interface ReplayStatLine {
+  span: ReplayStatsSpan;
+  /** Set for span "week". */
+  week: number | null;
+  games: number;
+  /** season: total before now; last4: per-game average; week: null unless played and he played. */
+  points: number | null;
+  /** week span only: that week's pre-game number; else null. */
+  projection: number | null;
+  /** Same rules as points; null for K/DST. */
+  box: ReplayBoxLine | null;
+}
 
 export interface ReplayWireRow extends ReplayPlayerRow {
   status: ReplayPlayerStatus;
@@ -81,10 +111,13 @@ export interface ReplayWireRow extends ReplayPlayerRow {
   last_points: number | null;
   /** His last 3 games before the current week; null for K/DST or no games. */
   usage: ReplayUsage | null;
+  line: ReplayStatLine;
 }
 
 export interface ReplayPlayers extends ReplayPage<ReplayWireRow> {
   week: number;
+  stats: ReplayStatsSpan;
+  stat_week: number | null;
 }
 
 export interface ReplayPlayersQuery extends ReplayPagination {
@@ -92,6 +125,11 @@ export interface ReplayPlayersQuery extends ReplayPagination {
   search?: string;
   status?: ReplayStatusFilter;
   sort?: ReplayPlayerSort;
+  /** Default asc for name/adp, desc otherwise; nulls always last. */
+  dir?: ReplaySortDir;
+  stats?: ReplayStatsSpan;
+  /** 1..current; only with stats "week". */
+  stat_week?: number;
 }
 
 export interface ReplayPlayerWeek {
@@ -113,12 +151,31 @@ export interface ReplayPlayerWeek {
   injury: ReplayInjury | null;
   /** That week's own game (games 1); null when unplayed or he did not play. */
   usage: ReplayUsage | null;
+  /** That week's own box score; null when unplayed, he did not play, or K/DST. */
+  box: ReplayBoxLine | null;
+  defense: ReplayDefenseRating | null;
+  away: boolean;
 }
 
-/** One player: where he stands now and weeks 1..current. */
+/** A week after the current one: an estimate, never a projection. */
+export interface ReplayUpcomingWeek {
+  week: number;
+  opponent: string | null;
+  away: boolean;
+  bye: boolean;
+  /** ros_ppg x the defense factor (1 decimal); null on a bye or when he is expected out. */
+  estimate: number | null;
+  defense: ReplayDefenseRating | null;
+  out_expected: boolean;
+}
+
+/** One player: where he stands now, weeks 1..current and the weeks after. */
 export interface ReplayPlayerDetail {
   player: ReplayWireRow;
   weeks: ReplayPlayerWeek[];
+  upcoming: ReplayUpcomingWeek[];
+  /** What the matchup ratings rest on: weeks of this season and whether last season is blended in. */
+  defense_basis: { weeks: number; prior: boolean };
 }
 
 export interface ReplayClaim {

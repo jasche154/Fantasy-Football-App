@@ -40,6 +40,35 @@ export interface ReplayPlayerRef {
   injury: ReplayInjury | null;
 }
 
+/** One game's (or a sum or average of games') box score; K/DST have none. Whole numbers, averages 1 decimal. */
+export interface ReplayBoxLine {
+  pass_yds: number;
+  pass_td: number;
+  pass_int: number;
+  carries: number;
+  rush_yds: number;
+  rush_td: number;
+  targets: number;
+  rec: number;
+  rec_yds: number;
+  rec_td: number;
+}
+
+export type ReplayDefenseTier = 'easy' | 'neutral' | 'tough';
+
+/** How much an NFL defense gives up to one position, as known before the week. */
+export interface ReplayDefenseRating {
+  /** 1 = gives up the most to that position. */
+  rank: number;
+  of: number;
+  /** easy = top quarter by rank, tough = bottom quarter. */
+  tier: ReplayDefenseTier;
+  /** Opponent-adjusted multiplier, about 0.8-1.2. */
+  factor: number;
+  /** League average points allowed to the position x factor (1 decimal). */
+  allowed: number;
+}
+
 export interface ReplayPlayerRow {
   player: ReplayPlayerRef;
   /** NFL team code, "BYE" or null (unknown team, or draft time). */
@@ -69,6 +98,8 @@ export interface ReplayPlayerRow {
   ppg: number;
   /** Traded in the last two weeks. */
   trade_locked: boolean;
+  /** That week's opponent vs his position; null for K/DST, a bye, an unknown team or nothing known. */
+  defense: ReplayDefenseRating | null;
 }
 
 /** An injury report: back = the week he is said to return (null = out for the season). */
@@ -373,7 +404,12 @@ export interface ReplayTeam {
   projected_total: number;
   actual_total: number | null;
   record: ReplayRecord;
+  /** Starters then bench; a played week holds its bench rows only when `bench_recorded`. */
   results: ReplayRosterRow[];
+  /** Real points left on the bench; null when unplayed or not recorded. */
+  bench_total: number | null;
+  /** False for weeks played before the bench was saved. */
+  bench_recorded: boolean;
   /** The IR slot: current week only, else []. Never in `results`. */
   ir: ReplayIrRow[];
 }

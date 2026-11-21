@@ -21,7 +21,7 @@ SETTINGS = fakes.fake_settings(draft_slot=4)
 SEED = 7
 USER = SETTINGS.draft_slot
 PLAYER_ROW = {"player", "opponent", "bye", "out", "projection", "points", "ros_ppg", "value", "rank", "pos_rank",
-              "adp", "pre_rank", "expert_rank", "news", "games", "ppg", "trade_locked"}
+              "adp", "pre_rank", "expert_rank", "news", "games", "ppg", "trade_locked", "defense"}
 WIRE_ROW = PLAYER_ROW | {"status", "owner", "season_points", "last_points", "usage"}
 SIDE = {"team_id", "name", "is_user", "tendency", "projected", "points", "record"}
 RECORD = {"wins", "losses", "ties", "rank", "points_for", "points_against", "place"}
@@ -245,7 +245,7 @@ def test_team_lists_starters_in_slot_order_then_the_bench():
     rows = roster["results"]
     starters = [row for row in rows if row["starting"]]
     assert set(roster) == {"team", "week", "played", "manual_lineup", "projected_total", "actual_total", "record",
-                           "results", "ir"} and roster["ir"] == []
+                           "results", "ir", "bench_total", "bench_recorded"} and roster["ir"] == []
     assert set(rows[0]) == PLAYER_ROW | {"slot", "starting"} and set(rows[0]["player"]) == PLAYER_REF
     assert [row["slot"] for row in starters] == ["QB", "RB", "RB", "WR", "WR", "TE", "FLEX", "K", "DST"]
     assert [row["slot"] for row in rows[9:]] == ["BN"] * 6 and len(rows) == 15

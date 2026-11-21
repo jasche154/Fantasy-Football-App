@@ -22,6 +22,7 @@ import type {
   ReplaySeasons,
   ReplaySide,
   ReplaySlot,
+  ReplayStatLine,
   ReplaySummary,
   ReplayTeam,
   ReplayTeamRef,
@@ -85,7 +86,7 @@ export function playerRow(player: ReplayPlayerRef, overrides: Partial<ReplayPlay
   return {
     player, opponent: 'DEN', bye: false, out: false, projection: 14.2, points: null, ros_ppg: 13.8, value: 31.5,
     rank: 20, pos_rank: `${player.position}8`, adp: 24.5, pre_rank: 22, expert_rank: 8, news: null, games: 4, ppg: 15.1,
-    trade_locked: false,
+    trade_locked: false, defense: null,
     ...overrides,
   };
 }
@@ -99,16 +100,22 @@ export function usage(overrides: Partial<ReplayUsage> = {}): ReplayUsage {
   return { games: 3, snap_pct: 72.4, targets: 6.3, target_share: 0.241, carries: 0.7, ...overrides };
 }
 
+/** A season stat line: 4 games, no box score unless overridden. */
+export function statLine(overrides: Partial<ReplayStatLine> = {}): ReplayStatLine {
+  return { span: 'season', week: null, games: 4, points: 60.4, projection: null, box: null, ...overrides };
+}
+
 /** A waiver-wire row: a free agent with no usage yet unless overridden. */
 export function wireRow(player: ReplayPlayerRef, overrides: Partial<ReplayWireRow> = {}): ReplayWireRow {
-  return { ...playerRow(player), status: 'free_agent', owner: null, season_points: 60.4, last_points: 12.3, usage: null, ...overrides };
+  return { ...playerRow(player), status: 'free_agent', owner: null, season_points: 60.4, last_points: 12.3, usage: null,
+    line: statLine(), ...overrides };
 }
 
 /** The user's roster in week 5: nine starters in slot order, then a bench with a bye and an injury. */
 export function team(overrides: Partial<ReplayTeam> = {}): ReplayTeam {
   return {
     team: teamRef(USER_TEAM_ID), week: 5, played: false, manual_lineup: false, projected_total: 118.4, actual_total: null,
-    record: record(),
+    record: record(), bench_total: null, bench_recorded: false,
     results: [
       rosterRow(MAHOMES, 'QB', { projection: 21.3, opponent: 'MIN' }),
       rosterRow(MCCAFFREY, 'RB', { projection: 22.8, opponent: 'DAL', rank: 1, pos_rank: 'RB1' }),
@@ -213,7 +220,10 @@ export function playerDetail(player: ReplayPlayerRef = MOSTERT, overrides: Parti
       projection: week === 3 ? 0 : 12.5, points: week === 3 || week === 5 ? null : 10 + week, ros_ppg: row.ros_ppg,
       value: row.value, rank: row.rank, pos_rank: row.pos_rank, expert_rank: row.expert_rank, news: null, injury: null,
       usage: week === 3 || week === 5 ? null : usage({ games: 1, snap_pct: 60 + week, targets: week, target_share: week / 20, carries: 10 }),
+      box: null, defense: null, away: false,
     })),
+    upcoming: [],
+    defense_basis: { weeks: 4, prior: false },
   };
 }
 

@@ -55,6 +55,7 @@ function renderRoute(location: HashLocation): ReactNode {
     case 'ask':
       return <AskPage />;
     case 'replay':
+    case 'play': // shortcut: renders the replay page until GameShell lands
       return <ReplayPage query={query} />;
     case 'settings':
       return <SettingsPage />;
@@ -66,7 +67,7 @@ function renderRoute(location: HashLocation): ReactNode {
 function Routes() {
   const location = useHashLocation();
   // Replay's home and each league share one path, so the league id is part of the page for focus handling.
-  const pageKey = location.route.name === 'replay' ? `${location.path}?game=${location.query.game ?? ''}` : location.path;
+  const pageKey = location.route.name === 'replay' || location.route.name === 'play' ? `${location.path}?game=${location.query.game ?? ''}` : location.path;
   return (
     <AppShell route={location.route} pageKey={pageKey}>
       {renderRoute(location)}

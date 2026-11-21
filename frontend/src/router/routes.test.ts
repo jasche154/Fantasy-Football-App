@@ -14,6 +14,7 @@ describe('parseHash', () => {
     expect(parseHash('#/odds?week=9').route).toEqual({ name: 'odds' });
     expect(parseHash('#/ask').route).toEqual({ name: 'ask' });
     expect(parseHash('#/settings').route).toEqual({ name: 'settings' });
+    expect(parseHash('#/play?game=3').route).toEqual({ name: 'play' });
   });
 
   it('parses the trade route with its shareable query', () => {

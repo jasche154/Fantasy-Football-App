@@ -32,6 +32,7 @@ from services import kdst_model
 from services.build_locks import key_lock
 from services.kdst_rankings import DST_PREFIX
 from services.projections import REGULAR_SEASON, load_game_lines
+from services.replay_box import BoxLine
 from services.schedule_strength import Schedule, load_schedule
 from services.scoring import scoring_for
 from services.valuation import NoDataError
@@ -102,6 +103,8 @@ class SeasonData:
     # (player, first week of a hard-tag streak) -> first later week with a real game, 0 = never. The one
     # sanctioned leak: replay_news turns it into a noisy report.
     returns: Mapping[PlayerWeek, int] = field(default_factory=lambda: MappingProxyType({}))
+    box: Mapping[PlayerWeek, BoxLine] = field(default_factory=lambda: MappingProxyType({}))     # skill games only
+    defense_prior: Mapping[tuple[str, str], float] = field(default_factory=lambda: MappingProxyType({}))  # last season
 
     def as_of(self, week: int) -> "SeasonData":
         """A copy holding only what was known before `week` was played (0 = draft time); cached.
@@ -163,6 +166,7 @@ def _as_of(data: SeasonData, week: int) -> SeasonData:
         injuries=MappingProxyType({key: v for key, v in data.injuries.items()
                                    if key[1] <= week and key[0] in players}),
         usage=MappingProxyType({key: v for key, v in data.usage.items() if key[1] < week and key[0] in players}),
+        box=MappingProxyType({key: v for key, v in data.box.items() if key[1] < week and key[0] in players}),
         expert_ranks=MappingProxyType({key: v for key, v in data.expert_ranks.items() if key[1] <= week}),
         expert_age=MappingProxyType({w: v for w, v in data.expert_age.items() if w <= week}),
         returns=MappingProxyType({key: v for key, v in data.returns.items() if key[1] <= week}))
