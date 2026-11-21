@@ -15,7 +15,8 @@ SIZES = rs.VALID_TEAMS
 DEFAULT_CAPS = {"QB": 2, "RB": 6, "WR": 7, "TE": 2, "K": 1, "DST": 1}
 ADP_WINDOW = 100                    # the picks where a draft should still track ADP closely (before K/DST rounds)
 MAX_MEAN_ADP_GAP = 8.0              # measured 2.4 (4 teams) to 5.7 (8 teams) picks on the fake season
-FIRST_QB_PICKS = (30, 130)          # most teams take their first QB in this overall-pick window (QB ADP), any size
+FIRST_QB_ROUNDS = (4, 10)           # 8-14 teams: most take their first QB in these rounds, none after the last
+FIRST_QB_PICKS = (30, 130)          # 4, 6 and 16 teams (rounds too short, or QBs go in round 3): an overall-pick window
 LAST_FIRST_QB_PICK = 150
 
 
@@ -311,14 +312,16 @@ def test_the_position_mix_by_round_looks_like_a_real_draft(teams):
         picks = picks_with_players(drafted(teams, seed))
         early.update(player.position for pick, player in picks if pick.round <= 3)
         for team_id in range(1, teams + 1):
-            first_qb.append(next(pick.overall for pick, player in picks
+            first_qb.append(next((pick.round, pick.overall) for pick, player in picks
                                  if pick.team_id == team_id and player.position == "QB"))
 
-    low, high = FIRST_QB_PICKS
     assert (early["RB"] + early["WR"]) / sum(early.values()) >= 0.75
     assert early["K"] == early["DST"] == 0
-    assert sum(low <= overall <= high for overall in first_qb) / len(first_qb) >= 0.75
-    assert max(first_qb) <= LAST_FIRST_QB_PICK
+    index, (low, high), last = ((0, FIRST_QB_ROUNDS, FIRST_QB_ROUNDS[1]) if 8 <= teams <= 14
+                                else (1, FIRST_QB_PICKS, LAST_FIRST_QB_PICK))
+    taken = [qb[index] for qb in first_qb]
+    assert sum(low <= when <= high for when in taken) / len(taken) >= 0.75
+    assert max(taken) <= last
 
 
 @pytest.mark.parametrize("teams", SIZES)

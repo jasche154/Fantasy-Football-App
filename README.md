@@ -973,9 +973,9 @@ that week's games on; only scoring a week reads its real points.
   seed). Games are labelled Quarter-final, Semi-final, Championship, Third place or Consolation; a bye
   shows as an idle week on the schedule ("Bye / no game"), and the Matchup tab then shows the week's
   first game. With 5 playoff teams round one is a single wild-card game. Leagues saved before playoff
-  sizes existed keep their title games; one saved before its first playoff week may pair its consolation
-  games differently (by the pool table rather than seeds 5 v 8, 6 v 7), and a finished one may reorder
-  places from 5th down.
+  sizes existed keep their title games. Their consolation games may pair differently (by the pool table rather than
+  seeds 5 v 8, 6 v 7): an 8-team league saved before its first playoff week, and a league of 10 or more
+  teams saved before its last playoff week. A finished one may reorder places from 5th down.
 - **Limits of "no hindsight":** a week's projection is the sites' final pre-game number, and it is
   already visible at that week's Wednesday waiver run. An expert snapshot taken on a Friday already knows
   that week's Thursday game. Injury news is built from the real return week (noisy, see above). A player appears on the board and the wire once
