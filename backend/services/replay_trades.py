@@ -67,6 +67,7 @@ class Verdict:
     give_values: tuple[tuple[int, float], ...] = ()     # (player_id, market_value), in the order given
     get_values: tuple[tuple[int, float], ...] = ()
     suggestion: str | None = None           # a hint that would fix a value decline
+    score: float = 0.0                      # the CPU's net on the 1000 chart scale (replay_trade_value)
 
 
 class OfferExpired(ValueError):
@@ -406,7 +407,7 @@ def execute(state: State, settings: Settings, know: Knowledge, from_team: int, t
 
 
 def propose(state: State, settings: Settings, know: Knowledge, to_team: int, give: Sequence[int],
-            get: Sequence[int], user_drops: Sequence[int] = ()) -> tuple[State, Verdict]:
+            get: Sequence[int], user_drops: Sequence[int] = (), counter_to: int | None = None) -> tuple[State, Verdict]:
     """The user offers `give` for `get` to a CPU. Accepted: carried out at once. Declined: kept as an Offer
     with status "declined" (once per identical proposal per week)."""
     user, give, get = rs.user_team(state), tuple(give), tuple(get)

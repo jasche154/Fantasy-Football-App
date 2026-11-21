@@ -93,6 +93,11 @@ class SeasonData:
     known_before: int | None = None                           # set by as_of: nothing from this week's games on
     injuries: Mapping[PlayerWeek, Injury] = field(default_factory=lambda: MappingProxyType({}))   # tag per week
     usage: Mapping[PlayerWeek, Usage] = field(default_factory=lambda: MappingProxyType({}))      # skill games only
+    expert_ranks: Mapping[PlayerWeek, int] = field(default_factory=lambda: MappingProxyType({}))  # expert pos rank; week 0 = preseason
+    expert_age: Mapping[int, int] = field(default_factory=lambda: MappingProxyType({}))           # week -> snapshot age in days
+    # (player, first week of a hard-tag streak) -> first later week with a real game, 0 = never. The one
+    # sanctioned leak: replay_news turns it into a noisy report.
+    returns: Mapping[PlayerWeek, int] = field(default_factory=lambda: MappingProxyType({}))
 
     def as_of(self, week: int) -> "SeasonData":
         """A copy holding only what was known before `week` was played (0 = draft time); cached.
@@ -153,7 +158,10 @@ def _as_of(data: SeasonData, week: int) -> SeasonData:
         projected=MappingProxyType({key: v for key, v in projected.items() if key[0] in players}),
         injuries=MappingProxyType({key: v for key, v in data.injuries.items()
                                    if key[1] <= week and key[0] in players}),
-        usage=MappingProxyType({key: v for key, v in data.usage.items() if key[1] < week and key[0] in players}))
+        usage=MappingProxyType({key: v for key, v in data.usage.items() if key[1] < week and key[0] in players}),
+        expert_ranks=MappingProxyType({key: v for key, v in data.expert_ranks.items() if key[1] <= week}),
+        expert_age=MappingProxyType({w: v for w, v in data.expert_age.items() if w <= week}),
+        returns=MappingProxyType({key: v for key, v in data.returns.items() if key[1] <= week}))
 
 
 # ---------------- loading ----------------

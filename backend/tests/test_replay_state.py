@@ -342,6 +342,19 @@ def test_a_league_saved_before_the_ir_slot_loads_with_empty_irs():
     assert restored == make_state() and all(t.ir == () for t in restored.teams)
 
 
+def test_a_league_saved_before_personas_and_counters_loads_with_their_defaults():
+    saved = json.loads(rs.to_json(make_state()))
+    for team in saved["teams"]:
+        team.pop("persona")
+    for offer in saved["offers"]:
+        offer.pop("counter_to")
+
+    restored = rs.state_from_json(json.dumps(saved))
+
+    assert restored == make_state()
+    assert all(t.persona == "balanced" for t in restored.teams) and restored.offers[0].counter_to is None
+
+
 def test_held_and_rostered_include_ir_players():
     state = _with_ir(make_state(), 2, (25,))
 

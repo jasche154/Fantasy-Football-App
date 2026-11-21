@@ -33,6 +33,7 @@ from types import MappingProxyType, SimpleNamespace
 
 from services import lineup_gain, my_team as mt, replay_state
 from services.league import LeagueSettings, replacement_levels
+from services.replay_news import Report
 from services.replay_pool import SKILL, Injury, PoolPlayer, SeasonData
 from services.schedule_strength import NEUTRAL, DefenseStrength, Schedule
 from services.trade import FAIR_POINTS_PER_WEEK
@@ -72,6 +73,14 @@ class ReplayValue:
     injury: Injury | None = None   # this week's tag; always None at week 0
     recent_points: tuple[float, ...] = ()   # real points of his last RECENT_GAMES games before this week, newest first
     last_game_week: int = 0        # the week of his last game before this week (0 = none)
+    chart: float = 0.0             # 0-1000 trade chart value after injury (replay_chart)
+    healthy_chart: float = 0.0     # chart value if healthy
+    pre_chart: float = 0.0         # chart value at draft time
+    expert_rank: int | None = None # this week's expert position rank (None = not ranked)
+    pre_rank: int | None = None    # overall preseason rank: expert interleaved on ADP, else ADP order
+    star: float = 0.0              # 0-1, replay_chart.star(pre_rank)
+    form_chart: float = 0.0        # signed chart points from his recent real games
+    news: Report | None = None     # injury report while he is out (replay_news)
 
 
 @dataclass(frozen=True, eq=False)
@@ -86,6 +95,7 @@ class Knowledge:
     defense: DefenseStrength                         # always neutral: no matchup adjustment in replay
     weeks_remaining: int
     through_week: int
+    rank_source: str = "model"                       # "experts" | "model": what this week's chart leans on
 
 
 class ReplayProjector(lineup_gain.Projector):
@@ -191,7 +201,7 @@ def _ranked(rows: Iterable[dict]) -> tuple[ReplayValue, ...]:
 
 
 @lru_cache(maxsize=256)
-def _knowledge(data: SeasonData, league: LeagueSettings, week: int, end_week: int) -> Knowledge:
+def _knowledge(data: SeasonData, league: LeagueSettings, week: int, end_week: int, seed: int) -> Knowledge:
     priors = _priors(data)
     weeks_left = max(0, end_week - max(1, week) + 1)
     by_team: dict[str | None, int] = {None: weeks_left}          # unknown team: every week left
@@ -213,7 +223,7 @@ def _knowledge(data: SeasonData, league: LeagueSettings, week: int, end_week: in
                      weeks_remaining=max(1, end_week - through), through_week=through)
 
 
-def knowledge(data: SeasonData, league: LeagueSettings, week: int, end_week: int) -> Knowledge:
+def knowledge(data: SeasonData, league: LeagueSettings, week: int, end_week: int, seed: int = 0) -> Knowledge:
     """Values as of just before `week` is played (0 = draft time), looking ahead to `end_week`.
 
     Built from `data.as_of(week)` only, and cached: the full season and its as_of(week) copy give the
@@ -222,7 +232,7 @@ def knowledge(data: SeasonData, league: LeagueSettings, week: int, end_week: int
         raise ValueError(f"Week {week} to {end_week} is not a valid span.")
     if data.known_before is not None and max(1, data.known_before) < week:
         raise ValueError(f"This season data stops before week {data.known_before}: it can't describe week {week}.")
-    return _knowledge(data.as_of(week), league, week, end_week)
+    return _knowledge(data.as_of(week), league, week, end_week, seed)      # seed: the game's news noise
 
 
 def clear_cache() -> None:
@@ -270,6 +280,14 @@ def lineup_holes(positions: Sequence[str], settings) -> int:
     holes = sum(max(0, wanted - have[slot]) for slot, wanted in starters.items() if slot != "FLEX")
     spare = sum(max(0, have[position] - starters.get(position, 0)) for position in FLEX_POSITIONS)
     return holes + max(0, starters.get("FLEX", 0) - spare)
+
+
+def missing_slots(positions: Sequence[str], settings) -> list[str]:
+    """The starting slots players at these positions cannot fill, once per missing starter (FLEX last)."""
+    have, starters = Counter(positions), settings.starters
+    missing = [slot for slot, wanted in starters.items() if slot != "FLEX" for _ in range(wanted - have[slot])]
+    spare = sum(max(0, have[position] - starters.get(position, 0)) for position in FLEX_POSITIONS)
+    return [*missing, *["FLEX"] * max(0, starters.get("FLEX", 0) - spare)]
 
 
 def can_field_lineup(positions: Sequence[str], settings) -> bool:

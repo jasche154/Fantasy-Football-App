@@ -115,6 +115,7 @@ class Team(_Record):
     chaos: float                              # how far a CPU strays from ADP
     lean: Mapping[str, float] = field(hash=False)      # position -> multiplier on a CPU's draft score
     ir: tuple[int, ...] = ()                  # players in the IR slot (not in `roster`); see replay_ir
+    persona: str = "balanced"                # a CPU's trading style (replay_personas.PERSONAS)
 
 
 @dataclass(frozen=True)
@@ -152,7 +153,8 @@ class Offer(_Record):                         # every executed trade (CPU-CPU to
     to_team: int
     give: tuple[int, ...]                     # what from_team sends
     get: tuple[int, ...]
-    status: str                               # "pending" | "accepted" | "declined" | "expired"
+    status: str                               # "pending" | "accepted" | "declined" | "expired" | "countered"
+    counter_to: int | None = None             # the Offer id this one answers with a counter
 
 
 @dataclass(frozen=True)
@@ -305,6 +307,14 @@ def add_event(state: State, kind: str, team_id: int | None, text: str, player_id
     event = Event(id=state.next_id, week=state.week, kind=kind, team_id=team_id, text=text,
                   player_ids=tuple(player_ids))
     return replace(state, events=(*state.events, event), next_id=state.next_id + 1)
+
+
+def trades_open(state: State, settings: Settings) -> bool:
+    """Can trades be made now? Through the deadline week, plus the waiver phase right after its games
+    (week = deadline + 1, phase "waivers"); with no waivers it closes once the deadline week is played."""
+    deadline = settings.trade_deadline_week
+    return state.week <= deadline or (state.week == deadline + 1 and state.phase == "waivers"
+                                      and settings.waiver_mode != "none")
 
 
 def faab_left(state: State, team_id: int) -> int:

@@ -378,6 +378,12 @@ def cpu_free_agency(state: State, settings: Settings, know: Knowledge, seed: int
     return state
 
 
+def cpu_cover(state: State, settings: Settings, know: Knowledge, seed: int, team_ids: Iterable[int]) -> State:
+    """After a trade: each of those CPUs adds a free agent for every starting slot its roster can no longer
+    fill (`replay_values.missing_slots`). Stub: returns the state unchanged until round 3 lands."""
+    return state
+
+
 # ---------------- the IR slot ----------------
 
 def _stash_pick(roster: Sequence[ReplayValue], ctx: _Context) -> ReplayValue | None:
