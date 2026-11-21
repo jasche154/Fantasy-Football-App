@@ -6,6 +6,7 @@ import type {
   ReplayAdvanceResult,
   ReplayClaimBody,
   ReplayClaims,
+  ReplayCounterBody,
   ReplayCreateBody,
   ReplayDeleted,
   ReplayDraft,
@@ -199,6 +200,11 @@ export function evaluateReplayTrade(gameId: number, body: ReplayTradeBody, signa
 /** Carried out at once when the CPU accepts (`executed`), otherwise the verdict says why not. */
 export function proposeReplayTrade(gameId: number, body: ReplayTradeBody): Promise<ReplayProposeResult> {
   return post(`${game(gameId)}/trades/propose`, body);
+}
+
+/** Answer a CPU's pending offer with your own deal: the offer becomes "countered"; answers like propose. */
+export function counterReplayOffer(gameId: number, offerId: number, body: ReplayCounterBody): Promise<ReplayProposeResult> {
+  return post(`${game(gameId)}/trades/offers/${offerId}/counter`, body);
 }
 
 export function respondReplayOffer(

@@ -700,3 +700,32 @@ def test_the_protected_top_scales_with_league_size(teams, protected):
     ctx = ai._context(fakes.fake_knowledge(3, settings), settings)
 
     assert ai.protected_rank(settings) == protected and len(ctx.protected) == protected
+
+
+# ---------------- covering a slot after a trade ----------------
+
+def test_a_cpu_that_traded_away_its_only_tight_end_adds_the_best_free_one():
+    cpu, state = CPUS[0], league(3, "open")
+    alone = without(state, cpu, *at(state, cpu, "TE")[1:])
+    traded = without(alone, cpu, *at(alone, cpu, "TE"))
+    free_te = max((v for v in replay_waivers.available_players(traded, know(3)) if v.position == "TE"),
+                  key=lambda v: (v.chart, v.healthy_value, -v.player_id))
+
+    after = ai.cpu_cover(traded, SETTINGS, know(3), SEED, [cpu, USER])
+
+    assert at(after, cpu, "TE") == [free_te.player_id] and after.events[-1].kind == "add"
+    assert rs.user_team(after) == rs.user_team(traded) and ai.cpu_cover(after, SETTINGS, know(3), SEED, [cpu]) == after
+
+
+def test_a_full_cpu_drops_a_skill_player_no_slot_needs_to_cover():
+    cpu, state = CPUS[1], league(3, "open")
+    traded = without(state, cpu, *at(state, cpu, "TE"))
+    full = rs.with_team(traded, replace(rs.team(traded, cpu), roster=(*rs.team(traded, cpu).roster,
+                        *[v.player_id for v in replay_waivers.available_players(traded, know(3))
+                          if v.position == "WR"][:SETTINGS.roster_size - len(rs.team(traded, cpu).roster)])))
+
+    after = ai.cpu_cover(full, SETTINGS, know(3), SEED, [cpu])
+
+    positions = [know(3).by_id[pid].position for pid in rs.team(after, cpu).roster]
+    assert len(positions) == SETTINGS.roster_size and positions.count("TE") == 1
+    assert rv.missing_slots(positions, SETTINGS) == []

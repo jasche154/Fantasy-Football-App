@@ -1,6 +1,6 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { getReplayTeam, getReplayTrades } from '../../api/replay';
-import type { ReplayOffer, ReplaySummary, ReplayTrades } from '../../api/types';
+import type { ReplayOffer, ReplayPendingOffer, ReplaySummary, ReplayTrades } from '../../api/types';
 import { AsyncView } from '../../components/AsyncView';
 import { Card } from '../../components/Card';
 import { Skeleton } from '../../components/StatusViews';
@@ -17,18 +17,19 @@ const STATUS: Readonly<Record<ReplayOffer['status'], { label: string; tone: stri
   declined: { label: 'Declined', tone: 'out' },
   expired: { label: 'Expired', tone: 'missing' },
   pending: { label: 'Pending', tone: 'missing' },
+  countered: { label: 'Countered', tone: 'missing' },
 };
 
 /** The CPU's acceptance test in one line (backend/services/replay_trades.py). */
 function rulesText(game: ReplaySummary): string {
   const extra = game.settings.difficulty === 'hard' ? ' (on Hard they want about 8% more than they give)' : '';
-  return `CPU managers only accept a trade that is fair in value for them${extra} and makes their own lineup better. `
-    + 'Each CPU team trades at most once a week.';
+  return `CPU managers accept a trade that is worth it to them on the 0-1000 trade chart${extra}; each one has its own `
+    + 'trading style. A CPU that turns you down may counter, and you can counter its offers. Each CPU team trades at most once a week.';
 }
 
 function closedText(game: ReplaySummary, trades: ReplayTrades): string {
-  return game.week > trades.deadline_week
-    ? `The trade deadline has passed: no trades after week ${trades.deadline_week}.`
+  return game.phase !== 'complete'
+    ? `The trade deadline has passed: trades closed at week ${trades.deadline_week}'s waivers.`
     : 'Trades are closed: the season is over.';
 }
 
@@ -82,10 +83,14 @@ export function TradesView({ game, version, act, isBusy, openPlayer }: ReplayVie
     if (notice) noticeRef.current?.focus();
   }, [notice]);
   const noticeTone = notice ? (notice.isGood ? ' success-text' : ' notice') : '';
+  const [countering, setCountering] = useState<ReplayPendingOffer | null>(null);
   return (
     <>
       <ReplayIrBlockedNotice game={game} />
       <p className="hint">{rulesText(game)}</p>
+      {game.rank_source === 'model' && (
+        <p className="hint">No expert ranks are loaded for this week: values come from the app's model ranks.</p>
+      )}
       <p ref={noticeRef} tabIndex={-1} role="status" className={`replay-trades__notice${noticeTone}`}>{notice?.text}</p>
       <AsyncView state={loaded} loading={<Skeleton lines={6} label="Loading trades…" />} errorTitle="Couldn't load trades">
         {([trades, mine]) => (
@@ -93,10 +98,12 @@ export function TradesView({ game, version, act, isBusy, openPlayer }: ReplayVie
             {!trades.open && <p className="notice">{closedText(game, trades)}</p>}
             <h2 className="section-title">Offers for you</h2>
             <TradeOffers game={game} version={version} offers={trades.offers} roster={mine.results} isOpen={trades.open}
-              actions={actions} openPlayer={openPlayer} />
+              actions={actions} openPlayer={openPlayer} onCounter={setCountering} />
             {trades.open && (
-              <Card title="Propose a trade" eyebrow={`Open through week ${trades.deadline_week}`}>
-                <TradeBuilder game={game} version={version} roster={mine.results} maxPlayers={trades.max_players} outDiscount={trades.out_discount}
+              <Card title={countering ? `Counter ${countering.from_team.name}'s offer` : 'Propose a trade'}
+                eyebrow={`Open through week ${trades.deadline_week}'s waivers`}>
+                <TradeBuilder key={countering?.id ?? 'new'} game={game} version={version} roster={mine.results}
+                  maxPlayers={trades.max_players} counterTo={countering} onCounterDone={() => setCountering(null)}
                   initialPartner={parsePositiveInt(query.with)} initialWant={parsePositiveInt(query.want)}
                   actions={actions} openPlayer={openPlayer} />
               </Card>

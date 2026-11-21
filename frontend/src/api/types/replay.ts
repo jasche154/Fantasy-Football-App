@@ -26,6 +26,8 @@ export interface ReplayTeamRef {
   team_id: number;
   name: string;
   is_user: boolean;
+  /** A one-line hint at how a CPU trades (its persona stays hidden); null for the user and before 3 weeks. */
+  tendency: string | null;
 }
 
 export interface ReplayPlayerRef {
@@ -49,19 +51,30 @@ export interface ReplayPlayerRow {
   /** Real points in that week; null when the week is unplayed or he did not play. */
   points: number | null;
   ros_ppg: number;
-  /** What he counts for in a trade package. */
+  /** His 0-1000 trade chart value this week (after injury), a whole number. */
   value: number;
-  /** Value over replacement (K, DST: 0). */
-  trade_value: number;
+  /** By chart value. */
   rank: number;
   /** e.g. "RB7". */
   pos_rank: string;
   adp: number | null;
+  /** Overall preseason rank (experts interleaved on ADP, else ADP order). */
+  pre_rank: number | null;
+  /** This week's expert position rank; null when unranked. */
+  expert_rank: number | null;
+  /** The injury report while he is out; it can be wrong. */
+  news: ReplayNews | null;
   /** Real games and points a game BEFORE that week. */
   games: number;
   ppg: number;
   /** Traded in the last two weeks. */
   trade_locked: boolean;
+}
+
+/** An injury report: back = the week he is said to return (null = out for the season). */
+export interface ReplayNews {
+  back: number | null;
+  text: string;
 }
 
 export interface ReplayRecord {
@@ -168,7 +181,7 @@ export interface ReplayReadiness {
 export interface ReplayPrepareStatus {
   season: number;
   status: 'running' | 'done' | 'failed';
-  /** The step running or failed, e.g. 'snaps'. */
+  /** The step running or failed, e.g. 'snaps' or 'experts'. */
   step: string | null;
   error: string | null;
   updated_at?: string;
@@ -266,6 +279,10 @@ export interface ReplaySummary {
   ir_blocked: ReplayPlayerRef[];
   /** Injury tags are loaded for this season. */
   has_injuries: boolean;
+  /** Trades can be made now: through the deadline week and its waiver phase. */
+  trades_open: boolean;
+  /** What this week's chart values lean on: expert ranks, or the app's model when none are loaded. */
+  rank_source: 'experts' | 'model';
 }
 
 /** What every POST under /games answers; `events` is what the action caused, oldest first. */

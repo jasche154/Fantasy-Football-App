@@ -60,7 +60,7 @@ def errors() -> Iterator[None]:
 
 
 def _game(row: ReplayLeague, settings: Settings, state: State, data: SeasonData) -> views.Game:
-    return views.Game(row.id, row.name, settings, state, data, row.updated_at.isoformat())
+    return views.Game(row.id, row.name, settings, state, data, row.updated_at.isoformat(), row.seed)
 
 
 def open_game(session: Session, game_id: int) -> views.Game:

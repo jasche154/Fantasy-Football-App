@@ -8,10 +8,13 @@ whole season's pool; `as_of(week)` narrows it to those known by then (an ADP, a 
 a player who only turns up in week 9 is not on the draft board or the wire before week 9. `injuries` holds
 each week's tag (that week's final report or roster status, known before its games); none at draft time.
 `usage` holds each skill game's snap share, targets, target share and carries (a result, like `actual`).
+`expert_ranks` / `expert_age` are FantasyPros position ranks as of each week (services/replay_experts.py) and
+`returns` says when each hard-tag streak really ended (`hard_tag_returns`).
 """
 import logging
 from collections import defaultdict
 from collections.abc import Mapping
+from datetime import date
 from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from threading import Lock
@@ -21,7 +24,8 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from database.models import (
-    KickerGame, NflGame, Player, PlayerStatsWeekly, ReplayAdp, ReplayInjury, ReplayProjection, TeamGameStats,
+    KickerGame, NflGame, Player, PlayerStatsWeekly, ReplayAdp, ReplayExpertRank, ReplayInjury, ReplayProjection,
+    TeamGameStats,
 )
 from integrations.adp_history import TWO_WAY
 from services import kdst_model
@@ -235,9 +239,11 @@ def readiness(session: Session, season: int) -> dict:
              and every_week and kickers >= MIN_KICKERS and defenses >= MIN_DEFENSES)
     projection_weeks = len(weeks)
     injury_weeks = _count(session, ReplayInjury.week.distinct(), ReplayInjury.season == season)  # not needed to play
+    expert_snapshots = _count(session, ReplayExpertRank.scrape_date.distinct(), ReplayExpertRank.season == season)
     return {"season": season, "ready": ready, "has_stats": has_stats, "has_schedule": bool(teams),
             "has_kdst": has_kdst, "adp_players": adp_players, "projection_weeks": projection_weeks,
-            "kickers": kickers, "defenses": defenses, "injury_weeks": injury_weeks}
+            "kickers": kickers, "defenses": defenses, "injury_weeks": injury_weeks,
+            "expert_snapshots": expert_snapshots}
 
 
 def ready_seasons(session: Session) -> list[int]:
@@ -340,6 +346,41 @@ def _by_player(teams: Mapping[PlayerWeek, str]) -> dict[int, tuple[tuple[int, st
     return {player_id: tuple(sorted(games)) for player_id, games in grouped.items()}
 
 
+def hard_tag_returns(injuries: Mapping[PlayerWeek, Injury], actual: Mapping[PlayerWeek, float],
+                     last_week: int) -> dict[PlayerWeek, int]:
+    """{(player, first week of a hard-tag streak): first later week he really played, 0 = never}. A streak
+    runs from a hard tag until his next game (byes and untagged weeks in between stay in it); a hard tag in a
+    week he played anyway starts nothing."""
+    tagged: dict[int, list[int]] = defaultdict(list)
+    for (player_id, week), injury in injuries.items():
+        if injury.hard and (player_id, week) not in actual:
+            tagged[player_id].append(week)
+    out: dict[PlayerWeek, int] = {}
+    for player_id, weeks in tagged.items():
+        back = None                                     # the week the open streak ends; 0 = it never does
+        for week in sorted(weeks):
+            if back is None or 0 < back <= week:
+                back = next((w for w in range(week + 1, last_week + 1) if (player_id, w) in actual), 0)
+                out[(player_id, week)] = back
+    return out
+
+
+def _expert_ranks(session: Session, season: int, schedule: Schedule,
+                  players: Mapping[int, PoolPlayer]) -> tuple[dict[PlayerWeek, int], dict[int, int]]:
+    from services.replay_experts import week_ranks      # it imports this module
+
+    kickoffs: dict[int, date] = {}
+    for game in schedule.games:
+        if game.gameday:
+            day = date.fromisoformat(game.gameday)
+            kickoffs[game.week] = min(kickoffs.get(game.week, day), day)
+    rows = [dict(row._mapping) for row in session.execute(select(
+        ReplayExpertRank.kind, ReplayExpertRank.scrape_date, ReplayExpertRank.player_id, ReplayExpertRank.position,
+        ReplayExpertRank.pos_rank).where(ReplayExpertRank.season == season))]
+    ranks, age = week_ranks(rows, kickoffs) if rows and kickoffs else ({}, {})
+    return {key: rank for key, rank in ranks.items() if key[0] in players}, age
+
+
 def _build(session: Session, season: int, scoring: str) -> SeasonData:
     status = readiness(session, season)
     if not status["ready"]:
@@ -364,6 +405,7 @@ def _build(session: Session, season: int, scoring: str) -> SeasonData:
                 for row in session.scalars(select(ReplayInjury).where(
                     ReplayInjury.season == season, ReplayInjury.week.between(1, last_week)))
                 if row.player_id in players}
+    expert_ranks, expert_age = _expert_ranks(session, season, schedule, players)
     unplaced = sum(1 for key in actual if key not in teams)
     if unplaced > len(actual) * 0.05:
         log.warning("Replay %s: %d of %d games have no team (schedule and stats team codes may differ)",
@@ -371,4 +413,6 @@ def _build(session: Session, season: int, scoring: str) -> SeasonData:
     return SeasonData(season=season, scoring=scoring, players=MappingProxyType(players), schedule=schedule,
                       actual=MappingProxyType(actual), projected=MappingProxyType(projected),
                       team_by_week=MappingProxyType(_by_player(teams)), last_week=last_week,
-                      injuries=MappingProxyType(injuries), usage=MappingProxyType(usage))
+                      injuries=MappingProxyType(injuries), usage=MappingProxyType(usage),
+                      expert_ranks=MappingProxyType(expert_ranks), expert_age=MappingProxyType(expert_age),
+                      returns=MappingProxyType(hard_tag_returns(injuries, actual, last_week)))

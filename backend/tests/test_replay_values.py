@@ -1,11 +1,12 @@
 """Replay League values: point-in-time knowledge, and that the app's lineup and trade engines run on it."""
 import time
 from dataclasses import replace
+from types import MappingProxyType
 
 import numpy as np
 import pytest
 
-from services import lineup_gain, my_team, replay_state, replay_values as rv, trade
+from services import lineup_gain, my_team, replay_news, replay_state, replay_values as rv, trade
 from services.league import LeagueSettings
 from services.replay_pool import SKILL
 from tests import replay_fakes as fakes
@@ -26,8 +27,14 @@ def roster_of(know: rv.Knowledge, *pos_ranks: str) -> list[rv.ReplayValue]:
     return [by_rank[rank] for rank in pos_ranks]
 
 
+def by_rate(know: rv.Knowledge, position: str, n: int) -> rv.ReplayValue:
+    """The nth best at a position by rest-of-season rate (pos_rank follows the chart instead)."""
+    return sorted((v for v in know.values if v.position == position), key=lambda v: (-v.ros_ppg, v.player_id))[n - 1]
+
+
 def middling_roster(know: rv.Knowledge) -> list[rv.ReplayValue]:
-    return roster_of(know, "QB14", "RB26", "RB38", "RB50", "WR26", "WR38", "WR50", "TE14")
+    return [by_rate(know, "QB", 14), *(by_rate(know, p, n) for p in ("RB", "WR") for n in (26, 38, 50)),
+            by_rate(know, "TE", 14)]
 
 
 # ---------------- the shape of Knowledge ----------------
@@ -37,7 +44,7 @@ def test_knowledge_covers_the_pool_known_that_week_ranked_best_first():
 
     assert len(know.values) == len(data.as_of(5).players) == len(know.by_id) < len(data.players)
     assert [v.rank for v in know.values] == list(range(1, len(know.values) + 1))
-    assert all(a.trade_value >= b.trade_value for a, b in zip(know.values, know.values[1:]))
+    assert all(a.chart >= b.chart for a, b in zip(know.values, know.values[1:]))
     assert all(know.by_id[v.player_id] is v for v in know.values)
     assert sorted(v.pos_rank for v in know.values if v.position == "TE")[:2] == ["TE1", "TE10"]
     assert (know.season, know.week, know.through_week, know.weeks_remaining) == (fakes.SEASON, 5, 4, END - 4)
@@ -65,7 +72,7 @@ def test_kickers_and_defenses_have_no_trade_value_but_still_project():
     assert len(specials) == 66 - len(fakes.KICKER_CHANGES)          # the replacement kickers are not known yet
     assert all(v.trade_value == 0.0 and v.vorp_per_game == 0.0 and v.healthy_value == 0.0 for v in specials)
     assert sum(v.ros_ppg > 5 for v in specials) >= 60 and sum(v.projection > 0 for v in specials) >= 60
-    assert all(a.ros_ppg >= b.ros_ppg for a, b in zip(kickers, kickers[1:]))       # ranked by rate within position
+    assert all(a.chart >= b.chart for a, b in zip(kickers, kickers[1:]))           # ranked by chart within position
 
 
 def test_knowledge_is_cached_and_fast():
@@ -89,7 +96,9 @@ def test_knowledge_rejects_a_negative_week_and_data_that_stops_too_early():
         rv.knowledge(data, league, -1, END)
     with pytest.raises(ValueError, match="stops before week 3"):
         rv.knowledge(data.as_of(3), league, 6, END)
-    assert rv.knowledge(data.as_of(0), league, 1, END).values == rv.knowledge(data, league, 1, END).values
+    early, full = rv.knowledge(data.as_of(0), league, 1, END), rv.knowledge(data, league, 1, END)
+    assert {v.player_id: (v.ros_ppg, v.projection) for v in early.values} == {
+        v.player_id: (v.ros_ppg, v.projection) for v in full.values}       # the week-1 expert snapshot comes later
 
 
 def test_league_settings_carry_the_replay_league_into_the_engine():
@@ -215,18 +224,25 @@ def test_team_is_the_one_known_before_the_week():
 
 # ---------------- injuries and byes ----------------
 
-def test_a_star_with_no_projection_loses_a_share_of_his_value_and_gets_it_all_back():
-    weeks = {w: know_at(w).by_id[fakes.INJURED_STAR_ID] for w in range(5, 11)}
+def game_weeks(know: rv.Knowledge, value: rv.ReplayValue) -> list[int]:
+    return [w for w in range(know.week, END + 1) if know.schedule.opponent(value.team, w)]
+
+
+def test_a_star_out_with_news_is_discounted_by_the_report_and_gets_it_all_back():
+    knows = {w: know_at(w) for w in range(5, 11)}
+    weeks = {w: know.by_id[fakes.INJURED_STAR_ID] for w, know in knows.items()}
 
     assert [weeks[w].out for w in range(5, 11)] == [False, True, True, True, True, False]
-    assert [weeks[w].availability for w in range(5, 11)] == [1.0, 0.55, 0.45, 0.4, 0.35, 1.0]
-    assert all(weeks[w].expected_missed == pytest.approx(weeks[w].games_left * (1 - weeks[w].availability), abs=0.006)
-               for w in range(5, 11))
-    assert all(weeks[w].trade_value == pytest.approx(weeks[w].healthy_value * weeks[w].availability, abs=0.06)
-               for w in range(5, 11))
-    assert weeks[5].trade_value > weeks[6].trade_value > weeks[7].trade_value > weeks[8].trade_value
-    assert weeks[9].trade_value > 25 and weeks[9].rank < 100            # four weeks out: no cliff, still a top asset
-    assert weeks[10].trade_value == weeks[10].healthy_value > 50        # projected again: full value at once
+    assert weeks[5].news is None and weeks[10].news is None
+    for w in fakes.INJURED_WEEKS:
+        value = weeks[w]
+        share = replay_news.share_played(value.news, game_weeks(knows[w], value))
+        assert value.news.since == 6 and w < value.news.back <= 12 and "expected back" in value.news.text
+        assert value.availability == round(share, 3) < 1
+        assert value.expected_missed == pytest.approx(value.games_left * (1 - share), abs=0.006)
+        assert value.trade_value == pytest.approx(value.healthy_value * value.availability, abs=0.11)
+        assert 300 < value.chart < value.healthy_chart                   # real but discounted value
+    assert weeks[10].availability == 1.0 and weeks[10].chart == weeks[10].healthy_chart > 500
     assert all(weeks[w].projection == 0.0 for w in fakes.INJURED_WEEKS)
 
 
@@ -308,7 +324,8 @@ def test_a_replaced_kicker_becomes_unavailable_and_his_replacement_appears():
 
     assert before.by_id[old_id].availability == 1.0 and new_id not in before.by_id      # not in the pool yet
     assert know_at(first_week).by_id[new_id].expected_missed == 0.0     # his first week: nobody was waiting on him
-    assert after.by_id[old_id].out and 0 < after.by_id[old_id].availability <= 0.35
+    gone = after.by_id[old_id]                                          # IR for good: out for the season
+    assert gone.out and gone.news.back is None and gone.availability == 0.0 and gone.chart == 0.0
     assert after.by_id[old_id].projection == 0.0
     assert after.by_id[new_id].ros_ppg > 4.5 and after.by_id[new_id].projection > 0     # four projections in
 
@@ -340,14 +357,15 @@ def test_knowledge_is_the_same_for_the_full_season_and_its_as_of_copy(week):
     assert rv.knowledge(data.as_of(week + 3), league, week, END).values == full.values
 
 
-def test_real_results_never_move_values_only_the_display_fields():
+def test_real_results_move_only_the_chart_form_and_the_display_fields():
     data = fakes.fake_season()
     boosted = fakes.patched(data, actual={key: points + 30 for key, points in data.actual.items()})
 
     real, altered = know_at(8, data), know_at(8, boosted)
 
-    assert [(v.player_id, v.ros_ppg, v.trade_value, v.rank) for v in real.values] == [
-        (v.player_id, v.ros_ppg, v.trade_value, v.rank) for v in altered.values]
+    assert {v.player_id: (v.ros_ppg, v.trade_value) for v in real.values} == {
+        v.player_id: (v.ros_ppg, v.trade_value) for v in altered.values}
+    assert altered.by_id[fakes.BUST_ID].form_chart > real.by_id[fakes.BUST_ID].form_chart
     assert altered.by_id[fakes.BUST_ID].ppg == pytest.approx(real.by_id[fakes.BUST_ID].ppg + 30, abs=0.01)
 
 
@@ -412,12 +430,12 @@ def test_gain_and_best_add_value_a_star_for_a_middling_roster():
     know, settings = know_at(6), fakes.fake_settings()
     projector, horizon = rv.projector(know), rv.horizon(know, settings)
     roster = middling_roster(know)
-    star, droppable = roster_of(know, "RB2")[0], roster_of(know, "RB50", "WR50")
+    star, droppable = roster_of(know, "RB2")[0], [by_rate(know, "RB", 50), by_rate(know, "WR", 50)]
 
     plain = lineup_gain.gain(roster, horizon, projector, know.league, add=[star], drop=droppable[:1])
     with_drop, dropped = lineup_gain.best_add(roster, droppable, star, horizon, projector, know.league)
     open_spot, nobody = lineup_gain.best_add(roster, [], star, horizon, projector, know.league)
-    pointless, _ = lineup_gain.best_add(roster, droppable, roster_of(know, "RB80")[0], horizon, projector, know.league)
+    pointless, _ = lineup_gain.best_add(roster, droppable, by_rate(know, "RB", 80), horizon, projector, know.league)
 
     assert plain > 20 and with_drop >= plain and dropped in droppable
     assert open_spot >= with_drop and nobody is None
@@ -431,8 +449,9 @@ def test_the_replay_projector_sits_an_injured_player_out_and_never_inflates_his_
     projector, engine_default = rv.projector(know), lineup_gain.Projector(know, {}, {}, 8)
     weekly = [projector.points(star, week) for week in range(8, END + 1)]
 
-    assert star.availability == 0.4 and star.expected_missed == pytest.approx(0.6 * star.games_left)
-    assert weekly[:4] == [0.0] * 4                        # sat out for the games he is expected to miss
+    missed = star.news.back - 8                           # the report says he is back after these weeks
+    assert star.expected_missed == pytest.approx((1 - star.availability) * star.games_left, abs=0.01)
+    assert star.expected_missed == missed and weekly[:missed] == [0.0] * missed     # sat out until the report's week
     assert 0 < weekly[-1] <= star.ros_ppg and max(weekly) <= star.ros_ppg
     assert engine_default.points(star, 15) > star.ros_ppg       # PlayerValue's rate is pre-discounted; ours is not
 
@@ -479,39 +498,34 @@ def test_evaluate_trade_judges_replay_values():
 
 # ---------------- what a player counts for in a trade package ----------------
 
-def test_market_value_is_the_trade_value_for_a_starter_and_a_floor_for_the_rest():
+def test_market_value_is_the_chart_value():
     know = know_at(6)
     star, scrub = roster_of(know, "RB3", "RB80")
     out = know.by_id[fakes.INJURED_STAR_ID]
 
-    assert rv.market_value(know, star.player_id) == star.market_value == star.trade_value > 100
-    assert scrub.trade_value == 0.0
-    assert rv.market_value(know, scrub.player_id) == pytest.approx(trade.FAIR_POINTS_PER_WEEK * scrub.games_left)
-    assert rv.market_value(know, out.player_id) == out.trade_value < out.healthy_value      # discounted, not floored
-    assert all(v.market_value >= round(trade.FAIR_POINTS_PER_WEEK * v.games_left, 1) > 0 for v in know.values)
+    assert rv.market_value(know, star.player_id) == star.market_value == star.chart > 700
+    assert scrub.trade_value == 0.0 and 0 < scrub.market_value == scrub.chart < 30
+    assert rv.market_value(know, out.player_id) == out.chart < out.healthy_chart             # discounted, not zero
+    discount = out.availability * rv.replay_chart.AVAILABILITY_SHARE                # his first week out
+    assert out.chart == pytest.approx(out.healthy_chart * discount, abs=0.2) and out.chart > 0
+    assert all(0 <= v.chart <= rv.replay_chart.CHART_MAX * rv.replay_chart.BYE_BUMP for v in know.values)
     with pytest.raises(ValueError):
         rv.market_value(know, 999_999)
 
 
 @pytest.mark.parametrize("position", ["K", "DST"])
-def test_kickers_and_defenses_are_worth_a_roster_spot_and_no_more(position):
-    # an elite unit counts for no more than a waiver one: else a free-agent unit buys skill value
+def test_kickers_and_defenses_chart_low_and_have_no_trade_value(position):
     for week in (1, 6, 12):
-        know = know_at(week)
-        ranked = sorted((v for v in know.values if v.position == position), key=lambda v: -v.ros_ppg)
+        ranked = sorted((v for v in know_at(week).values if v.position == position), key=lambda v: -v.chart)
 
         assert ranked[0].ros_ppg > ranked[-1].ros_ppg
-        assert all(v.market_value == round(trade.FAIR_POINTS_PER_WEEK * v.games_left, 1) > 0 for v in ranked)
-        assert all(v.trade_value == 0.0 for v in ranked)
+        assert 5 < ranked[0].chart < 40 and all(v.trade_value == 0.0 for v in ranked)
 
 
-def test_market_floor_shrinks_with_the_games_left():
-    scrub = roster_of(know_at(6), "RB80")[0].player_id
+def test_chart_values_do_not_shrink_as_the_weeks_pass():
+    tops = [know_at(week).values[0].chart for week in (1, 6, 12, 16)]
 
-    early, late = know_at(2).by_id[scrub], know_at(16).by_id[scrub]
-
-    assert early.market_value > late.market_value == pytest.approx(trade.FAIR_POINTS_PER_WEEK * late.games_left)
-    assert late.games_left == 1
+    assert all(top > 900 for top in tops)
 
 
 # ---------------- lineups over all six positions ----------------
@@ -656,17 +670,17 @@ def test_ir_and_pup_expect_him_to_miss_at_least_80_percent_of_his_games(tag, flo
     assert value.trade_value == pytest.approx(value.healthy_value * value.availability, abs=0.15)
 
 
-def test_the_ir_floor_moves_only_the_ir_kicker_in_the_base_season():
+def test_the_ir_kicker_who_never_returns_is_reported_out_for_the_season():
     kicker, data = fakes.IR_KICKER_ID, fakes.fake_season()
     untagged = fakes.tagged(data, {key: None for key in data.injuries if key[0] == kicker})
-    floor = round(1 - rv.IR_OUT_SHARE, 3)
     for week in range(fakes.IR_KICKER_WEEK, data.last_week + 1):
         tagged, plain = know_at(week).by_id[kicker], know_at(week, untagged).by_id[kicker]
-        assert tagged.availability == min(floor, plain.availability)      # a longer streak's share still wins
-        assert tagged.market_value == plain.market_value                  # a kicker stays at the roster-spot floor
-        assert replace(tagged, injury=None, availability=0, expected_missed=0) == replace(
-            plain, availability=0, expected_missed=0)
-    assert know_at(9, untagged).by_id[kicker].availability == round(1 - rv.OUT_SHARE[1], 3) > floor
+        assert tagged.news.since == fakes.IR_KICKER_WEEK and plain.news is None
+        assert tagged.availability == 0.0 and tagged.healthy_chart == plain.healthy_chart   # no game left for him
+        ignored = {"availability": 0, "expected_missed": 0, "chart": 0, "market_value": 0, "rank": 0, "pos_rank": "",
+                   "news": None, "trade_value": 0}
+        assert replace(tagged, injury=None, **ignored) == replace(plain, **ignored)
+    assert know_at(fakes.IR_KICKER_WEEK + 3).by_id[kicker].news.back is None
 
 
 def test_a_hard_tag_carried_over_his_bye_shows_and_he_stays_out():
@@ -691,3 +705,80 @@ def test_a_hard_tag_alone_makes_a_player_without_a_prior_out():
 
     assert hurt.by_id[backup].out and hurt.by_id[backup].projection == 0.0    # no prior, so no out streak: the tag says so
     assert rv.IR_OUT_SHARE == 0.80
+
+
+# ---------------- the trade chart ----------------
+
+NEWS_FIELDS = {"news": None, "availability": 0, "expected_missed": 0, "chart": 0, "market_value": 0,
+               "trade_value": 0, "rank": 0, "pos_rank": ""}
+
+
+def hard_tagged(data, week: int) -> set[int]:
+    return {pid for (pid, w), tag in data.injuries.items() if w == week and tag.hard}
+
+
+@pytest.mark.parametrize("week", [6, 8, 9, 12])
+def test_changing_returns_moves_only_players_hard_tagged_now(week):
+    data = fakes.fake_season()
+    real, other = know_at(week, data), know_at(week, fakes.returns_changed(data))
+    tagged = hard_tagged(data, week)
+
+    assert tagged and any(real.by_id[pid] != other.by_id[pid] for pid in tagged)
+    for v in real.values:
+        ignored = NEWS_FIELDS if v.player_id in tagged else {"rank": 0, "pos_rank": ""}
+        assert replace(v, **ignored) == replace(other.by_id[v.player_id], **ignored)
+
+
+def test_the_seed_moves_only_the_news():
+    data, league = fakes.fake_season(), rv.league_settings(fakes.fake_settings())
+    reports = {seed: rv.knowledge(data, league, 7, END, seed) for seed in range(6)}
+
+    assert len({know.by_id[fakes.INJURED_STAR_ID].news for know in reports.values()}) > 1
+    for know in reports.values():
+        for v in know.values:
+            ignored = NEWS_FIELDS if v.player_id in hard_tagged(data, 7) else {"rank": 0, "pos_rank": ""}
+            assert replace(v, **ignored) == replace(reports[0].by_id[v.player_id], **ignored)
+
+
+def test_chart_fields_come_from_the_expert_ranks_and_the_preseason():
+    know, data = know_at(4), fakes.fake_season()
+    top = know.values[0]
+
+    assert know.rank_source == "experts" and top.chart > 900
+    assert top.expert_rank == data.expert_ranks[(top.player_id, 4)]
+    assert all(v.pre_rank is not None and v.pre_chart > 0 for v in know.values if v.adp is not None)
+    firsts = sorted((v for v in know.values if v.pre_rank is not None), key=lambda v: v.pre_rank)[:12]
+    assert all(v.star == 1.0 for v in firsts) and know.by_id[fakes.BREAKOUT_ID].star < 0.5
+    assert [v.chart for v in know.values] == sorted((v.chart for v in know.values), reverse=True)
+    assert all(v.market_value == v.chart for v in know.values)
+
+
+def test_without_expert_ranks_the_chart_is_the_models():
+    data = replace(fakes.fake_season(), expert_ranks=MappingProxyType({}), expert_age=MappingProxyType({}))
+    know = know_at(5, data)
+
+    assert know.rank_source == "model" and all(v.expert_rank is None for v in know.values)
+    assert know.values[0].chart > 900
+    pre = sorted((v for v in know.values if v.adp is not None), key=lambda v: (v.adp, v.player_id))
+    assert [v.pre_rank for v in pre] == list(range(1, len(pre) + 1))            # ADP order
+
+
+def test_a_star_drops_less_after_bad_games_than_a_lesser_player():
+    data = replace(fakes.fake_season(), expert_ranks=MappingProxyType({}), expert_age=MappingProxyType({}))
+    star, lesser = fakes.player_id("WR", 2), fakes.player_id("WR", 25)
+    bad = fakes.patched(data, actual={(pid, w): 1.0 for pid in (star, lesser) for w in (2, 3, 4)})
+    before, after = know_at(5, data), know_at(5, bad)
+
+    drop = {pid: 1 - after.by_id[pid].chart / before.by_id[pid].chart for pid in (star, lesser)}
+    assert after.by_id[star].form_chart < 0 and 0 < drop[star] < drop[lesser]
+
+
+def test_the_bye_bump_lands_once_his_bye_is_behind_him():
+    data = fakes.fake_season()
+    pid = fakes.player_id("RB", 1)
+    bye = next(w for w in range(1, 18) if data.on_bye(pid, w))
+    flat = replace(data, expert_ranks=MappingProxyType({(p, w): r for (p, w), r in data.expert_ranks.items()
+                                                        if w == 0}))           # one frozen snapshot
+    on, after = know_at(bye, flat).by_id[pid], know_at(bye + 1, flat).by_id[pid]
+
+    assert after.healthy_chart > on.healthy_chart * 1.01

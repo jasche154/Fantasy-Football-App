@@ -860,6 +860,11 @@ that week's games on; only scoring a week reads its real points.
   regular season: one missing week would zero it). It also reports `injury_weeks` (weeks with tags
   stored), which `ready` does not require. A re-run of Prepare fetches the MyFantasyLeague ADP
   tail again while a season has none.
+  The "experts" step (2020 on) stores FantasyPros position ranks from the nflverse archive in
+  `replay_expert_ranks` (`services/replay_experts.py`): the last preseason cheatsheet and every in-season
+  rest-of-season snapshot. Week W uses the latest snapshot taken before week W's first Sunday kickoff. A
+  failed download is reported and never blocks the season; without ranks the values use the app's model
+  ranks only ("model ranks" on the Trades screen).
 - **Injuries and IR:** Q, D and O come from the official injury report; IR, PUP and SUS from the weekly
   roster status (PUP = status PUP or reserve code R04; suspended = SUS or R40/R33/R30; every other
   reserve list = IR, except the lists that are not an injury (retired R02, did not report R03, left squad
@@ -895,10 +900,19 @@ that week's games on; only scoring a week reads its real points.
   always replaced.
 - **Values:** `ros_ppg` is the weighted mean (4, 3, 2, 1) of a player's last four pre-game projections,
   with a preseason rate (the ADP order mapped onto the week-1 projection curve) filling the slots that
-  do not exist yet. Trade value is points over replacement x games left x the share of them he is
-  expected to play (a player with no projection is "out": he is expected to miss 45% of his remaining
-  games after one week out, up to 90% after six; a player on IR or PUP is expected to miss at least 80%
-  of his remaining games, measured 2018-2025).
+  do not exist yet. Waivers still use points over replacement (`trade_value`). Trades and the Value
+  column use a **0-1000 trade chart** (`services/replay_chart.py`): a player's rank at his position is
+  turned into the ADP pick where that season's Nth player at the position went, and the pick into
+  1000 x exp(-(pick - 1) / 40), so a star is worth more than two good players. The rank blends this
+  week's expert rank (weight 0.65 for a fresh snapshot, less as it ages) with the app's model rank
+  (`ros_ppg` nudged by his last three real games), and an injured player is priced by the share of his
+  team's remaining games he is expected to play.
+- **Injury news:** a player who is out carries a report of when he is due back (`services/replay_news.py`).
+  It is built from the week he really returned, blurred by seeded noise (off by up to two weeks, a few
+  false "out for the season" calls, season-ending injuries first reported as a return weeks out) that
+  shrinks as the return nears; it never names a week already reached. This is the one sanctioned use of
+  later data (a beat report would know as much). Shown under a tagged player on the Players and Trades
+  screens.
 - **The week:** Wednesday waivers by rolling priority (CPUs claim when a player adds about a lineup point
   a week), then free agency, then the games: every team's best lineup by projection (yours can be set
   by hand), scored with real points. With waivers off, every unrostered player is a free agent.
@@ -920,25 +934,28 @@ that week's games on; only scoring a week reads its real points.
 - **Usage:** the Players screen and a player's page show snap %, targets, target share and carries,
   averaged over his last 3 games before this week (a player's page: each played week's own game). Only
   weeks already played; snap % only where snap counts are loaded; no red-zone numbers (not in the data).
-- **Trades:** a CPU accepts only if the package it gets is worth at least what it gives (8% more on
-  hard) and its rest-of-season lineup improves; both teams must still field a full lineup. Declines
-  come with the reasons. A kicker or defense counts for a roster spot only, and a CPU will not swap its
-  own for a weaker one; a throw-in the CPU would cut to make room counts for nothing. A player who is out
-  this week can be traded from the active roster (never from the IR slot): a CPU counts an out player it
-  receives at 80% of his value (`replay_trades.OUT_RISK_DISCOUNT`; the value already prices the games he is
-  expected to miss, the rest is the bench spot he holds meanwhile) and never takes one in a deal that leaves
-  it a starting slot nobody can fill this week. A CPU sends you an out player only for at least 75% of his
-  healthy value (`replay_trades.OUT_SELL_SHARE`): the absence model underprices most out players (2018-25,
-  tagged Out they kept 60-85% of their healthy value against 35-55% priced), and you may remember when he
-  came back. Between CPUs the market value stands. Suspensions use the same absence model as injuries (the
-  data has no known length). CPUs also trade with each other (each attempt asks up to
-  `replay_trade_ai.MAX_PAIRS` (3) pairs of CPUs, about 4 trades a season) and send you offers.
+- **Trades:** a CPU scores a deal on the chart (`services/replay_trade_value.py`): what it receives and
+  keeps, minus its forced drops, plus a premium for getting the best player in the deal and a little for
+  roster spots and lineup gain, against what it sends (8% more from you on hard). It also refuses a deal
+  that loses it 20% of market value. Declines come with the reasons. A player on IR can't be traded; a CPU
+  sells you an out player only for at least half his healthy chart value. After a deal each starting slot
+  the CPU can no longer fill needs a free agent it can add, and it adds him right away
+  (`replay_waiver_ai.cpu_cover`). Each CPU has a hidden **persona** (balanced, panicky, shark, steady,
+  gambler: `services/replay_personas.py`, assigned from the league's seed at creation) that nudges what it
+  thinks a player is worth by up to 15% and how often it offers and counters; after 3 weeks a one-line
+  tendency hint is shown, never the persona. **Counters:** a CPU that turns down a deal on value alone may
+  answer with a counter offer it would take (`services/replay_counter.py`), shown under Offers for you;
+  you can counter a CPU's offer from the trade builder (the offer is marked "countered"). The **deadline**:
+  trades are open through week 11 and its waiver phase, and close when you press Sim to Wednesday after
+  week 11's games (in a league without waivers, once week 11 is played). CPUs also trade with each other
+  and send you offers.
 - **Season:** 14 weeks, then two playoff weeks: seeds 1-4 play for the title, everyone else plays
   consolation games in groups of four seeds (semi-finals, then a game for 5th and one for 7th, and so on),
   so places 5..N come from that ladder. A leftover pair (10 and 14 teams) plays twice: the team that won
   both places higher; a split goes to more points over the two games, then the higher seed.
 - **Limits of "no hindsight":** a week's projection is the sites' final pre-game number, and it is
-  already visible at that week's Wednesday waiver run. A player appears on the board and the wire once
+  already visible at that week's Wednesday waiver run. An expert snapshot taken on a Friday already knows
+  that week's Thursday game. Injury news is built from the real return week (noisy, see above). A player appears on the board and the wire once
   he has an ADP, a projection or a game by that week. A player's NFL team before his first game is the
   team of that first game.
 
@@ -1035,10 +1052,11 @@ League parameters accepted by every valuation endpoint: `scoring=ppr|half|std`,
 | POST | `/api/replay/games/{id}/ir/place` | Body `{"player_id": id}`; move a player tagged O, IR or PUP this week to your IR slot |
 | POST | `/api/replay/games/{id}/ir/activate` | Body `{"player_id": id, "drop": id, "swap": id}` (`drop` and `swap` optional, not both); bring him back, dropping `drop` when the roster is full or moving the injured `swap` to IR in his place |
 | POST | `/api/replay/games/{id}/advance` | Body `{"step": "wednesday", "week": 3}` runs the waivers, `"play"` plays the week (409 if `week` is not the league's current week) |
-| GET | `/api/replay/games/{id}/trades` | CPU offers waiting for you (with a preview verdict), every past offer and trade, and `out_discount` (0.8) |
+| GET | `/api/replay/games/{id}/trades` | CPU offers waiting for you (with a preview verdict), every past offer and trade (`counter_to` marks a counter), and whether trades are open |
 | POST | `/api/replay/games/{id}/trades/evaluate` | Body `{"to_team": 3, "give": [ids], "get": [ids], "drops": [ids]}`; that CPU's verdict with reasons (nothing changes) |
-| POST | `/api/replay/games/{id}/trades/propose` | Same body; the trade is carried out when the CPU accepts |
+| POST | `/api/replay/games/{id}/trades/propose` | Same body; the trade is carried out when the CPU accepts; a decline may come back with the CPU's `counter` offer |
 | POST | `/api/replay/games/{id}/trades/offers/{offer_id}/respond` | Body `{"accept": true, "drops": [ids]}`; answer a CPU's offer |
+| POST | `/api/replay/games/{id}/trades/offers/{offer_id}/counter` | Body `{"give": [ids], "get": [ids], "drops": [ids]}`; counter a CPU's offer with your own deal (answers like propose) |
 
 Every replay `POST` under `/games` answers `{"game": <summary>, "events": [...]}` plus the action's own
 result (a declined trade is a 200 with its verdict). A replay league or player that does not exist is

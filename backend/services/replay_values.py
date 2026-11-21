@@ -15,9 +15,10 @@ results are used only for weeks already played: the `games` / `ppg` display fiel
   his remaining games (OUT_SHARE: 45% after one week out, 90% after six), never all of them.
   availability = the share he is expected to play.
 - healthy_value = max(0, ros_ppg - replacement) x his team's games left; trade_value = healthy_value x
-  availability. Kickers and defenses have neither; `market_value` is what any player counts for in a trade
-  package (never below a roster-spot floor, so nobody is a free throw-in; a kicker or defense is worth that
-  floor and no more, so a free-agent unit cannot be turned into skill value).
+  availability. Kickers and defenses have neither. These drive waivers and lineups.
+- Trade chart (services/replay_chart.py): `chart` on a 0-1000 rank-based scale from expert ranks and the
+  model, after injury news (services/replay_news.py); `market_value` is the chart. rank / pos_rank sort by it.
+  A hard-tagged player with a `returns` entry gets a news report; his availability comes from it.
 - Injury tags (week >= 1): a hard tag (O, IR, PUP, SUS) means out, and that week's projection counts as 0.
   Tagged IR or PUP, he is expected to miss at least IR_OUT_SHARE of his remaining games. Q and D change nothing.
 
@@ -31,12 +32,11 @@ from dataclasses import dataclass
 from functools import lru_cache
 from types import MappingProxyType, SimpleNamespace
 
-from services import lineup_gain, my_team as mt, replay_state
+from services import lineup_gain, my_team as mt, replay_chart, replay_state
 from services.league import LeagueSettings, replacement_levels
 from services.replay_news import Report
 from services.replay_pool import SKILL, Injury, PoolPlayer, SeasonData
 from services.schedule_strength import NEUTRAL, DefenseStrength, Schedule
-from services.trade import FAIR_POINTS_PER_WEEK
 
 RECENCY_WEIGHTS = (4, 3, 2, 1)                        # newest first: the projections (or priors) behind ros_ppg
 OUT_SHARE = {1: 0.45, 2: 0.55, 3: 0.60, 4: 0.65, 5: 0.75}    # share of remaining games missed, by weeks out so far
@@ -68,7 +68,7 @@ class ReplayValue:
     out: bool = False              # no projection this week and not on a bye
     healthy_value: float = 0.0     # vorp_per_game x games_left, no injury discount
     games_left: int = 0            # his team's games from this week to the league's last week
-    market_value: float = 0.0      # what he counts for in a trade package (K and DST: the roster-spot floor)
+    market_value: float = 0.0      # what he counts for in a trade package: his chart value
     last_projection: float = 0.0   # his most recent non-zero pre-game projection
     injury: Injury | None = None   # this week's tag; always None at week 0
     recent_points: tuple[float, ...] = ()   # real points of his last RECENT_GAMES games before this week, newest first
@@ -178,20 +178,17 @@ def _row(data: SeasonData, player: PoolPlayer, prior: float, week: int, team: st
 
 
 def _valued(row: dict, replacement: Mapping[str, float]) -> dict:
-    """Adds the values. A kicker or defense is worth a roster spot only: an elite one counts for no more,
-    or the user could turn a free-agent unit into skill value."""
-    floor = FAIR_POINTS_PER_WEEK * row["games_left"]
+    """Adds the values over replacement (skill only; K and DST have none) and the trade chart value."""
     if row["position"] not in SKILL:
-        return {**row, "vorp_per_game": 0.0, "healthy_value": 0.0, "trade_value": 0.0, "market_value": round(floor, 1)}
+        return {**row, "vorp_per_game": 0.0, "healthy_value": 0.0, "trade_value": 0.0, "market_value": row["chart"]}
     over = max(0.0, row["ros_ppg"] - replacement[row["position"]])
     healthy = over * row["games_left"]
-    value = round(healthy * row["availability"], 1)
-    return {**row, "vorp_per_game": round(over, 2), "healthy_value": round(healthy, 1), "trade_value": value,
-            "market_value": round(max(value, floor), 1)}
+    return {**row, "vorp_per_game": round(over, 2), "healthy_value": round(healthy, 1),
+            "trade_value": round(healthy * row["availability"], 1), "market_value": row["chart"]}
 
 
 def _ranked(rows: Iterable[dict]) -> tuple[ReplayValue, ...]:
-    ordered = sorted(rows, key=lambda r: (-r["trade_value"], -r["ros_ppg"], r["name"], r["player_id"]))
+    ordered = sorted(rows, key=lambda r: (-r["chart"], -r["ros_ppg"], r["name"], r["player_id"]))
     counts: dict[str, int] = defaultdict(int)
     values = []
     for rank, row in enumerate(ordered, start=1):
@@ -214,13 +211,15 @@ def _knowledge(data: SeasonData, league: LeagueSettings, week: int, end_week: in
     teams = {pid: data.team_at(pid, week) for pid in data.players}
     rows = [_row(data, player, priors[pid], week, teams[pid], games_left(teams[pid]))
             for pid, player in data.players.items()]
+    charts, source = replay_chart.charts(data, rows, priors, week, end_week, seed)
+    rows = [{**row, **charts[row["player_id"]]} for row in rows]           # news may set availability
     replacement = replacement_levels(((r["position"], r["ros_ppg"]) for r in rows if r["position"] in SKILL), league)
     values = _ranked(_valued(row, replacement) for row in rows)
     through = max(0, week - 1)
     return Knowledge(season=data.season, week=week, league=league, values=values,
                      by_id=MappingProxyType({v.player_id: v for v in values}),
                      replacement=MappingProxyType(replacement), schedule=data.schedule, defense=NEUTRAL,
-                     weeks_remaining=max(1, end_week - through), through_week=through)
+                     weeks_remaining=max(1, end_week - through), through_week=through, rank_source=source)
 
 
 def knowledge(data: SeasonData, league: LeagueSettings, week: int, end_week: int, seed: int = 0) -> Knowledge:
@@ -239,6 +238,7 @@ def clear_cache() -> None:
     _knowledge.cache_clear()
     _priors.cache_clear()
     projector.cache_clear()
+    replay_chart.clear_cache()
     from services import replay_claim_ai                # its hot_rates cache holds Knowledge objects too
     replay_claim_ai.hot_rates.cache_clear()
 
@@ -265,9 +265,7 @@ def horizon(know: Knowledge, settings: "replay_state.Settings") -> lineup_gain.H
 
 
 def market_value(know: Knowledge, player_id: int) -> float:
-    """What a player counts for in a trade package: never below trade.FAIR_POINTS_PER_WEEK x his games left.
-
-    Skill: his trade value, or that floor. K and DST: the floor alone (a roster spot), however good."""
+    """What a player counts for in a trade package: his chart value (0-1000, replay_chart)."""
     return _values(know, [player_id])[0].market_value
 
 

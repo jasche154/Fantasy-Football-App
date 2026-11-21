@@ -27,11 +27,11 @@ function verdict(overrides: Partial<ReplayVerdict> = {}): ReplayVerdict {
 
 function offer(overrides: Partial<ReplayPendingOffer> = {}): ReplayPendingOffer {
   return { id: 61, week: 5, status: 'pending', from_team: BRIGADE, to_team: teamRef(USER_TEAM_ID), give: [MOSTERT], get: [ETIENNE],
-    verdict: verdict(), note: null, ...overrides };
+    verdict: verdict(), note: null, counter_to: null, ...overrides };
 }
 
 function trades(overrides: Partial<ReplayTrades> = {}): ReplayTrades {
-  return { open: true, deadline_week: 11, max_players: 3, out_discount: 0.8, offers: [], results: [], ...overrides };
+  return { open: true, deadline_week: 11, max_players: 3, offers: [], results: [], ...overrides };
 }
 
 const answered = (accepted: boolean, expired = false, message: string | null = null) =>

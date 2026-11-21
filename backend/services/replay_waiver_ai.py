@@ -380,8 +380,40 @@ def cpu_free_agency(state: State, settings: Settings, know: Knowledge, seed: int
 
 def cpu_cover(state: State, settings: Settings, know: Knowledge, seed: int, team_ids: Iterable[int]) -> State:
     """After a trade: each of those CPUs adds a free agent for every starting slot its roster can no longer
-    fill (`replay_values.missing_slots`). Stub: returns the state unchanged until round 3 lands."""
+    fill (`replay_values.missing_slots`): the most valuable unlocked free agent who can play there, dropping
+    its least valuable skill player that no starting slot needs when the roster is full. `seed` is unused."""
+    for team_id in team_ids:
+        if rs.team(state, team_id).is_user or replay_ir.blocked_reason(state, know, team_id):
+            continue
+        for _ in range(sum(settings.starters.values())):              # one per starting slot at the very most
+            move = _cover_move(state, settings, know, team_id)
+            if move is None:
+                break
+            state = replay_waivers.execute_move(state, settings, know, team_id, *move)
     return state
+
+
+def _by_chart(value: ReplayValue) -> tuple[float, float, int]:
+    return value.chart, value.healthy_value, -value.player_id
+
+
+def _cover_move(state: State, settings: Settings, know: Knowledge, team_id: int) -> Move | None:
+    roster = [know.by_id[pid] for pid in rs.team(state, team_id).roster]
+    missing = rv.missing_slots([v.position for v in roster], settings)
+    if not missing:
+        return None
+    eligible = rv.FLEX_POSITIONS if missing[0] == "FLEX" else (missing[0],)
+    add = max((v for v in _unrostered(state, know, state.locked) if v.position in eligible), key=_by_chart,
+              default=None)
+    if add is None:
+        return None
+    if len(roster) < settings.roster_size:
+        return add.player_id, None
+    for out in sorted((v for v in roster if v.position in SKILL), key=_by_chart):
+        after = [v.position for v in roster if v is not out] + [add.position]
+        if len(rv.missing_slots(after, settings)) < len(missing):
+            return add.player_id, out.player_id
+    return None
 
 
 # ---------------- the IR slot ----------------

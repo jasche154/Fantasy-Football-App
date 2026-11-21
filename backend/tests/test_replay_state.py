@@ -516,3 +516,14 @@ def test_store_raises_replay_not_found_for_a_missing_league(db):
         rs.load(db, 999)
     with pytest.raises(rs.ReplayNotFound):
         rs.delete(db, 999)
+
+
+@pytest.mark.parametrize(("week", "phase", "mode", "is_open"), [
+    (11, "open", "wednesday", True), (12, "waivers", "wednesday", True), (12, "open", "wednesday", False),
+    (12, "waivers", "faab", True), (11, "open", "none", True), (12, "open", "none", False),
+    (13, "waivers", "wednesday", False),
+])
+def test_trades_close_at_the_waiver_run_after_the_deadline_week(week, phase, mode, is_open):
+    settings = Settings(season=2023, waiver_mode=mode)
+
+    assert rs.trades_open(make_state(week=week, phase=phase), settings) is is_open

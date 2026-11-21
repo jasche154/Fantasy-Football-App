@@ -6,7 +6,9 @@ prepare_season makes one season playable, skipping whatever is already stored (u
 1. game results from nflverse: weekly player stats, schedule, kicker games and team game stats, then
    ("snaps") its snap counts into the shared player_snap_counts_weekly (optional: a failure never blocks);
 2. the 32 team-defense pseudo-players;
-3. preseason ADP (Fantasy Football Calculator, then MyFantasyLeague for the players it lacks) into replay_adp;
+3. preseason ADP (Fantasy Football Calculator, then MyFantasyLeague for the players it lacks) into replay_adp,
+   then ("experts") FantasyPros position ranks into replay_expert_ranks (services/replay_experts.py; 2020 on;
+   optional: a failure never blocks);
 4. ESPN's and Sleeper's pre-game projections for every regular-season week into replay_projections;
 5. each week's injury tags (official report and roster status, nflverse) into replay_injuries
    (services/replay_injuries.py), matched after the ADP step because it creates drafted players who never played.
@@ -36,6 +38,7 @@ from integrations.adp_history import PAUSE_SECONDS, AdpEntry, HistoryClient, His
 from integrations.espn_history import WeekProjection
 from integrations.weekly_sources import normalize_team
 from services import replay_pool, system_status
+from services.replay_experts import load_expert_ranks
 from services.replay_injuries import load_injuries
 
 log = logging.getLogger(__name__)
@@ -331,10 +334,12 @@ def prepare_season(session: Session, season: int, http: httpx.Client | None = No
         summary["defenses"] = ensure_defenses(session)
         if "crosswalk" in summary["errors"]:          # nothing is stored without ids; the next run retries
             skipped = {"skipped": "player ids not synced"}       # snap counts match players by their PFR id
-            summary["snaps"] = summary["adp"] = summary["projections"] = summary["injuries"] = skipped
+            for step in ("snaps", "adp", "experts", "projections", "injuries"):
+                summary[step] = skipped
         else:
             run("snaps", lambda: load_snaps(session, season, force))
             run("adp", lambda: load_adp(session, season, client, force))
+            run("experts", lambda: load_expert_ranks(session, season, force))
             run("projections", lambda: load_projections(session, season, client, force))
             # Reloaded whenever ADP was: that step may have created players the tags must be matched to.
             run("injuries", lambda: load_injuries(session, season, force or not summary["adp"].get("skipped")))

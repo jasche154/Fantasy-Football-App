@@ -2,17 +2,32 @@
 to a star).
 
 A position rank becomes the ADP pick where that season's Nth player at the position went (`slot_curve`),
-and a pick becomes points on a convex curve (`pick_value`). Pure: no database, no Knowledge.
-See .plans/pr1-plan.md section C for the formula.
+and a pick becomes points on a convex curve (`pick_value`). Nothing depends on the weeks left: values move
+with injuries, form, expert ranks and a small bump once a player's bye is behind him.
+
+- healthy_chart = w x value_at(expert rank) + (1 - w) x value_at(model rank), x BYE_BUMP once the bye is
+  past. The model rank is his fractional position rank on `model_ppg` (ros_ppg moved toward his last real
+  games). w = EXPERT_WEIGHT for a snapshot at most EXPERT_FRESH_DAYS old, halved per further week; before
+  the first in-season snapshot the preseason ranks stand in (ageing a week per week played).
+- chart: with a news report (replay_news), healthy_chart x share of games he plays x AVAILABILITY_SHARE (0 if
+  out for the season; from his second week out only the model half is discounted, the experts already price
+  it). Out without a report: healthy_chart x the OUT_SHARE availability replay_values gives him.
+
+Pure: no database, no Knowledge. See .plans/pr1-plan.md section C for the formula.
 """
 import math
+from collections import defaultdict
 from collections.abc import Mapping, Sequence
+from functools import lru_cache
+from types import MappingProxyType
 
+from services import replay_news
 from services.replay_pool import SeasonData
 
 TAU = 40.0                     # pick_value decay: 1 -> 1000, 12 -> 760, 24 -> 563, 50 -> 294, 100 -> 84
 CHART_MAX = 1000.0
 PICKS_PAST_LAST = 3            # slot curve past the last drafted player: this many picks per rank
+EMPTY_CURVE_START = 200.0      # a position nobody drafted starts here
 STAR_TOP, STAR_SPAN = 60, 48   # star = clamp((STAR_TOP - pre_rank) / STAR_SPAN, 0, 1)
 FORM_GAMES = 3                 # model_ppg: his last real games
 FORM_WEIGHT = 0.50
@@ -23,26 +38,59 @@ EXPERT_FRESH_DAYS = 10
 UNLISTED_GAP = 10              # missing from an existing snapshot: last listed + this
 BYE_BUMP = 1.03                # once his bye is behind him
 AVAILABILITY_SHARE = 0.9       # chart x share_played x this, when a news report exists
+DAYS_PER_WEEK = 7
 
 
+@lru_cache(maxsize=64)
 def slot_curve(data: SeasonData) -> Mapping[str, tuple[float, ...]]:
     """{position: (ADP pick of the 1st, 2nd, ... player drafted there)} for that season."""
-    raise NotImplementedError
+    picks: dict[str, list[float]] = defaultdict(list)
+    for player in data.players.values():
+        if player.adp is not None:
+            picks[player.position].append(player.adp)
+    return MappingProxyType({position: tuple(sorted(found)) for position, found in picks.items()})
+
+
+def clear_cache() -> None:
+    slot_curve.cache_clear()
+    _by_week.cache_clear()
+    replay_news.clear_cache()
 
 
 def pick_value(pick: float) -> float:
     """Chart points for a draft pick: CHART_MAX at pick 1, decaying by TAU."""
-    return CHART_MAX * math.exp(-(pick - 1) / TAU)
+    return CHART_MAX * math.exp(-(max(1.0, pick) - 1) / TAU)
+
+
+def pick_at(curve: Mapping[str, Sequence[float]], position: str, rank: float) -> float:
+    """The ADP pick of a (fractional, 1-based) position rank; past the last drafted, PICKS_PAST_LAST per rank."""
+    picks = curve.get(position, ())
+    rank = max(1.0, rank)
+    if not picks:
+        return EMPTY_CURVE_START + PICKS_PAST_LAST * (rank - 1)
+    if rank >= len(picks):
+        return picks[-1] + PICKS_PAST_LAST * (rank - len(picks))
+    low = int(rank)                                 # 1-based; rank < len(picks) so low + 1 exists
+    return picks[low - 1] + (rank - low) * (picks[low] - picks[low - 1])
 
 
 def value_at(curve: Mapping[str, Sequence[float]], position: str, rank: float) -> float:
     """Chart points for a (fractional, 1-based) position rank, through the slot curve."""
-    raise NotImplementedError
+    return pick_value(pick_at(curve, position, rank))
 
 
 def model_ppg(ros_ppg: float, prior: float, recent_points: Sequence[float], star: float) -> float:
     """ros_ppg moved toward his recent real games (newest first), less so for a star's dip."""
-    raise NotImplementedError
+    games = list(recent_points[:FORM_GAMES])
+    if not games:
+        return ros_ppg
+    gap = sum(games) / len(games) - ros_ppg
+    share = len(games) / FORM_GAMES * FORM_WEIGHT
+    if gap < 0:
+        share *= 1 - FORM_STAR_DOWN * star
+    elif ros_ppg < prior:
+        share *= 1 + FORM_STAR_UP * star
+    return ros_ppg + share * gap
 
 
 def star(pre_rank: int | None) -> float:
@@ -50,3 +98,117 @@ def star(pre_rank: int | None) -> float:
     if pre_rank is None:
         return 0.0
     return min(1.0, max(0.0, (STAR_TOP - pre_rank) / STAR_SPAN))
+
+
+def fractional_ranks(scores: Mapping[int, float]) -> dict[int, float]:
+    """{id: 1-based rank}, fractional by where his score sits between the players just above and below."""
+    order = sorted(scores, key=lambda pid: (-scores[pid], pid))
+    ranks: dict[int, float] = {}
+    for j, pid in enumerate(order):
+        if j == 0 or j == len(order) - 1:
+            ranks[pid] = float(j + 1)
+            continue
+        above, mine, below = scores[order[j - 1]], scores[pid], scores[order[j + 1]]
+        ranks[pid] = j + ((above - mine) / (above - below) if above > below else 1.0)
+    return ranks
+
+
+@lru_cache(maxsize=64)
+def _by_week(data: SeasonData) -> Mapping[int, Mapping[int, int]]:
+    weeks: dict[int, dict[int, int]] = defaultdict(dict)
+    for (pid, week), rank in data.expert_ranks.items():
+        weeks[week][pid] = rank
+    return MappingProxyType(dict(weeks))
+
+
+def pre_picks(data: SeasonData) -> dict[int, float]:
+    """{id: preseason pick}: the slot of his expert preseason rank, else his ADP."""
+    curve, ranked = slot_curve(data), _by_week(data).get(0, {})
+    picks = {pid: p.adp for pid, p in data.players.items() if p.adp is not None}
+    picks.update({pid: pick_at(curve, data.players[pid].position, rank)
+                  for pid, rank in ranked.items() if pid in data.players})
+    return picks
+
+
+def pre_ranks(picks: Mapping[int, float]) -> dict[int, int]:
+    """{id: overall preseason rank} from `pre_picks`."""
+    return {pid: n for n, pid in enumerate(sorted(picks, key=lambda pid: (picks[pid], pid)), start=1)}
+
+
+def expert_weight(age_days: float) -> float:
+    return EXPERT_WEIGHT * 0.5 ** max(0.0, (age_days - EXPERT_FRESH_DAYS) / DAYS_PER_WEEK)
+
+
+def snapshot(data: SeasonData, week: int) -> tuple[Mapping[int, int], float]:
+    """({id: expert position rank}, blend weight) for the latest snapshot known at `week`; ({}, 0) if none."""
+    weeks = _by_week(data)
+    known = [w for w in weeks if w <= week]
+    if not known:
+        return {}, 0.0
+    latest = max(known)
+    age = data.expert_age.get(latest, 0) + DAYS_PER_WEEK * max(0, week - max(latest, 1))
+    return weeks[latest], expert_weight(age)
+
+
+def _bye_done(data: SeasonData, team: str | None, week: int) -> bool:
+    return team is not None and any(data.schedule.opponent(team, w) is None for w in range(1, week))
+
+
+def _game_weeks(data: SeasonData, team: str | None, week: int, end_week: int) -> list[int]:
+    return [w for w in range(max(1, week), end_week + 1) if data.schedule.opponent(team, w) is not None]
+
+
+def _injured(data: SeasonData, row: dict, news: "replay_news.Report | None", week: int, end_week: int,
+             expert: float, model: float) -> tuple[float, dict]:
+    """(chart, availability fields from the news) from his weighted expert and model parts."""
+    if news is None:
+        return (expert + model) * row["availability"], {}
+    share = replay_news.share_played(news, _game_weeks(data, row["team"], week, end_week))
+    extra = {"availability": round(share, 3), "expected_missed": round(row["games_left"] * (1 - share), 2)}
+    discount = share * AVAILABILITY_SHARE
+    if news.back is None:
+        return 0.0, extra
+    if week > news.since:                               # second week out on: the experts already price it
+        return expert + model * discount, extra
+    return (expert + model) * discount, extra
+
+
+def charts(data: SeasonData, rows: Sequence[dict], priors: Mapping[int, float], week: int, end_week: int,
+           seed: int) -> tuple[dict[int, dict], str]:
+    """({id: chart fields for ReplayValue (+ availability / expected_missed from news)}, rank_source).
+
+    `rows` are replay_values rows (player_id, position, team, ros_ppg, recent_points, availability,
+    games_left)."""
+    curve, picks = slot_curve(data), pre_picks(data)
+    overall = pre_ranks(picks)
+    listed, age_weight = snapshot(data, week)
+    by_position: dict[str, list[dict]] = defaultdict(list)
+    for row in rows:
+        by_position[row["position"]].append(row)
+    fields: dict[int, dict] = {}
+    source = "model"
+    for position, group in by_position.items():
+        ranks = [listed[r["player_id"]] for r in group if r["player_id"] in listed]
+        w = age_weight if ranks else 0.0
+        source = "experts" if w > 0 else source
+        last = max(ranks, default=0)
+        stars = {r["player_id"]: star(overall.get(r["player_id"])) for r in group}
+        model = fractional_ranks({r["player_id"]: model_ppg(r["ros_ppg"], priors.get(r["player_id"], 0.0),
+                                                            r["recent_points"], stars[r["player_id"]])
+                                  for r in group})
+        plain = fractional_ranks({r["player_id"]: r["ros_ppg"] for r in group})
+        for row in group:
+            pid = row["player_id"]
+            bump = BYE_BUMP if _bye_done(data, row["team"], week) else 1.0
+            expert = w * value_at(curve, position, listed.get(pid, last + UNLISTED_GAP)) * bump if w else 0.0
+            model_value = value_at(curve, position, model[pid])
+            news = replay_news.current(data, pid, week, end_week, seed)
+            chart, extra = _injured(data, row, news, week, end_week, expert, (1 - w) * model_value * bump)
+            fields[pid] = {
+                **extra, "chart": round(chart, 1), "healthy_chart": round(expert + (1 - w) * model_value * bump, 1),
+                "pre_chart": round(pick_value(picks[pid]), 1) if pid in picks else 0.0,
+                "expert_rank": listed.get(pid), "pre_rank": overall.get(pid), "star": round(stars[pid], 3),
+                "form_chart": round((1 - w) * (model_value - value_at(curve, position, plain[pid])) * bump, 1),
+                "news": news,
+            }
+    return fields, source

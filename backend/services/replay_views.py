@@ -9,21 +9,27 @@ pre-game projection or null, never a result. Paths below are under /api/replay; 
 pydantic models in api/replay_routes.py (create) and api/replay_action_routes.py.
 
 Shared pieces
-  TeamRef    {team_id, name, is_user}
+  TeamRef    {team_id, name, is_user, tendency: string | null}
+      tendency      a one-line hint at how a CPU trades, from its hidden persona; null for the user and
+                    before 3 weeks are played (the persona's name is never shown)
   Injury     {tag: Q | D | O | IR | PUP | SUS, practice: DNP | LP | FP | null, injury: string | null}
   PlayerRef  {id, name, position, team, injury: Injury | null}
       team          his NFL team as known before the week shown, or null
       injury        his tag in the CURRENT week, wherever the ref appears (events, offers, verdicts, claims). Only a
                     PlayerRow built for another week (team / matchup with ?week=) carries that week's tag. Always null
                     in the draft room. O, IR, PUP and SUS mean he does not play; O, IR and PUP may go on IR.
-  PlayerRow  {player: PlayerRef, opponent, bye, out, projection, points, ros_ppg, value, trade_value, rank,
-              pos_rank, adp, games, ppg, trade_locked}
+  PlayerRow  {player: PlayerRef, opponent, bye, out, projection, points, ros_ppg, value, rank, pos_rank, adp,
+              pre_rank, expert_rank, news: {back, text} | null, games, ppg, trade_locked}
       opponent      NFL team code, "BYE" or null (unknown team, or draft time)
       projection    that week's pre-game projection (0 on a bye or when out; at draft time the preseason rate)
       points        real points in that week; null when the week is unplayed or he did not play
       ros_ppg       expected points a game from here on, if healthy
-      value         what he counts for in a trade package; trade_value: value over replacement (K, DST: 0)
-      rank, pos_rank  by trade_value, e.g. 14 and "RB7";  adp: preseason ADP or null
+      value         his 0-1000 trade chart value this week (after injury), a whole number
+      rank, pos_rank  by chart value, e.g. 14 and "RB7";  adp: preseason ADP or null
+      pre_rank      overall preseason rank (experts interleaved on ADP, else ADP order) or null
+      expert_rank   this week's expert position rank, null when unranked (or before 2020)
+      news          the injury report on a player who is out: back = the week he is said to return
+                    (null = out for the season), text = the report. Noisy: it can be wrong.
       games, ppg    real games and points a game BEFORE that week
       out           no projection in his team's latest game week (this one, or the one before a bye), or an
                     O / IR / PUP / SUS tag this week
@@ -51,7 +57,7 @@ GET  /seasons                     {results: Readiness[], prepare: PrepareStatus 
       Readiness {season, ready, has_stats, has_schedule, has_kdst, adp_players, projection_weeks, kickers, defenses,
                  injury_weeks}      injury_weeks: weeks with injury tags stored (`ready` does not need it)
       PrepareStatus {season, status: running | done | failed, step, error, updated_at?}
-                    step may be "game_results" | "snaps" | "adp" | "projections" | "injuries"
+                    step may be "game_results" | "snaps" | "adp" | "projections" | "injuries" | "experts"
 POST /seasons/{season}/prepare?force=    PrepareStatus of the import now running (maybe another season's)
 GET  /games                       {results: [{id, name, season, phase, week, teams, scoring, champion: name | null,
                                               created_at, updated_at}]}, most recently played first
@@ -63,9 +69,12 @@ GET  /games/{id}                  Summary
                next_action: {step: pick | wednesday | play | done, label},
                record: Record, matchup: {week, playoff, label, you: Side, opponent: Side} | null,
                pending: {claims, offers}, champion: TeamRef | null, updated_at,
-               ir_blocked: PlayerRef[], has_injuries: bool}
+               ir_blocked: PlayerRef[], has_injuries: bool, trades_open: bool, rank_source: experts | model}
       ir_blocked    the USER's IR players who lost their tag (non-empty = adds, claims and trades refused)
       has_injuries  injury tags are loaded for this season
+      trades_open   trades can be made now: through the deadline week, and its waiver phase (the deadline
+                    passes at "Sim to Wednesday" after the deadline week's games)
+      rank_source   what this week's chart values lean on: "experts" (expert ranks) or "model" (none loaded)
       waiver_mode   wednesday | faab | none (faab: blind bids from a $100 budget, see claims)
 Every POST under /games answers {game: Summary, events: Event[], ...extras}: `events` is what the action
 caused, oldest first (the CPUs' picks, the waiver run, the week's results). Extras:
@@ -82,7 +91,10 @@ caused, oldest first (the CPUs' picks, the waiver run, the week's results). Extr
   POST .../lineup                 team: Team (the user's, with the new lineup)
   POST .../advance                step, week (the week it acted on)
   POST .../trades/evaluate        instead of the above: {verdict: Verdict} (nothing changes)
-  POST .../trades/propose         verdict: Verdict, executed: bool
+  POST .../trades/propose         verdict: Verdict, executed: bool, counter: Offer | null
+      counter       the CPU's counter offer after a decline (pending, for the user to answer), or null
+  POST .../trades/offers/{id}/counter   {give, get, drops?}: the user's counter to a CPU's pending offer (give =
+      what the user sends); that offer becomes "countered". Answers like propose.
   POST .../trades/offers/{id}/respond   accepted, expired, message: string | null, verdict: Verdict | null
       an offer that no longer stands answers 200 with expired true and the reason in message
 
@@ -112,7 +124,8 @@ GET  .../players?position=&search=&status=&sort=&limit=&offset=     Page of Wire
       position: QB | RB | WR | TE | K | DST | FLEX. status: available (default) | waivers | free_agent |
       rostered | all. sort: value (default) | projection | ros_ppg | adp | points | name.
 GET  .../players/{player_id}      {player: WireRow, weeks: [{week, played, team, opponent, bye, out, projection,
-                                   points, ros_ppg, value, trade_value, rank, pos_rank, injury: Injury | null,
+                                   points, ros_ppg, value, rank, pos_rank, expert_rank, news,
+                                   injury: Injury | null,
                                    usage: Usage | null}]}
       injury: that week's tag (weeks 1..current). usage: that week's own game (games 1) once played, else null.
       weeks from the first one he was in the pool (a late arrival has no rows before his first projection
@@ -122,11 +135,12 @@ GET  .../claims                   {phase, can_claim, priority, waiver_order: Tea
                                    faab: {budget, left, teams: [{team: TeamRef, left}]} | null}
       bid: the claim's whole-dollar bid (0 outside FAAB). faab: null unless waiver_mode is faab; left is the
       user's budget left, teams every team's (current waiver order). Other teams' pending bids are never shown.
-GET  .../trades                   {open, deadline_week, max_players, out_discount, offers: [Offer + {verdict, note}],
+GET  .../trades                   {open, deadline_week, max_players, offers: [Offer + {verdict, note}],
                                    results: Offer[]}
-      out_discount: what a CPU counts a player who is out this week at when it receives him (0.8)
-      Offer {id, week, status: pending | accepted | declined | expired, from_team: TeamRef, to_team: TeamRef,
-             give: PlayerRef[] (what from_team sends), get: PlayerRef[]}
+      open          Summary.trades_open
+      Offer {id, week, status: pending | accepted | declined | expired | countered, from_team: TeamRef,
+             to_team: TeamRef, give: PlayerRef[] (what from_team sends), get: PlayerRef[], counter_to: id | null}
+      counter_to    the offer this one answers (a counter), else null
       offers: CPU offers the user can answer, each with a preview Verdict from the user's side (or null
       and a note saying why it cannot be accepted as is). results: every other offer and trade, newest first.
 """
@@ -134,7 +148,9 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import cached_property
 
-from services import replay_draft, replay_ir, replay_season, replay_state as rs, replay_trades, replay_values as rv
+from services import (
+    replay_draft, replay_ir, replay_personas, replay_season, replay_state as rs, replay_trades, replay_values as rv,
+)
 from services.replay_pool import ALL_POSITIONS, SeasonData
 from services.replay_state import Event, Settings, State, Team, WeekResult
 from services.replay_values import Knowledge, ReplayValue
@@ -157,6 +173,7 @@ class Game:
     state: State
     full_season: SeasonData                 # never read directly: use `data` and `know_at`
     updated_at: str | None = None
+    seed: int = 0                           # the game's seed (injury-news noise); never shown
 
     @property
     def played(self) -> int:
@@ -173,7 +190,7 @@ class Game:
         if not 0 <= week <= self.state.week:
             raise ValueError(f"Week {week} has not been reached yet: this league is in week {self.state.week}.")
         return rv.knowledge(self.full_season.as_of(week), rv.league_settings(self.settings), week,
-                            self.settings.end_week)
+                            self.settings.end_week, self.seed)
 
     @cached_property
     def know(self) -> Knowledge:
@@ -196,8 +213,10 @@ class Game:
 
 # ---------------- shared pieces ----------------
 
-def team_ref(team: Team) -> dict:
-    return {"team_id": team.id, "name": team.name, "is_user": team.is_user}
+def team_ref(game: Game, team: Team) -> dict:
+    """tendency: a hint at a CPU's (hidden) trading persona, once it has played enough weeks."""
+    tendency = None if team.is_user else replay_personas.tendency(team.persona, game.played)
+    return {"team_id": team.id, "name": team.name, "is_user": team.is_user, "tendency": tendency}
 
 
 def player_ref(value: ReplayValue) -> dict:
@@ -251,15 +270,23 @@ def player_row(game: Game, know: Knowledge, player_id: int) -> dict:
     bye = bool(week) and value.team is not None and opponent is None
     return {"player": player_ref(value), "opponent": "BYE" if bye else opponent, "bye": bye, "out": value.out,
             "projection": round(value.projection, 2), "points": points, "ros_ppg": value.ros_ppg,
-            "value": value.market_value, "trade_value": value.trade_value, "rank": value.rank,
-            "pos_rank": value.pos_rank, "adp": value.adp, "games": value.games, "ppg": value.ppg,
+            "value": round(value.chart), "rank": value.rank, "pos_rank": value.pos_rank, "adp": value.adp,
+            "pre_rank": value.pre_rank, "expert_rank": value.expert_rank, "news": news(value),
+            "games": value.games, "ppg": value.ppg,
             "trade_locked": week == game.state.week and rs.retrade_locked(game.state, player_id)}
+
+
+def news(value: ReplayValue) -> dict | None:
+    """The injury report on a player who is out: when he is said to be back (None = the season) and the text."""
+    report = value.news
+    return {"back": report.back, "text": report.text} if report else None
 
 
 def event_row(game: Game, event: Event) -> dict:
     owner = next((team for team in game.state.teams if team.id == event.team_id), None)
-    return {"id": event.id, "week": event.week, "kind": event.kind, "team": team_ref(owner) if owner else None,
-            "text": event.text, "players": refs(game, event.player_ids)}
+    return {"id": event.id, "week": event.week, "kind": event.kind,
+            "team": team_ref(game, owner) if owner else None, "text": event.text,
+            "players": refs(game, event.player_ids)}
 
 
 def new_events(game: Game, before: State | None) -> list[dict]:
@@ -294,7 +321,7 @@ def side(game: Game, team_id: int, week: int) -> dict:
     if week <= game.state.week:
         lineup, _ = lineup_of(game, owner, week)
         projected = rv.lineup_points(game.know_at(week), [pid for ids in lineup.values() for pid in ids])
-    return {**team_ref(owner), "projected": projected, "points": result.scores[team_id] if result else None,
+    return {**team_ref(game, owner), "projected": projected, "points": result.scores[team_id] if result else None,
             "record": record(game, team_id)}
 
 
@@ -344,7 +371,7 @@ def team(game: Game, team_id: int | None = None, week: int | None = None) -> dic
             for slot, ids in lineup.items() for pid in ids]
     rows += [{"slot": BENCH, "starting": False, **player_row(game, know, pid)} for pid in bench]
     injured = owner.ir if week == game.state.week else ()
-    return {"team": team_ref(owner), "week": week, "played": result is not None,
+    return {"team": team_ref(game, owner), "week": week, "played": result is not None,
             "manual_lineup": owner.is_user and result is None and game.state.lineup is not None,
             "projected_total": rv.lineup_points(know, [pid for ids in lineup.values() for pid in ids]),
             "actual_total": result.scores[owner.id] if result else None, "record": record(game, owner.id),
@@ -399,13 +426,15 @@ def summary(game: Game) -> dict:
         "id": game.id, "name": game.name, "season": settings.season, "phase": state.phase, "week": state.week,
         "end_week": settings.end_week, "user_team_id": game.user.id,
         "settings": {**{key: getattr(settings, key) for key in SETTING_KEYS}, "starters": dict(settings.starters)},
-        "teams": [team_ref(t) for t in state.teams],
+        "teams": [team_ref(game, t) for t in state.teams],
         "on_the_clock": replay_draft.on_the_clock(state, settings), "next_action": _next_action(game),
         "record": record(game, game.user.id), "matchup": _headline(game),
         "pending": {"claims": len(state.claims), "offers": len(replay_trades.offers_for_user(state))},
-        "champion": team_ref(champion) if champion else None, "updated_at": game.updated_at,
+        "champion": team_ref(game, champion) if champion else None, "updated_at": game.updated_at,
         "ir_blocked": refs(game, replay_ir.ineligible(state, game.know, game.user.id)),
         "has_injuries": game.has_injuries,
+        "trades_open": state.phase in replay_trades.TRADE_PHASES and rs.trades_open(state, settings),
+        "rank_source": game.know.rank_source,
     }
 
 
@@ -418,7 +447,7 @@ def draft(game: Game, position: str | None = None, search: str | None = None, li
           offset: int = 0) -> dict:
     """The draft room: picks so far, the order, the user's roster, and who is left (in draft order)."""
     state, settings, know = game.state, game.settings, game.know_at(0)
-    wanted, teams = positions_for(position), {t.id: team_ref(t) for t in state.teams}
+    wanted, teams = positions_for(position), {t.id: team_ref(game, t) for t in state.teams}
     drafting = replay_draft.on_the_clock(state, settings) is not None
     left = replay_draft.available(state, game.full_season.as_of(0)) if drafting else []
     board = [know.by_id[p.player_id] for p in left if p.position in wanted and name_matches(search, p.name)]

@@ -87,7 +87,7 @@ export function PlayersTable({ game, week, rows, claimedIds, moves, onAdd, onCla
             <th scope="col" className="num th--end" title="Points this season">Season</th>
             <th scope="col" className="num th--end" title="Points per game played">PPG</th>
             <th scope="col" className="num th--end" title="Expected points per game for the rest of the season">ROS</th>
-            <th scope="col" className="num th--end" title="Trade value">Value</th>
+            <th scope="col" className="num th--end" title="Trade chart value, 0-1000">Value</th>
             <UsageHeaders span="last 3 games" />
             <th scope="col"><span className="sr-only">Action</span></th>
           </tr>
@@ -99,6 +99,7 @@ export function PlayersTable({ game, week, rows, claimedIds, moves, onAdd, onCla
               <tr key={row.player.id} className={row.owner?.is_user ? 'row--mine' : undefined}>
                 <td className="td--player">
                   <ReplayPlayerCell player={row.player} info={{ out: row.out, trade_locked: row.trade_locked }} onOpen={openPlayer} />
+                  {row.player.injury && row.news && <span className="hint">{row.news.text}</span>}
                 </td>
                 <td><StatusCell row={row} /></td>
                 <td>{row.bye ? 'BYE' : (row.opponent ?? EMPTY_VALUE)}</td>

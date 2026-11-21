@@ -6,7 +6,7 @@ active one (`bot_*`) makes random legal picks, claims, drops, free-agent adds, t
 to offers and lineups from its own seeded dice. Runs are cached, so each league is simulated once.
 """
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from statistics import mean, median
 
@@ -185,7 +185,7 @@ def _bot_trades(state: rs.State, settings: rs.Settings, data, dice) -> rs.State:
             richer = sorted((know.by_id[pid].market_value, pid) for pid in mine)
             give, get = [next((pid for worth, pid in richer if worth >= asked * 1.1), richer[-1][1])], get[:1]
         drops = _overflow_drops(state, settings, dice, give, get)
-        state, _ = rg.propose_trade(state, settings, data, partner.id, give, get, drops)
+        state, _, _ = rg.propose_trade(state, settings, data, 0, partner.id, give, get, drops)
     return state
 
 
@@ -370,6 +370,80 @@ def test_the_user_can_answer_a_cpu_offer_until_it_no_longer_stands():
     assert [o.status for o in refused.value.state.offers if o.id == offer.id] == ["expired"]
 
 
+def _with_offer() -> tuple[rs.Settings, rs.State, rs.Offer]:
+    state = next(step.state for step in simulate(*IDLE[0]).steps if replay_trades.offers_for_user(step.state))
+    return LEAGUES[0], state, replay_trades.offers_for_user(state)[0]
+
+
+def test_an_accepted_offer_lets_the_cpu_cover_its_lineup(monkeypatch):
+    settings, state, offer = _with_offer()
+    covered = []
+    monkeypatch.setattr(rg.replay_waiver_ai, "cpu_cover",
+                        lambda state, settings, know, seed, team_ids: covered.append(list(team_ids)) or state)
+
+    rg.respond_offer(state, settings, DATA, offer.id, False)
+    rg.respond_offer(state, settings, DATA, offer.id, True)
+
+    assert covered == [[offer.from_team]]
+
+
+def _countering(monkeypatch) -> list[rs.Offer]:
+    """replay_counter.counter_offer stubbed: the CPU always answers a decline with the mirrored deal."""
+    seen = []
+
+    def counter(state, settings, know, declined, seed):
+        seen.append(declined)
+        reply = rs.Offer(state.next_id, state.week, declined.to_team, declined.from_team, declined.get[:1],
+                         declined.give, "pending", counter_to=declined.id)
+        return replace(state, offers=(*state.offers, reply), next_id=state.next_id + 1)
+
+    monkeypatch.setattr(rg.replay_counter, "counter_offer", counter)
+    return seen
+
+
+def test_a_declined_proposal_can_come_back_as_the_cpus_counter(monkeypatch):
+    seen = _countering(monkeypatch)
+    settings, state, offer = _with_offer()
+    mine, theirs = rs.user_team(state).roster, rs.team(state, offer.from_team).roster
+
+    state, verdict, counter = rg.propose_trade(state, settings, DATA, 11, offer.from_team, mine[-1:], theirs[:1])
+    again = rg.propose_trade(state, settings, DATA, 11, offer.from_team, mine[-1:], theirs[:1])
+
+    assert not verdict.accepted and seen == [state.offers[-2]] and counter == state.offers[-1]
+    assert (counter.counter_to, counter.status, counter.to_team) == (seen[0].id, "pending", rs.user_team(state).id)
+    assert again[2] is None and again[0] is state                   # asked twice: no second counter
+
+
+def test_the_user_counters_a_cpu_offer(monkeypatch):
+    _countering(monkeypatch)
+    settings, state, offer = _with_offer()
+    asked = []
+    propose = rg.replay_trades.propose
+    monkeypatch.setattr(rg.replay_trades, "propose",
+                        lambda *args, counter_to=None: asked.append(counter_to) or propose(*args, counter_to=counter_to))
+
+    after, verdict, _ = rg.counter_offer(state, settings, DATA, 11, offer.id, offer.get, offer.give)
+
+    assert asked == [offer.id] and [o.status for o in after.offers if o.id == offer.id] == ["countered"]
+    with pytest.raises(ValueError, match="no pending offer"):
+        rg.counter_offer(after, settings, DATA, 11, offer.id, offer.get, offer.give)
+
+
+def test_trades_close_when_the_deadline_weeks_waivers_run():
+    settings, steps = LEAGUES[0], simulate(*IDLE[0]).steps
+    week = settings.trade_deadline_week + 1
+    waivers, after = (next(s.state for s in steps if (s.state.week, s.state.phase) == (week, phase))
+                      for phase in ("waivers", "open"))
+
+    def ask(state: rs.State):
+        cpu = state.teams[0]                                    # team 1: a CPU (the user drafts 4th)
+        return rg.evaluate_trade(state, settings, DATA, cpu.id, rs.user_team(state).roster[:1], cpu.roster[:1])
+
+    with pytest.raises(ValueError, match="deadline"):
+        ask(after)
+    assert isinstance(ask(waivers), rg.Verdict)
+
+
 def test_cpus_make_their_ir_moves_first_at_the_waiver_run_and_at_the_start_of_the_week(monkeypatch):
     waivers = simulate(*IDLE[0]).steps[2].state
     calls = []
@@ -440,7 +514,7 @@ def test_nothing_can_be_changed_once_the_season_is_over():
                lambda: rg.submit_claim(final, settings, DATA, free, mine[0]),
                lambda: rg.add_drop(final, settings, DATA, free, mine[0]),
                lambda: rg.drop(final, settings, DATA, mine[0]),
-               lambda: rg.propose_trade(final, settings, DATA, final.teams[0].id, mine[:1], theirs[:1]),
+               lambda: rg.propose_trade(final, settings, DATA, 0, final.teams[0].id, mine[:1], theirs[:1]),
                lambda: rg.evaluate_trade(final, settings, DATA, final.teams[0].id, mine[:1], theirs[:1])]
 
     for action in actions:

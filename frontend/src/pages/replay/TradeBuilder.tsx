@@ -1,12 +1,14 @@
 import { useState } from 'react';
-import { evaluateReplayTrade, getReplayTeam, proposeReplayTrade } from '../../api/replay';
-import type { ReplayIrRow, ReplayRosterRow, ReplaySummary, ReplayTradeBody, ReplayVerdict } from '../../api/types';
+import { counterReplayOffer, evaluateReplayTrade, getReplayTeam, proposeReplayTrade } from '../../api/replay';
+import type {
+  ReplayIrRow, ReplayOffer, ReplayPendingOffer, ReplayRosterRow, ReplaySummary, ReplayTradeBody, ReplayVerdict,
+} from '../../api/types';
 import { AsyncView } from '../../components/AsyncView';
 import { Skeleton, TableSkeleton } from '../../components/StatusViews';
 import { useAsync } from '../../hooks/useAsync';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { formatNumber } from '../../lib/format';
-import { DropPicker, overLimit, toggleId, TradeVerdictView, type TradeActions } from './TradeParts';
+import { DropPicker, overLimit, PlayerNames, playerIds, toggleId, TradeVerdictView, type TradeActions } from './TradeParts';
 import { ReplayPlayerCell, TeamSelect } from './shared';
 
 const EVALUATE_DELAY_MS = 300;
@@ -66,6 +68,7 @@ function RosterPicker({ title, caption, verb, rows, selected, max, onToggle, ope
                   <td className="td--player">
                     <ReplayPlayerCell player={player} info={{ out: row.out, trade_locked: row.trade_locked }} onOpen={openPlayer} />
                     {row.slot === 'IR' && <span className="status-badge status-badge--missing">On IR</span>}
+                    {row.player.injury && row.news && <span className="hint">{row.news.text}</span>}
                   </td>
                   <td className="num">{formatNumber(row.value)}</td>
                 </tr>
@@ -84,8 +87,9 @@ interface TradeBuilderProps {
   /** The user's roster now. */
   roster: readonly ReplayRosterRow[];
   maxPlayers: number;
-  /** CPUs count an out player they receive at this share of his value. */
-  outDiscount: number;
+  /** A CPU offer being countered: the builder starts from its deal and sends the user's version back. */
+  counterTo: ReplayPendingOffer | null;
+  onCounterDone: () => void;
   /** From the URL (with=TEAM, want=PLAYER) when another screen links here. */
   initialPartner: number | null;
   initialWant: number | null;
@@ -94,14 +98,16 @@ interface TradeBuilderProps {
 }
 
 /** Pick a partner and players from both rosters; the verdict follows the selection, then propose it. */
-export function TradeBuilder({ game, version, roster, maxPlayers, outDiscount, initialPartner, initialWant, actions, openPlayer }: TradeBuilderProps) {
+export function TradeBuilder({ game, version, roster, maxPlayers, counterTo, onCounterDone, initialPartner, initialWant, actions, openPlayer }: TradeBuilderProps) {
   const partners = game.teams.filter((team) => !team.is_user);
-  const linked = partners.find((team) => team.team_id === initialPartner);
+  const linked = partners.find((team) => team.team_id === (counterTo?.from_team.team_id ?? initialPartner));
   const [partnerId, setPartnerId] = useState(linked?.team_id ?? partners[0]?.team_id ?? 0);
-  const [give, setGive] = useState<number[]>([]);
-  const [get, setGet] = useState<number[]>(linked && initialWant !== null ? [initialWant] : []);
+  // A counter starts from the CPU's offer, written from its side: the user gives its "get" for its "give".
+  const [give, setGive] = useState<number[]>(counterTo ? playerIds(counterTo.get) : []);
+  const [get, setGet] = useState<number[]>(counterTo ? playerIds(counterTo.give) : linked && initialWant !== null ? [initialWant] : []);
   const [picked, setPicked] = useState<number[]>([]);
   const [declined, setDeclined] = useState<ReplayVerdict | null>(null);
+  const [counter, setCounter] = useState<ReplayOffer | null>(null);
   const theirs = useAsync((signal) => getReplayTeam(game.id, { team_id: partnerId }, signal), [game.id, partnerId, version]);
   const partner = partners.find((team) => team.team_id === partnerId)?.name ?? 'That team';
   // While another partner's roster loads, the previous one must not be offered.
@@ -126,13 +132,22 @@ export function TradeBuilder({ game, version, roster, maxPlayers, outDiscount, i
 
   const change = (update: () => void) => {
     setDeclined(null);
+    setCounter(null);
     update();
   };
   const propose = async () => {
     if (!body) return;
-    const result = await actions.send(PROPOSE_KEY, () => proposeReplayTrade(game.id, body));
+    const { to_team: _partner, ...deal } = body;
+    const result = await actions.send(PROPOSE_KEY, () => (counterTo ? counterReplayOffer(game.id, counterTo.id, deal)
+      : proposeReplayTrade(game.id, body)));
     if (!result) return;
-    if (!result.executed) return setDeclined(result.verdict);
+    if (counterTo) onCounterDone();         // the CPU's offer is countered now: back to a fresh builder
+    if (!result.executed) {
+      setDeclined(result.verdict);
+      setCounter(result.counter);
+      if (counterTo) actions.announce({ text: `${partner} turned down your counter.${result.counter ? ' It countered back: see Offers for you.' : ''}`, isGood: false });
+      return;
+    }
     setGive([]);
     setGet([]);
     setPicked([]);
@@ -157,8 +172,14 @@ export function TradeBuilder({ game, version, roster, maxPlayers, outDiscount, i
       </div>
       <p className="hint">
         {`Up to ${maxPlayers} players a side. A player on IR or traded in the last two weeks can't be dealt. `
-          + `CPUs count a player who is out this week at ${Math.round(outDiscount * 100)}% of his value.`}
+          + 'Values are on a 0-1000 trade chart; an injured player counts for the games he is expected to play.'}
       </p>
+      {counterTo && (
+        <p className="hint">
+          Change the deal and send it back to {counterTo.from_team.name}.{' '}
+          <button type="button" className="btn btn--ghost btn--sm" onClick={onCounterDone}>Cancel counter</button>
+        </p>
+      )}
       {over > 0 && <DropPicker rows={spare} count={over} value={drops} onChange={(ids) => change(() => setPicked(ids))} />}
       {body ? (
         settledKey !== bodyKey ? <Skeleton lines={3} label="Checking the trade…" /> : (
@@ -171,7 +192,7 @@ export function TradeBuilder({ game, version, roster, maxPlayers, outDiscount, i
       )}
       <div className="replay-trade__actions">
         <button type="button" className="btn btn--primary" disabled={!isEvaluated || actions.isBusy} onClick={() => void propose()}>
-          {actions.pendingKey === PROPOSE_KEY ? 'Proposing…' : 'Propose trade'}
+          {actions.pendingKey === PROPOSE_KEY ? 'Proposing…' : counterTo ? 'Send counter' : 'Propose trade'}
         </button>
       </div>
       {error && <p className="error-text">{error}</p>}
@@ -181,6 +202,12 @@ export function TradeBuilder({ game, version, roster, maxPlayers, outDiscount, i
             <p className="error-text"><strong>{partner} turned it down.</strong></p>
             <ul>{declined.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
             {declined.suggestion && <p className="hint">{declined.suggestion}</p>}
+            {counter && (
+              <p className="notice">
+                <strong>{partner} countered:</strong> you give <PlayerNames players={counter.get} onOpen={openPlayer} /> for{' '}
+                <PlayerNames players={counter.give} onOpen={openPlayer} />. Answer it under Offers for you.
+              </p>
+            )}
           </div>
         )}
       </div>

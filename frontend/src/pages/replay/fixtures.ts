@@ -38,7 +38,8 @@ const TEAM_NAMES = ['Gridiron Ghosts', 'Blitz Brigade', 'End Zone Elite', 'Your 
   'Fourth and Long', 'Red Zone Rebels', 'Sunday Scaries', 'Goal Line Gang', 'Two Minute Drill', 'Waiver Wizards'];
 
 /** The league's 12 teams, team_id 1..12; team 4 is the user's. */
-export const TEAMS: ReplayTeamRef[] = TEAM_NAMES.map((name, index) => ({ team_id: index + 1, name, is_user: index + 1 === USER_TEAM_ID }));
+export const TEAMS: ReplayTeamRef[] = TEAM_NAMES.map((name, index) => ({ team_id: index + 1, name, is_user: index + 1 === USER_TEAM_ID,
+  tendency: null }));
 
 export function teamRef(teamId: number): ReplayTeamRef {
   return TEAMS[teamId - 1];
@@ -83,7 +84,8 @@ export function side(teamId: number, overrides: Partial<ReplaySide> = {}): Repla
 export function playerRow(player: ReplayPlayerRef, overrides: Partial<ReplayPlayerRow> = {}): ReplayPlayerRow {
   return {
     player, opponent: 'DEN', bye: false, out: false, projection: 14.2, points: null, ros_ppg: 13.8, value: 31.5,
-    trade_value: 24.0, rank: 20, pos_rank: `${player.position}8`, adp: 24.5, games: 4, ppg: 15.1, trade_locked: false,
+    rank: 20, pos_rank: `${player.position}8`, adp: 24.5, pre_rank: 22, expert_rank: 8, news: null, games: 4, ppg: 15.1,
+    trade_locked: false,
     ...overrides,
   };
 }
@@ -115,8 +117,8 @@ export function team(overrides: Partial<ReplayTeam> = {}): ReplayTeam {
       rosterRow(NACUA, 'WR', { opponent: 'PHI', trade_locked: true }),
       rosterRow(KELCE, 'TE', { opponent: 'MIN' }),
       rosterRow(PACHECO, 'FLEX', { opponent: 'MIN' }),
-      rosterRow(TUCKER, 'K', { projection: 8.4, opponent: 'PIT', trade_value: 0 }),
-      rosterRow(NINERS, 'DST', { projection: 7.9, opponent: 'DAL', trade_value: 0 }),
+      rosterRow(TUCKER, 'K', { projection: 8.4, opponent: 'PIT' }),
+      rosterRow(NINERS, 'DST', { projection: 7.9, opponent: 'DAL' }),
       rosterRow(COOK, 'BN', { opponent: 'BYE', bye: true, projection: 0 }),
       rosterRow(OLAVE, 'BN', { opponent: 'NE', out: true, projection: 0 }),
     ],
@@ -140,7 +142,7 @@ export function summary(overrides: Partial<ReplaySummary> = {}): ReplaySummary {
       opponent: side(OPPONENT_TEAM_ID, { projected: 104.75, record: record({ wins: 2, losses: 2, rank: 6 }) }),
     },
     pending: { claims: 0, offers: 0 }, champion: null, updated_at: '2026-11-20T12:00:00',
-    ir_blocked: [], has_injuries: true,
+    ir_blocked: [], has_injuries: true, trades_open: true, rank_source: 'experts',
     ...overrides,
   };
 }
@@ -209,7 +211,7 @@ export function playerDetail(player: ReplayPlayerRef = MOSTERT, overrides: Parti
     weeks: [1, 2, 3, 4, 5].map((week) => ({
       week, played: week < 5, team: player.team, opponent: week === 3 ? 'BYE' : 'DEN', bye: week === 3, out: false,
       projection: week === 3 ? 0 : 12.5, points: week === 3 || week === 5 ? null : 10 + week, ros_ppg: row.ros_ppg,
-      value: row.value, trade_value: row.trade_value, rank: row.rank, pos_rank: row.pos_rank, injury: null,
+      value: row.value, rank: row.rank, pos_rank: row.pos_rank, expert_rank: row.expert_rank, news: null, injury: null,
       usage: week === 3 || week === 5 ? null : usage({ games: 1, snap_pct: 60 + week, targets: week, target_share: week / 20, carries: 10 }),
     })),
   };

@@ -3,6 +3,7 @@ import type {
   ReplayActionResult,
   ReplayGameRow,
   ReplayInjury,
+  ReplayNews,
   ReplayPage,
   ReplayPagination,
   ReplayPhase,
@@ -98,9 +99,10 @@ export interface ReplayPlayerWeek {
   points: number | null;
   ros_ppg: number;
   value: number;
-  trade_value: number;
   rank: number;
   pos_rank: string;
+  expert_rank: number | null;
+  news: ReplayNews | null;
   /** That week's tag. */
   injury: ReplayInjury | null;
   /** That week's own game (games 1); null when unplayed or he did not play. */
@@ -154,12 +156,14 @@ export interface ReplayClaimBody {
 export interface ReplayOffer {
   id: number;
   week: number;
-  status: 'pending' | 'accepted' | 'declined' | 'expired';
+  status: 'pending' | 'accepted' | 'declined' | 'expired' | 'countered';
   from_team: ReplayTeamRef;
   to_team: ReplayTeamRef;
   /** What from_team sends. */
   give: ReplayPlayerRef[];
   get: ReplayPlayerRef[];
+  /** The offer this one answers (a counter), else null. */
+  counter_to: number | null;
 }
 
 /** A CPU offer the user can answer: a preview verdict from the user's side, or a note saying why not. */
@@ -172,8 +176,6 @@ export interface ReplayTrades {
   open: boolean;
   deadline_week: number;
   max_players: number;
-  /** CPUs count an out player they receive at this share of his value. */
-  out_discount: number;
   offers: ReplayPendingOffer[];
   /** Every other offer and trade, newest first. */
   results: ReplayOffer[];
@@ -188,6 +190,9 @@ export interface ReplayTradeBody {
   drops?: number[];
 }
 
+/** POST trades/offers/{id}/counter body: the user's own deal (give = what the user sends) with the CPU that made the offer. */
+export type ReplayCounterBody = Omit<ReplayTradeBody, 'to_team'>;
+
 export interface ReplayEvaluateResult {
   verdict: ReplayVerdict;
 }
@@ -195,6 +200,8 @@ export interface ReplayEvaluateResult {
 export interface ReplayProposeResult extends ReplayActionResult {
   verdict: ReplayVerdict;
   executed: boolean;
+  /** The CPU's counter offer after a decline (pending, for the user to answer), or null. */
+  counter: ReplayOffer | null;
 }
 
 export interface ReplayRespondResult extends ReplayActionResult {
