@@ -237,10 +237,21 @@ def cpu_claims(state: State, settings: Settings, know: Knowledge, seed: int) -> 
             continue
         moves = _plan_claims([know.by_id[pid] for pid in team.roster], pool, _for_team(ctx, team))
         if moves:
-            claims[team.id] = [Claim(next_id + n, team.id, add, out,
-                                     claim_ai.claim_bid(state, settings, seed, team.id, add, gain, weights))
-                               for n, (add, out, gain) in enumerate(moves)]
+            claims[team.id] = _priced(state, settings, seed, team.id, moves, weights, next_id)
             next_id += len(moves)
+    return claims
+
+
+def _priced(state: State, settings: Settings, seed: int, team_id: int, moves: Sequence[tuple[int, int | None, float]],
+            weights: float, first_id: int) -> list[Claim]:
+    """The team's claims with their bids. A later claim was planned on the roster after the earlier ones, so it
+    never outbids them (the highest bid runs first) and the bids together fit the budget left."""
+    claims, cap, left = [], None, rs.faab_left(state, team_id)
+    for n, (add, out, gain) in enumerate(moves):
+        bid = claim_ai.claim_bid(state, settings, seed, team_id, add, gain, weights)
+        bid = min(bid, left) if cap is None else min(bid, cap, left)
+        claims.append(Claim(first_id + n, team_id, add, out, bid))
+        cap, left = bid, left - bid
     return claims
 
 

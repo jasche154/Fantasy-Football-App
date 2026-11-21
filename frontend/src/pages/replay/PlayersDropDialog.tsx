@@ -22,11 +22,13 @@ export interface BidLimit {
   left: number | null;
 }
 
+const FAAB_BUDGET = 100;       // a season's budget (backend replay_state.FAAB_BUDGET): the cap while `left` is unknown
+
 /** A whole-dollar bid from 0 up to the budget left, or null. */
 export function parseBid(text: string, left: number | null): number | null {
   if (!/^\d+$/.test(text.trim())) return null;
   const bid = Number(text);
-  return left === null || bid <= left ? bid : null;
+  return bid <= (left ?? FAAB_BUDGET) ? bid : null;
 }
 
 interface BidFieldProps {
@@ -37,13 +39,15 @@ interface BidFieldProps {
 
 function BidField({ value, left, onChange }: BidFieldProps) {
   const id = useId();
+  const invalid = parseBid(value, left) === null;
   return (
     <div className="field replay-bid">
       <label className="field__label" htmlFor={id}>Bid ($)</label>
       <input id={id} className="input replay-bid__input" type="number" inputMode="numeric" min={0} max={left ?? undefined} step={1}
-        value={value} aria-invalid={parseBid(value, left) === null} aria-describedby={`${id}-hint`} onChange={(event) => onChange(event.target.value)} />
-      <p id={`${id}-hint`} className="hint">
-        {left === null ? 'Whole dollars.' : `Whole dollars, $0 to $${left}: you have $${left} left.`} Bids are blind; the highest wins.
+        value={value} aria-invalid={invalid} aria-describedby={`${id}-hint`} onChange={(event) => onChange(event.target.value)} />
+      <p id={`${id}-hint`} className={invalid ? 'field__error' : 'hint'}>
+        {invalid && 'Enter a whole-dollar bid in range. '}
+        {left === null ? `Whole dollars, $0 to $${FAAB_BUDGET}.` : `Whole dollars, $0 to $${left}: you have $${left} left.`} Bids are blind; the highest wins.
       </p>
     </div>
   );

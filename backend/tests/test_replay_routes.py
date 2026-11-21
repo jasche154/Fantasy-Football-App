@@ -466,7 +466,8 @@ def test_a_faab_league_takes_bids_on_claims(client):
     post(client, wednesday + "/draft/auto", whole_draft="true")
     free = get(client, wednesday + "/players", status="free_agent", limit=1)["results"][0]["player"]["id"]
     mine = _ids(get(client, wednesday + "/team")["results"], "BN")[0]
-    assert post(client, wednesday + "/add-drop", {"add": free, "drop": mine, "bid": 50})["events"]  # bid ignored
+    assert refused(client, wednesday + "/add-drop", {"add": free, "drop": mine, "bid": 50})[0] == 422   # no bids on adds
+    assert post(client, wednesday + "/add-drop", {"add": free, "drop": mine})["events"]
 
 
 def test_two_requests_cannot_play_the_same_week_twice(tmp_path_factory):
@@ -649,3 +650,12 @@ def test_a_lineup_body_bounds_each_slot_list():
 
     with pytest.raises(ValidationError):
         LineupBody(starters={"QB": list(range(1, MAX_LISTED + 2))})
+
+
+def test_an_add_drop_body_refuses_a_bid():
+    from pydantic import ValidationError
+
+    from api.replay_action_routes import AddBody
+
+    with pytest.raises(ValidationError):
+        AddBody(add=1, bid=5)

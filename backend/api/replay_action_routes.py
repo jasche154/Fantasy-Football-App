@@ -6,7 +6,7 @@ runs under the replay lock (`replay_routes.turn`). A declined trade is a 200 wit
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from api.replay_routes import GameId, errors, open_game, turn
@@ -34,7 +34,13 @@ class LineupBody(BaseModel):
 class ClaimBody(BaseModel):
     add: int = PlayerId
     drop: int | None = Field(None, ge=1)
-    bid: int | None = Field(None, ge=0, le=rs.FAAB_BUDGET)     # FAAB leagues' claims only; add-drop ignores it
+    bid: int | None = Field(None, ge=0, le=rs.FAAB_BUDGET)     # FAAB leagues' claims only
+
+
+class AddBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")       # a bid means nothing for a free-agent add: refuse it, don't drop it
+    add: int = PlayerId
+    drop: int | None = Field(None, ge=1)
 
 
 class BidBody(BaseModel):
@@ -116,7 +122,7 @@ def cancel_claim(game_id: GameId, claim_id: int, session: Session = Depends(get_
 
 
 @router.post("/add-drop")
-def add_drop(game_id: GameId, body: ClaimBody, session: Session = Depends(get_session)) -> dict:
+def add_drop(game_id: GameId, body: AddBody, session: Session = Depends(get_session)) -> dict:
     """Add a free agent now (after the week's waiver run), dropping `drop` when the roster is full."""
     with turn(session, game_id) as t:
         return t.done(rg.add_drop(*t.args, body.add, body.drop))

@@ -180,7 +180,7 @@ export function ClaimsPanel({ gameId, claims, moves, openPlayer }: ClaimsPanelPr
               ? <p className="hint">{emptyText(data)}</p>
               : (
                 <>
-                  <h3 className="section-title">Your claims, tried from the top</h3>
+                  <h3 className="section-title">{data.faab ? 'Your claims: highest bid tried first, this order breaks ties' : 'Your claims, tried from the top'}</h3>
                   <ClaimList gameId={gameId} data={data} moves={moves} openPlayer={openPlayer} />
                 </>
               )}

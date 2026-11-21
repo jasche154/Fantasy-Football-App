@@ -270,3 +270,14 @@ def test_the_faab_run_does_not_depend_on_the_future():
 
     assert rs.to_json(real) == rs.to_json(blind)
     assert rs.to_json(advanced[0]) == rs.to_json(advanced[1])
+
+
+def test_a_cpus_later_claim_never_outbids_its_first_and_both_fit_the_budget(monkeypatch):
+    from services import replay_claim_ai, replay_waiver_ai
+    state = league(t2=70)                                                # CPU 2 has $30 left
+    asked = iter([25, 28])                                               # the second, planned after the first, bids more
+    monkeypatch.setattr(replay_claim_ai, "claim_bid", lambda *args: next(asked))
+
+    first, second = replay_waiver_ai._priced(state, FAAB, 0, 2, [(1, None, 5.0), (2, None, 4.0)], 1.0, 100)
+
+    assert (first.bid, second.bid) == (25, 5)                            # under the first and within $30 together
