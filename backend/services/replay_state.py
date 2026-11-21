@@ -69,7 +69,7 @@ class Settings(_Record):
     waiver_mode: str = "wednesday"           # "wednesday" | "faab" | "none" (always free agency)
     regular_season_weeks: int = 14
     playoff_teams: int = 4                   # playoffs are the 2 weeks after the regular season
-    trade_deadline_week: int = 11            # no trades once state.week > this
+    trade_deadline_week: int = 11            # the last week traded in, plus its waiver phase (`trades_open`)
     season_hidden: bool = False              # reserved; not used in v1
     difficulty: str = "normal"               # "normal" | "hard": see USER_TRADE_MULTIPLE, DRAFT_CHAOS_SCALE
 

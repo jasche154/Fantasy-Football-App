@@ -1,6 +1,7 @@
 """Replay League counter-offers: after a value-only decline a CPU may answer with a deal it would take.
 
-It counters with probability `replay_personas.counter_rate`. Candidates: add one of the user's players, swap a
+It counters with probability `replay_personas.counter_rate`, one roll per CPU per week (so declining and
+re-proposing can't reroll it), and at most once per week. Candidates: add one of the user's players, swap a
 requested player for a lesser one at his position, or drop one requested player; it picks the one it accepts
 that costs the user least (never a "big_loss" for the user, never one needing a user drop) and stores it as a
 pending Offer(counter_to=declined.id). It never counters a counter of its own counter. See .plans/pr1-plan.md
@@ -35,11 +36,15 @@ def _own_counter_answered(state: State, declined: Offer) -> bool:
     return answered is not None and answered.from_team == declined.to_team and answered.counter_to is not None
 
 
+def _countered_this_week(state: State, cpu_id: int) -> bool:
+    return any(o.from_team == cpu_id and o.week == state.week and o.counter_to is not None for o in state.offers)
+
+
 def counter_offer(state: State, settings: Settings, know: Knowledge, declined: Offer, seed: int) -> State:
     """The state with the CPU's counter to the user's declined proposal added as a pending Offer, or unchanged."""
     cpu = rs.team(state, declined.to_team)
     if (declined.status != "declined" or cpu.is_user or declined.from_team != rs.user_team(state).id
-            or _own_counter_answered(state, declined) or any(o.counter_to == declined.id for o in state.offers)):
+            or _own_counter_answered(state, declined) or _countered_this_week(state, cpu.id)):
         return state
     try:
         verdict = rt.evaluate(state, settings, know, declined.from_team, cpu.id, declined.give, declined.get)
@@ -47,7 +52,7 @@ def counter_offer(state: State, settings: Settings, know: Knowledge, declined: O
         return state
     if verdict.accepted or not all(reason.startswith(rt.VALUE_REASON) for reason in verdict.reasons):
         return state
-    if rs.rng(seed, "counter", declined.id).random() >= replay_personas.counter_rate(cpu.persona):
+    if rs.rng(seed, "counter", state.week, cpu.id).random() >= replay_personas.counter_rate(cpu.persona):
         return state
     best: tuple[float, Deal] | None = None
     for give, get in _candidates(state, know, declined.give, declined.get):

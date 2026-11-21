@@ -597,6 +597,11 @@
   background: var(--color-warn-soft);
 }
 
+.status-badge--neutral {
+  color: var(--color-text-subtle);
+  background: var(--color-surface-3);
+}
+
 .status-badge--out {
   color: var(--color-neg);
   background: var(--color-neg-soft);

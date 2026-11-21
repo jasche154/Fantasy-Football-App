@@ -81,3 +81,17 @@ def test_only_the_users_declined_proposals_are_countered(always):
     later = replace(state, week=2)
     assert rc.counter_offer(later, SETTINGS, know, mine, seed=0) is later       # values are for week 1: no deal
     assert rs.user_team(state).id == mine.from_team
+
+
+def test_one_roll_per_cpu_per_week_and_at_most_one_counter(always, monkeypatch):
+    state, know, mine = declined()
+    once = rc.counter_offer(state, SETTINGS, know, mine, seed=0)
+    again, _, other = declined(once, (CPU, [P("RB", 23)], [P("RB", 17)]))
+    rolls, roll = [], rs.rng
+    monkeypatch.setattr(rs, "rng", lambda *parts: (rolls.append(parts), roll(*parts))[1])
+
+    rc.counter_offer(state, SETTINGS, know, mine, seed=7)
+
+    assert rolls == [(7, "counter", state.week, CPU)]                  # not the offer id: re-proposing can't reroll
+    assert once.offers[-1].counter_to == mine.id
+    assert rc.counter_offer(again, SETTINGS, know, other, seed=0) is again      # already countered this week

@@ -27,7 +27,8 @@ def test_returns_mark_each_hard_tag_streak_with_the_first_later_game_or_never():
                 (2, 2): ir, (2, 5): ir,                                       # never back: one open streak
                 (3, 4): out, (4, 2): Injury("Q")}                             # played through the tag; soft tag
 
-    assert hard_tag_returns(injuries, actual, 10) == {(1, 3): 6, (1, 7): 9, (2, 2): 0}
+    # the tag alone starts a streak: that he played week 4 anyway is hindsight before week 4 is played
+    assert hard_tag_returns(injuries, actual, 10) == {(1, 3): 6, (1, 7): 9, (2, 2): 0, (3, 4): 0}
 
 
 def test_fake_season_returns_follow_the_story():

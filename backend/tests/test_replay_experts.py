@@ -11,7 +11,7 @@ from services import replay_experts
 from services.replay_experts import expert_rows, week_ranks
 
 SEASON = 2023
-WEEK1 = date(2023, 9, 10)               # week 1's Sunday (the opener was Thursday 9-7)
+WEEK1 = date(2023, 9, 7)                # week 1's first kickoff (the Thursday opener)
 LAST = date(2024, 1, 7)
 
 
@@ -21,10 +21,11 @@ def line(page: str, scraped: str, fp_id: str, name: str, ecr: float, team: str =
 
 RAW = [
     line("/nfl/rankings/ppr-wr-cheatsheets.php", "2023-08-31", "1", "Old Sheet", 1.0),       # older cheatsheet
-    line("/nfl/rankings/ppr-wr-cheatsheets.php", "2023-09-08", "2", "Wide Two", 2.0),
-    line("/nfl/rankings/ppr-wr-cheatsheets.php", "2023-09-08", "1", "Wide One", 1.5),
-    line("/nfl/rankings/ppr-wr-cheatsheets.php", "2023-09-08", "9", "Nobody Known", 1.0),    # unmatched, still ranked
-    line("dst-cheatsheets", "2023-09-08", "8000", "Kansas City Chiefs", 1.0, "KC"),
+    line("/nfl/rankings/ppr-wr-cheatsheets.php", "2023-09-06", "2", "Wide Two", 2.0),
+    line("/nfl/rankings/ppr-wr-cheatsheets.php", "2023-09-06", "1", "Wide One", 1.5),
+    line("/nfl/rankings/ppr-wr-cheatsheets.php", "2023-09-06", "9", "Nobody Known", 1.0),    # unmatched, still ranked
+    line("/nfl/rankings/ppr-wr-cheatsheets.php", "2023-09-08", "1", "Wide One", 9.0),       # after the opener
+    line("dst-cheatsheets", "2023-09-06", "8000", "Kansas City Chiefs", 1.0, "KC"),
     line("ros-ppr-wr", "2023-09-15", "1", "Wide One", 3.0),
     line("ros-ppr-wr", "2023-09-15", "2", "Wide Two", 1.0),
     line("/nfl/rankings/ros-ppr-wr.php", "2023-09-29", "2", "Wide Two", 2.0),
@@ -68,9 +69,9 @@ def test_rows_keep_the_last_cheatsheet_and_in_season_ros_pages_matched_by_id_nam
 
     got = {(r["kind"], r["scrape_date"], r["player_id"]): (r["position"], r["pos_rank"], r["ecr"]) for r in rows}
     assert got == {
-        ("pre", "2023-09-08", people["Wide One"]): ("WR", 2, 1.5),            # 'Nobody Known' holds rank 1
-        ("pre", "2023-09-08", people["Wide Two"]): ("WR", 3, 2.0),
-        ("pre", "2023-09-08", people["Chiefs D/ST"]): ("DST", 1, 1.0),
+        ("pre", "2023-09-06", people["Wide One"]): ("WR", 2, 1.5),            # 'Nobody Known' holds rank 1
+        ("pre", "2023-09-06", people["Wide Two"]): ("WR", 3, 2.0),
+        ("pre", "2023-09-06", people["Chiefs D/ST"]): ("DST", 1, 1.0),
         ("ros", "2023-09-15", people["Wide Two"]): ("WR", 1, 1.0),
         ("ros", "2023-09-15", people["Wide One"]): ("WR", 2, 3.0),
         ("ros", "2023-09-29", people["Wide One"]): ("WR", 1, 1.0),
@@ -98,7 +99,8 @@ def rank_rows() -> list[dict]:
     def row(kind, scraped, pid, position, rank):
         return {"kind": kind, "scrape_date": scraped, "player_id": pid, "position": position, "pos_rank": rank}
 
-    return [row("pre", "2023-09-07", 1, "WR", 1), row("pre", "2023-09-07", 2, "WR", 2),
+    return [row("pre", "2023-09-06", 1, "WR", 1), row("pre", "2023-09-06", 2, "WR", 2),
+            row("pre", "2023-09-07", 1, "WR", 2), row("pre", "2023-09-07", 2, "WR", 1),    # opener day: too late
             row("pre", "2023-09-01", 3, "K", 1),                               # K page scraped earlier
             row("ros", "2023-09-15", 1, "WR", 2), row("ros", "2023-09-15", 2, "WR", 1),
             row("ros", "2023-09-22", 1, "WR", 1), row("ros", "2023-09-22", 2, "WR", 2),
@@ -111,11 +113,11 @@ def test_each_week_uses_the_latest_snapshot_before_its_sunday():
 
     ranks, age = week_ranks(rank_rows(), kickoffs)
 
-    assert ranks == {(1, 0): 1, (2, 0): 2, (3, 0): 1,                         # no ROS page before week 1's Sunday
+    assert ranks == {(1, 0): 1, (2, 0): 2, (3, 0): 1,                         # cheatsheets before the Thursday opener
                      (1, 2): 2, (2, 2): 1,                                    # 9-15 is before Sunday 9-17
                      (1, 3): 1, (2, 3): 2,                                    # 9-24 is not before Sunday 9-24
                      (1, 4): 9}                                               # a page with one player
-    assert age == {0: 3, 2: 2, 3: 2, 4: 7}
+    assert age == {0: 1, 2: 2, 3: 2, 4: 7}
 
 
 def test_no_rows_means_no_ranks():
@@ -164,3 +166,15 @@ def test_a_season_without_dated_games_or_rows_is_reported(db, monkeypatch):
     assert replay_experts.load_expert_ranks(db, 2021) == {"rows": 0, "errors": {"experts": "NoSchedule"}}
     assert replay_experts.load_expert_ranks(db, SEASON) == {"rows": 0, "errors": {"experts": "NoRows"}}
 
+
+
+def test_a_failed_import_rolls_back_and_is_reported_by_type(db, monkeypatch):
+    monkeypatch.setattr(replay_experts, "download", lambda: list(RAW))
+    monkeypatch.setattr(replay_experts, "fp_crosswalk", lambda: {"1": "00-W1"})
+    replay_experts.load_expert_ranks(db, SEASON)
+    monkeypatch.setattr(replay_experts, "expert_rows", lambda *args: [{"season": SEASON, "player_id": None}])
+
+    result = replay_experts.load_expert_ranks(db, SEASON, force=True)
+
+    assert result == {"rows": 7, "errors": {"experts": "IntegrityError"}}
+    assert db.scalar(select(func.count()).select_from(ReplayExpertRank)) == 7         # the delete rolled back

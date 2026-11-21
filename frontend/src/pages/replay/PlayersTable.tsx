@@ -99,7 +99,7 @@ export function PlayersTable({ game, week, rows, claimedIds, moves, onAdd, onCla
               <tr key={row.player.id} className={row.owner?.is_user ? 'row--mine' : undefined}>
                 <td className="td--player">
                   <ReplayPlayerCell player={row.player} info={{ out: row.out, trade_locked: row.trade_locked }} onOpen={openPlayer} />
-                  {row.player.injury && row.news && <span className="hint">{row.news.text}</span>}
+                  {row.player.injury && row.news && <p className="hint">{row.news.text}</p>}
                 </td>
                 <td><StatusCell row={row} /></td>
                 <td>{row.bye ? 'BYE' : (row.opponent ?? EMPTY_VALUE)}</td>

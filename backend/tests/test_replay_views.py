@@ -254,7 +254,7 @@ def test_a_manual_lineup_is_flagged_and_shown():
     starters = {slot: [row["player"]["id"] for row in best if row["slot"] == slot] for slot in SETTINGS.starters}
     starters["FLEX"] = [bench["player"]["id"]]
 
-    manual = views.team(game(rg.set_lineup(state, SETTINGS, DATA, starters)))
+    manual = views.team(game(rg.set_lineup(state, SETTINGS, DATA, starters, seed=SEED)))
 
     slots = {row["player"]["id"]: row["slot"] for row in manual["results"]}
     assert manual["manual_lineup"] is True
@@ -437,7 +437,8 @@ def test_claims_are_listed_in_the_users_order_with_the_waiver_priority():
     state = at(4, "waivers")
     wire = [row["player"]["id"] for row in league.players(game(state), limit=2)["results"]]
     drop = rs.user_team(state).roster[-3]
-    claimed = rg.submit_claim(rg.submit_claim(state, SETTINGS, DATA, wire[0], drop), SETTINGS, DATA, wire[1], drop)
+    claimed = rg.submit_claim(rg.submit_claim(state, SETTINGS, DATA, wire[0], drop, seed=SEED), SETTINGS, DATA, wire[1],
+                             drop, seed=SEED)
 
     listed, idle = league.claims(game(claimed)), league.claims(game(at(4)))
 
@@ -454,7 +455,7 @@ def test_claims_are_listed_in_the_users_order_with_the_waiver_priority():
 
 def _swap(state: rs.State, partner: int) -> tuple[list[int], list[int]]:
     """The user's and the partner's most valuable running backs."""
-    know = rg.knowledge(state, SETTINGS, DATA)
+    know = rg.knowledge(state, SETTINGS, DATA, seed=SEED)
 
     def best_back(team_id: int) -> int:
         return max((pid for pid in rs.team(state, team_id).roster if know.by_id[pid].position == "RB"),
@@ -466,7 +467,7 @@ def _swap(state: rs.State, partner: int) -> tuple[list[int], list[int]]:
 def test_verdict_is_told_from_the_users_side():
     state = at(3)
     give, get = _swap(state, 9)
-    found = rg.evaluate_trade(state, SETTINGS, DATA, 9, give, get)
+    found = rg.evaluate_trade(state, SETTINGS, DATA, 9, give, get, seed=SEED)
 
     shown = league.verdict(game(state), found)
 
@@ -604,5 +605,5 @@ def test_an_offer_for_a_player_since_moved_to_ir_says_why_it_cannot_be_accepted(
 
     offer = league.trades(game(offered))["offers"][0]
 
-    name = rg.knowledge(state, SETTINGS, DATA).by_id[mine[0]].name
+    name = rg.knowledge(state, SETTINGS, DATA, seed=SEED).by_id[mine[0]].name
     assert (offer["verdict"], offer["note"]) == (None, f"On IR, so not tradable until activated: {name}.")

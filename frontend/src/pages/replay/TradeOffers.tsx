@@ -21,10 +21,12 @@ interface OfferCardProps {
   openPlayer: (playerId: number) => void;
   /** Opens the trade builder with this offer's deal, to change and send back. */
   onCounter: (offer: ReplayPendingOffer) => void;
+  /** A counter is being built: starting another would throw that deal away. */
+  isCountering: boolean;
 }
 
 /** A CPU's offer: what goes each way, the preview verdict, the user's drops when it overfills the roster. */
-function OfferCard({ game, version, offer, roster, isOpen, actions, openPlayer, onCounter }: OfferCardProps) {
+function OfferCard({ game, version, offer, roster, isOpen, actions, openPlayer, onCounter, isCountering }: OfferCardProps) {
   const [picked, setPicked] = useState<number[]>([]);
   const partner = offer.from_team.name;
   const sends = playerIds(offer.get);                      // the offer is written from the CPU's side
@@ -76,7 +78,7 @@ function OfferCard({ game, version, offer, roster, isOpen, actions, openPlayer, 
           onClick={() => void answer(true)}>
           {actions.pendingKey === acceptKey ? 'Accepting…' : <>Accept <span className="sr-only">offer from {partner}</span></>}
         </button>
-        <button type="button" className="btn btn--ghost btn--sm" disabled={actions.isBusy || !isOpen} onClick={() => onCounter(offer)}>
+        <button type="button" className="btn btn--ghost btn--sm" disabled={actions.isBusy || !isOpen || isCountering} onClick={() => onCounter(offer)}>
           Counter <span className="sr-only">offer from {partner}</span>
         </button>
         <button type="button" className="btn btn--ghost btn--sm" disabled={actions.isBusy} onClick={() => void answer(false)}>

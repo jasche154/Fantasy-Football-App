@@ -729,3 +729,73 @@ def test_a_full_cpu_drops_a_skill_player_no_slot_needs_to_cover():
     positions = [know(3).by_id[pid].position for pid in rs.team(after, cpu).roster]
     assert len(positions) == SETTINGS.roster_size and positions.count("TE") == 1
     assert rv.missing_slots(positions, SETTINGS) == []
+
+
+# ---------------- covering a slot a trade emptied ----------------
+
+def _without(state: State, team_id: int, *player_ids: int) -> State:
+    team = rs.team(state, team_id)
+    return rs.with_team(state, replace(team, roster=tuple(p for p in team.roster if p not in player_ids)))
+
+
+def _set(know: Knowledge, changes: dict[int, dict]) -> Knowledge:
+    values = tuple(replace(v, **changes.get(v.player_id, {})) for v in know.values)
+    return replace(know, values=values, by_id={v.player_id: v for v in values})
+
+
+def _position(know: Knowledge, state: State, team_id: int, position: str) -> list[int]:
+    return [pid for pid in rs.team(state, team_id).roster if know.by_id[pid].position == position]
+
+
+def _best_free(know: Knowledge, state: State, position: str) -> ReplayValue:
+    return max((v for v in know.values if v.position == position and v.player_id not in rs.rostered(state)),
+               key=lambda v: (v.chart, v.healthy_value, -v.player_id))
+
+
+def test_cover_skips_out_players_and_waits_out_the_waiver_phase():
+    know, cpu = fakes.fake_knowledge(1), CPUS[0]
+    state = league(phase="open")
+    state = _without(state, cpu, *_position(know, state, cpu, "TE"))
+    hurt = _best_free(know, state, "TE")
+    know = _set(know, {hurt.player_id: {"out": True}})
+
+    covered = ai.cpu_cover(state, SETTINGS, know, SEED, [cpu])
+    waiting = ai.cpu_cover(replace(state, phase="waivers"), SETTINGS, know, SEED, [cpu])
+
+    added = _position(know, covered, cpu, "TE")
+    assert len(added) == 1 and added != [hurt.player_id]
+    assert waiting == replace(state, phase="waivers")
+
+
+def test_cover_tries_every_missing_slot():
+    know, cpu = fakes.fake_knowledge(1), CPUS[0]
+    state = league(phase="open")
+    state = _without(state, cpu, *_position(know, state, cpu, "TE"), *_position(know, state, cpu, "K"))
+    free_tes = [v.player_id for v in know.values if v.position == "TE" and v.player_id not in rs.rostered(state)]
+    state = replace(state, locked=tuple(free_tes))                    # no tight end to be had: the kicker still is
+
+    covered = ai.cpu_cover(state, SETTINGS, know, SEED, [cpu])
+
+    assert len(_position(know, covered, cpu, "K")) == 1 and not _position(know, covered, cpu, "TE")
+
+
+def test_cover_drops_by_healthy_chart_so_a_false_out_for_season_report_costs_nobody():
+    know, cpu = fakes.fake_knowledge(1), CPUS[0]
+    state = league(phase="open")
+    team = rs.team(state, cpu)
+    extra = _best_free(know, state, "WR").player_id                   # a full roster with no tight end
+    state = rs.with_team(state, replace(team, roster=(*(p for p in team.roster if know.by_id[p].position != "TE"),
+                                                      extra)))
+    roster = [know.by_id[pid] for pid in rs.team(state, cpu).roster]
+    missing = rv.missing_slots([v.position for v in roster], SETTINGS)
+    safe = [v for v in sorted((v for v in roster if v.position in SKILL),
+                              key=lambda v: (v.healthy_chart, v.healthy_value, v.ros_ppg, v.player_id))
+            if len(rv.missing_slots([w.position for w in roster if w is not v] + ["TE"], SETTINGS)) < len(missing)]
+    lowest, reported = safe[0], safe[1]
+    know = _set(know, {reported.player_id: {"chart": 0.0}})           # reported out for the season: healthy as before
+
+    covered = ai.cpu_cover(state, SETTINGS, know, SEED, [cpu])
+
+    held = rs.team(covered, cpu).roster
+    assert len(held) == SETTINGS.roster_size and len(_position(know, covered, cpu, "TE")) == 1
+    assert reported.player_id in held and lowest.player_id not in held

@@ -731,8 +731,10 @@ def test_changing_returns_moves_only_players_hard_tagged_now(week):
 
 def test_the_seed_moves_only_the_news():
     data, league = fakes.fake_season(), rv.league_settings(fakes.fake_settings())
+    rv.clear_cache()
     reports = {seed: rv.knowledge(data, league, 7, END, seed) for seed in range(6)}
 
+    assert rv._base.cache_info().misses == 1                          # one chart pass serves every game's seed
     assert len({know.by_id[fakes.INJURED_STAR_ID].news for know in reports.values()}) > 1
     for know in reports.values():
         for v in know.values:

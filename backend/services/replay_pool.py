@@ -349,11 +349,11 @@ def _by_player(teams: Mapping[PlayerWeek, str]) -> dict[int, tuple[tuple[int, st
 def hard_tag_returns(injuries: Mapping[PlayerWeek, Injury], actual: Mapping[PlayerWeek, float],
                      last_week: int) -> dict[PlayerWeek, int]:
     """{(player, first week of a hard-tag streak): first later week he really played, 0 = never}. A streak
-    runs from a hard tag until his next game (byes and untagged weeks in between stay in it); a hard tag in a
-    week he played anyway starts nothing."""
+    runs from a hard tag until his next game (byes and untagged weeks in between stay in it). Only the tag
+    starts one: whether he played that week anyway is not known before it is played."""
     tagged: dict[int, list[int]] = defaultdict(list)
     for (player_id, week), injury in injuries.items():
-        if injury.hard and (player_id, week) not in actual:
+        if injury.hard:
             tagged[player_id].append(week)
     out: dict[PlayerWeek, int] = {}
     for player_id, weeks in tagged.items():

@@ -862,8 +862,9 @@ that week's games on; only scoring a week reads its real points.
   tail again while a season has none.
   The "experts" step (2020 on) stores FantasyPros position ranks from the nflverse archive in
   `replay_expert_ranks` (`services/replay_experts.py`): the last preseason cheatsheet and every in-season
-  rest-of-season snapshot. Week W uses the latest snapshot taken before week W's first Sunday kickoff. A
-  failed download is reported and never blocks the season; without ranks the values use the app's model
+  rest-of-season snapshot. Week W uses the latest snapshot taken before week W's first Sunday kickoff; the
+  draft uses the last cheatsheet taken before week 1's first kickoff (the Thursday opener). A failed
+  download or import is reported and never blocks the season; without ranks the values use the app's model
   ranks only ("model ranks" on the Trades screen).
 - **Injuries and IR:** Q, D and O come from the official injury report; IR, PUP and SUS from the weekly
   roster status (PUP = status PUP or reserve code R04; suspended = SUS or R40/R33/R30; every other
@@ -939,12 +940,14 @@ that week's games on; only scoring a week reads its real points.
   roster spots and lineup gain, against what it sends (8% more from you on hard). It also refuses a deal
   that loses it 20% of market value. Declines come with the reasons. A player on IR can't be traded; a CPU
   sells you an out player only for at least half his healthy chart value. After a deal each starting slot
-  the CPU can no longer fill needs a free agent it can add, and it adds him right away
-  (`replay_waiver_ai.cpu_cover`). Each CPU has a hidden **persona** (balanced, panicky, shark, steady,
+  the CPU can no longer fill needs a player it can add (unrostered, not out, not on waivers; in the waiver
+  phase, when everyone unrostered is on waivers, anyone you haven't claimed), and it adds him
+  (`replay_waiver_ai.cpu_cover`): right away, or in the waiver phase once waivers clear. Each CPU has a hidden **persona** (balanced, panicky, shark, steady,
   gambler: `services/replay_personas.py`, assigned from the league's seed at creation) that nudges what it
   thinks a player is worth by up to 15% and how often it offers and counters; after 3 weeks a one-line
   tendency hint is shown, never the persona. **Counters:** a CPU that turns down a deal on value alone may
-  answer with a counter offer it would take (`services/replay_counter.py`), shown under Offers for you;
+  answer with a counter offer it would take (`services/replay_counter.py`; one roll and at most one counter
+  per CPU per week), shown under Offers for you;
   you can counter a CPU's offer from the trade builder (the offer is marked "countered"). The **deadline**:
   trades are open through week 11 and its waiver phase, and close when you press Sim to Wednesday after
   week 11's games (in a league without waivers, once week 11 is played). CPUs also trade with each other

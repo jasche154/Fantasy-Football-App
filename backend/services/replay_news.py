@@ -91,15 +91,21 @@ def clear_cache() -> None:
     _streaks.cache_clear()
 
 
-def current(data: SeasonData, player_id: int, week: int, end_week: int, seed: int) -> Report | None:
-    """The report on a player hard-tagged this week whose streak (a `returns` entry started by `week` and not
-    yet over) is known, else None."""
+def open_streak(data: SeasonData, player_id: int, week: int) -> tuple[int, int, str] | None:
+    """(since, real return, tag) for a player hard-tagged this week whose streak (a `returns` entry started
+    by `week` and not yet over) is known, else None. Seed-free: only `report` adds the noise."""
     tag = data.injuries.get((player_id, week)) if week else None
     if tag is None or not tag.hard:
         return None
     open_ = [(since, back) for since, back in _streaks(data).get(player_id, ())
              if since <= week and (back == 0 or back > week)]
-    if not open_:
+    return (*open_[-1], tag.tag) if open_ else None
+
+
+def current(data: SeasonData, player_id: int, week: int, end_week: int, seed: int) -> Report | None:
+    """The report on a player with an `open_streak` this week, else None."""
+    streak = open_streak(data, player_id, week)
+    if streak is None:
         return None
-    since, back = open_[-1]
-    return report(seed, player_id, since, back, week, end_week, tag.tag)
+    since, back, tag = streak
+    return report(seed, player_id, since, back, week, end_week, tag)

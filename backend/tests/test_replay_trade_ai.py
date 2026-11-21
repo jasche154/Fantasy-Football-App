@@ -122,11 +122,11 @@ def test_the_test_suite_clears_the_trade_and_draft_caches():
 
     rt._season(SETTINGS, knowledge(1), rs.user_team(fakes.drafted_state()).roster)
     replay_draft._board(fakes.fake_season().as_of(0))
-    assert rt._season.cache_info().currsize and replay_draft._board.cache_info().currsize
+    assert rt._seasons.cache_info().currsize and replay_draft._board.cache_info().currsize
 
     _clear_caches()
 
-    assert rt._season.cache_info().currsize == replay_draft._board.cache_info().currsize == 0
+    assert rt._seasons.cache_info().currsize == replay_draft._board.cache_info().currsize == 0
 
 
 def test_every_cpu_trade_passes_the_acceptance_test_for_both_sides(seasons):

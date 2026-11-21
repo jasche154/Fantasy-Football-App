@@ -197,8 +197,17 @@ def _ranked(rows: Iterable[dict]) -> tuple[ReplayValue, ...]:
     return tuple(values)
 
 
-@lru_cache(maxsize=256)
-def _knowledge(data: SeasonData, league: LeagueSettings, week: int, end_week: int, seed: int) -> Knowledge:
+@dataclass(frozen=True, eq=False)
+class _Base:
+    """One week's values before the seeded injury news: shared by every game (seed) on that season."""
+    rows: Mapping[int, dict]                        # valued rows by id (never mutated)
+    parts: replay_chart.Parts                       # what replay_chart.with_news needs, hard-tagged players only
+    replacement: Mapping[str, float]
+    source: str
+
+
+@lru_cache(maxsize=64)
+def _base(data: SeasonData, league: LeagueSettings, week: int, end_week: int) -> _Base:
     priors = _priors(data)
     weeks_left = max(0, end_week - max(1, week) + 1)
     by_team: dict[str | None, int] = {None: weeks_left}          # unknown team: every week left
@@ -211,15 +220,24 @@ def _knowledge(data: SeasonData, league: LeagueSettings, week: int, end_week: in
     teams = {pid: data.team_at(pid, week) for pid in data.players}
     rows = [_row(data, player, priors[pid], week, teams[pid], games_left(teams[pid]))
             for pid, player in data.players.items()]
-    charts, source = replay_chart.charts(data, rows, priors, week, end_week, seed)
-    rows = [{**row, **charts[row["player_id"]]} for row in rows]           # news may set availability
+    charts, parts, source = replay_chart.base_charts(data, rows, priors, week, end_week)
+    rows = [{**row, **charts[row["player_id"]]} for row in rows]
     replacement = replacement_levels(((r["position"], r["ros_ppg"]) for r in rows if r["position"] in SKILL), league)
-    values = _ranked(_valued(row, replacement) for row in rows)
+    return _Base(MappingProxyType({r["player_id"]: _valued(r, replacement) for r in rows}), parts,
+                 MappingProxyType(replacement), source)
+
+
+@lru_cache(maxsize=32)
+def _knowledge(data: SeasonData, league: LeagueSettings, week: int, end_week: int, seed: int) -> Knowledge:
+    """`_base` plus this seed's news (which may set availability) on the hard-tagged players only."""
+    base = _base(data, league, week, end_week)
+    news = replay_chart.with_news(data, base.rows, base.rows, base.parts, week, end_week, seed)
+    values = _ranked(_valued(news[pid], base.replacement) if pid in news else row for pid, row in base.rows.items())
     through = max(0, week - 1)
     return Knowledge(season=data.season, week=week, league=league, values=values,
                      by_id=MappingProxyType({v.player_id: v for v in values}),
-                     replacement=MappingProxyType(replacement), schedule=data.schedule, defense=NEUTRAL,
-                     weeks_remaining=max(1, end_week - through), through_week=through, rank_source=source)
+                     replacement=base.replacement, schedule=data.schedule, defense=NEUTRAL,
+                     weeks_remaining=max(1, end_week - through), through_week=through, rank_source=base.source)
 
 
 def knowledge(data: SeasonData, league: LeagueSettings, week: int, end_week: int, seed: int = 0) -> Knowledge:
@@ -236,6 +254,7 @@ def knowledge(data: SeasonData, league: LeagueSettings, week: int, end_week: int
 
 def clear_cache() -> None:
     _knowledge.cache_clear()
+    _base.cache_clear()
     _priors.cache_clear()
     projector.cache_clear()
     replay_chart.clear_cache()

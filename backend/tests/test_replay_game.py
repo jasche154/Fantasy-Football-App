@@ -19,7 +19,9 @@ from services import (
 )
 from tests import replay_fakes as fakes
 
-DATA = fakes.fake_season()
+# The injured star is back in STAR_BACK_WEEK with a clearly top projection, so starting him is the only right
+# lineup whoever owns him by then (trades and cover moves change every CPU's depth).
+DATA = fakes.patched(fakes.fake_season(), projected={(fakes.INJURED_STAR_ID, fakes.STAR_BACK_WEEK): 30.0})
 POSITION = {pid: player.position for pid, player in DATA.players.items()}
 DRAFTED = sorted((p for p in DATA.players.values() if p.adp is not None and p.position in ("RB", "WR", "TE")),
                  key=lambda p: (p.adp, p.player_id))
@@ -139,42 +141,43 @@ def bot_pick(state: rs.State, settings: rs.Settings, data, seed: int) -> rs.Stat
     return rg.auto_pick(state, settings, data, seed)
 
 
-def _bot_claims(state: rs.State, settings: rs.Settings, data, dice) -> rs.State:
-    wire = replay_waivers.available_players(state, rg.knowledge(state, settings, data))[:BOT_WIRE]
+def _bot_claims(state: rs.State, settings: rs.Settings, data, dice, seed: int) -> rs.State:
+    wire = replay_waivers.available_players(state, rg.knowledge(state, settings, data, seed=seed))[:BOT_WIRE]
     shared = _a_drop(state, settings, dice)         # one drop behind several claims: only the first can win
     for value in _some(dice, wire, 0, 3):
         drop = shared if _chance(dice, 0.5) else _a_drop(state, settings, dice)
-        state = rg.submit_claim(state, settings, data, value.player_id, drop)
+        state = rg.submit_claim(state, settings, data, value.player_id, drop, seed=seed)
     ids = [claim.id for claim in state.claims]
     if len(ids) > 1:
         state = rg.reorder_claims(state, ids[::-1])
     if ids and _chance(dice, 0.25):
         state = rg.cancel_claim(state, ids[0])
     if rs.user_team(state).roster and _chance(dice, 0.15):
-        state = rg.drop(state, settings, data, _some(dice, rs.user_team(state).roster, 1, 1)[0])
+        state = rg.drop(state, settings, data, _some(dice, rs.user_team(state).roster, 1, 1)[0], seed=seed)
     return state
 
 
-def _bot_answers(state: rs.State, settings: rs.Settings, data, dice) -> rs.State:
+def _bot_answers(state: rs.State, settings: rs.Settings, data, dice, seed: int) -> rs.State:
     for offer in replay_trades.offers_for_user(state):
         drops = _overflow_drops(state, settings, dice, offer.get, offer.give)
         try:
-            state = rg.respond_offer(state, settings, data, offer.id, _chance(dice, 0.7), drops)
+            state = rg.respond_offer(state, settings, data, offer.id, _chance(dice, 0.7), drops, seed=seed)
         except rg.OfferExpired as expired:
             state = expired.state
     return state
 
 
-def _bot_add(state: rs.State, settings: rs.Settings, data, dice) -> rs.State:
-    know = rg.knowledge(state, settings, data)
+def _bot_add(state: rs.State, settings: rs.Settings, data, dice, seed: int) -> rs.State:
+    know = rg.knowledge(state, settings, data, seed=seed)
     free = replay_waivers.available_players(state, know, status="free_agent")[:BOT_WIRE]
     if not free or not _chance(dice, 0.7):
         return state
-    return rg.add_drop(state, settings, data, _some(dice, free, 1, 1)[0].player_id, _a_drop(state, settings, dice))
+    return rg.add_drop(state, settings, data, _some(dice, free, 1, 1)[0].player_id, _a_drop(state, settings, dice),
+                       seed=seed)
 
 
-def _bot_trades(state: rs.State, settings: rs.Settings, data, dice) -> rs.State:
-    know = rg.knowledge(state, settings, data)
+def _bot_trades(state: rs.State, settings: rs.Settings, data, dice, seed: int) -> rs.State:
+    know = rg.knowledge(state, settings, data, seed=seed)
     for _ in range(BOT_PROPOSALS if state.week <= settings.trade_deadline_week else 0):
         mine = rs.user_team(state).roster
         partner = _some(dice, [team for team in state.teams if not team.is_user], 1, 1)[0]
@@ -185,34 +188,34 @@ def _bot_trades(state: rs.State, settings: rs.Settings, data, dice) -> rs.State:
             richer = sorted((know.by_id[pid].market_value, pid) for pid in mine)
             give, get = [next((pid for worth, pid in richer if worth >= asked * 1.1), richer[-1][1])], get[:1]
         drops = _overflow_drops(state, settings, dice, give, get)
-        state, _, _ = rg.propose_trade(state, settings, data, 0, partner.id, give, get, drops)
+        state, _, _ = rg.propose_trade(state, settings, data, seed, partner.id, give, get, drops)
     return state
 
 
-def _bot_lineup(state: rs.State, settings: rs.Settings, data, dice) -> rs.State:
+def _bot_lineup(state: rs.State, settings: rs.Settings, data, dice, seed: int) -> rs.State:
     if _chance(dice, 0.2):
         return rg.clear_lineup(state)
     if _chance(dice, 0.5):
-        know = rg.knowledge(state, settings, data)
+        know = rg.knowledge(state, settings, data, seed=seed)
         lineup = dict(replay_season.starters_for(state, settings, know, rs.user_team(state).id))
         slot = _some(dice, list(lineup), 1, 1)[0]
-        return rg.set_lineup(state, settings, data, {**lineup, slot: lineup[slot][:-1]})     # one spot empty
+        return rg.set_lineup(state, settings, data, {**lineup, slot: lineup[slot][:-1]}, seed=seed)   # one empty
     return state
 
 
-def _bot_ir(state: rs.State, settings: rs.Settings, data, dice) -> rs.State:
+def _bot_ir(state: rs.State, settings: rs.Settings, data, dice, seed: int) -> rs.State:
     """Places, activates (with a drop or a swap) and drops from IR; always clears a block first, so the
     adds, claims and trades after it are not refused."""
-    know, team = rg.knowledge(state, settings, data), rs.user_team(state)
+    know, team = rg.knowledge(state, settings, data, seed=seed), rs.user_team(state)
     hurt = [pid for pid in team.roster if replay_ir.eligible(know, pid)]
-    if team.ir and (replay_ir.ineligible(state, know, team.id) or _chance(dice, 0.3)):
-        if hurt and _chance(dice, 0.5):
-            return rg.ir_activate(state, settings, data, team.ir[0], swap=_some(dice, hurt, 1, 1)[0])
+    if team.ir and (hurt or replay_ir.ineligible(state, know, team.id) or _chance(dice, 0.3)):
+        if hurt:                    # another player is out: always swap him in, so the runs surely show swaps
+            return rg.ir_activate(state, settings, data, team.ir[0], swap=_some(dice, hurt, 1, 1)[0], seed=seed)
         if _chance(dice, 0.2):
-            return rg.drop(state, settings, data, team.ir[0])
-        return rg.ir_activate(state, settings, data, team.ir[0], _a_drop(state, settings, dice))
+            return rg.drop(state, settings, data, team.ir[0], seed=seed)
+        return rg.ir_activate(state, settings, data, team.ir[0], _a_drop(state, settings, dice), seed=seed)
     if hurt and not team.ir and _chance(dice, 0.7):
-        return rg.ir_place(state, settings, data, _some(dice, hurt, 1, 1)[0])
+        return rg.ir_place(state, settings, data, _some(dice, hurt, 1, 1)[0], seed=seed)
     return state
 
 
@@ -220,7 +223,7 @@ def bot_turn(state: rs.State, settings: rs.Settings, data, seed: int) -> rs.Stat
     dice = rs.rng(seed, "bot", state.week, state.phase)
     acts = (_bot_claims,) if state.phase == "waivers" else (_bot_answers, _bot_add, _bot_trades)
     for act in (_bot_ir, *acts, _bot_lineup):
-        state = act(state, settings, data, dice)
+        state = act(state, settings, data, dice, seed)
     return state
 
 
@@ -358,15 +361,15 @@ def test_the_user_can_answer_a_cpu_offer_until_it_no_longer_stands():
     state = next(step.state for step in simulate(*IDLE[0]).steps if replay_trades.offers_for_user(step.state))
     offer = replay_trades.offers_for_user(state)[0]
 
-    accepted = rs.user_team(rg.respond_offer(state, settings, DATA, offer.id, True)).roster
-    declined = rg.respond_offer(state, settings, DATA, offer.id, False)
-    without_him = rg.drop(state, settings, DATA, offer.get[0])
+    accepted = rs.user_team(rg.respond_offer(state, settings, DATA, offer.id, True, seed=11)).roster
+    declined = rg.respond_offer(state, settings, DATA, offer.id, False, seed=11)
+    without_him = rg.drop(state, settings, DATA, offer.get[0], seed=11)
 
     assert set(offer.give) <= set(accepted) and not set(offer.get) & set(accepted)
     assert [o.status for o in declined.offers if o.id == offer.id] == ["declined"]
-    assert rg.evaluate_trade(state, settings, DATA, offer.from_team, offer.get, offer.give).accepted
+    assert rg.evaluate_trade(state, settings, DATA, offer.from_team, offer.get, offer.give, seed=11).accepted
     with pytest.raises(rg.OfferExpired, match="no longer stands") as refused:
-        rg.respond_offer(without_him, settings, DATA, offer.id, True)
+        rg.respond_offer(without_him, settings, DATA, offer.id, True, seed=11)
     assert [o.status for o in refused.value.state.offers if o.id == offer.id] == ["expired"]
 
 
@@ -381,10 +384,26 @@ def test_an_accepted_offer_lets_the_cpu_cover_its_lineup(monkeypatch):
     monkeypatch.setattr(rg.replay_waiver_ai, "cpu_cover",
                         lambda state, settings, know, seed, team_ids: covered.append(list(team_ids)) or state)
 
-    rg.respond_offer(state, settings, DATA, offer.id, False)
-    rg.respond_offer(state, settings, DATA, offer.id, True)
+    rg.respond_offer(state, settings, DATA, offer.id, False, seed=11)
+    rg.respond_offer(state, settings, DATA, offer.id, True, seed=11)
 
     assert covered == [[offer.from_team]]
+
+
+def test_cpus_cover_their_trades_once_waivers_clear(monkeypatch):
+    """In the waivers phase every unrostered player is on waivers: cpu_cover waits for start_week, which runs
+    it for every CPU after the waiver run, with nothing locked and the phase open."""
+    settings = LEAGUES[0]
+    waivers = next(step.state for step in simulate(*IDLE[0]).steps if step.state.phase == "waivers")
+    calls = []
+    cover = rg.replay_waiver_ai.cpu_cover
+    monkeypatch.setattr(rg.replay_waiver_ai, "cpu_cover", lambda state, settings, know, seed, team_ids: calls.append(
+        (state.phase, state.locked, list(team_ids))) or cover(state, settings, know, seed, team_ids))
+
+    rg.advance(waivers, settings, DATA, 11, rg.WEDNESDAY)
+
+    assert calls == [("open", (), [team.id for team in waivers.teams])]
+    assert cover(waivers, settings, rg.knowledge(waivers, settings, DATA, seed=11), 11, [1, 2, 3]) is waivers
 
 
 def _countering(monkeypatch) -> list[rs.Offer]:
@@ -437,7 +456,8 @@ def test_trades_close_when_the_deadline_weeks_waivers_run():
 
     def ask(state: rs.State):
         cpu = state.teams[0]                                    # team 1: a CPU (the user drafts 4th)
-        return rg.evaluate_trade(state, settings, DATA, cpu.id, rs.user_team(state).roster[:1], cpu.roster[:1])
+        return rg.evaluate_trade(state, settings, DATA, cpu.id, rs.user_team(state).roster[:1], cpu.roster[:1],
+                                 seed=11)
 
     with pytest.raises(ValueError, match="deadline"):
         ask(after)
@@ -481,7 +501,7 @@ def test_no_cpu_is_blocked_by_its_ir_while_the_user_acts_in_the_waiver_phase():
 
     blocked = [(step.state.week, team.id) for step in run.steps if step.state.phase == "waivers"
                for team in step.state.teams if not team.is_user and replay_ir.blocked_reason(
-                   step.state, rg.knowledge(step.state, settings, DATA), team.id)]
+                   step.state, rg.knowledge(step.state, settings, DATA, seed=11), team.id)]
 
     assert blocked == []
 
@@ -492,10 +512,10 @@ def test_the_users_ir_actions_pass_through_to_the_users_team():
     first, second, third = rs.user_team(state).roster[:3]
     data = fakes.tagged(DATA, {(first, 6): fakes.Injury("O"), (second, 6): fakes.Injury("IR")})
 
-    placed = rg.ir_place(state, settings, data, first)
-    back = rg.ir_activate(placed, settings, data, first)
-    dropping = rg.ir_activate(placed, settings, data, first, drop=third)
-    swapped = rg.ir_activate(placed, settings, data, first, swap=second)
+    placed = rg.ir_place(state, settings, data, first, seed=11)
+    back = rg.ir_activate(placed, settings, data, first, seed=11)
+    dropping = rg.ir_activate(placed, settings, data, first, drop=third, seed=11)
+    swapped = rg.ir_activate(placed, settings, data, first, swap=second, seed=11)
 
     assert rs.user_team(placed).ir == (first,) and first not in rs.user_team(placed).roster
     assert rs.user_team(back).ir == () and first in rs.user_team(back).roster
@@ -503,19 +523,19 @@ def test_the_users_ir_actions_pass_through_to_the_users_team():
     assert rs.user_team(swapped).ir == (second,) and first in rs.user_team(swapped).roster
     assert [e.kind for e in swapped.events[len(state.events):]] == ["ir", "ir"]
     with pytest.raises(ValueError, match="can't go on IR"):
-        rg.ir_place(state, settings, DATA, first)               # no tag in the real week 6
+        rg.ir_place(state, settings, DATA, first, seed=11)      # no tag in the real week 6
 
 
 def test_nothing_can_be_changed_once_the_season_is_over():
     settings, final = LEAGUES[0], simulate(*IDLE[0]).final
     mine, theirs = rs.user_team(final).roster, final.teams[0].roster
-    free = replay_waivers.available_players(final, rg.knowledge(final, settings, DATA))[0].player_id
-    actions = [lambda: rg.set_lineup(final, settings, DATA, {}),
-               lambda: rg.submit_claim(final, settings, DATA, free, mine[0]),
-               lambda: rg.add_drop(final, settings, DATA, free, mine[0]),
-               lambda: rg.drop(final, settings, DATA, mine[0]),
+    free = replay_waivers.available_players(final, rg.knowledge(final, settings, DATA, seed=11))[0].player_id
+    actions = [lambda: rg.set_lineup(final, settings, DATA, {}, seed=11),
+               lambda: rg.submit_claim(final, settings, DATA, free, mine[0], seed=11),
+               lambda: rg.add_drop(final, settings, DATA, free, mine[0], seed=11),
+               lambda: rg.drop(final, settings, DATA, mine[0], seed=11),
                lambda: rg.propose_trade(final, settings, DATA, 0, final.teams[0].id, mine[:1], theirs[:1]),
-               lambda: rg.evaluate_trade(final, settings, DATA, final.teams[0].id, mine[:1], theirs[:1])]
+               lambda: rg.evaluate_trade(final, settings, DATA, final.teams[0].id, mine[:1], theirs[:1], seed=11)]
 
     for action in actions:
         with pytest.raises(ValueError):
@@ -598,7 +618,7 @@ def test_a_cpu_keeps_its_injured_star_on_ir_while_he_is_out_and_starts_him_when_
         if week in fakes.INJURED_WEEKS:                                   # the spot he opened was filled
             assert len(owner.roster) == settings.roster_size, week
         if week == fakes.STAR_BACK_WEEK:
-            know = rg.knowledge(state, settings, DATA)
+            know = rg.knowledge(state, settings, DATA, seed=seed)
             lineup = replay_season.starters_for(state, settings, know, owner.id)
             assert star in owner.roster and star in {pid for ids in lineup.values() for pid in ids}
 

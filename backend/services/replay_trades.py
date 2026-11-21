@@ -13,8 +13,9 @@ lists its reasons. Every CPU team in the deal must pass both of these, on point-
 And for both teams: at most MAX_PLAYERS_PER_SIDE players a side, nobody traded in the last two weeks, a roster
 within the limit (the user names who to drop; a CPU cuts its lowest healthy-chart skill players, never its
 only kicker or defense), and the one position rule: every starting slot the deal leaves empty
-(`replay_values.missing_slots`) has its own eligible free agent to fill it (unrostered, not on waivers, not
-out). Positions need not match: a CPU sends its only tight end and picks one up (`replay_waiver_ai.cpu_cover`).
+(`replay_values.missing_slots`) has its own eligible player to fill it (`free_agents`: unrostered, not out,
+and free once waivers clear). Positions need not match: a CPU sends its only tight end and picks one up
+(`replay_waiver_ai.cpu_cover`, at once in the open phase, when waivers clear in the waivers phase).
 Every drop goes through `replay_state.release`. An out player on the active roster may be traded; one in an
 IR slot can't be, but still counts for a team's lineup gain.
 
@@ -165,8 +166,12 @@ def _cpu_drops(settings: Settings, know: Knowledge, kept: Sequence[int]) -> tupl
 
 
 def free_agents(state: State, know: Knowledge) -> list[int]:
-    """Who a team could pick up right now to fill a slot: unrostered, not on waivers, not out; best first."""
-    taken = rs.rostered(state) | set(state.locked)
+    """Who could fill a slot a trade empties, best first: unrostered, not out, and free once waivers clear.
+    In the open phase that excludes players on waivers (`state.locked`). In the waivers phase everyone
+    unrostered is on waivers and the cover waits for them to clear (`replay_waiver_ai.cpu_cover`), so it is
+    anyone the user hasn't claimed (a CPU's own claim may take one; the next best then covers)."""
+    claimed = {claim.add for claim in state.claims if state.phase == "waivers"}
+    taken = rs.rostered(state) | (claimed if state.phase == "waivers" else set(state.locked))
     pool = (v for v in know.values if v.player_id not in taken and not v.out)
     return [v.player_id for v in sorted(pool, key=lambda v: (-v.chart, -v.ros_ppg, v.player_id))]
 
@@ -186,16 +191,26 @@ def cover(know: Knowledge, settings: Settings, roster: Sequence[int], pool: Sequ
     return tuple(picked)
 
 
-@lru_cache(maxsize=1024)
+@lru_cache(maxsize=8)
+def _seasons(know: Knowledge) -> dict[tuple[Settings, tuple[int, ...]], float]:
+    """One point cache per Knowledge (immutable, hashed by identity, so entries never go stale), and only
+    for the last few: each game and week has its own (the news differs by seed), and holding one keeps the
+    whole Knowledge alive."""
+    return {}
+
+
 def _season(settings: Settings, know: Knowledge, roster: tuple[int, ...]) -> float:
     """Season-weighted points of the roster's best skill lineups. Cached: a search asks about the same
-    rosters again and again (a Knowledge is immutable and hashed by identity, so entries never go stale)."""
-    skill = [know.by_id[pid] for pid in roster if know.by_id[pid].position in SKILL]
-    return lineup_gain.season_points(skill, rv.horizon(know, settings), rv.projector(know), know.league)
+    rosters again and again."""
+    cache, key = _seasons(know), (settings, roster)
+    if key not in cache:
+        skill = [know.by_id[pid] for pid in roster if know.by_id[pid].position in SKILL]
+        cache[key] = lineup_gain.season_points(skill, rv.horizon(know, settings), rv.projector(know), know.league)
+    return cache[key]
 
 
 def clear_cache() -> None:
-    _season.cache_clear()
+    _seasons.cache_clear()
 
 
 def _side(state: State, settings: Settings, know: Knowledge, team: Team, other: Team, sends: tuple[int, ...],

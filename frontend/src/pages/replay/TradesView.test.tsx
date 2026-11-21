@@ -347,6 +347,30 @@ describe('TradesView counters', () => {
     expect(await screen.findByText('Trade executed with Blitz Brigade.')).toBeInTheDocument();
   });
 
+  it('locks the partner and other offers while countering, and keeps a declined counter on screen', async () => {
+    const COUNTER_PATH = `${TRADES_PATH}/offers/61/counter`;
+    const no = verdict({ accepted: false, reasons: ['Value is too far apart.'], suggestion: 'Add Nico Collins to make this fair.' });
+    const back = { id: 71, week: 5, status: 'pending' as const, from_team: BRIGADE, to_team: teamRef(USER_TEAM_ID),
+      give: [MOSTERT], get: [MCCAFFREY], counter_to: 70 };
+    const other = offer({ id: 62, from_team: GHOSTS });
+    const { user } = renderTrades(trades({ offers: [offer(), other] }), [
+      { method: 'POST', path: EVALUATE_PATH, reply: json({ verdict: no }) },
+      { method: 'POST', path: COUNTER_PATH, reply: json({ ...actionResult(), verdict: no, executed: false, counter: back }) },
+    ]);
+    await user.click(await screen.findByRole('button', { name: 'Counter offer from Blitz Brigade' }));
+
+    expect(await screen.findByText("Counter Blitz Brigade's offer")).toHaveFocus();
+    expect(screen.getByRole('combobox', { name: 'Trade with' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Counter offer from Gridiron Ghosts' })).toBeDisabled();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send counter' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Send counter' }));
+
+    const outcome = (await screen.findByText('Blitz Brigade turned it down.')).closest('.replay-verdict') as HTMLElement;
+    expect(within(outcome).getByText('Value is too far apart.')).toBeInTheDocument();
+    expect(within(outcome).getByText('Add Nico Collins to make this fair.')).toBeInTheDocument();
+    expect(within(outcome).getByText('Blitz Brigade countered:').closest('p')).toHaveTextContent('you give Christian McCaffrey for Raheem Mostert.');
+  });
+
   it("shows the CPU's counter after it turns a proposal down", async () => {
     const no = verdict({ accepted: false, reasons: ['Value is too far apart.'] });
     const counter = { id: 70, week: 5, status: 'pending' as const, from_team: GHOSTS, to_team: teamRef(USER_TEAM_ID),

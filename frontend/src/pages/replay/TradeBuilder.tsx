@@ -68,7 +68,7 @@ function RosterPicker({ title, caption, verb, rows, selected, max, onToggle, ope
                   <td className="td--player">
                     <ReplayPlayerCell player={player} info={{ out: row.out, trade_locked: row.trade_locked }} onOpen={openPlayer} />
                     {row.slot === 'IR' && <span className="status-badge status-badge--missing">On IR</span>}
-                    {row.player.injury && row.news && <span className="hint">{row.news.text}</span>}
+                    {row.player.injury && row.news && <p className="hint">{row.news.text}</p>}
                   </td>
                   <td className="num">{formatNumber(row.value)}</td>
                 </tr>
@@ -141,7 +141,6 @@ export function TradeBuilder({ game, version, roster, maxPlayers, counterTo, onC
     const result = await actions.send(PROPOSE_KEY, () => (counterTo ? counterReplayOffer(game.id, counterTo.id, deal)
       : proposeReplayTrade(game.id, body)));
     if (!result) return;
-    if (counterTo) onCounterDone();         // the CPU's offer is countered now: back to a fresh builder
     if (!result.executed) {
       setDeclined(result.verdict);
       setCounter(result.counter);
@@ -152,14 +151,19 @@ export function TradeBuilder({ game, version, roster, maxPlayers, counterTo, onC
     setGet([]);
     setPicked([]);
     actions.announce({ text: `Trade executed with ${partner}.`, isGood: true });
+    if (counterTo) onCounterDone();         // the counter went through: back to a fresh builder
   };
+  const tendency = partners.find((team) => team.team_id === partnerId)?.tendency;
   const error = actions.errorFor(PROPOSE_KEY);
 
   return (
     <div className="replay-builder">
       <div className="weekly-controls">
-        <TeamSelect game={game} value={partnerId} label="Trade with" excludeUser onChange={(id) => change(() => { setPartnerId(id); setGet([]); })} />
+        {/* A counter always goes back to the team that made the offer. */}
+        <TeamSelect game={game} value={partnerId} label="Trade with" excludeUser disabled={counterTo !== null}
+          onChange={(id) => change(() => { setPartnerId(id); setGet([]); })} />
       </div>
+      {tendency && <p className="hint">{tendency}</p>}
       <div className="replay-trade__sides">
         <RosterPicker title="You give" caption="Your roster" verb="Give" rows={roster} selected={giveIds} max={maxPlayers}
           onToggle={(id) => change(() => setGive(toggleId(giveIds, id)))} openPlayer={openPlayer} />

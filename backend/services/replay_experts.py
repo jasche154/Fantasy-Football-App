@@ -2,8 +2,8 @@
 
 `download` pulls the archive (nflreadpy, imported there only); `expert_rows` matches it to our players
 (pure); `week_ranks` picks, for each week, the latest snapshot taken before that week's first Sunday kickoff
-(pure); `load_expert_ranks` stores rows in `replay_expert_ranks`. Only the last preseason cheatsheet and
-every in-season ROS snapshot are kept. A failed download is reported, never blocks a season.
+(the preseason cheatsheet: before week 1's first kickoff, its Thursday opener) (pure); `load_expert_ranks` stores rows in `replay_expert_ranks`. Only the last preseason cheatsheet and
+every in-season ROS snapshot are kept. A failed download or import is reported, never blocks a season.
 See .plans/pr1-plan.md section B.
 
 The archive has PPR position pages only (no overall list, no half or standard), so every scoring format
@@ -67,10 +67,10 @@ def _sunday(day: date) -> date:
 
 def _snapshots(season: int, raw: list[dict], week1_kickoff: date,
                last_game: date) -> dict[tuple[str, str, str], list[dict]]:
-    """{(kind, position, scrape_date): rows} for the season: the last cheatsheet per position before week 1's
-    Sunday, and every ROS page from just before week 1 to the last game."""
+    """{(kind, position, scrape_date): rows} for the season: the last cheatsheet per position scraped before
+    week 1's first kickoff (`week1_kickoff`), and every ROS page from just before week 1 to the last game."""
     pages: dict[tuple[str, str, str], list[dict]] = defaultdict(list)
-    first_ros = week1_kickoff - timedelta(days=ROS_LEAD_DAYS)
+    first_ros = _sunday(week1_kickoff) - timedelta(days=ROS_LEAD_DAYS)
     for row in raw:
         kind_position, scraped = _page(row.get("fp_page")), str(row.get("scrape_date") or "")
         try:
@@ -100,7 +100,7 @@ def _player(row: dict, position: str, matcher: SeasonMatcher, fp_to_gsis: dict[s
 def expert_rows(season: int, raw: list[dict], matcher: SeasonMatcher, fp_to_gsis: dict[str, str],
                 week1_kickoff: date, last_game: date) -> list[dict]:
     """Rows for `replay_expert_ranks`, matched by FantasyPros id, then name (matcher.by_name), then team
-    defense (matcher.defense). `week1_kickoff` is week 1's first Sunday. pos_rank counts every row of the
+    defense (matcher.defense). `week1_kickoff` is week 1's first game day. pos_rank counts every row of the
     page, matched or not; a player listed twice in one snapshot keeps his better line."""
     out: list[dict] = []
     unmatched: list[str] = []
@@ -147,16 +147,17 @@ def _ranks(pages: Mapping[tuple[str, str], Mapping[str, list[dict]]], kind: str,
 def week_ranks(rows: list[dict], kickoffs: Mapping[int, date]) -> tuple[dict[PlayerWeek, int], dict[int, int]]:
     """({(player_id, week): position rank}, {week: snapshot age in days}). Week 0 = preseason.
 
-    `kickoffs` maps each week to its first game date (moved to that week's Sunday here). Week 0 holds the
-    last cheatsheet before week 1's Sunday; week W the latest ROS page per position scraped before week W's
-    Sunday, and only when there is one. The age is counted from that Sunday to the newest page used."""
+    `kickoffs` maps each week to its first game date. Week 0 (the draft) holds the last cheatsheet scraped
+    before week 1's first kickoff, so nothing from the opener leaks in; week W the latest ROS page per
+    position scraped before week W's Sunday (its first date moved to that Sunday), and only when there is one.
+    The age is counted from that cutoff to the newest page used."""
     pages: dict[tuple[str, str], dict[str, list[dict]]] = defaultdict(lambda: defaultdict(list))
     for row in rows:
         pages[(row["kind"], row["position"])][row["scrape_date"]].append(row)
     sundays = {week: _sunday(day) for week, day in kickoffs.items()}
     ranks: dict[PlayerWeek, int] = {}
     age: dict[int, int] = {}
-    wanted = [(0, "pre", sundays.get(1, date.max))] + [(w, "ros", sundays[w]) for w in sorted(sundays) if w >= 1]
+    wanted = [(0, "pre", kickoffs.get(1, date.max))] + [(w, "ros", sundays[w]) for w in sorted(sundays) if w >= 1]
     for week, kind, sunday in wanted:
         found, newest = _ranks(pages, kind, sunday)
         if newest is None:
@@ -168,12 +169,12 @@ def week_ranks(rows: list[dict], kickoffs: Mapping[int, date]) -> tuple[dict[Pla
 
 
 def _season_dates(session: Session, season: int) -> tuple[date, date] | None:
-    """(week 1's first Sunday, the last regular-season game day) from the stored schedule."""
+    """(week 1's first game day, the last regular-season game day) from the stored schedule."""
     rows = session.execute(select(NflGame.week, NflGame.gameday).where(
         NflGame.season == season, NflGame.game_type == "REG", NflGame.gameday.is_not(None))).all()
     days = [(week, date.fromisoformat(day)) for week, day in rows]
     week1 = [day for week, day in days if week == 1]
-    return (_sunday(min(week1)), max(day for _, day in days)) if week1 else None
+    return (min(week1), max(day for _, day in days)) if week1 else None
 
 
 def stored_rows(session: Session, season: int) -> int:
@@ -197,10 +198,15 @@ def load_expert_ranks(session: Session, season: int, force: bool = False) -> dic
     except Exception as exc:                            # nflreadpy raises a mix of HTTP and parsing errors
         log.warning("experts %s: download failed (%s)", season, type(exc).__name__)
         return {"rows": stored, "errors": {"experts": type(exc).__name__}}
-    rows = expert_rows(season, raw, SeasonMatcher(session, season), crosswalk, *dates)
-    if not rows:
-        return {"rows": stored, "errors": {"experts": "NoRows"}}
-    session.execute(delete(ReplayExpertRank).where(ReplayExpertRank.season == season))
-    session.execute(insert(ReplayExpertRank), rows)
-    session.commit()
+    try:
+        rows = expert_rows(season, raw, SeasonMatcher(session, season), crosswalk, *dates)
+        if not rows:
+            return {"rows": stored, "errors": {"experts": "NoRows"}}
+        session.execute(delete(ReplayExpertRank).where(ReplayExpertRank.season == season))
+        session.execute(insert(ReplayExpertRank), rows)
+        session.commit()
+    except Exception as exc:                            # bad archive rows or a DB error: never block prepare_season
+        session.rollback()
+        log.warning("experts %s: import failed (%s)", season, type(exc).__name__)
+        return {"rows": stored, "errors": {"experts": type(exc).__name__}}
     return {"rows": len(rows), "snapshots": len({(r["kind"], r["scrape_date"]) for r in rows})}

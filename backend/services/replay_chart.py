@@ -173,12 +173,24 @@ def _injured(data: SeasonData, row: dict, news: "replay_news.Report | None", wee
     return (expert + model) * discount, extra
 
 
+Parts = Mapping[int, tuple[float, float, tuple[int, int, str]]]    # {id: (expert part, model part, open streak)}
+
+
 def charts(data: SeasonData, rows: Sequence[dict], priors: Mapping[int, float], week: int, end_week: int,
            seed: int) -> tuple[dict[int, dict], str]:
     """({id: chart fields for ReplayValue (+ availability / expected_missed from news)}, rank_source).
 
     `rows` are replay_values rows (player_id, position, team, ros_ppg, recent_points, availability,
-    games_left)."""
+    games_left). `base_charts` then `with_news`: callers that value one week for many seeds cache the first."""
+    fields, parts, source = base_charts(data, rows, priors, week, end_week)
+    by_id = {row["player_id"]: row for row in rows}
+    return {**fields, **with_news(data, by_id, fields, parts, week, end_week, seed)}, source
+
+
+def base_charts(data: SeasonData, rows: Sequence[dict], priors: Mapping[int, float], week: int,
+                end_week: int) -> tuple[dict[int, dict], Parts, str]:
+    """`charts` without the seeded news: (fields with news None, the parts `with_news` needs for players
+    with an open hard-tag streak, rank_source)."""
     curve, picks = slot_curve(data), pre_picks(data)
     overall = pre_ranks(picks)
     listed, age_weight = snapshot(data, week)
@@ -186,6 +198,7 @@ def charts(data: SeasonData, rows: Sequence[dict], priors: Mapping[int, float], 
     for row in rows:
         by_position[row["position"]].append(row)
     fields: dict[int, dict] = {}
+    parts: dict[int, tuple[float, float, tuple[int, int, str]]] = {}
     source = "model"
     for position, group in by_position.items():
         ranks = [listed[r["player_id"]] for r in group if r["player_id"] in listed]
@@ -202,13 +215,27 @@ def charts(data: SeasonData, rows: Sequence[dict], priors: Mapping[int, float], 
             bump = BYE_BUMP if _bye_done(data, row["team"], week) else 1.0
             expert = w * value_at(curve, position, listed.get(pid, last + UNLISTED_GAP)) * bump if w else 0.0
             model_value = value_at(curve, position, model[pid])
-            news = replay_news.current(data, pid, week, end_week, seed)
-            chart, extra = _injured(data, row, news, week, end_week, expert, (1 - w) * model_value * bump)
+            model_part = (1 - w) * model_value * bump
+            streak = replay_news.open_streak(data, pid, week)
+            if streak is not None:
+                parts[pid] = (expert, model_part, streak)
+            chart, _ = _injured(data, row, None, week, end_week, expert, model_part)
             fields[pid] = {
-                **extra, "chart": round(chart, 1), "healthy_chart": round(expert + (1 - w) * model_value * bump, 1),
+                "chart": round(chart, 1), "healthy_chart": round(expert + model_part, 1),
                 "pre_chart": round(pick_value(picks[pid]), 1) if pid in picks else 0.0,
                 "expert_rank": listed.get(pid), "pre_rank": overall.get(pid), "star": round(stars[pid], 3),
                 "form_chart": round((1 - w) * (model_value - value_at(curve, position, plain[pid])) * bump, 1),
-                "news": news,
+                "news": None,
             }
-    return fields, source
+    return fields, parts, source
+
+
+def with_news(data: SeasonData, rows: Mapping[int, dict], fields: Mapping[int, dict], parts: Parts, week: int,
+              end_week: int, seed: int) -> dict[int, dict]:
+    """{id: fields} for the players in `parts` only: their seeded news report and the chart it gives."""
+    out: dict[int, dict] = {}
+    for pid, (expert, model_part, (since, back, tag)) in parts.items():
+        news = replay_news.report(seed, pid, since, back, week, end_week, tag)
+        chart, extra = _injured(data, rows[pid], news, week, end_week, expert, model_part)
+        out[pid] = {**fields[pid], **extra, "chart": round(chart, 1), "news": news}
+    return out

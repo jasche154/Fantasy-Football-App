@@ -380,8 +380,12 @@ def cpu_free_agency(state: State, settings: Settings, know: Knowledge, seed: int
 
 def cpu_cover(state: State, settings: Settings, know: Knowledge, seed: int, team_ids: Iterable[int]) -> State:
     """After a trade: each of those CPUs adds a free agent for every starting slot its roster can no longer
-    fill (`replay_values.missing_slots`): the most valuable unlocked free agent who can play there, dropping
-    its least valuable skill player that no starting slot needs when the roster is full. `seed` is unused."""
+    fill (`replay_values.missing_slots`): the most valuable unlocked free agent who isn't out and can play
+    there, dropping its lowest healthy-chart skill player that no starting slot needs when the roster is
+    full. In the waivers phase every unrostered player is on waivers, so nothing happens: `start_week` covers
+    every CPU once they clear. `seed` is unused."""
+    if state.phase == "waivers":
+        return state
     for team_id in team_ids:
         if rs.team(state, team_id).is_user or replay_ir.blocked_reason(state, know, team_id):
             continue
@@ -398,21 +402,24 @@ def _by_chart(value: ReplayValue) -> tuple[float, float, int]:
 
 
 def _cover_move(state: State, settings: Settings, know: Knowledge, team_id: int) -> Move | None:
+    """The first move that fills one of the team's missing slots, trying each slot in turn. Drops go by
+    healthy chart (like `replay_trades._cpu_drops`), so a false out-for-season report never makes one."""
     roster = [know.by_id[pid] for pid in rs.team(state, team_id).roster]
     missing = rv.missing_slots([v.position for v in roster], settings)
-    if not missing:
-        return None
-    eligible = rv.FLEX_POSITIONS if missing[0] == "FLEX" else (missing[0],)
-    add = max((v for v in _unrostered(state, know, state.locked) if v.position in eligible), key=_by_chart,
-              default=None)
-    if add is None:
-        return None
-    if len(roster) < settings.roster_size:
-        return add.player_id, None
-    for out in sorted((v for v in roster if v.position in SKILL), key=_by_chart):
-        after = [v.position for v in roster if v is not out] + [add.position]
-        if len(rv.missing_slots(after, settings)) < len(missing):
-            return add.player_id, out.player_id
+    free = [v for v in _unrostered(state, know, state.locked) if not v.out]
+    cuts = sorted((v for v in roster if v.position in SKILL),
+                  key=lambda v: (v.healthy_chart, v.healthy_value, v.ros_ppg, v.player_id))
+    for slot in missing:
+        eligible = rv.FLEX_POSITIONS if slot == "FLEX" else (slot,)
+        add = max((v for v in free if v.position in eligible), key=_by_chart, default=None)
+        if add is None:
+            continue
+        if len(roster) < settings.roster_size:
+            return add.player_id, None
+        for out in cuts:
+            after = [v.position for v in roster if v is not out] + [add.position]
+            if len(rv.missing_slots(after, settings)) < len(missing):
+                return add.player_id, out.player_id
     return None
 
 

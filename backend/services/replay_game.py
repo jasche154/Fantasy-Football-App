@@ -5,9 +5,10 @@ each other.
     week, "wednesday"/"faab":   advance("wednesday") -> advance("play") -> ...
     week, no waivers:           advance("play") -> ...
 
-- `start_week`: CPU IR moves, CPU free agency, then CPU trades and a possible offer to the user (each CPU
-  that traded covers any starting slot it can no longer fill), then every dropped player comes off waivers
-  and the phase is "open".
+- `start_week`: CPU IR moves, CPU free agency, then CPU trades and a possible offer to the user, then every
+  dropped player comes off waivers, the phase is "open" and each CPU covers any starting slot a trade left
+  it unable to fill (`replay_waiver_ai.cpu_cover`). A trade accepted in the open phase is covered at once; one
+  in the waivers phase waits for this, as every unrostered player is on waivers until then.
 - Trades are open through `trade_deadline_week` and its waiver phase (`replay_state.trades_open`): the
   deadline passes when the user presses "Sim to Wednesday" after the deadline week's games. A declined
   proposal may come back as the CPU's counter offer; the user may counter a CPU's offer too.
@@ -47,7 +48,7 @@ STEPS = (WEDNESDAY, PLAY)
 SEASON_PHASES = ("waivers", "open")
 
 
-def knowledge(state: State, settings: Settings, data: SeasonData, seed: int = 0) -> rv.Knowledge:
+def knowledge(state: State, settings: Settings, data: SeasonData, *, seed: int) -> rv.Knowledge:
     """What everyone knows before `state.week` is played (cached). Views and every engine call use this;
     `seed` is the game's, for its injury-news noise (views pass the same one)."""
     return rv.knowledge(data.as_of(state.week), rv.league_settings(settings), state.week, settings.end_week, seed)
@@ -110,17 +111,16 @@ def auto_draft(state: State, settings: Settings, data: SeasonData, seed: int) ->
 
 def start_week(state: State, settings: Settings, data: SeasonData, seed: int) -> State:
     """The CPUs' start-of-week moves: IR, free agency, then trades (and maybe an offer to the user). Then
-    every dropped player comes off waivers and the phase is "open": the user can add anyone left."""
+    every dropped player comes off waivers and the phase is "open": CPUs cover the starting slots their trades
+    emptied (this week's, and any made in the waiver phase), then the user can add anyone left."""
     if state.phase not in SEASON_PHASES:
         raise ValueError("A week can only start during the season.")
-    know = knowledge(state, settings, data, seed)
+    know = knowledge(state, settings, data, seed=seed)
     state = replay_waiver_ai.cpu_ir(state, settings, know, seed)
     state = replay_waiver_ai.cpu_free_agency(state, settings, know, seed)
-    before = len(state.offers)
     state = replay_trade_ai.cpu_trades(state, settings, know, seed)
-    traded = {team_id for o in state.offers[before:] if o.status == "accepted" for team_id in (o.from_team, o.to_team)}
-    state = replay_waiver_ai.cpu_cover(state, settings, know, seed, sorted(traded))
-    return replace(state, locked=(), phase="open")
+    state = replace(state, locked=(), phase="open")
+    return replay_waiver_ai.cpu_cover(state, settings, know, seed, [team.id for team in state.teams])
 
 
 def _wednesday(state: State, settings: Settings, data: SeasonData, seed: int) -> State:
@@ -128,7 +128,7 @@ def _wednesday(state: State, settings: Settings, data: SeasonData, seed: int) ->
         reason = ("This league has no weekly waiver run" if settings.waiver_mode == "none"
                   else f"Week {state.week}'s waivers have already run")
         raise ValueError(f"{reason}: play week {state.week} instead.")
-    know = knowledge(state, settings, data, seed)
+    know = knowledge(state, settings, data, seed=seed)
     state = replay_waiver_ai.cpu_ir(state, settings, know, seed)
     claims = replay_waiver_ai.cpu_claims(state, settings, know, seed)
     return start_week(replay_waivers.process_claims(state, settings, know, claims), settings, data, seed)
@@ -137,9 +137,9 @@ def _wednesday(state: State, settings: Settings, data: SeasonData, seed: int) ->
 def _play(state: State, settings: Settings, data: SeasonData, seed: int) -> State:
     if state.phase != "open":
         raise ValueError(f"Run week {state.week}'s waivers before playing it.")
-    played = replay_season.play_week(state, settings, data, knowledge(state, settings, data, seed), seed)
+    played = replay_season.play_week(state, settings, data, knowledge(state, settings, data, seed=seed), seed)
     if played.phase == "waivers":       # CPUs' IR moves as the waiver phase opens: none is blocked while the user acts
-        return replay_waiver_ai.cpu_ir(played, settings, knowledge(played, settings, data, seed), seed)
+        return replay_waiver_ai.cpu_ir(played, settings, knowledge(played, settings, data, seed=seed), seed)
     # Without waivers the next week starts right away: CPUs move first, then the user can grab anyone.
     return start_week(played, settings, data, seed) if played.phase == "open" else played
 
@@ -159,9 +159,9 @@ def advance(state: State, settings: Settings, data: SeasonData, seed: int, step:
 # ---------------- the user's actions (thin pass-throughs) ----------------
 # `seed` is the game's: it only shapes the injury news in the Knowledge, so views and actions agree.
 
-def set_lineup(state: State, settings: Settings, data: SeasonData, starters: Mapping[str, Sequence[int]],
-               seed: int = 0) -> State:
-    return replay_season.set_lineup(state, settings, knowledge(state, settings, data, seed), starters)
+def set_lineup(state: State, settings: Settings, data: SeasonData, starters: Mapping[str, Sequence[int]], *,
+               seed: int) -> State:
+    return replay_season.set_lineup(state, settings, knowledge(state, settings, data, seed=seed), starters)
 
 
 def clear_lineup(state: State) -> State:
@@ -169,8 +169,8 @@ def clear_lineup(state: State) -> State:
 
 
 def submit_claim(state: State, settings: Settings, data: SeasonData, add: int, drop: int | None = None,
-                 bid: int | None = None, seed: int = 0) -> State:
-    return replay_waivers.submit_claim(state, settings, knowledge(state, settings, data, seed), add, drop, bid)
+                 bid: int | None = None, *, seed: int) -> State:
+    return replay_waivers.submit_claim(state, settings, knowledge(state, settings, data, seed=seed), add, drop, bid)
 
 
 def set_claim_bid(state: State, settings: Settings, claim_id: int, bid: int) -> State:
@@ -185,47 +185,47 @@ def reorder_claims(state: State, ids: Sequence[int]) -> State:
     return replay_waivers.reorder_claims(state, ids)
 
 
-def add_drop(state: State, settings: Settings, data: SeasonData, add: int, drop: int | None = None,
-             seed: int = 0) -> State:
+def add_drop(state: State, settings: Settings, data: SeasonData, add: int, drop: int | None = None, *,
+             seed: int) -> State:
     """The user adds a free agent (phase "open"), dropping `drop` when the roster is full."""
-    know = knowledge(state, settings, data, seed)
+    know = knowledge(state, settings, data, seed=seed)
     return replay_waivers.add_drop(state, settings, know, rs.user_team(state).id, add, drop)
 
 
-def drop(state: State, settings: Settings, data: SeasonData, player_id: int, seed: int = 0) -> State:
-    know = knowledge(state, settings, data, seed)
+def drop(state: State, settings: Settings, data: SeasonData, player_id: int, *, seed: int) -> State:
+    know = knowledge(state, settings, data, seed=seed)
     return replay_waivers.drop(state, settings, know, rs.user_team(state).id, player_id)
 
 
-def ir_place(state: State, settings: Settings, data: SeasonData, player_id: int, seed: int = 0) -> State:
+def ir_place(state: State, settings: Settings, data: SeasonData, player_id: int, *, seed: int) -> State:
     """The user moves an eligible player from the active roster to IR."""
-    know = knowledge(state, settings, data, seed)
+    know = knowledge(state, settings, data, seed=seed)
     return replay_ir.place(state, know, rs.user_team(state).id, player_id)
 
 
 def ir_activate(state: State, settings: Settings, data: SeasonData, player_id: int, drop: int | None = None,
-                swap: int | None = None, seed: int = 0) -> State:
+                swap: int | None = None, *, seed: int) -> State:
     """The user brings a player back from IR (dropping `drop`, or moving `swap` to IR in his place)."""
-    know = knowledge(state, settings, data, seed)
+    know = knowledge(state, settings, data, seed=seed)
     return replay_ir.activate(state, settings, know, rs.user_team(state).id, player_id, drop, swap)
 
 
 # ---------------- trades ----------------
 
 def evaluate_trade(state: State, settings: Settings, data: SeasonData, to_team: int, give: Sequence[int],
-                   get: Sequence[int], user_drops: Sequence[int] = (), seed: int = 0) -> Verdict:
+                   get: Sequence[int], user_drops: Sequence[int] = (), *, seed: int) -> Verdict:
     """Would that CPU take the user's `give` for its `get`? Changes nothing."""
-    know = knowledge(state, settings, data, seed)
+    know = knowledge(state, settings, data, seed=seed)
     return replay_trades.evaluate(state, settings, know, rs.user_team(state).id, to_team, give, get, user_drops)
 
 
 def _propose(state: State, settings: Settings, data: SeasonData, seed: int, to_team: int, give: Sequence[int],
              get: Sequence[int], user_drops: Sequence[int], counter_to: int | None) -> tuple[State, Verdict, Offer | None]:
-    know = knowledge(state, settings, data, seed)
+    know = knowledge(state, settings, data, seed=seed)
     before = len(state.offers)
     state, verdict = replay_trades.propose(state, settings, know, to_team, give, get, user_drops,
                                            counter_to=counter_to)
-    if verdict.accepted:            # the CPU fills any starting slot the deal left it unable to fill
+    if verdict.accepted:            # the CPU fills any starting slot the deal emptied (waivers phase: at start_week)
         return replay_waiver_ai.cpu_cover(state, settings, know, seed, [to_team]), verdict, None
     if len(state.offers) == before:                 # the same proposal was already declined this week
         return state, verdict, None
@@ -254,10 +254,10 @@ def counter_offer(state: State, settings: Settings, data: SeasonData, seed: int,
 
 
 def respond_offer(state: State, settings: Settings, data: SeasonData, offer_id: int, accept: bool,
-                  user_drops: Sequence[int] = (), seed: int = 0) -> State:
+                  user_drops: Sequence[int] = (), *, seed: int) -> State:
     """The user answers a CPU's offer. OfferExpired (a ValueError) carries the state to save when the
     offer no longer stands."""
-    know = knowledge(state, settings, data, seed)
+    know = knowledge(state, settings, data, seed=seed)
     state = replay_trades.respond(state, settings, know, offer_id, accept, user_drops)
     offer = next(o for o in state.offers if o.id == offer_id)
     return replay_waiver_ai.cpu_cover(state, settings, know, seed, [offer.from_team]) if accept else state

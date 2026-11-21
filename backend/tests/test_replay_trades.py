@@ -128,6 +128,20 @@ def test_a_cpu_trades_its_only_tight_end_for_a_much_better_back_and_picks_one_up
                                 "agent to fill it.",)
 
 
+def test_in_the_waivers_phase_a_slot_is_covered_by_anyone_the_user_has_not_claimed():
+    """Everyone unrostered is on waivers then: the cover waits for them to clear (cpu_cover at start_week)."""
+    only_te, back = P("TE", 25), P("RB", 10)
+    state, know = league(changes={only_te: star(500.0), back: star(900.0, star=1.0)})
+    waivers = lock_free_agents(replace(state, phase="waivers"), know, "TE")
+    tes = [pid for pid in rt.free_agents(waivers, know) if know.by_id[pid].position == "TE"]
+    claimed = replace(waivers, claims=tuple(rs.Claim(n, USER, pid, None) for n, pid in enumerate(tes, start=900)))
+
+    assert tes and rt.evaluate(waivers, SETTINGS, know, USER, DEEP_AT_WR, [back], [only_te]).accepted
+    assert not set(tes) & set(rt.free_agents(claimed, know))
+    assert said(rt.evaluate(claimed, SETTINGS, know, USER, DEEP_AT_WR, [back], [only_te]), "short at TE")
+    assert not set(tes) & set(rt.free_agents(replace(waivers, phase="open"), know))   # open: waivers are locked
+
+
 # ---------------- value ----------------
 
 def test_a_lopsided_one_for_one_is_declined_on_value_with_a_points_hint():
