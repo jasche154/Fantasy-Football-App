@@ -967,11 +967,15 @@ that week's games on; only scoring a week reads its real points.
   round (the top seed left plays the lowest); with 5-7 teams the top 8 - P seeds get a round-one bye. The
   semi-final losers play for third in the final week. Round-one losers (P >= 5) play on for places 5..P,
   and the teams that missed the playoffs for P+1..N: each week a pool ranks its teams by pool wins, then
-  points in pool weeks, then seed, and pairs them off (1 v 2, 3 v 4); an odd one out sits idle, and a pool
+  points in pool weeks, then seed, and pairs them off (1 v 2, 3 v 4); in an odd pool the team idle least
+  so far sits out (then the lowest in the table), so the bye rotates, and a pool
   of two plays twice (the team that won both places higher; a split goes to more points, then the higher
   seed). Games are labelled Quarter-final, Semi-final, Championship, Third place or Consolation; a bye
   shows as an idle week on the schedule ("Bye / no game"), and the Matchup tab then shows the week's
-  first game.
+  first game. With 5 playoff teams round one is a single wild-card game. Leagues saved before playoff
+  sizes existed keep their title games; one saved before its first playoff week may pair its consolation
+  games differently (by the pool table rather than seeds 5 v 8, 6 v 7), and a finished one may reorder
+  places from 5th down.
 - **Limits of "no hindsight":** a week's projection is the sites' final pre-game number, and it is
   already visible at that week's Wednesday waiver run. An expert snapshot taken on a Friday already knows
   that week's Thursday game. Injury news is built from the real return week (noisy, see above). A player appears on the board and the wire once
@@ -1046,7 +1050,7 @@ League parameters accepted by every valuation endpoint: `scoring=ppr|half|std`,
 | GET | `/api/replay/seasons` | Which past seasons can be replayed (readiness per season, with its `last_week`) and the running data import |
 | POST | `/api/replay/seasons/{season}/prepare?force=` | Import that season's results, ADP, pre-game projections and injury tags in the background |
 | GET | `/api/replay/games` | Saved replay leagues, most recently played first |
-| POST | `/api/replay/games` | Body `{"season": 2019, "teams": 12, "scoring": "half", "draft_slot": 6, "waiver_mode": "wednesday", "difficulty": "normal", "playoff_end_week": 17, "playoff_teams": 6, "name": "...", "seed": 1}` (only `season` is required; it may be `"random"`; teams 4/6/8/10/12/14/16; `playoff_end_week` 16/17/18 (default 17; 422 when the season is shorter), `playoff_teams` 4-8 (default by league size), the regular season is what the playoff rounds leave before the final; `waiver_mode` `"wednesday"`, `"faab"` (blind bids from $100) or `"none"` (free agency only); `difficulty` `"hard"`); a new league, drafted up to your first pick |
+| POST | `/api/replay/games` | Body `{"season": 2019, "teams": 12, "scoring": "half", "draft_slot": 6, "waiver_mode": "wednesday", "difficulty": "normal", "playoff_end_week": 17, "playoff_teams": 6, "name": "...", "seed": 1}` (only `season` is required; it may be `"random"`; teams 4/6/8/10/12/14/16; `playoff_end_week` 16/17/18 (default 17; 422 when the season is shorter; a random season is drawn from the ready seasons that long), `playoff_teams` 4-8 (default by league size), the regular season is what the playoff rounds leave before the final; `waiver_mode` `"wednesday"`, `"faab"` (blind bids from $100) or `"none"` (free agency only); `difficulty` `"hard"`); a new league, drafted up to your first pick |
 | GET | `/api/replay/games/{id}` | Game summary: phase, week, your record and matchup, what to do next, champion |
 | POST | `/api/replay/games/{id}/delete` | Delete the league |
 | GET | `/api/replay/games/{id}/draft?position=&search=&sort=&direction=&limit=&offset=` | Draft room: picks, order, your roster, players left by preseason rank (`sort` `rank`, `adp` or `projection`; `direction` `asc`/`desc`, default asc, desc for projection; unknowns last), each with the round his rank implies |

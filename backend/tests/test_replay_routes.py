@@ -13,6 +13,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from api import replay_routes
 from config import get_settings
 from database.db import get_session
 from database.models import Base
@@ -371,6 +372,20 @@ def test_a_random_season_and_draft_slot_come_from_the_seed(client):
     assert first["on_the_clock"] == first["user_team_id"]
 
 
+def test_a_random_season_only_comes_from_seasons_long_enough_for_the_window(client, monkeypatch):
+    ready = {SEASON + 1: 18, SEASON + 2: 18, SEASON: 17}         # season -> last week
+    monkeypatch.setattr(replay_pool, "ready_seasons",
+                        lambda session, min_last_week=0: [s for s, last in ready.items() if last >= min_last_week])
+    picked = {seed: replay_routes._season(None, "random", seed, 18) for seed in range(20)}
+
+    assert set(picked.values()) == {SEASON + 1, SEASON + 2}      # never the 17-week season
+    assert picked == {seed: replay_routes._season(None, "random", seed, 18) for seed in range(20)}   # by seed
+    ready = {SEASON: 17}
+    assert refused(client, "/games", {"season": "random", "playoff_end_week": 18}) == (
+        422, "No prepared season has a week 18: pick an earlier championship week.")
+    assert post(client, "/games", {"season": "random", "seed": 3})["game"]["season"] == SEASON
+
+
 def test_create_says_what_is_wrong_with_a_league(client, monkeypatch):
     def create(**body) -> tuple[int, str]:
         return refused(client, "/games", {"season": SEASON, **body})
@@ -381,7 +396,7 @@ def test_create_says_what_is_wrong_with_a_league(client, monkeypatch):
     assert create(teams=99)[0] == create(scoring="superflex")[0] == create(season="soon")[0] == 422
     assert create(season=2019)[0] == 503 and "2019 is not ready" in create(season=2019)[1]
     assert create(scoring="ppr")[0] == 200                       # the same season in another scoring
-    monkeypatch.setattr(replay_pool, "ready_seasons", lambda session: [])
+    monkeypatch.setattr(replay_pool, "ready_seasons", lambda session, min_last_week=0: [])
     assert create(season="random") == (503, "No season is ready to play yet: prepare one first.")
 
 
@@ -419,7 +434,8 @@ def test_the_draft_board_sorts_by_rank_adp_or_projection(client):
     ranks = [row["pre_rank"] for row in ranked]
     known = [rank for rank in ranks if rank is not None]
     assert known == sorted(known) and ranks[:len(known)] == known
-    assert all(row["round"] == -(-row["pre_rank"] // 10) for row in ranked if row["pre_rank"])
+    assert all(row["round"] == -(-row["pre_rank"] // 10) for row in ranked if row["pre_rank"] and row["pre_rank"] <= 150)
+    assert all(row["round"] is None for row in ranked if (row["pre_rank"] or 0) > 150)       # past the 15th round
     adps = [row["adp"] for row in by_adp if row["adp"] is not None]
     assert adps == sorted(adps) and len(adps) > 100
     assert [row["projection"] for row in best] == sorted((row["projection"] for row in best), reverse=True)

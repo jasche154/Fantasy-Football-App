@@ -638,3 +638,13 @@ def test_an_offer_for_a_player_since_moved_to_ir_says_why_it_cannot_be_accepted(
 
     name = rg.knowledge(state, SETTINGS, DATA, seed=SEED).by_id[mine[0]].name
     assert (offer["verdict"], offer["note"]) == (None, f"On IR, so not tradable until activated: {name}.")
+
+
+def test_draft_board_gives_no_round_past_the_last_round_of_the_draft():
+    board = views.draft(game(drafting()), limit=500)
+    rounds = board["rounds"]
+
+    deep = [row for row in board["results"] if row["pre_rank"] and -(-row["pre_rank"] // 12) > rounds]
+    assert deep and all(row["round"] is None for row in deep)
+    assert all(row["round"] == -(-row["pre_rank"] // 12) for row in board["results"]
+               if row["pre_rank"] and row not in deep)

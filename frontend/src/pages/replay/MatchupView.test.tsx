@@ -148,6 +148,13 @@ describe('MatchupView', () => {
     expect(faceOff()).toHaveTextContent('Quarter-final · Week 5 · Not played yet');
   });
 
+  it("does not call another week's game the user's bye while this week loads", async () => {
+    const earlier = matchup({ week: 4, home: team({ team: teamRef(3) }), away: team({ team: teamRef(6) }) });
+    renderMatchup([{ path: MATCHUP_PATH, reply: json(earlier) }]);
+    await screen.findAllByRole('table');
+    expect(screen.queryByText(/No game this week for your team/)).not.toBeInTheDocument();
+  });
+
   it('says so when the week has no games', async () => {
     renderMatchup([{ path: SCOREBOARD_PATH, reply: json(scoreboard({ results: [] })) }]);
     expect(await screen.findByText('No games this week.')).toBeInTheDocument();

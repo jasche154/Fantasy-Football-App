@@ -445,9 +445,10 @@ def summary(game: Game) -> dict:
 DRAFT_SORTS = {"rank": lambda v: v.pre_rank, "adp": lambda v: v.adp, "projection": lambda v: v.projection}
 
 
-def _board_row(value: ReplayValue, teams: int) -> dict:
+def _board_row(value: ReplayValue, teams: int, rounds: int) -> dict:
+    round_ = -(-value.pre_rank // teams) if value.pre_rank else None
     return {"player": player_ref(value), "adp": value.adp, "pos_rank": value.pos_rank, "rank": value.rank,
-            "pre_rank": value.pre_rank, "round": -(-value.pre_rank // teams) if value.pre_rank else None,
+            "pre_rank": value.pre_rank, "round": round_ if round_ and round_ <= rounds else None,   # past the draft: none
             "projection": round(value.projection, 2)}
 
 
@@ -474,7 +475,7 @@ def draft(game: Game, position: str | None = None, search: str | None = None, li
     overall = len(state.picks) + 1 if drafting else None
     mine = [pick.player_id for pick in state.picks if pick.team_id == game.user.id]
     return {
-        **page(board, limit, offset, lambda value: _board_row(value, settings.teams)), "phase": state.phase,
+        **page(board, limit, offset, lambda value: _board_row(value, settings.teams, settings.rounds)), "phase": state.phase,
         "on_the_clock": replay_draft.on_the_clock(state, settings),
         "is_user_turn": replay_draft.on_the_clock(state, settings) == game.user.id,
         "round": (overall - 1) // settings.teams + 1 if overall else None, "overall": overall,

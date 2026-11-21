@@ -169,6 +169,8 @@ def _log_bracket(state: State, settings: Settings) -> State:
     games = title_games(state, settings, upcoming)
     if upcoming == settings.end_week:
         games, title = games[:1], "Championship game"
+    elif len(games) == 1:                                 # 5 playoff teams: one round-one game, three byes
+        title = "Wild-card game"
     else:
         title = f"{game_label(state, settings, upcoming, games[0])}s"
     listed = ", ".join(f"{names[home]} v {names[away]}" for home, away in games)

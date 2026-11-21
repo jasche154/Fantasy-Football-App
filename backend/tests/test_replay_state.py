@@ -540,3 +540,10 @@ def test_trades_close_at_the_waiver_run_after_the_deadline_week(week, phase, mod
     settings = Settings(season=2023, waiver_mode=mode)
 
     assert rs.trades_open(make_state(week=week, phase=phase), settings) is is_open
+
+
+def test_settings_errors_name_the_playoff_size_and_the_deadline():
+    with pytest.raises(ValueError, match="^A 4-team league has a 4-team playoff.$"):
+        Settings(season=2021, teams=4, draft_slot=1, playoff_teams=5)
+    with pytest.raises(ValueError, match=r"^The trade deadline \(week 14\) must be in the 13-week regular season.$"):
+        Settings(season=2021, regular_season_weeks=13, trade_deadline_week=14)

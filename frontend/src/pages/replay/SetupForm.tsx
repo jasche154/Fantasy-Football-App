@@ -14,10 +14,8 @@ import { SCORING_OPTIONS } from '../../state/leagueSettings';
 const POLL_MS = 3000;
 const RANDOM = 'random';
 const TEAM_COUNTS = [4, 6, 8, 10, 12, 14, 16];
-/** Championship week -> the playoff weeks' label; week 18 needs a season with games in week 18. */
-const PLAYOFF_WINDOWS: readonly { value: ReplayPlayoffEndWeek; label: string }[] = [
-  { value: 16, label: 'Weeks 14-16' }, { value: 17, label: 'Weeks 15-17' }, { value: 18, label: 'Weeks 16-18' },
-];
+/** Championship weeks on offer; week 18 needs a season with games in week 18 (a random season never gets it). */
+const PLAYOFF_END_WEEKS: readonly ReplayPlayoffEndWeek[] = [16, 17, 18];
 const DEFAULT_PLAYOFF_END: ReplayPlayoffEndWeek = 17;
 const MIN_PLAYOFF_TEAMS = 4;
 const MAX_PLAYOFF_TEAMS = 8;
@@ -39,6 +37,12 @@ const DIFFICULTIES: readonly { value: ReplayDifficulty; title: string; text: str
 function defaultPlayoffTeams(teams: number): number {
   if (teams < 10) return 4;
   return teams < 14 ? 6 : 8;
+}
+
+/** "Weeks 16-17 (final week 17)": a 4-team bracket plays 2 rounds, a bigger one 3, ending in the championship week. */
+function playoffWindowLabel(endWeek: number, playoffTeams: number): string {
+  const rounds = playoffTeams <= 4 ? 2 : 3;
+  return `Weeks ${endWeek - rounds + 1}-${endWeek} (final week ${endWeek})`;
 }
 
 /** "6 teams (top 2 get a bye)": byes fill the bracket up to 4 or 8. */
@@ -176,8 +180,9 @@ export function SetupForm({ onCreated }: { onCreated: (game: ReplaySummary) => v
         const chosen = season === RANDOM || ready.includes(season) ? season : (ready[ready.length - 1] ?? '');
         const chosenSlot = slot !== RANDOM && Number(slot) > teams ? RANDOM : slot;
         const lastWeek = data.results.find((row) => String(row.season) === chosen)?.last_week ?? 0;
-        const windows = PLAYOFF_WINDOWS.filter((option) => option.value < 18 || lastWeek >= 18);
-        const chosenEnd = windows.some((option) => option.value === playoffEnd) ? playoffEnd : DEFAULT_PLAYOFF_END;
+        // Every season has a week 17, so a random one can end there at the latest.
+        const endWeeks = PLAYOFF_END_WEEKS.filter((end) => end < 18 || (chosen !== RANDOM && lastWeek >= 18));
+        const chosenEnd = endWeeks.includes(playoffEnd) ? playoffEnd : DEFAULT_PLAYOFF_END;
         const chosenPlayoffTeams = playoffTeams ?? defaultPlayoffTeams(teams);
         const playoffCounts = Array.from({ length: Math.min(MAX_PLAYOFF_TEAMS, teams) - MIN_PLAYOFF_TEAMS + 1 }, (_, index) => MIN_PLAYOFF_TEAMS + index);
         const submit = async (event: FormEvent) => {
@@ -190,9 +195,8 @@ export function SetupForm({ onCreated }: { onCreated: (game: ReplaySummary) => v
             draft_slot: chosenSlot === RANDOM ? undefined : Number(chosenSlot),
             waiver_mode: waiverMode,
             difficulty,
-            // A random season's length is unknown here: the server's default window fits every season.
-            playoff_end_week: chosen === RANDOM ? undefined : chosenEnd,
-            playoff_teams: chosenPlayoffTeams,
+            playoff_end_week: chosenEnd,
+            playoff_teams: playoffTeams ?? undefined,       // untouched: the server's default for the league size
           });
           if (result) onCreated(result.game);
         };
@@ -214,10 +218,8 @@ export function SetupForm({ onCreated }: { onCreated: (game: ReplaySummary) => v
               <SelectField label="Scoring" value={scoring} onChange={(value) => setScoring(value as Scoring)} options={SCORING_OPTIONS} />
               <SelectField label="Draft slot" value={chosenSlot} onChange={setSlot}
                 options={[{ value: RANDOM, label: 'Random' }, ...Array.from({ length: teams }, (_, index) => ({ value: String(index + 1), label: `Pick ${index + 1}` }))]} />
-              {chosen !== RANDOM && (
-                <SelectField label="Playoffs" value={chosenEnd} onChange={(value) => setPlayoffEnd(Number(value) as ReplayPlayoffEndWeek)}
-                  options={windows} />
-              )}
+              <SelectField label="Playoffs" value={chosenEnd} onChange={(value) => setPlayoffEnd(Number(value) as ReplayPlayoffEndWeek)}
+                options={endWeeks.map((end) => ({ value: end, label: playoffWindowLabel(end, chosenPlayoffTeams) }))} />
               <SelectField label="Playoff teams" value={chosenPlayoffTeams} onChange={(value) => setPlayoffTeams(Number(value))}
                 options={playoffCounts.map((count) => ({ value: count, label: playoffTeamsLabel(count) }))} />
             </div>

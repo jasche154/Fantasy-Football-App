@@ -106,11 +106,13 @@ def _validate(s: Settings) -> None:
         (s.teams in VALID_TEAMS, f"A league has {', '.join(map(str, VALID_TEAMS[:-1]))} or {VALID_TEAMS[-1]} teams."),
         (1 <= s.draft_slot <= s.teams, f"Draft slot must be between 1 and {s.teams}."),
         (PLAYOFF_TEAMS_RANGE[0] <= s.playoff_teams <= min(PLAYOFF_TEAMS_RANGE[1], s.teams),
+         f"A {s.teams}-team league has a {s.teams}-team playoff." if s.teams <= PLAYOFF_TEAMS_RANGE[0] else
          f"Playoff teams must be between {PLAYOFF_TEAMS_RANGE[0]} and {min(PLAYOFF_TEAMS_RANGE[1], s.teams)}."),
         (not unknown, f"Unknown lineup slots {unknown}. Valid: {list(SLOTS)}"),
         (s.bench >= 0 and min(s.starters.values(), default=0) >= 0, "Starter and bench counts can't be negative."),
         (s.regular_season_weeks >= 1, "The regular season needs at least one week."),
-        (s.trade_deadline_week <= s.regular_season_weeks, "The trade deadline must be in the regular season."),
+        (s.trade_deadline_week <= s.regular_season_weeks,
+         f"The trade deadline (week {s.trade_deadline_week}) must be in the {s.regular_season_weeks}-week regular season."),
     )
     for passed, message in checks:
         if not passed:

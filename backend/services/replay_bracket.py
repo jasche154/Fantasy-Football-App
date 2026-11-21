@@ -6,7 +6,8 @@ replay_season, which is the module to import).
   reseeded (the best seed left plays the lowest). The semi-final losers play for third place in the final week.
 - With three rounds, the round-one losers play on for places 5..P and the teams outside the playoffs for
   P+1..N, each group as a pool: every week the pool is ranked by wins in its games, then points in its games,
-  then seed, and paired off 1v2, 3v4 (an odd one out is idle). A pool of two simply plays every week.
+  then seed, and paired off 1v2, 3v4. In an odd pool the idle team is the one idle least so far (then the
+  lowest in the table), so the bye rotates. A pool of two simply plays every week.
 - A tied playoff game goes to the higher seed.
 - Final places, once the last week is played: the final, the third-place game, the losers' pool table,
   then the consolation pool table. Before that: seed order.
@@ -128,6 +129,9 @@ def _pool_table(state: State, members: Sequence[int], weeks: range, seeds: Seque
 
 def _pool_games(state: State, members: Sequence[int], start: int, week: int, seeds: Sequence[int]) -> Matchups:
     table = _pool_table(state, members, range(start, week), seeds)
+    if len(table) % 2:                    # the idle one: fewest idle weeks so far, then lowest in the table
+        played = {t: sum(t in game for w in range(start, week) for game in _result(state, w).matchups) for t in table}
+        table.remove(max(reversed(table), key=played.__getitem__))
     return tuple((table[i], table[i + 1]) for i in range(0, len(table) - 1, 2))
 
 

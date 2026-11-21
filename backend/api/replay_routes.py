@@ -144,16 +144,18 @@ class CreateBody(BaseModel):
     seed: int | None = Field(None, ge=0, le=MAX_SEED)
 
 
-def _season(session: Session, wanted: int | str, seed: int) -> int:
+def _season(session: Session, wanted: int | str, seed: int, end_week: int) -> int:
     if wanted != "random":
         if wanted not in replay_pool.SUPPORTED_SEASONS:
             seasons_ = replay_pool.SUPPORTED_SEASONS
             raise ValueError(f"Replay seasons run from {seasons_[0]} to {seasons_[-1]}, not {wanted}.")
         return int(wanted)
-    ready = replay_pool.ready_seasons(session)
-    if not ready:
+    if not replay_pool.ready_seasons(session):
         raise NoDataError("No season is ready to play yet: prepare one first.")
-    return int(rs.rng(seed, "season").choice(ready))
+    fits = replay_pool.ready_seasons(session, min_last_week=end_week)
+    if not fits:
+        raise ValueError(f"No prepared season has a week {end_week}: pick an earlier championship week.")
+    return int(rs.rng(seed, "season").choice(fits))
 
 
 @router.get("/games")
@@ -166,7 +168,7 @@ def create_game(body: CreateBody, session: Session = Depends(get_session)) -> di
     """A new league, drafted up to the user's first pick. Season "random": a seeded choice of a ready one."""
     seed = body.seed if body.seed is not None else secrets.randbelow(MAX_SEED + 1)
     with errors():
-        season = _season(session, body.season, seed)
+        season = _season(session, body.season, seed, body.playoff_end_week)
         slot = body.draft_slot or int(rs.rng(seed, "slot").integers(1, body.teams + 1))
         playoff_teams = body.playoff_teams or rs.default_playoff_teams(body.teams)
         settings = Settings(season=season, teams=body.teams, scoring=body.scoring, draft_slot=slot,

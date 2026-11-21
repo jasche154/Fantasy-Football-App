@@ -9,10 +9,11 @@ import { formatPoints, PositionTabs, ReplayPlayerCell, type ReplayPositionTab } 
 /** The backend's `search` limit. */
 const MAX_SEARCH_LENGTH = 60;
 const SORT_NAMES: Record<ReplayDraftSort, string> = { rank: 'rank', adp: 'ADP', projection: 'projection' };
-const RANK_TITLES: Record<ReplaySummary['rank_source'], string> = {
-  experts: 'Preseason expert rank',
-  model: 'ADP order (no expert ranks for this season)',
+const RANK_NOTES: Record<ReplaySummary['rank_source'], string> = {
+  experts: 'Rank: preseason expert consensus (ADP order where no expert rank).',
+  model: 'Rank: ADP order — no expert ranks for this season.',
 };
+const PROJ_NOTE = 'Proj: raw points a game, not adjusted for position.';
 
 interface DraftBoardProps {
   draft: ReplayDraft;
@@ -63,15 +64,12 @@ export function DraftBoard({
             <caption className="sr-only">Available players</caption>
             <thead>
               <tr>
-                <SortableHeader columnKey="rank" sort={sort} onSort={onSort} title={RANK_TITLES[rankSource]}>Rank</SortableHeader>
+                <SortableHeader columnKey="rank" sort={sort} onSort={onSort}>Rank</SortableHeader>
                 <th scope="col" className="num" title="The round his rank puts him in">Rd</th>
                 <th scope="col">Player</th>
                 <th scope="col">Pos rank</th>
                 <SortableHeader columnKey="adp" sort={sort} onSort={onSort} title="Preseason average draft position">ADP</SortableHeader>
-                <SortableHeader columnKey="projection" sort={sort} onSort={onSort}
-                  title="Preseason projection: raw points a game, not adjusted for position (a kicker can outscore a WR3 and still go late)">
-                  Proj
-                </SortableHeader>
+                <SortableHeader columnKey="projection" sort={sort} onSort={onSort}>Proj</SortableHeader>
                 <th scope="col"><span className="sr-only">Draft</span></th>
               </tr>
             </thead>
@@ -99,6 +97,7 @@ export function DraftBoard({
               })}
             </tbody>
           </table>
+          <p className="hint">{RANK_NOTES[rankSource]} {PROJ_NOTE}</p>
         </div>
       )}
       <div className="weekly-controls">

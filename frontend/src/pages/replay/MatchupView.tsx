@@ -121,7 +121,7 @@ export function MatchupView({ game, version, openPlayer }: ReplayViewProps) {
         <AsyncView state={matchup} loading={<TableSkeleton rows={9} columns={4} label="Loading the matchup…" />} errorTitle="Couldn't load this matchup">
           {(data) => (
             <FaceOff matchup={data} starters={game.settings.starters} openPlayer={openPlayer}
-              isUserIdle={teamId === undefined && !data.home.team.is_user && !data.away.team.is_user} />
+              isUserIdle={data.week === week && teamId === undefined && !data.home.team.is_user && !data.away.team.is_user} />
           )}
         </AsyncView>
       </section>

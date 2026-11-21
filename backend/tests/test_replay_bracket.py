@@ -141,6 +141,16 @@ def test_the_bracket_event_names_the_round_and_the_byes():
     assert texts[2] == f"Championship game: {names[s[4]]} v {names[s[5]]}" and len(texts) == 3
 
 
+def test_a_single_round_one_game_is_a_wild_card_game():
+    states = _scripted(8, 5)
+    names = {t.id: t.name for t in states[0].teams}
+    s = season.playoff_seeds(states[0])
+
+    first = next(e.text for e in states[-1].events if e.kind == "playoffs")
+
+    assert first == f"Wild-card game: {names[s[3]]} v {names[s[4]]} (byes: {names[s[0]]}, {names[s[1]]}, {names[s[2]]})"
+
+
 def test_matchups_are_unknown_until_the_week_before_is_played():
     settings = _settings(12, 6)
     regular = _regular(12, 6)
@@ -181,6 +191,21 @@ def test_a_pool_pairs_teams_by_wins_then_points_then_seed():
     assert second[-2:] == ((b, d), (a, c))
 
 
+def test_the_idle_team_in_an_odd_pool_rotates():
+    settings, states = _settings(12, 7), _scripted(12, 7)        # losers' pool: 3 teams; consolation: 5 teams
+    s = season.playoff_seeds(states[0])
+    losers = set(s[1:4]) | set(s[4:7])                           # round-one losers come from seeds 2-7
+    outside = set(s[7:])
+
+    idle = {week: _idle(states[week - REGULAR - 1], settings, week) for week in range(REGULAR + 1, REGULAR + 4)}
+    losers_idle = [idle[week] & losers - {s[0]} for week in (REGULAR + 2, REGULAR + 3)]
+    outside_idle = [idle[week] & outside for week in idle]
+
+    assert all(len(group) == 1 for group in losers_idle + outside_idle)
+    assert losers_idle[0] != losers_idle[1]                       # not the same team both weeks
+    assert len(set().union(*outside_idle)) == 3                  # three different teams over three weeks
+
+
 # ---------------- old saves ----------------
 
 def _old(key: str) -> tuple[Settings, State]:
@@ -205,6 +230,22 @@ def test_an_old_save_in_its_playoffs_loads_finishes_and_places_everyone():
     table = season.final_standings(done, settings)
     assert [row["place"] for row in table] == list(range(1, 9)) and table[0]["team_id"] == done.champion
     assert sorted(row["team_id"] for row in table) == list(range(1, 9))
+
+
+def test_an_old_save_between_the_regular_season_and_the_playoffs_keeps_its_title_games_and_finishes():
+    settings, state = _old("pre_playoffs")
+    _, old_week = _old("mid_playoffs")                    # the same league one week on, played by the old code
+
+    games = season.matchups_for_week(state, settings, 3)
+    done = _week(_week(state, settings, {}), settings, {})
+
+    assert (state.week, state.phase, len(state.results)) == (3, "waivers", 2)
+    assert games[:2] == season.title_games(state, settings, 3) == old_week.results[-1].matchups[:2]
+    # The consolation games may pair differently from the old code (pool table, not seeds 5v8 / 6v7): accepted.
+    assert sorted(t for game in games[2:] for t in game) == sorted(season.playoff_seeds(state)[4:])
+    table = season.final_standings(done, settings)
+    assert done.phase == "complete" and table[0]["team_id"] == done.champion
+    assert sorted(row["team_id"] for row in table) == list(range(1, 9)) and [row["place"] for row in table] == list(range(1, 9))
 
 
 def test_a_finished_old_save_keeps_its_top_four_and_places_everyone():

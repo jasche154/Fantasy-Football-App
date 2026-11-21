@@ -82,8 +82,7 @@ describe('DraftView', () => {
       ['Rank▲', 'Rd', 'Player', 'Pos rank', 'ADP↕', 'Proj↕', 'Draft']);
     expect(rows.slice(1).map((row) => within(row).getAllByRole('cell')[0].textContent)).toEqual(['13', '20', '—']);
     expect(within(rows[3]).getAllByText('—')).toHaveLength(3);                // no rank, round or ADP for the kicker
-    expect(screen.getByRole('columnheader', { name: /Rank/ })).toHaveAttribute('title', 'Preseason expert rank');
-    expect(screen.getByRole('columnheader', { name: /Proj/ })).toHaveAttribute('title', expect.stringMatching(/^Preseason projection: raw points a game/));
+    expect(screen.getByText(/Rank: preseason expert consensus \(ADP order where no expert rank\)\. Proj: raw points a game/)).toBeInTheDocument();
     expect(within(rows[2]).getByRole('button', { name: 'Draft Raheem Mostert' })).toBeEnabled();
     expect(screen.getByText('Showing 3 of 3 players')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Show more' })).not.toBeInTheDocument();
@@ -113,7 +112,7 @@ describe('DraftView', () => {
 
   it('says the rank is ADP order when the season has no expert ranks', async () => {
     renderDraft(draft(), [], vi.fn(), draftSummary({ rank_source: 'model' }));
-    expect(await screen.findByRole('columnheader', { name: /Rank/ })).toHaveAttribute('title', 'ADP order (no expert ranks for this season)');
+    expect(await screen.findByText(/Rank: ADP order — no expert ranks for this season\./)).toBeInTheDocument();
   });
 
   it('lists my roster by position against the lineup, and the picks most recent first', async () => {
