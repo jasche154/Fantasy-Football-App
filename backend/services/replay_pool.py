@@ -7,6 +7,7 @@ point-in-time friendly: `actual` holds what really happened (used to score a wee
 whole season's pool; `as_of(week)` narrows it to those known by then (an ADP, a projection or a game), so
 a player who only turns up in week 9 is not on the draft board or the wire before week 9. `injuries` holds
 each week's tag (that week's final report or roster status, known before its games); none at draft time.
+`usage` holds each skill game's snap share, targets, target share and carries (a result, like `actual`).
 """
 import logging
 from collections import defaultdict
@@ -61,6 +62,15 @@ class Injury:
 
 
 @dataclass(frozen=True)
+class Usage:
+    """A skill player's role in one game (nflverse box score and snap counts)."""
+    snap_pct: float | None                  # 0-100; None where snap counts are not loaded
+    targets: int
+    target_share: float | None              # 0-1 fraction of his team's targets
+    carries: int
+
+
+@dataclass(frozen=True)
 class PoolPlayer:
     player_id: int
     name: str
@@ -82,12 +92,13 @@ class SeasonData:
     last_week: int                                            # last regular-season week with games (17 or 18)
     known_before: int | None = None                           # set by as_of: nothing from this week's games on
     injuries: Mapping[PlayerWeek, Injury] = field(default_factory=lambda: MappingProxyType({}))   # tag per week
+    usage: Mapping[PlayerWeek, Usage] = field(default_factory=lambda: MappingProxyType({}))      # skill games only
 
     def as_of(self, week: int) -> "SeasonData":
         """A copy holding only what was known before `week` was played (0 = draft time); cached.
 
-        Real points for weeks < week, pre-game projections for weeks <= week (week 1's at draft time: the
-        preseason curve is built from them), injury tags for weeks 1..week (none at draft time), and each
+        Real points and usage for weeks < week, pre-game projections for weeks <= week (week 1's at draft
+        time: the preseason curve is built from them), injury tags for weeks 1..week (none at draft time), and each
         player's games before `week`, or else his first game of the season (the `team_at` fallback; an
         accepted limit: wrong only for a drafted player who changed teams before his first game). `players`
         holds only those who existed by then: an ADP, a projection or a real game in those weeks; it only
@@ -141,7 +152,8 @@ def _as_of(data: SeasonData, week: int) -> SeasonData:
         actual=MappingProxyType({key: v for key, v in actual.items() if key[0] in players}),
         projected=MappingProxyType({key: v for key, v in projected.items() if key[0] in players}),
         injuries=MappingProxyType({key: v for key, v in data.injuries.items()
-                                   if key[1] <= week and key[0] in players}))
+                                   if key[1] <= week and key[0] in players}),
+        usage=MappingProxyType({key: v for key, v in data.usage.items() if key[1] < week and key[0] in players}))
 
 
 # ---------------- loading ----------------
@@ -232,8 +244,9 @@ def _two_way(session: Session) -> dict[int, tuple[str, str]]:
 
 
 def _skill_games(session: Session, season: int, scoring: str, schedule: Schedule, last_week: int,
-                 two_way: Mapping[int, tuple[str, str]]) -> tuple[dict[PlayerWeek, float], dict[PlayerWeek, str]]:
-    actual, teams = {}, {}
+                 two_way: Mapping[int, tuple[str, str]]) -> tuple[dict[PlayerWeek, float], dict[PlayerWeek, str],
+                                                                  dict[PlayerWeek, Usage]]:
+    actual, teams, usage = {}, {}, {}
     lines = load_game_lines(session, season, scoring_for(scoring))
     if two_way:                                       # the skill-position load leaves them out
         lines.update(load_game_lines(session, season, scoring_for(scoring), list(two_way),
@@ -244,10 +257,11 @@ def _skill_games(session: Session, season: int, scoring: str, schedule: Schedule
                 continue
             key = (player_id, game.week)
             actual[key] = game.fantasy_points
+            usage[key] = Usage(game.snap_pct, game.targets, game.target_share, game.carries)
             team = schedule.opponent(game.opponent, game.week)      # the opponent's opponent that week
             if team:
                 teams[key] = team
-    return actual, teams
+    return actual, teams, usage
 
 
 def _kicker_games(session: Session, season: int,
@@ -327,7 +341,8 @@ def _build(session: Session, season: int, scoring: str) -> SeasonData:
     schedule = replace(loaded, games=tuple(replace(g, home_score=None, away_score=None) for g in loaded.games))
     last_week = max(game.week for game in schedule.games)
     two_way = _two_way(session)
-    parts = (_skill_games(session, season, scoring, schedule, last_week, two_way),
+    skill_points, skill_teams, usage = _skill_games(session, season, scoring, schedule, last_week, two_way)
+    parts = ((skill_points, skill_teams),
              _kicker_games(session, season, last_week),
              _defense_games(session, season, last_week, schedule, _defense_ids(session)))
     actual = {key: points for part, _ in parts for key, points in part.items()}
@@ -335,8 +350,8 @@ def _build(session: Session, season: int, scoring: str) -> SeasonData:
     projected = _projections(session, season, scoring, last_week)
     players = _pool(session, season, {pid for pid, _ in (*actual, *projected)}, two_way,
                     {team for team, _ in schedule.opponents})
-    actual, projected, teams = ({key: value for key, value in table.items() if key[0] in players}
-                                for table in (actual, projected, teams))
+    actual, projected, teams, usage = ({key: value for key, value in table.items() if key[0] in players}
+                                       for table in (actual, projected, teams, usage))
     injuries = {(row.player_id, row.week): Injury(row.tag, row.practice, row.injury)
                 for row in session.scalars(select(ReplayInjury).where(
                     ReplayInjury.season == season, ReplayInjury.week.between(1, last_week)))
@@ -348,4 +363,4 @@ def _build(session: Session, season: int, scoring: str) -> SeasonData:
     return SeasonData(season=season, scoring=scoring, players=MappingProxyType(players), schedule=schedule,
                       actual=MappingProxyType(actual), projected=MappingProxyType(projected),
                       team_by_week=MappingProxyType(_by_player(teams)), last_week=last_week,
-                      injuries=MappingProxyType(injuries))
+                      injuries=MappingProxyType(injuries), usage=MappingProxyType(usage))

@@ -5,9 +5,10 @@ probability EXTRA_ATTEMPT_CHANCE) and then, with probability USER_OFFER_CHANCE, 
 offer. An attempt asks up to MAX_PAIRS seeded pairs of CPUs that have not traded this week and makes the
 first pair's deal that it finds. Each pair is searched within fixed bounds:
 
-1. Each side's TOP_SKILL most valuable skill players that may be traded (never one who is out, in any deal);
-   packages of one or two of them.
-2. Keep the deals whose package values are fair for both sides (cheap: no lineup maths).
+1. Each side's TOP_SKILL most valuable skill players that may be traded (out players too, from the active
+   roster); packages of one or two of them.
+2. Keep the deals whose package values are fair for both sides (cheap: no lineup maths; a CPU counts an out
+   player it receives at replay_trades.OUT_RISK_DISCOUNT).
 3. Run the full `replay_trades.evaluate` on the PAIR_SCORED (MAX_SCORED for the user) with the smallest
    value gap.
 4. Drop the ones worth less than MIN_CPU_GAIN to a CPU's lineup (a CPU accepts a deal for MIN_TRADE_GAIN, but
@@ -22,7 +23,7 @@ from itertools import combinations
 
 import numpy as np
 
-from services import replay_state as rs, replay_trades as rt, replay_values as rv
+from services import replay_state as rs, replay_trades as rt
 from services.replay_pool import SKILL
 from services.replay_state import Settings, State, Team
 from services.replay_values import Knowledge, ReplayValue
@@ -42,19 +43,23 @@ MIN_CPU_GAIN = 2.0              # season-weighted lineup points a CPU must gain 
                                 # and one season in five had none)
 
 Deal = tuple[tuple[int, ...], tuple[int, ...]]      # (what the first team sends, what it receives)
-Package = tuple[float, tuple[int, ...]]             # (package value, player ids)
+Package = tuple[float, tuple[int, ...], float, float]   # (as sent, ids, as a CPU receives it, as a CPU sends
+                                                        # it to the user)
 
 
 def _tradable(state: State, know: Knowledge, team: Team) -> list[ReplayValue]:
-    """The team's most valuable skill players that may move: not re-trade locked, not out."""
+    """The team's most valuable skill players that may move: not re-trade locked (out players may: an IR slot
+    is not on the roster)."""
     values = [value for pid in team.roster if (value := know.by_id[pid]).position in SKILL
-              and not rs.retrade_locked(state, pid) and not value.out]
+              and not rs.retrade_locked(state, pid)]
     return sorted(values, key=lambda v: (-v.market_value, v.player_id))[:TOP_SKILL]
 
 
 def _packages(know: Knowledge, values: Sequence[ReplayValue]) -> list[Package]:
+    """(value as sent, ids, value as a CPU counts it coming in, value as a CPU counts it going to the user)."""
     groups = (tuple(v.player_id for v in combo) for size in PACKAGE_SIZES for combo in combinations(values, size))
-    return [(rt.package_value(know, ids), ids) for ids in groups]
+    return [(rt.package_value(know, ids), ids, rt.package_value(know, ids, True),
+             rt.package_value(know, ids, cpu_sends=True)) for ids in groups]
 
 
 def fair_for_user(settings: Settings, know: Knowledge, value_give: float, value_get: float) -> bool:
@@ -68,7 +73,7 @@ def _fair_to_sender(settings: Settings, know: Knowledge, sender: Team, receiver:
                     get: Package) -> bool:
     """A CPU sender needs its multiple back. The user needs a fair deal that needs no drop."""
     if not sender.is_user:
-        return get[0] >= give[0] * rt.needed_multiple(settings, receiver)
+        return get[2] >= give[0] * rt.needed_multiple(settings, receiver)
     fits = len(sender.roster) - len(give[1]) + len(get[1]) <= settings.roster_size
     return fits and fair_for_user(settings, know, give[0], get[0])
 
@@ -77,19 +82,11 @@ def _fair_deals(state: State, settings: Settings, know: Knowledge, sender: Team,
     """Value-fair deals between the two, smallest value gap first. `receiver` is a CPU."""
     mine = _packages(know, _tradable(state, know, sender))
     theirs = _packages(know, _tradable(state, know, receiver))
-    wanted = rt.needed_multiple(settings, sender)
+    wanted, sent = rt.needed_multiple(settings, sender), 3 if sender.is_user else 0     # its count of what it sends
     fair = [(abs(give[0] - get[0]), len(give[1]) + len(get[1]), give[1], get[1])
             for give in mine for get in theirs
-            if give[0] >= get[0] * wanted and _fair_to_sender(settings, know, sender, receiver, give, get)]
+            if give[2] >= get[sent] * wanted and _fair_to_sender(settings, know, sender, receiver, give, get)]
     return [(give, get) for _, _, give, get in sorted(fair)]
-
-
-def _strands_a_starter(settings: Settings, know: Knowledge, team: Team, sends: Sequence[int],
-                       receives: Sequence[int], drops: Sequence[int]) -> bool:
-    """Would the deal leave this CPU a starting slot nobody plays in this week that it can fill today? Its
-    free-agency pass has already run, so the slot would stay empty."""
-    after = [pid for pid in team.roster if pid not in sends and pid not in drops] + list(receives)
-    return len(rv.idle_slots(know, after, settings)) > len(rv.idle_slots(know, team.roster, settings))
 
 
 def _best_deal(state: State, settings: Settings, know: Knowledge, sender: Team, receiver: Team,
@@ -104,7 +101,7 @@ def _best_deal(state: State, settings: Settings, know: Knowledge, sender: Team, 
             found.append((shared, (give, get), verdict))
     for _, (give, get), verdict in sorted(found, key=lambda row: -row[0]):
         sides = ((sender, give, get, verdict.your_drops), (receiver, get, give, verdict.their_drops))
-        if not any(_strands_a_starter(settings, know, *side) for side in sides if not side[0].is_user):
+        if not any(rt.strands_a_starter(settings, know, *side) for side in sides if not side[0].is_user):
             return give, get
     return None
 

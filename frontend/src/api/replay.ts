@@ -157,6 +157,11 @@ export function cancelReplayClaim(gameId: number, claimId: number): Promise<Repl
   return post(`${game(gameId)}/claims/${claimId}/cancel`);
 }
 
+/** Change a pending FAAB claim's bid (whole dollars). */
+export function setReplayClaimBid(gameId: number, claimId: number, bid: number): Promise<ReplayActionResult> {
+  return post(`${game(gameId)}/claims/${claimId}/bid`, { bid });
+}
+
 /** `ids`: every pending claim id in the new preference order. */
 export function reorderReplayClaims(gameId: number, ids: number[]): Promise<ReplayActionResult> {
   return post(`${game(gameId)}/claims/reorder`, { ids });

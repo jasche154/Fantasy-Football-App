@@ -7,7 +7,9 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from database.models import KickerGame, NflGame, Player, PlayerStatsWeekly, ReplayAdp, ReplayProjection, TeamGameStats
+from database.models import (
+    KickerGame, NflGame, Player, PlayerSnapCountsWeekly, PlayerStatsWeekly, ReplayAdp, ReplayProjection, TeamGameStats,
+)
 from integrations import adp_history, espn_history, sleeper_projections
 from integrations.adp_history import AdpEntry, HistoryClient, HistoryError, SeasonMatcher
 from services import replay_data, replay_injuries, replay_pool
@@ -480,7 +482,13 @@ def loaders(monkeypatch):
         session.add_all([team_game(seasons[0], 1), kicker_game(seasons[0], 1, 1)])
         session.commit()
 
+    def snaps(session, seasons, index):
+        calls.append("snaps")
+        session.add(PlayerSnapCountsWeekly(player_id=1, season=seasons[0], week=1, offense_pct=0.5))
+        session.commit()
+
     monkeypatch.setattr(ps, "load_feed", stats)
+    monkeypatch.setattr(ps, "load_snap_counts", snaps)
     monkeypatch.setattr(ps, "load_schedules", schedules)
     monkeypatch.setattr(ps, "sync_crosswalk", lambda session, index: calls.append("crosswalk"))
     monkeypatch.setattr(advanced_stats, "load_advanced_stats", advanced)
@@ -515,7 +523,9 @@ def test_prepare_season_runs_every_step_and_a_second_run_makes_no_requests(db, l
     summary = replay_data.prepare_season(db, SEASON, http=sites.client(), on_step=steps.append)
     again = replay_data.prepare_season(db, SEASON, http=sites.client())
 
-    assert steps == ["game_results", "adp", "projections", "injuries"] and loaders == ["crosswalk", "crosswalk"]
+    assert steps == ["game_results", "snaps", "adp", "projections", "injuries"]
+    assert loaders == ["crosswalk", "snaps", "crosswalk"]           # stats were stored: snaps still load once
+    assert summary["snaps"] == {"rows": 1} and again["snaps"] == {"rows": 1, "skipped": "already loaded"}
     assert summary["errors"] == {} and summary["requests"] == 7 and summary["defenses"] == 32
     assert summary["adp"]["rows"] == 7 and summary["projections"]["weeks"] == 2
     assert summary["injuries"] == {"rows": 2, "weeks": 2, "tags": {"IR": 1, "Q": 1}}   # the rookie is matched

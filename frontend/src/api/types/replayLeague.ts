@@ -11,6 +11,7 @@ import type {
   ReplayPositionFilter,
   ReplayRecord,
   ReplayTeamRef,
+  ReplayUsage,
   ReplayVerdict,
 } from './replay';
 
@@ -71,6 +72,8 @@ export interface ReplayWireRow extends ReplayPlayerRow {
   /** Real points in weeks already played. */
   season_points: number;
   last_points: number | null;
+  /** His last 3 games before the current week; null for K/DST or no games. */
+  usage: ReplayUsage | null;
 }
 
 export interface ReplayPlayers extends ReplayPage<ReplayWireRow> {
@@ -100,6 +103,8 @@ export interface ReplayPlayerWeek {
   pos_rank: string;
   /** That week's tag. */
   injury: ReplayInjury | null;
+  /** That week's own game (games 1); null when unplayed or he did not play. */
+  usage: ReplayUsage | null;
 }
 
 /** One player: where he stands now and weeks 1..current. */
@@ -113,6 +118,16 @@ export interface ReplayClaim {
   order: number;
   add: ReplayPlayerRow;
   drop: ReplayPlayerRow | null;
+  /** 0 outside FAAB. */
+  bid: number;
+}
+
+export interface ReplayFaab {
+  budget: number;
+  /** The user's budget left. */
+  left: number;
+  /** Every team in waiver order. */
+  teams: { team: ReplayTeamRef; left: number }[];
 }
 
 export interface ReplayClaims {
@@ -122,12 +137,16 @@ export interface ReplayClaims {
   priority: number | null;
   waiver_order: ReplayTeamRef[];
   results: ReplayClaim[];
+  /** Null unless a FAAB league. */
+  faab: ReplayFaab | null;
 }
 
 /** POST claims and add-drop body. */
 export interface ReplayClaimBody {
   add: number;
   drop?: number | null;
+  /** Claims in FAAB leagues only (whole dollars, 0..left); never sent otherwise or on add-drop. */
+  bid?: number | null;
 }
 
 // ---------------- trades ----------------
@@ -153,6 +172,8 @@ export interface ReplayTrades {
   open: boolean;
   deadline_week: number;
   max_players: number;
+  /** CPUs count an out player they receive at this share of his value. */
+  out_discount: number;
   offers: ReplayPendingOffer[];
   /** Every other offer and trade, newest first. */
   results: ReplayOffer[];

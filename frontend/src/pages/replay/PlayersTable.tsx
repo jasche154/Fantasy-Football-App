@@ -3,6 +3,7 @@ import { EMPTY_VALUE, formatNumber } from '../../lib/format';
 import { buildHash, paths } from '../../router/routes';
 import type { PlayerMoves } from './PlayersMoves';
 import { formatPoints, irBlockedText, ReplayPlayerCell } from './shared';
+import { UsageCells, UsageHeaders } from './usage';
 
 /** The key of a direct "Add" (the one move a table row sends itself). */
 export function addKey(playerId: number): string {
@@ -67,7 +68,10 @@ interface PlayersTableProps {
   openPlayer: (playerId: number) => void;
 }
 
-/** The waiver wire. Every points column is from weeks already played; Proj is this week's pre-game projection. */
+/**
+ * The waiver wire. Every points and usage column is from weeks already played (usage: his last 3 games); Proj is
+ * this week's pre-game projection. The table scrolls inside its wrapper on a phone.
+ */
 export function PlayersTable({ game, week, rows, claimedIds, moves, onAdd, onClaim, openPlayer }: PlayersTableProps) {
   return (
     <div className="table-wrap">
@@ -84,6 +88,7 @@ export function PlayersTable({ game, week, rows, claimedIds, moves, onAdd, onCla
             <th scope="col" className="num th--end" title="Points per game played">PPG</th>
             <th scope="col" className="num th--end" title="Expected points per game for the rest of the season">ROS</th>
             <th scope="col" className="num th--end" title="Trade value">Value</th>
+            <UsageHeaders span="last 3 games" />
             <th scope="col"><span className="sr-only">Action</span></th>
           </tr>
         </thead>
@@ -103,6 +108,7 @@ export function PlayersTable({ game, week, rows, claimedIds, moves, onAdd, onCla
                 <td className="num">{row.games > 0 ? formatPoints(row.ppg) : EMPTY_VALUE}</td>
                 <td className="num">{formatPoints(row.ros_ppg)}</td>
                 <td className="num">{formatNumber(row.value)}</td>
+                <UsageCells usage={row.usage} />
                 <td className="replay-players__action">
                   <RowAction game={game} row={row} hasClaim={claimedIds.has(row.player.id)} moves={moves} onAdd={onAdd} onClaim={onClaim} />
                   {/* The hub's alert announces it; this copy sits where the user is looking. */}

@@ -2,7 +2,7 @@
 each other.
 
     create_game -> pick / auto_pick / auto_draft -> (draft done) start_week
-    week, "wednesday" waivers:  advance("wednesday") -> advance("play") -> ...
+    week, "wednesday"/"faab":   advance("wednesday") -> advance("play") -> ...
     week, no waivers:           advance("play") -> ...
 
 - `start_week`: CPU IR moves, CPU free agency, then CPU trades and a possible offer to the user, then every
@@ -34,7 +34,8 @@ from services.replay_trades import OfferExpired, Verdict       # re-exported for
 __all__ = [
     "OfferExpired", "STEPS", "Verdict", "add_drop", "advance", "auto_draft", "auto_pick", "cancel_claim",
     "clear_lineup", "create_game", "drop", "evaluate_trade", "ir_activate", "ir_place", "knowledge", "pick",
-    "propose_trade", "reorder_claims", "respond_offer", "set_lineup", "start_week", "submit_claim",
+    "propose_trade", "reorder_claims", "respond_offer", "set_claim_bid", "set_lineup", "start_week",
+    "submit_claim",
 ]
 
 WEDNESDAY, PLAY = "wednesday", "play"
@@ -157,8 +158,13 @@ def clear_lineup(state: State) -> State:
     return replay_season.clear_lineup(state)
 
 
-def submit_claim(state: State, settings: Settings, data: SeasonData, add: int, drop: int | None = None) -> State:
-    return replay_waivers.submit_claim(state, settings, knowledge(state, settings, data), add, drop)
+def submit_claim(state: State, settings: Settings, data: SeasonData, add: int, drop: int | None = None,
+                 bid: int | None = None) -> State:
+    return replay_waivers.submit_claim(state, settings, knowledge(state, settings, data), add, drop, bid)
+
+
+def set_claim_bid(state: State, settings: Settings, claim_id: int, bid: int) -> State:
+    return replay_waivers.set_claim_bid(state, settings, claim_id, bid)
 
 
 def cancel_claim(state: State, claim_id: int) -> State:

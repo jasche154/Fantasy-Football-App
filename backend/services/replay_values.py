@@ -2,7 +2,8 @@
 
 Inputs are only things that existed before that week's games: preseason ADP and the pre-game projections
 for weeks 1..W (`knowledge` reads the season through `SeasonData.as_of(week)`, so it cannot see more). Real
-results are used for the `games` / `ppg` display fields alone, and only for weeks already played.
+results are used only for weeks already played: the `games` / `ppg` display fields, and `recent_points` /
+`last_game_week`, which the CPU's waiver claims read (services/replay_claim_ai.py, the "hot" route).
 
 - prior_ppg: rank players by ADP within a position; the Nth gets the Nth highest WEEK-1 projection at that
   position. Without ADP: his own week-1 projection. Week 0 (the draft) uses the prior only, also as the
@@ -42,6 +43,7 @@ OUT_SHARE_LONG = 0.90                                 # six or more weeks out (m
 IR_OUT_SHARE = 0.80                                   # least share missed when tagged IR or PUP (measured 2018-25)
 FLEX_POSITIONS = ("RB", "WR", "TE")
 BACKUPS = {"QB": 1, "RB": 3, "WR": 4, "TE": 1}        # most a CPU carries behind its starters (no spare K or DST)
+RECENT_GAMES = 3                                      # recent_points: his last games before this week
 
 
 @dataclass(frozen=True)
@@ -68,6 +70,8 @@ class ReplayValue:
     market_value: float = 0.0      # what he counts for in a trade package (K and DST: the roster-spot floor)
     last_projection: float = 0.0   # his most recent non-zero pre-game projection
     injury: Injury | None = None   # this week's tag; always None at week 0
+    recent_points: tuple[float, ...] = ()   # real points of his last RECENT_GAMES games before this week, newest first
+    last_game_week: int = 0        # the week of his last game before this week (0 = none)
 
 
 @dataclass(frozen=True, eq=False)
@@ -149,7 +153,8 @@ def _row(data: SeasonData, player: PoolPlayer, prior: float, week: int, team: st
     if injury is not None and injury.tag in ("IR", "PUP"):
         share = max(share, IR_OUT_SHARE)
     recent = _recent(data, pid, week)
-    played = [data.actual[(pid, w)] for w in range(1, week) if (pid, w) in data.actual]
+    weeks = [w for w in range(1, week) if (pid, w) in data.actual]
+    played = [data.actual[(pid, w)] for w in weeks]
     return {
         "player_id": pid, "name": player.name, "position": player.position, "adp": player.adp, "team": team,
         "ros_ppg": round(_ros_ppg(recent, prior), 2),
@@ -158,6 +163,7 @@ def _row(data: SeasonData, player: PoolPlayer, prior: float, week: int, team: st
         "out": streak > 0 or (injury is not None and injury.hard), "games_left": games_left,
         "expected_missed": round(games_left * share, 2), "availability": round(1.0 - share, 3),
         "games": len(played), "ppg": round(sum(played) / len(played), 2) if played else 0.0,
+        "recent_points": tuple(played[::-1][:RECENT_GAMES]), "last_game_week": weeks[-1] if weeks else 0,
     }
 
 

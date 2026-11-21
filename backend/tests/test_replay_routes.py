@@ -315,8 +315,9 @@ def test_responses_have_the_documented_keys(story):
                                        "champion"}
     assert set(final["activity"]) == {"total", "limit", "offset", "results"} and final["activity"]["limit"] == 50
     assert set(final["players"]["results"][0]) == WIRE_ROW and final["players"]["week"] == 16
-    assert set(final["claims"]) == {"phase", "can_claim", "priority", "waiver_order", "results"}
-    assert set(final["trades"]) == {"open", "deadline_week", "max_players", "offers", "results"}
+    assert set(final["claims"]) == {"phase", "can_claim", "priority", "waiver_order", "results", "faab"}
+    assert final["claims"]["faab"] is None                     # a "wednesday" league
+    assert set(final["trades"]) == {"open", "deadline_week", "max_players", "offers", "results", "out_discount"}
     assert set(final["draft"]["picks"][0]) == {"overall", "round", "team", "player"}
 
 
@@ -369,6 +370,7 @@ def test_unknown_games_players_and_teams_are_reported(client, story):
         assert refused(client, "/games/999999" + path, method="GET") == (404, "No replay league 999999.")
     for path, body in (("/draft/pick", {"player_id": 1}), ("/draft/auto", None), ("/lineup", {"starters": None}),
                        ("/claims", {"add": 1}), ("/claims/1/cancel", None), ("/claims/reorder", {"ids": []}),
+                       ("/claims/1/bid", {"bid": 1}),
                        ("/add-drop", {"add": 1}), ("/drop", {"player_id": 1}), ("/ir/place", {"player_id": 1}),
                        ("/ir/activate", {"player_id": 1}),
                        ("/advance", {"step": "play", "week": 1}),
@@ -436,6 +438,35 @@ def test_a_drop_and_a_season_without_waivers(client):
     assert (played["game"]["phase"], played["game"]["week"]) == ("open", 2)        # no Wednesday step
     assert refused(client, game + "/advance", {"step": "wednesday", "week": 2})[0] == 422
     assert refused(client, game + "/drop", {"player_id": bench[0]})[0] == 422
+
+
+def test_a_faab_league_takes_bids_on_claims(client):
+    game = "/games/%d" % post(client, "/games", {"season": SEASON, "seed": 6, "waiver_mode": "faab"})["game"]["id"]
+    post(client, game + "/draft/auto", whole_draft="true")
+    post(client, game + "/advance", {"step": "play", "week": 1})
+    add = get(client, game + "/players", limit=1)["results"][0]["player"]["id"]
+    cut = _ids(get(client, game + "/team")["results"], "BN")[0]
+
+    bad = [refused(client, game + "/claims", {"add": add, "drop": cut, "bid": bid})[0] for bid in (-1, 101)]
+    missing = refused(client, game + "/claims", {"add": add, "drop": cut})
+    claimed = post(client, game + "/claims", {"add": add, "drop": cut, "bid": 10})
+    claim_id = get(client, game + "/claims")["results"][0]["id"]
+    rebid = post(client, f"{game}/claims/{claim_id}/bid", {"bid": 25})
+    bad_rebid = [refused(client, f"{game}/claims/{claim_id}/bid", {"bid": bid})[0] for bid in (-1, 101)]
+    after = post(client, game + "/advance", {"step": "wednesday", "week": 2})
+    too_late = refused(client, f"{game}/claims/{claim_id}/bid", {"bid": 5})
+
+    assert bad == bad_rebid == [422, 422]
+    assert missing == (422, "Enter a bid: $0 to $100 (your budget left).")
+    assert set(claimed) >= {"game", "events"} and set(rebid) >= {"game", "events"}
+    mine = [e["text"] for e in after["events"] if e["kind"] == "claim" and e["team"]["is_user"]]
+    assert len(mine) == 1 and " for $25, dropping " in mine[0]                     # the rebid is what was paid
+    assert too_late == (422, "Bids can only be changed before the weekly waiver run.")
+    wednesday = "/games/%d" % post(client, "/games", {"season": SEASON, "seed": 6})["game"]["id"]
+    post(client, wednesday + "/draft/auto", whole_draft="true")
+    free = get(client, wednesday + "/players", status="free_agent", limit=1)["results"][0]["player"]["id"]
+    mine = _ids(get(client, wednesday + "/team")["results"], "BN")[0]
+    assert post(client, wednesday + "/add-drop", {"add": free, "drop": mine, "bid": 50})["events"]  # bid ignored
 
 
 def test_two_requests_cannot_play_the_same_week_twice(tmp_path_factory):
@@ -601,7 +632,7 @@ def test_prepare_runs_in_the_background_and_reports_its_status(client, story, mo
 
 def test_a_prepared_season_is_read_again(monkeypatch):
     cleared = []
-    for step in ("load_game_results", "load_adp", "load_projections", "load_injuries"):
+    for step in ("load_game_results", "load_snaps", "load_adp", "load_projections", "load_injuries"):
         monkeypatch.setattr(replay_data, step, lambda *args, **kwargs: {})
     monkeypatch.setattr(replay_data, "ensure_defenses", lambda session: 32)
     monkeypatch.setattr(replay_pool, "clear_cache", lambda: cleared.append(True))

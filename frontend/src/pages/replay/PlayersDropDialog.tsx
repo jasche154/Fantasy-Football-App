@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useId, useState, type FormEvent } from 'react';
 import type { ReplayPlayerRef, ReplayPlayerRow, ReplaySummary, ReplayTeam } from '../../api/types';
 import { AsyncView } from '../../components/AsyncView';
 import { Skeleton } from '../../components/StatusViews';
@@ -17,13 +17,47 @@ export interface DropTarget {
 
 type DialogMoves = Pick<KeyedAct, 'isBusy' | 'pendingKey' | 'errorFor'>;
 
+/** A FAAB claim's bid: `left` is the user's budget left (null while unknown; the server still checks). */
+export interface BidLimit {
+  left: number | null;
+}
+
+/** A whole-dollar bid from 0 up to the budget left, or null. */
+export function parseBid(text: string, left: number | null): number | null {
+  if (!/^\d+$/.test(text.trim())) return null;
+  const bid = Number(text);
+  return left === null || bid <= left ? bid : null;
+}
+
+interface BidFieldProps {
+  value: string;
+  left: number | null;
+  onChange: (value: string) => void;
+}
+
+function BidField({ value, left, onChange }: BidFieldProps) {
+  const id = useId();
+  return (
+    <div className="field replay-bid">
+      <label className="field__label" htmlFor={id}>Bid ($)</label>
+      <input id={id} className="input replay-bid__input" type="number" inputMode="numeric" min={0} max={left ?? undefined} step={1}
+        value={value} aria-invalid={parseBid(value, left) === null} aria-describedby={`${id}-hint`} onChange={(event) => onChange(event.target.value)} />
+      <p id={`${id}-hint`} className="hint">
+        {left === null ? 'Whole dollars.' : `Whole dollars, $0 to $${left}: you have $${left} left.`} Bids are blind; the highest wins.
+      </p>
+    </div>
+  );
+}
+
 interface ChooserProps {
   target: DropTarget;
   game: ReplaySummary;
   roster: ReplayTeam;
   earlierNoDrop: number;
   moves: DialogMoves;
-  onConfirm: (drop: ReplayPlayerRef | null) => void;
+  /** Set for a claim in a FAAB league: the dialog asks for a bid. */
+  bidding?: BidLimit;
+  onConfirm: (drop: ReplayPlayerRef | null, bid?: number) => void;
   onClose: () => void;
 }
 
@@ -38,7 +72,7 @@ function rosterHint(filled: number, size: number, earlierNoDrop: number, isCover
 }
 
 /** The "Drop who?" form; My Team wraps it in its own drawer for an IR activation. */
-export function Chooser({ target, game, roster, earlierNoDrop, moves, onConfirm, onClose }: ChooserProps) {
+export function Chooser({ target, game, roster, earlierNoDrop, moves, bidding, onConfirm, onClose }: ChooserProps) {
   const size = game.settings.roster_size;
   const openSpots = size - roster.results.length;
   const isActivate = target.kind === 'activate';
@@ -47,6 +81,8 @@ export function Chooser({ target, game, roster, earlierNoDrop, moves, onConfirm,
   // Still allowed without a drop: an earlier claim can lose to a team ahead in the waiver order.
   const isCovered = target.kind === 'claim' && hasRoom && openSpots - earlierNoDrop <= 0;
   const [picked, setPicked] = useState<number | 'none' | null>(null);
+  const [bidText, setBidText] = useState('0');
+  const bid = bidding ? parseBid(bidText, bidding.left) : undefined;
   const choice = picked ?? (hasRoom && !isCovered ? 'none' : null);
   const players = [...roster.results].sort((a, b) => a.value - b.value);
   const isClaim = target.kind === 'claim';
@@ -57,12 +93,13 @@ export function Chooser({ target, game, roster, earlierNoDrop, moves, onConfirm,
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    if (choice === null) return;
-    onConfirm(choice === 'none' ? null : (players.find((row) => row.player.id === choice)?.player ?? null));
+    if (choice === null || bid === null) return;
+    onConfirm(choice === 'none' ? null : (players.find((row) => row.player.id === choice)?.player ?? null), bid);
   };
 
   return (
     <form onSubmit={submit}>
+      {bidding && <BidField value={bidText} left={bidding.left} onChange={setBidText} />}
       <fieldset className="fieldset">
         <legend className="section-title">Drop who?</legend>
         <p className="hint">
@@ -87,7 +124,7 @@ export function Chooser({ target, game, roster, earlierNoDrop, moves, onConfirm,
       </fieldset>
       {error && <p className="error-text" role="alert">{error}</p>}
       <div className="replay-drop__actions">
-        <button type="submit" className="btn btn--primary" disabled={moves.isBusy || choice === null}>
+        <button type="submit" className="btn btn--primary" disabled={moves.isBusy || choice === null || bid === null}>
           {isPending ? pendingLabel : idleLabel}
         </button>
         <button type="button" className="btn btn--ghost" onClick={onClose}>Cancel</button>
@@ -104,18 +141,20 @@ interface PlayersDropDialogProps {
   /** The user's pending claims without a drop (0 when unknown). */
   earlierNoDrop: number;
   moves: DialogMoves;
-  /** The player to drop, or null for none. */
-  onConfirm: (drop: ReplayPlayerRef | null) => void;
+  /** Set for a claim in a FAAB league. */
+  bidding?: BidLimit;
+  /** The player to drop, or null for none; the bid for a FAAB claim. */
+  onConfirm: (drop: ReplayPlayerRef | null, bid?: number) => void;
   onClose: () => void;
 }
 
 /** "Drop who?" for an add or a waiver claim. */
-export function PlayersDropDialog({ target, game, team, earlierNoDrop, moves, onConfirm, onClose }: PlayersDropDialogProps) {
+export function PlayersDropDialog({ target, game, team, earlierNoDrop, moves, bidding, onConfirm, onClose }: PlayersDropDialogProps) {
   const isClaim = target.kind === 'claim';
   return (
     <ReplayDrawer eyebrow={isClaim ? 'Waiver claim' : 'Free agent'} title={`${isClaim ? 'Claim' : 'Add'} ${target.row.player.name}`} onClose={onClose}>
       <AsyncView state={team} loading={<Skeleton lines={6} label="Loading your roster…" />} errorTitle="Couldn't load your roster">
-        {(roster) => <Chooser target={target} game={game} roster={roster} earlierNoDrop={earlierNoDrop} moves={moves} onConfirm={onConfirm} onClose={onClose} />}
+        {(roster) => <Chooser target={target} game={game} roster={roster} earlierNoDrop={earlierNoDrop} moves={moves} bidding={bidding} onConfirm={onConfirm} onClose={onClose} />}
       </AsyncView>
     </ReplayDrawer>
   );

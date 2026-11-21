@@ -7,7 +7,7 @@ export type ReplayPosition = 'QB' | 'RB' | 'WR' | 'TE' | 'K' | 'DST';
 export type ReplayPositionFilter = ReplayPosition | 'FLEX';
 export type ReplaySlot = ReplayPosition | 'FLEX' | 'BN';
 export type ReplayPhase = 'draft' | 'waivers' | 'open' | 'complete';
-export type ReplayWaiverMode = 'wednesday' | 'none';
+export type ReplayWaiverMode = 'wednesday' | 'faab' | 'none';
 export type ReplayDifficulty = 'normal' | 'hard';
 export type ReplayEventKind = 'draft' | 'add' | 'drop' | 'claim' | 'trade' | 'result' | 'playoffs' | 'champion' | 'ir';
 /** O, IR, PUP and SUS mean he does not play; O, IR and PUP may go on IR. */
@@ -82,7 +82,8 @@ export interface ReplaySide extends ReplayTeamRef {
   record: ReplayRecord;
 }
 
-export type ReplayGameLabel = 'Semi-final' | 'Championship' | 'Third place' | 'Consolation';
+/** Week-2 consolation games are '5th place', '7th place', ... */
+export type ReplayGameLabel = 'Semi-final' | 'Championship' | 'Third place' | 'Consolation' | `${number}th place`;
 
 export interface ReplayGameRow {
   home: ReplaySide;
@@ -139,6 +140,15 @@ export interface ReplayVerdict {
   suggestion: string | null;
 }
 
+/** Usage averaged over `games` games: snap_pct 0-100, targets and carries per game, target_share a 0-1 fraction. */
+export interface ReplayUsage {
+  games: number;
+  snap_pct: number | null;
+  targets: number;
+  target_share: number | null;
+  carries: number;
+}
+
 // ---------------- seasons and saved games ----------------
 
 export interface ReplayReadiness {
@@ -158,6 +168,7 @@ export interface ReplayReadiness {
 export interface ReplayPrepareStatus {
   season: number;
   status: 'running' | 'done' | 'failed';
+  /** The step running or failed, e.g. 'snaps'. */
   step: string | null;
   error: string | null;
   updated_at?: string;

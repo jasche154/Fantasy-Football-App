@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from api.replay_routes import GameId, errors, open_game, turn
 from database.db import get_session
-from services import replay_game as rg, replay_views as views, replay_views_league as league_views
+from services import replay_game as rg, replay_state as rs, replay_views as views, replay_views_league as league_views
 
 router = APIRouter(prefix="/api/replay/games/{game_id}")
 
@@ -34,6 +34,11 @@ class LineupBody(BaseModel):
 class ClaimBody(BaseModel):
     add: int = PlayerId
     drop: int | None = Field(None, ge=1)
+    bid: int | None = Field(None, ge=0, le=rs.FAAB_BUDGET)     # FAAB leagues' claims only; add-drop ignores it
+
+
+class BidBody(BaseModel):
+    bid: int = Field(..., ge=0, le=rs.FAAB_BUDGET)
 
 
 class ActivateBody(BaseModel):
@@ -88,13 +93,20 @@ def set_lineup(game_id: GameId, body: LineupBody, session: Session = Depends(get
 @router.post("/claims")
 def submit_claim(game_id: GameId, body: ClaimBody, session: Session = Depends(get_session)) -> dict:
     with turn(session, game_id) as t:
-        return t.done(rg.submit_claim(*t.args, body.add, body.drop))
+        return t.done(rg.submit_claim(*t.args, body.add, body.drop, body.bid))
 
 
 @router.post("/claims/reorder")
 def reorder_claims(game_id: GameId, body: ReorderBody, session: Session = Depends(get_session)) -> dict:
     with turn(session, game_id) as t:
         return t.done(rg.reorder_claims(t.state, body.ids))
+
+
+@router.post("/claims/{claim_id}/bid")
+def set_claim_bid(game_id: GameId, claim_id: int, body: BidBody, session: Session = Depends(get_session)) -> dict:
+    """Change a pending claim's FAAB bid (phase "waivers" only)."""
+    with turn(session, game_id) as t:
+        return t.done(rg.set_claim_bid(t.state, t.settings, claim_id, body.bid))
 
 
 @router.post("/claims/{claim_id}/cancel")

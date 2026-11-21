@@ -152,6 +152,8 @@ describe('Replay League endpoints', () => {
     await replay.setReplayLineup(7, null);
     await replay.submitReplayClaim(7, { add: 201, drop: 111 });
     await replay.cancelReplayClaim(7, 5);
+    await replay.submitReplayClaim(7, { add: 201, drop: null, bid: 12 });
+    await replay.setReplayClaimBid(7, 5, 30);
     await replay.reorderReplayClaims(7, [6, 5]);
     await replay.replayAddDrop(7, { add: 201 });
     await replay.replayDrop(7, 111);
@@ -180,6 +182,8 @@ describe('Replay League endpoints', () => {
       ['POST', `${games}/7/lineup`, { starters: null }],
       ['POST', `${games}/7/claims`, { add: 201, drop: 111 }],
       ['POST', `${games}/7/claims/5/cancel`, undefined],
+      ['POST', `${games}/7/claims`, { add: 201, drop: null, bid: 12 }],
+      ['POST', `${games}/7/claims/5/bid`, { bid: 30 }],
       ['POST', `${games}/7/claims/reorder`, { ids: [6, 5] }],
       ['POST', `${games}/7/add-drop`, { add: 201 }],
       ['POST', `${games}/7/drop`, { player_id: 111 }],

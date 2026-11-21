@@ -84,6 +84,33 @@ describe('LeagueView standings', () => {
     expect(within(ahead).queryByText('Won')).not.toBeInTheDocument();
   });
 
+  it('lists the consolation games apart from the title bracket, place games included', async () => {
+    const semis = board(15, { played: true, playoff: true, results: [
+      { home: side(1, { points: 120.5 }), away: side(USER_TEAM_ID, { points: 131.02 }), winner: USER_TEAM_ID, label: 'Semi-final' },
+      { home: side(5, { points: 80 }), away: side(6, { points: 70 }), winner: 5, label: 'Consolation' },
+    ] });
+    const final = board(16, { played: true, playoff: true, results: [
+      { home: side(USER_TEAM_ID, { points: 111.11 }), away: side(2, { points: 109.9 }), winner: USER_TEAM_ID, label: 'Championship' },
+      { home: side(1, { points: 101 }), away: side(3, { points: 100 }), winner: 1, label: 'Third place' },
+      { home: side(5, { points: 90 }), away: side(7, { points: 85 }), winner: 5, label: '5th place' },
+      { home: side(6, { points: 70 }), away: side(8, { points: 75 }), winner: 8, label: '7th place' },
+    ] });
+    renderLeague([{ path: `${PATH}/standings`, reply: json(standings({ seeds_final: true, bracket: [semis, final], champion: teamRef(USER_TEAM_ID) })) }]);
+
+    const bracket = await screen.findByRole('region', { name: 'Playoff bracket' });
+    const title = within(bracket).getByRole('table', { name: 'Week 16 playoff games' });
+    expect(within(title).getAllByRole('row')).toHaveLength(3);                       // header, Championship, Third place
+    expect(within(bracket).queryByText('5th place')).not.toBeInTheDocument();
+    expect(within(bracket).queryByText('Consolation')).not.toBeInTheDocument();
+
+    const consolation = screen.getByRole('region', { name: 'Consolation games' });
+    expect(within(consolation).getByRole('table', { name: 'Week 15 consolation games' })).toHaveTextContent('ConsolationHail MarysWon80.00');
+    const places = within(consolation).getByRole('table', { name: 'Week 16 consolation games' });
+    expect(within(places).getByRole('row', { name: /5th place/ })).toHaveTextContent('5th placeHail MarysWon90.00Fourth and Long85.00');
+    expect(within(places).getByRole('row', { name: /7th place/ })).toHaveTextContent('7th placePigskin Pros70.00Red Zone RebelsWon75.00');
+    expect(within(consolation).queryByText('Championship')).not.toBeInTheDocument();
+  });
+
   it('shows the finish once the season is over', async () => {
     const done = standings();
     renderLeague([{ path: `${PATH}/standings`, reply: json({ ...done, results: done.results.map((row) => ({ ...row, place: row.seed })) }) }]);

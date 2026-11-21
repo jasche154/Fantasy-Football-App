@@ -58,7 +58,7 @@ def test_settings_round_trip_through_json_exactly():
 
 
 @pytest.mark.parametrize("bad", [
-    {"scoring": "superflex"}, {"waiver_mode": "faab"}, {"teams": 11}, {"teams": 2}, {"draft_slot": 0},
+    {"scoring": "superflex"}, {"waiver_mode": "auction"}, {"teams": 11}, {"teams": 2}, {"draft_slot": 0},
     {"teams": 4}, {"teams": 6}, {"teams": 16}, {"difficulty": "easy"}, {"teams": 8, "draft_slot": 9},
     {"draft_slot": 13}, {"playoff_teams": 14}, {"starters": {"QB": 1, "IDP": 2}}, {"starters": {"QB": -1}},
     {"bench": -1}, {"regular_season_weeks": 0},

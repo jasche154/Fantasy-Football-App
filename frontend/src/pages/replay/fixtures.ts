@@ -25,6 +25,7 @@ import type {
   ReplaySummary,
   ReplayTeam,
   ReplayTeamRef,
+  ReplayUsage,
   ReplayWireRow,
 } from '../../api/types';
 import type { ReplayViewProps } from './shared';
@@ -91,9 +92,14 @@ export function rosterRow(player: ReplayPlayerRef, slot: ReplaySlot, overrides: 
   return { ...playerRow(player), slot, starting: slot !== 'BN', ...overrides };
 }
 
-/** A waiver-wire row: a free agent unless overridden. */
+/** Usage over `games` games (a receiver's line unless overridden). */
+export function usage(overrides: Partial<ReplayUsage> = {}): ReplayUsage {
+  return { games: 3, snap_pct: 72.4, targets: 6.3, target_share: 0.241, carries: 0.7, ...overrides };
+}
+
+/** A waiver-wire row: a free agent with no usage yet unless overridden. */
 export function wireRow(player: ReplayPlayerRef, overrides: Partial<ReplayWireRow> = {}): ReplayWireRow {
-  return { ...playerRow(player), status: 'free_agent', owner: null, season_points: 60.4, last_points: 12.3, ...overrides };
+  return { ...playerRow(player), status: 'free_agent', owner: null, season_points: 60.4, last_points: 12.3, usage: null, ...overrides };
 }
 
 /** The user's roster in week 5: nine starters in slot order, then a bench with a bye and an injury. */
@@ -195,7 +201,7 @@ export function useTestHub(): Pick<ReplayViewProps, 'version' | 'act'> {
   return { version, act };
 }
 
-/** GET players/{id}: weeks 1..5, a bye in week 3, the current week unplayed. */
+/** GET players/{id}: weeks 1..5, a bye in week 3, the current week unplayed (usage only in weeks he played). */
 export function playerDetail(player: ReplayPlayerRef = MOSTERT, overrides: Partial<ReplayWireRow> = {}): ReplayPlayerDetail {
   const row = wireRow(player, overrides);
   return {
@@ -204,6 +210,7 @@ export function playerDetail(player: ReplayPlayerRef = MOSTERT, overrides: Parti
       week, played: week < 5, team: player.team, opponent: week === 3 ? 'BYE' : 'DEN', bye: week === 3, out: false,
       projection: week === 3 ? 0 : 12.5, points: week === 3 || week === 5 ? null : 10 + week, ros_ppg: row.ros_ppg,
       value: row.value, trade_value: row.trade_value, rank: row.rank, pos_rank: row.pos_rank, injury: null,
+      usage: week === 3 || week === 5 ? null : usage({ games: 1, snap_pct: 60 + week, targets: week, target_share: week / 20, carries: 10 }),
     })),
   };
 }

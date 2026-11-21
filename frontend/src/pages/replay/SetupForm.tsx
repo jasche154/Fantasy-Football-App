@@ -16,10 +16,11 @@ const RANDOM = 'random';
 const TEAM_COUNTS = [8, 10, 12, 14];
 const MAX_NAME_LENGTH = 60;
 const STEP_LABELS: Record<string, string> = { starting: 'starting', game_results: 'game results', adp: 'ADP', projections: 'projections',
-  injuries: 'injury reports' };
+  injuries: 'injury reports', snaps: 'snap counts' };
 
 const WAIVER_MODES: readonly { value: ReplayWaiverMode; title: string; text: string }[] = [
   { value: 'wednesday', title: 'Wednesday waivers', text: 'After each week, unrostered players sit on waivers until Wednesday, when claims settle in priority order.' },
+  { value: 'faab', title: 'FAAB bidding', text: 'Every team gets $100 for the season. Bids are blind; the highest bid wins (ties: waiver priority). Claims settle on Wednesday.' },
   { value: 'none', title: 'Free agency only', text: 'No weekly waiver run: unrostered players are free agents you can add right away (a dropped player frees up the next week).' },
 ];
 const DIFFICULTIES: readonly { value: ReplayDifficulty; title: string; text: string }[] = [

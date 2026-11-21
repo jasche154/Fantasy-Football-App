@@ -2,8 +2,8 @@
 import pytest
 from sqlalchemy import insert, select
 
-from database.models import KickerGame, Player, PlayerStatsWeekly
-from services import kdst_model, projections, valuation as valuation_module
+from database.models import KickerGame, Player, PlayerSnapCountsWeekly, PlayerStatsWeekly
+from services import kdst_model, player_usage, projections, valuation as valuation_module
 from services.league import LeagueSettings
 from services.players import AmbiguousPlayer, resolve_player
 from services.valuation import build_valuation
@@ -49,6 +49,36 @@ def test_a_first_season_valuation_ignores_the_replay_only_season_before_it(sessi
     assert [(v.player_id, v.ros_ppg, v.trade_value) for v in with_old.values] == \
         [(v.player_id, v.ros_ppg, v.trade_value) for v in without.values]
     assert projections.prior_player_seasons(session, FIRST, league.scoring_settings()) == []
+
+
+def _snaps(session, season: int, weeks: range, pct: float) -> None:
+    """Snap rows (Replay League's "snaps" step writes the shared table) for every player with a game."""
+    ids = session.scalars(select(PlayerStatsWeekly.player_id.distinct()).where(PlayerStatsWeekly.season == CURRENT))
+    session.execute(insert(PlayerSnapCountsWeekly), [{"player_id": pid, "season": season, "week": week,
+                                                      "game_type": "REG", "offense_pct": pct}
+                                                     for pid in ids for week in weeks])
+    session.commit()
+
+
+def _usage_rows(session) -> dict:
+    scoring = LeagueSettings().scoring_settings()
+    return {position: player_usage.load_usage(session, FIRST, position, scoring) for position in ("RB", "WR")}
+
+
+def test_replay_only_snap_counts_change_neither_a_first_season_valuation_nor_its_usage(session):
+    _copy_weeks(session, FIRST, range(1, 4))
+    _snaps(session, FIRST, range(1, 4), 0.6)
+    league = LeagueSettings()
+    without, usage = build_valuation(session, league, FIRST), _usage_rows(session)
+
+    _copy_weeks(session, OLD, range(1, 18), points=3.0)
+    _snaps(session, OLD, range(1, 18), 0.05)
+    valuation_module._cache.clear()
+    with_old = build_valuation(session, league, FIRST)
+
+    assert [(v.player_id, v.ros_ppg, v.trade_value) for v in with_old.values] ==         [(v.player_id, v.ros_ppg, v.trade_value) for v in without.values]
+    assert _usage_rows(session) == usage
+    assert {game.snap_share for games in usage["RB"].values() for game in games} == {60.0}     # the probe reads snaps
 
 
 def test_first_season_kicker_inputs_ignore_the_replay_only_season(session):

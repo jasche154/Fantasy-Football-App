@@ -6,7 +6,7 @@ import { json, mockFetch, type MockReply, type MockRoute } from '../../test/mock
 import { META_ROUTE, renderWithProviders } from '../../test/render';
 import {
   actionResult, COLLINS, COOK, GAME_ID, HILL, MAHOMES, MOSTERT, nextAction, OLAVE, OPPONENT_TEAM_ID, playerRow, rosterRow,
-  summary, team, teamRef, TEAMS, USER_TEAM_ID, useTestHub, viewProps, wireRow,
+  summary, team, teamRef, TEAMS, usage, USER_TEAM_ID, useTestHub, viewProps, wireRow,
 } from './fixtures';
 import { PlayersView } from './PlayersView';
 
@@ -27,11 +27,11 @@ function wire(results: ReplayWireRow[], total = results.length) {
 }
 
 function claim(id: number, order: number, add: ReplayPlayerRef, drop: ReplayPlayerRef | null = null): ReplayClaim {
-  return { id, order, add: playerRow(add), drop: drop && playerRow(drop) };
+  return { id, order, add: playerRow(add), drop: drop && playerRow(drop), bid: 0 };
 }
 
 function claims(results: ReplayClaim[] = []): ReplayClaims {
-  return { phase: 'waivers', can_claim: true, priority: 4, waiver_order: TEAMS, results };
+  return { phase: 'waivers', can_claim: true, priority: 4, waiver_order: TEAMS, results, faab: null };
 }
 
 function Hub({ game }: { game: ReplaySummary }) {
@@ -91,6 +91,18 @@ describe('PlayersView table', () => {
     renderPlayers(summary(), [{ path: PLAYERS, reply: json(wire([wireRow(MOSTERT, { last_points: null, games: 0, ppg: 0, season_points: 0 })])) }]);
     const cells = (await row('Raheem Mostert')).getAllByRole('cell').map((cell) => cell.textContent);
     expect(cells.slice(2, 9)).toEqual(['DEN', '14.20', '—', '0.00', '—', '13.80', '31.5']);
+  });
+
+  it('shows each player\'s usage over his last 3 games, and a dash where there is none', async () => {
+    renderPlayers(summary(), [{ path: PLAYERS, reply: json(wire([
+      wireRow(MOSTERT, { usage: usage() }), wireRow(COLLINS, { usage: usage({ snap_pct: null, target_share: null }) }), wireRow(HILL),
+    ])) }]);
+    const usageCells = async (name: string) => (await row(name)).getAllByRole('cell').slice(9, 13).map((cell) => cell.textContent);
+    expect(await usageCells('Raheem Mostert')).toEqual(['72%', '6.3', '24%', '0.7']);
+    expect(await usageCells('Nico Collins')).toEqual(['—', '6.3', '—', '0.7']);            // no snap counts that season
+    expect(await usageCells('Tyreek Hill')).toEqual(['—', '—', '—', '—']);
+    expect(screen.getByRole('columnheader', { name: 'Snap %' }).querySelector('abbr')).toHaveAttribute('title', 'Share of offensive snaps, last 3 games');
+    expect(screen.getByTitle('Carries per game, last 3 games')).toHaveTextContent('Car');
   });
 
   it('sends the filters, the debounced search and the page to the API', async () => {

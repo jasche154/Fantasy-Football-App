@@ -11,6 +11,8 @@
   the championship bracket (1 v 4, 2 v 3, then the final and a third-place game); every further group of four
   seeds plays a consolation ladder the same way and a leftover pair plays each other twice, so every team has
   a scored game every week. A tied playoff game goes to the higher seed.
+- Final places, once the last week is played, come from those games: each group's winners' game decides its
+  top two places and the losers' game the next two; a leftover pair places by wins, then points, then seed.
 """
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
@@ -174,15 +176,26 @@ def matchup_for(state: State, settings: Settings, team_id: int, week: int | None
     return next((game for game in games if team_id in game), None)
 
 
+def _pair_order(pair: Sequence[int], games: Sequence[WeekResult], seeds: Sequence[int]) -> list[int]:
+    """A leftover pair that played twice: won both, else more points over the two, else the higher seed."""
+    winners = {_decide(pair, game.scores, seeds)[0] for game in games}
+    points = {team_id: round(sum(game.scores[team_id] for game in games), 2) for team_id in pair}
+    return sorted(pair, key=lambda t: (len(winners) > 1 or t not in winners, -points[t], seeds.index(t)))
+
+
 def final_standings(state: State, settings: Settings) -> list[dict]:
-    """The regular-season table rows with a "place": champion, runner-up, third and fourth by the title
-    bracket, then everyone else in regular-season order. Before the final is played: that order throughout."""
+    """The regular-season table rows with a "place". Once the final week is played, every group of four seeds
+    places by its second-week games (winners' game: 4k+1 and 4k+2, losers' game: 4k+3 and 4k+4) and a
+    leftover pair by `_pair_order`. Before that: regular-season order throughout."""
     rows = {row["team_id"]: row for row in rs.standings(state)}
     seeds = tuple(rows)
-    final = _result(state, settings.end_week)
-    title_games = final.matchups[:BRACKET_SIZE // 2] if final is not None else ()
-    bracket = [team_id for game in title_games for team_id in _decide(game, final.scores, seeds)]
-    order = [*bracket, *(team_id for team_id in seeds if team_id not in bracket)]
+    opening, final = _result(state, settings.regular_season_weeks + 1), _result(state, settings.end_week)
+    order = list(seeds)
+    if final is not None and opening is not None:
+        groups = [seeds[i:i + BRACKET_SIZE] for i in range(0, len(seeds), BRACKET_SIZE)]
+        order = [team_id for group in groups for team_id in (
+            _pair_order(group, (opening, final), seeds) if len(group) == 2 else
+            [t for game in _second_round(group, opening, seeds) for t in _decide(game, final.scores, seeds)])]
     return [{**rows[team_id], "place": place} for place, team_id in enumerate(order, start=1)]
 
 
@@ -239,7 +252,7 @@ def play_week(state: State, settings: Settings, data: SeasonData, know: rv.Knowl
     `data` is the FULL season, read only for this week's points; `know` is the Knowledge for this week and
     makes every choice. Appends the WeekResult and its events, expires pending offers, then either crowns
     the champion (phase "complete") or moves to the next week with the lineup cleared: phase "waivers" in
-    wednesday mode, still "open" otherwise. `seed` is unused: nothing here is random."""
+    wednesday and faab mode, still "open" with free agency only. `seed` is unused: nothing here is random."""
     _check_playable(state, settings, data, know)
     week = state.week
     matchups = matchups_for_week(state, settings, week)
@@ -255,5 +268,5 @@ def play_week(state: State, settings: Settings, data: SeasonData, know: rv.Knowl
     played = _log_results(replace(state, results=(*state.results, result), offers=offers), result)
     if week == settings.end_week:
         return _crown(played, result)
-    phase = "waivers" if settings.waiver_mode == "wednesday" else PLAY_PHASE
+    phase = "waivers" if settings.waiver_mode != "none" else PLAY_PHASE
     return replace(_log_bracket(played, settings), week=week + 1, lineup=None, phase=phase)
