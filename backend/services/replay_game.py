@@ -63,7 +63,7 @@ def _check_fits(settings: Settings, data: SeasonData) -> None:
                          f"but the data loaded is {data.season} with {data.scoring} scoring.")
     if settings.end_week > data.last_week:
         raise ValueError(f"The {data.season} season has {data.last_week} weeks: a regular season of "
-                         f"{settings.regular_season_weeks} weeks plus {rs.PLAYOFF_WEEKS} playoff weeks is too long.")
+                         f"{settings.regular_season_weeks} weeks plus {rs.playoff_rounds(settings.playoff_teams)} playoff weeks is too long.")
     if settings.playoff_teams != replay_season.BRACKET_SIZE:
         raise ValueError(f"Replay leagues play a {replay_season.BRACKET_SIZE}-team playoff bracket.")
 

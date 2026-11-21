@@ -372,7 +372,7 @@ def test_create_says_what_is_wrong_with_a_league(client, monkeypatch):
         return refused(client, "/games", {"season": SEASON, **body})
 
     assert create(season=2010) == (422, "Replay seasons run from 2018 to 2025, not 2010.")
-    assert create(teams=9)[0] == 422 and "A league has 8, 10, 12 or 14 teams" in create(teams=9)[1]
+    assert create(teams=9)[0] == 422 and "A league has 4, 6, 8, 10, 12, 14 or 16 teams" in create(teams=9)[1]
     assert create(teams=8, draft_slot=9) == (422, "Draft slot must be between 1 and 8.")
     assert create(teams=99)[0] == create(scoring="superflex")[0] == create(season="soon")[0] == 422
     assert create(season=2019)[0] == 503 and "2019 is not ready" in create(season=2019)[1]

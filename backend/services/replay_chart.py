@@ -37,6 +37,7 @@ TAU = 40.0                     # pick_value decay: 1 -> 1000, 12 -> 760, 24 -> 5
 CHART_MAX = 1000.0
 PICKS_PAST_LAST = 3            # slot curve past the last drafted player: this many picks per rank
 EMPTY_CURVE_START = 200.0      # a position nobody drafted starts here
+KDST_FIRST_PICK = 150.0        # K/DST slot curve starts no earlier than this pick (FFC ADP drafts them too early)
 STAR_TOP, STAR_SPAN = 60, 48   # star = clamp((STAR_TOP - pre_rank) / STAR_SPAN, 0, 1)
 FORM_GAMES = 3                 # model_ppg: his last real games
 FORM_WEIGHT = 0.50

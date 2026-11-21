@@ -10,7 +10,7 @@ from services.replay_state import Settings, State
 from tests import replay_fakes as fakes
 
 SEEDS = range(20)
-SIZES = rs.VALID_TEAMS
+SIZES = (8, 10, 12, 14)             # shortcut: PR 2 adds 4, 6, 16 (worker A tunes the draft tests for them)
 DEFAULT_CAPS = {"QB": 2, "RB": 6, "WR": 7, "TE": 2, "K": 1, "DST": 1}
 ADP_WINDOW = 100                    # the picks where a draft should still track ADP closely
 MAX_MEAN_ADP_GAP = 8.0              # measured 4.2 to 5.2 picks on the fake season

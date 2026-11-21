@@ -153,6 +153,23 @@ def _playoff_matchups(state: State, settings: Settings, week: int) -> Matchups:
     return tuple(game for group in groups for game in _second_round(group, opening, seeds))
 
 
+def title_games(state: State, settings: Settings, week: int) -> Matchups:
+    """The title bracket's games in a playoff week, higher seed first; () while unknown. In the final week:
+    (final, third place)."""
+    raise NotImplementedError
+
+
+def byes(state: State, settings: Settings, week: int) -> tuple[int, ...]:
+    """Seeds with a first-round bye this week (round one only: 2 ** rounds - playoff_teams top seeds)."""
+    raise NotImplementedError
+
+
+def game_label(state: State, settings: Settings, week: int, pair: Sequence[int]) -> str | None:
+    """None (regular season) | "Quarter-final" | "Semi-final" | "Championship" | "Third place" | "Consolation".
+    A 2-round bracket's first round is "Semi-final"."""
+    raise NotImplementedError
+
+
 def matchups_for_week(state: State, settings: Settings, week: int) -> Matchups:
     """((home, away), ...) for a week: as played if it has been, else the schedule or the playoff games.
 
