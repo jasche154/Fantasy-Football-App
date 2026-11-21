@@ -335,7 +335,8 @@ def seasons_to_load(session: Session, current_season: int, reload_all: bool) -> 
     every_season = list(range(FIRST_SEASON, current_season + 1))
     if reload_all:
         return every_season
-    loaded = set(session.scalars(select(PlayerStatsWeekly.season).distinct()))
+    # Expected points: only this loader fills it (Replay League's import also writes weekly stats, so those don't count).
+    loaded = set(session.scalars(select(PlayerExpectedPointsWeekly.season).distinct()))
     return [s for s in every_season if s not in loaded or s == current_season]
 
 

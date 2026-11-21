@@ -609,3 +609,12 @@ def test_a_prepared_season_is_read_again(monkeypatch):
     summary = replay_data.prepare_season(None, SEASON)
 
     assert cleared == [True] and summary["errors"] == {}
+
+
+def test_a_lineup_body_bounds_each_slot_list():
+    from pydantic import ValidationError
+
+    from api.replay_action_routes import MAX_LISTED, LineupBody
+
+    with pytest.raises(ValidationError):
+        LineupBody(starters={"QB": list(range(1, MAX_LISTED + 2))})

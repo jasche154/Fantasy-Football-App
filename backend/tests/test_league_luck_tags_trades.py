@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from database.models import NflGame, Player
+from database.models import NflGame
 from services import all_play as ap
 from services import league_insights as li
 from services import manager_tags as tags_module

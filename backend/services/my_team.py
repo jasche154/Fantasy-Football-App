@@ -15,7 +15,7 @@ aren't modeled, so they're left out of the lineup check.
 import json
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import datetime
 from types import MappingProxyType
 

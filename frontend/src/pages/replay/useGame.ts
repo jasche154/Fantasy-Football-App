@@ -15,6 +15,7 @@ export interface GameState {
   act: ReplayAct;
   isBusy: boolean;
   actError: string | null;
+  clearError: () => void;
   /** What the last action caused, for the "What just happened" panel. */
   events: readonly ReplayEvent[];
   dismissEvents: () => void;
@@ -65,5 +66,7 @@ export function useGame(gameId: number): GameState {
   }, [gameId]);
 
   const dismissEvents = useCallback(() => setEvents([]), []);
-  return { loaded, game: latest ?? loaded.data, version, act, isBusy: isBusy || settledVersion !== version, actError, events, dismissEvents };
+  const clearError = useCallback(() => setActError(null), []);
+  return { loaded, game: latest ?? loaded.data, version, act, isBusy: isBusy || settledVersion !== version, actError, clearError,
+    events, dismissEvents };
 }

@@ -41,7 +41,10 @@ def _projection(row: dict) -> WeekProjection | None:
     half = _points(stats, "pts_half_ppr")
     if position in SAME_IN_EVERY_FORMAT:
         std = half = ppr
-    std = ppr if std is None else std
+    if std is None and half is not None:
+        std = round(2 * half - ppr, 2)                  # half-PPR is the midpoint of the two
+    if std is None:
+        return None                                     # no standard number: guessing PPR would overstate it
     half = round((ppr + std) / 2, 2) if half is None else half
     name = f"{player.get('first_name') or ''} {player.get('last_name') or ''}".strip()
     team = normalize_team(str(source_id)) if position == "DST" else None      # a defense's id is its team code

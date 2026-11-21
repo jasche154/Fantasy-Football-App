@@ -59,7 +59,7 @@ function Scoreline({ game }: { game: ReplaySummary }) {
 /** One line for screen readers after an action: the user's own news first, then how much more is in the panel. */
 function announce(game: ReplaySummary, events: readonly ReplayEvent[]): string {
   if (events.length === 0) return '';
-  const lead = events.find((item) => item.team?.is_user) ?? groupEvents(events)[0].events[0];
+  const lead = events.find((item) => item.team?.is_user) ?? groupEvents(events)[0]?.events[0] ?? events[0];
   const draftDone = game.phase !== 'draft' && events.some((item) => item.kind === 'draft') ? 'The draft is complete. ' : '';
   const more = events.length > 1 ? ` ${pluralize(events.length - 1, 'more update')} under “What just happened”.` : '';
   return `${draftDone}${lead.text}.${more}`;
@@ -111,7 +111,8 @@ interface GameHubProps {
 
 /** The league shell: header, the one primary button, what just happened, the tabs and the current screen. */
 export function GameHub({ gameId, view }: GameHubProps) {
-  const { loaded, game, version, act, isBusy, actError, events, dismissEvents } = useGame(gameId);
+  const { loaded, game, version, act, isBusy, actError, clearError, events, dismissEvents } = useGame(gameId);
+  useEffect(clearError, [view, clearError]);       // a refusal on one tab is not news on the next
   const [playerId, setPlayerId] = useState<number | null>(null);
   const [isAdvancing, setIsAdvancing] = useState(false);
   const viewRef = useRef<HTMLElement>(null);

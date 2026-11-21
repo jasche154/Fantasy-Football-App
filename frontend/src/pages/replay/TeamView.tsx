@@ -38,7 +38,7 @@ function Roster({ team, isStale, game, act, isBusy, openPlayer }: RosterProps) {
 
   useEffect(() => {
     if (movingKey === null) return undefined;
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') setMovingKey(null); };
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape' && !event.defaultPrevented) setMovingKey(null); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [movingKey]);

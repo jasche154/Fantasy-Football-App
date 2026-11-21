@@ -268,6 +268,8 @@ def load_projections(session: Session, season: int, client: HistoryClient, force
             except HistoryError as exc:
                 out["errors"][f"projections {source}"] = type(exc).__name__
                 break
+            if not entries:                             # a changed payload shape parses to nothing: say so
+                out["errors"][f"projections {source} week {week}"] = "NoRows"
             rows, unmatched = projection_rows(matcher, source, season, week, entries)
             if rows:                                    # an empty week is not stored, so a re-run asks again
                 _store_week(session, season, week, source, rows)
@@ -379,6 +381,7 @@ def main(argv: list[str] | None = None) -> None:
     logging.getLogger("httpx").setLevel(logging.WARNING)      # house rule: request URLs stay out of logs
     logging.getLogger("alembic").setLevel(logging.WARNING)
     print(f"Database: {engine.url.render_as_string(hide_password=True)} (schema {ensure_schema(engine)})")
+    failed = False
     for season in parse_seasons(args.seasons):
         with Session(engine) as session:
             try:
@@ -387,6 +390,9 @@ def main(argv: list[str] | None = None) -> None:
                 log.exception("season %s failed", season)
                 summary = {"season": season, "errors": {"prepare": type(exc).__name__}}
         print(json.dumps(summary, indent=1))
+        failed = failed or bool(summary.get("errors"))
+    if failed:
+        raise SystemExit(1)                         # so a script can tell an import went wrong
 
 
 if __name__ == "__main__":

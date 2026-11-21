@@ -130,6 +130,20 @@ describe('TeamView lineup editing', () => {
     expect(api.callsTo(LINEUP_PATH, 'POST')).toHaveLength(0);
   });
 
+  it('keeps the move when an open drawer takes the Escape', async () => {
+    const { user } = renderTeam();
+    await table();
+    await user.click(screen.getByRole('button', { name: 'Move James Cook' }));
+    const drawer = (event: KeyboardEvent) => event.preventDefault();       // what ReplayDrawer does with Escape
+    window.addEventListener('keydown', drawer, true);
+    try {
+      await user.keyboard('{Escape}');
+    } finally {
+      window.removeEventListener('keydown', drawer, true);
+    }
+    expect(screen.getByRole('button', { name: 'Cancel moving James Cook' })).toBeInTheDocument();
+  });
+
   it('resets a manual lineup to the best one', async () => {
     const { api, user } = renderTeam(team({ manual_lineup: true }), {}, [{ method: 'POST', path: LINEUP_PATH, reply: lineupReply() }]);
     await table();

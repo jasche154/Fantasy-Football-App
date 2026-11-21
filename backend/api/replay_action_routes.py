@@ -3,7 +3,7 @@
 Every route here answers {game: Summary, events: Event[], ...extras} (see services/replay_views.py) and
 runs under the replay lock (`replay_routes.turn`). A declined trade is a 200 with its verdict.
 """
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
@@ -27,7 +27,8 @@ class PickBody(BaseModel):
 
 
 class LineupBody(BaseModel):
-    starters: dict[str, list[int]] | None = Field(..., max_length=MAX_LISTED)     # null: back to the best lineup
+    # null: back to the best lineup. Each slot's list is bounded too: it is checked while the game's lock is held.
+    starters: dict[str, Annotated[list[int], Field(max_length=MAX_LISTED)]] | None = Field(..., max_length=MAX_LISTED)
 
 
 class ClaimBody(BaseModel):

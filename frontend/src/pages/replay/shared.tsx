@@ -312,9 +312,10 @@ export function ReplayDrawer({ eyebrow, title, label, closeLabel = 'Close', onCl
     return () => { if (opener instanceof HTMLElement) opener.focus(); };
   }, []);
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    // Capture phase and preventDefault: Escape closes only the drawer, not also what is behind it (a lineup move).
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') { event.preventDefault(); onClose(); } };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, [onClose]);
   return (
     <>

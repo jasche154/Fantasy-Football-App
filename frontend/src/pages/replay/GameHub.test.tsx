@@ -8,6 +8,7 @@ import { META_ROUTE, renderWithProviders } from '../../test/render';
 import {
   actionResult, draftSummary, event, GAME_ID, MOSTERT, nextAction, playerDetail, RESULT_EVENTS, summary, teamRef, USER_TEAM_ID,
 } from './fixtures';
+import { AppProviders } from '../../App';
 import { GameHub } from './GameHub';
 import type { ReplayView, ReplayViewProps } from './shared';
 
@@ -191,6 +192,17 @@ describe('GameHub act', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Your roster is full: choose a player to drop.');
     expect(screen.getByText('screen saw: Your roster is full: choose a player to drop.')).toBeInTheDocument();
     expect(screen.getByText('team screen, version 0')).toBeInTheDocument();
+  });
+
+  it('clears a refusal when the user moves to another tab', async () => {
+    mockFetch([META_ROUTE, { method: 'POST', path: `${GAME_PATH}/add-drop`, reply: json({ detail: 'Roster full.' }, 422) },
+      { path: GAME_PATH, reply: json(summary()) }]);
+    const { rerender } = renderWithProviders(<GameHub gameId={GAME_ID} view="team" />, { hash: `#/replay?game=${GAME_ID}` });
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Add Mostert' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Roster full.');
+    rerender(<AppProviders><GameHub gameId={GAME_ID} view="players" /></AppProviders>);
+    expect(await screen.findByText('players screen, version 0')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('keeps the screens busy for the render that first shows a new version', async () => {

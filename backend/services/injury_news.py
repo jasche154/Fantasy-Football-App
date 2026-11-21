@@ -34,7 +34,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from database.models import InjuryNews, Player, PlayerStatus, utc_now
-from integrations.sleeper import SleeperError
 from integrations.sleeper_news import fetch_news
 from services.ros_consensus import IR_STATUSES, SHORT_OUT
 

@@ -233,6 +233,25 @@ def test_sleeper_rows_keep_three_formats_and_placeholders_are_dropped():
     assert "Place Holder" not in projections
 
 
+def test_sleeper_standard_comes_from_half_ppr_and_a_row_with_neither_is_dropped():
+    payload = [sleeper_row("90", "Half", "Only", "WR", pts_ppr=10.0, pts_half_ppr=8.0),
+               sleeper_row("91", "Ppr", "Only", "WR", pts_ppr=10.0)]
+
+    projections = {p.name: p for p in sleeper_projections.parse_week(payload)}
+
+    assert projections["Half Only"].pts_std == 6.0 and "Ppr Only" not in projections
+
+
+def test_a_week_whose_payload_parses_to_nothing_is_reported(db):
+    class Blank(Sites):
+        def __call__(self, request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json=[]) if "sleeper" in request.url.host else super().__call__(request)
+
+    summary = replay_data.load_projections(db, SEASON, HistoryClient(Blank().client(), pause=0))
+
+    assert summary["errors"] == {"projections sleeper week 1": "NoRows", "projections sleeper week 2": "NoRows"}
+
+
 def test_sleeper_defense_is_keyed_by_team_and_scores_the_same_in_every_format():
     defense = next(p for p in sleeper_projections.parse_week(SLEEPER_PAYLOAD) if p.position == "DST")
 

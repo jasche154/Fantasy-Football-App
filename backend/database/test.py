@@ -1,7 +1,6 @@
 from sqlalchemy import create_engine, select, func
 from sqlalchemy.orm import Session
 from models import Player, PlayerRushingAdvancedWeekly
-import matplotlib.pyplot as plt
 engine = create_engine("sqlite:///fantasy.db")
 
 with Session(engine) as session:
