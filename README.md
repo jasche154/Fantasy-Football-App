@@ -936,13 +936,14 @@ that week's games on; only scoring a week reads its real points.
   averaged over his last 3 games before this week (a player's page: each played week's own game). Only
   weeks already played; snap % only where snap counts are loaded; no red-zone numbers (not in the data).
 - **Trades:** a CPU scores a deal on the chart (`services/replay_trade_value.py`): what it receives and
-  keeps, minus its forced drops, plus a premium for getting the best player in the deal and a little for
-  roster spots and lineup gain, against what it sends (8% more from you on hard). It also refuses a deal
+  keeps, minus its forced drops, plus a premium for getting the best player in the deal, a little for
+  roster spots, half its lineup gain or its whole lineup loss, against what it sends plus a 3% margin (and
+  8% more from you on hard). It also refuses a deal
   that loses it 20% of market value. Declines come with the reasons. A player on IR can't be traded; a CPU
   sells you an out player only for at least half his healthy chart value. After a deal each starting slot
   the CPU can no longer fill needs a player it can add (unrostered, not out, not on waivers; in the waiver
   phase, when everyone unrostered is on waivers, anyone you haven't claimed), and it adds him
-  (`replay_waiver_ai.cpu_cover`): right away, or in the waiver phase once waivers clear. Each CPU has a hidden **persona** (balanced, panicky, shark, steady,
+  (`replay_cover.cpu_cover`): right away, or in the waiver phase once waivers clear. Each CPU has a hidden **persona** (balanced, panicky, shark, steady,
   gambler: `services/replay_personas.py`, assigned from the league's seed at creation) that nudges what it
   thinks a player is worth by up to 15% and how often it offers and counters; after 3 weeks a one-line
   tendency hint is shown, never the persona. **Counters:** a CPU that turns down a deal on value alone may

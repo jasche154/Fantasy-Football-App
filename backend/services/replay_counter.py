@@ -1,13 +1,14 @@
 """Replay League counter-offers: after a value-only decline a CPU may answer with a deal it would take.
 
 It counters with probability `replay_personas.counter_rate`, one roll per CPU per week (so declining and
-re-proposing can't reroll it), and at most once per week. Candidates: add one of the user's players, swap a
+re-proposing can't reroll it), and searches at most once per week (`State.counter_searched`), so at most one
+counter a week and repeated declines never rerun the search. Candidates: add one of the user's players, swap a
 requested player for a lesser one at his position, or drop one requested player; it picks the one it accepts
 that costs the user least (never a "big_loss" for the user, never one needing a user drop) and stores it as a
-pending Offer(counter_to=declined.id). It never counters a counter of its own counter. See .plans/pr1-plan.md
-section D.
+pending Offer(counter_to=declined.id). It never counters a counter of its own counter.
 """
 from collections.abc import Iterator
+from dataclasses import replace
 
 from services import replay_personas, replay_state as rs, replay_trades as rt
 from services.replay_state import Offer, Settings, State
@@ -37,7 +38,8 @@ def _own_counter_answered(state: State, declined: Offer) -> bool:
 
 
 def _countered_this_week(state: State, cpu_id: int) -> bool:
-    return any(o.from_team == cpu_id and o.week == state.week and o.counter_to is not None for o in state.offers)
+    return (state.counter_searched.get(cpu_id) == state.week
+            or any(o.from_team == cpu_id and o.week == state.week and o.counter_to is not None for o in state.offers))
 
 
 def counter_offer(state: State, settings: Settings, know: Knowledge, declined: Offer, seed: int) -> State:
@@ -54,6 +56,7 @@ def counter_offer(state: State, settings: Settings, know: Knowledge, declined: O
         return state
     if rs.rng(seed, "counter", state.week, cpu.id).random() >= replay_personas.counter_rate(cpu.persona):
         return state
+    state = replace(state, counter_searched={**state.counter_searched, cpu.id: state.week})
     best: tuple[float, Deal] | None = None
     for give, get in _candidates(state, know, declined.give, declined.get):
         try:

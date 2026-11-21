@@ -4,8 +4,9 @@
 lists its reasons. Every CPU team in the deal must pass both of these, on point-in-time values only (`know`):
 
 1. Value. `replay_trade_value.tally` on its persona's private values scores >= 0: what it gets (plus the
-   best-player premium, a freed roster spot and half its lineup gain) against what it gives x a multiple:
-   1.00 (normal) or 1.08 (hard) against the user, 0.95 against another CPU.
+   best-player premium, a freed roster spot, half its lineup gain or its full lineup loss) against what it
+   gives x a multiple x OUT_MARGIN (a 3% margin): 1.00 (normal) or 1.08 (hard) against the user, 0.95
+   against another CPU.
 2. Never stupid. On neutral chart values it gets back at least MARKET_GUARD of what it gives
    (`replay_trade_value.market_ok`), whatever its persona.
 3. One accepted trade per CPU per week; a CPU blocked by its IR (`replay_ir.blocked_reason`) declines all.
@@ -15,7 +16,7 @@ within the limit (the user names who to drop; a CPU cuts its lowest healthy-char
 only kicker or defense), and the one position rule: every starting slot the deal leaves empty
 (`replay_values.missing_slots`) has its own eligible player to fill it (`free_agents`: unrostered, not out,
 and free once waivers clear). Positions need not match: a CPU sends its only tight end and picks one up
-(`replay_waiver_ai.cpu_cover`, at once in the open phase, when waivers clear in the waivers phase).
+(`replay_cover.cpu_cover`, at once in the open phase, when waivers clear in the waivers phase).
 Every drop goes through `replay_state.release`. An out player on the active roster may be traded; one in an
 IR slot can't be, but still counts for a team's lineup gain.
 
@@ -168,7 +169,7 @@ def _cpu_drops(settings: Settings, know: Knowledge, kept: Sequence[int]) -> tupl
 def free_agents(state: State, know: Knowledge) -> list[int]:
     """Who could fill a slot a trade empties, best first: unrostered, not out, and free once waivers clear.
     In the open phase that excludes players on waivers (`state.locked`). In the waivers phase everyone
-    unrostered is on waivers and the cover waits for them to clear (`replay_waiver_ai.cpu_cover`), so it is
+    unrostered is on waivers and the cover waits for them to clear (`replay_cover.cpu_cover`), so it is
     anyone the user hasn't claimed (a CPU's own claim may take one; the next best then covers)."""
     claimed = {claim.add for claim in state.claims if state.phase == "waivers"}
     taken = rs.rostered(state) | (claimed if state.phase == "waivers" else set(state.locked))
@@ -254,8 +255,10 @@ def _rule_reasons(state: State, know: Knowledge, sender: Team, receiver: Team, m
 def _value_reason(side: _Side, other: Team, settings: Settings, know: Knowledge) -> str | None:
     counted, name = side.tally, side.team.name
     if counted is not None and counted.score < 0:
-        multiple = needed_multiple(settings, other)
-        extra = f" They want {multiple - 1:.0%} more than they give." if multiple > 1 else ""
+        bar = needed_multiple(settings, other) * tv.OUT_MARGIN
+        extra = f" They want {bar - 1:.0%} more than they give." if bar > 1 else ""
+        if counted.lineup < 0:
+            extra += f" It would weaken their starting lineup (worth {-counted.lineup:.0f} of value to them)."
         cut = [pid for pid in side.receives if pid not in side.kept]
         if cut:
             extra += f" They would drop {_names(know, cut)} to make room, so that counts for nothing."

@@ -95,6 +95,16 @@ def test_a_player_on_two_position_pages_in_one_snapshot_is_stored_once(db):
     assert [(r["position"], r["pos_rank"]) for r in rows] == [("WR", 1)]
 
 
+def test_a_player_on_two_pages_keeps_his_own_positions_line_even_when_worse(db):
+    raw = [line("ros-ppr-te", "2023-09-15", "1", "Wide One", 1.0), line("ros-ppr-wr", "2023-09-15", "2", "Wide Two", 1.0),
+           line("ros-ppr-wr", "2023-09-15", "1", "Wide One", 2.0)]
+
+    rows = expert_rows(SEASON, raw, SeasonMatcher(db, SEASON), {"1": "00-W1", "2": "00-W2"}, WEEK1, LAST)
+
+    wide_one = [(r["position"], r["pos_rank"]) for r in rows if r["player_id"] == ids(db)["Wide One"]]
+    assert wide_one == [("WR", 2)]                       # not his TE1 line: the pool has him at WR
+
+
 def rank_rows() -> list[dict]:
     def row(kind, scraped, pid, position, rank):
         return {"kind": kind, "scrape_date": scraped, "player_id": pid, "position": position, "pos_rank": rank}
@@ -140,6 +150,9 @@ def test_load_stores_once_then_skips_and_force_downloads_again(db, monkeypatch):
     forced = replay_experts.load_expert_ranks(db, SEASON, force=True)
 
     assert first == {"rows": 7, "snapshots": 3} == forced and again == {"rows": 7, "skipped": True}
+    assert len(calls) == 1                                  # one download serves the whole prepare run
+    replay_experts.clear_cache()
+    replay_experts.load_expert_ranks(db, SEASON, force=True)
     assert len(calls) == 2
     assert db.scalar(select(func.count()).select_from(ReplayExpertRank)) == 7
 
@@ -151,6 +164,7 @@ def test_a_failed_download_is_reported_by_type_and_keeps_stored_rows(db, monkeyp
     monkeypatch.setattr(replay_experts, "download", lambda: list(RAW))
     monkeypatch.setattr(replay_experts, "fp_crosswalk", lambda: {"1": "00-W1"})
     replay_experts.load_expert_ranks(db, SEASON)
+    replay_experts.clear_cache()                            # a later prepare run downloads again
     monkeypatch.setattr(replay_experts, "download", broken)
 
     result = replay_experts.load_expert_ranks(db, SEASON, force=True)

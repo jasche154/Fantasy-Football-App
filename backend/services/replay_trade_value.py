@@ -8,8 +8,9 @@ score = in + premium + spot + 0.5 x lineup - out x multiple x 1.03 (a shark also
   deal and v2 the other side's best. Signed: + when the CPU gets B, - when it sends him.
 - spot: SPOT_VALUE per roster spot the deal frees.
 - lineup: LINEUP_PER_WEEK x its lineup gain a week, clamped to +- LINEUP_CAP x out.
-`market_ok` is the anti-stupid guard on neutral chart values, whatever the persona.
-Pure: takes a Knowledge and the players, no state. See .plans/pr1-plan.md section D.
+The multiple is 1.00 (normal) or 1.08 (hard) against the user and 0.95 between CPUs; a CPU accepts at
+score >= 0 when `market_ok` (the anti-stupid guard on neutral chart values, whatever the persona) holds too.
+Pure: takes a Knowledge and the players, no state.
 """
 from collections.abc import Sequence
 from dataclasses import dataclass

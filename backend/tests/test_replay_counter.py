@@ -79,7 +79,7 @@ def test_only_the_users_declined_proposals_are_countered(always):
 
     assert rc.counter_offer(state, SETTINGS, know, replace(mine, status="accepted"), seed=0) is state
     later = replace(state, week=2)
-    assert rc.counter_offer(later, SETTINGS, know, mine, seed=0) is later       # values are for week 1: no deal
+    assert rc.counter_offer(later, SETTINGS, know, mine, seed=0).offers == later.offers   # week-1 values: no deal
     assert rs.user_team(state).id == mine.from_team
 
 
@@ -95,3 +95,19 @@ def test_one_roll_per_cpu_per_week_and_at_most_one_counter(always, monkeypatch):
     assert rolls == [(7, "counter", state.week, CPU)]                  # not the offer id: re-proposing can't reroll
     assert once.offers[-1].counter_to == mine.id
     assert rc.counter_offer(again, SETTINGS, know, other, seed=0) is again      # already countered this week
+
+
+def test_a_search_that_finds_nothing_is_not_rerun_that_week(always, monkeypatch):
+    state, know, mine = declined()
+    searches = []
+    monkeypatch.setattr(rc, "_candidates", lambda *args: searches.append(args) or iter(()))
+
+    first = rc.counter_offer(state, SETTINGS, know, mine, seed=0)
+    again, _, other = declined(first, (CPU, [P("RB", 23)], [P("RB", 17)]))
+    second = rc.counter_offer(again, SETTINGS, know, other, seed=0)
+
+    assert len(searches) == 1 and first.offers == state.offers and second is again
+    assert first.counter_searched == {CPU: state.week}
+    assert rs.state_from_json(rs.to_json(first)) == first
+    next_week = replace(again, week=state.week + 1)
+    assert rc._countered_this_week(next_week, CPU) is False

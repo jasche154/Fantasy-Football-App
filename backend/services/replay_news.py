@@ -2,7 +2,7 @@
 
 Built from `SeasonData.returns` (the one sanctioned leak: the real return week), blurred by seeded noise
 (`replay_state.rng(seed, "news", player_id, since)`) so it reads like a beat report, never the answer.
-Pure: no database, no Knowledge. See .plans/pr1-plan.md section C step 9 for the noise rules.
+Pure: no database, no Knowledge.
 
 - A suspension is exact.
 - Otherwise the first report misses the real week by -2..+2 (ERRORS / ERROR_ODDS), and the miss shrinks to

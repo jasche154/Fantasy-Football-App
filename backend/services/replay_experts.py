@@ -2,9 +2,13 @@
 
 `download` pulls the archive (nflreadpy, imported there only); `expert_rows` matches it to our players
 (pure); `week_ranks` picks, for each week, the latest snapshot taken before that week's first Sunday kickoff
-(the preseason cheatsheet: before week 1's first kickoff, its Thursday opener) (pure); `load_expert_ranks` stores rows in `replay_expert_ranks`. Only the last preseason cheatsheet and
-every in-season ROS snapshot are kept. A failed download or import is reported, never blocks a season.
-See .plans/pr1-plan.md section B.
+(the preseason cheatsheet: before week 1's first kickoff, its Thursday opener) (pure); `load_expert_ranks`
+stores rows in `replay_expert_ranks`. Only the last preseason cheatsheet and every in-season ROS snapshot are
+kept; pos_rank is the 1-based ecr order within a page and snapshot. A failed download or import is reported,
+never blocks a season, and seasons before FIRST_SEASON are skipped (the archive starts in 2020).
+
+Players match by FantasyPros id through the DynastyProcess crosswalk (`fantasypros_id` -> gsis; not
+`sportsdata_id`), then by name, and defenses by team.
 
 The archive has PPR position pages only (no overall list, no half or standard), so every scoring format
 uses the PPR order. Snapshots are scraped on Fridays, so week W's ranks already know week W-1's games and
@@ -32,6 +36,7 @@ PAGE_PREFIX = "/nfl/rankings/"
 ROS_LEAD_DAYS = 7               # a ROS page scraped in the days before week 1 still counts for week 1
 UNMATCHED_SHOWN = 10
 _PAGE = re.compile(PAGE_PATTERN)
+_archive: tuple[list[dict], dict[str, str]] | None = None       # (download(), fp_crosswalk()) until clear_cache
 
 
 def _page(page: str | None) -> tuple[str, str] | None:
@@ -47,9 +52,11 @@ def download() -> list[dict]:
     import nflreadpy as nfl
     import polars as pl
 
-    frame = nfl.load_ff_rankings("all").filter(pl.col("ecr_type") == "rp").select(
+    page = pl.col("fp_page").str.replace(PAGE_PREFIX, "", literal=True)
+    frame = nfl.load_ff_rankings("all").filter(
+        (pl.col("ecr_type") == "rp") & page.str.contains(f"^(?:{PAGE_PATTERN})")).select(
         "fp_page", "id", "player", "team", "ecr", "scrape_date")
-    return [row for row in frame.to_dicts() if _page(row["fp_page"])]
+    return [row for row in frame.to_dicts() if _page(row["fp_page"])]       # drops "ros-...-cheatsheets"
 
 
 def fp_crosswalk() -> dict[str, str]:
@@ -58,6 +65,20 @@ def fp_crosswalk() -> dict[str, str]:
 
     frame = nfl.load_ff_playerids().select(["fantasypros_id", "gsis_id"]).drop_nulls()
     return {str(fp): gsis for fp, gsis in frame.iter_rows()}
+
+
+def archive() -> tuple[list[dict], dict[str, str]]:
+    """(download(), fp_crosswalk()), fetched once until `clear_cache`: a multi-season prepare downloads once."""
+    global _archive
+    if _archive is None:
+        _archive = download(), fp_crosswalk()
+    return _archive
+
+
+def clear_cache() -> None:
+    """Frees the archive (a big list): call when a prepare run is over."""
+    global _archive
+    _archive = None
 
 
 def _sunday(day: date) -> date:
@@ -101,7 +122,8 @@ def expert_rows(season: int, raw: list[dict], matcher: SeasonMatcher, fp_to_gsis
                 week1_kickoff: date, last_game: date) -> list[dict]:
     """Rows for `replay_expert_ranks`, matched by FantasyPros id, then name (matcher.by_name), then team
     defense (matcher.defense). `week1_kickoff` is week 1's first game day. pos_rank counts every row of the
-    page, matched or not; a player listed twice in one snapshot keeps his better line."""
+    page, matched or not; a player listed twice in one snapshot keeps the line from his own position's page
+    (his pool position), else his better line."""
     out: list[dict] = []
     unmatched: list[str] = []
     for (kind, position, scraped), rows in sorted(_snapshots(season, raw, week1_kickoff, last_game).items()):
@@ -109,16 +131,19 @@ def expert_rows(season: int, raw: list[dict], matcher: SeasonMatcher, fp_to_gsis
         for pos_rank, row in enumerate(sorted(rows, key=lambda r: r["ecr"]), start=1):
             player_id = _player(row, position, matcher, fp_to_gsis)
             if player_id is None:
-                unmatched.append(f"{row.get('player')} ({position})")
+                unmatched.append(f"{row.get('player')!r} ({position})")
             elif player_id not in seen:
                 seen.add(player_id)
                 out.append({"season": season, "kind": kind, "scrape_date": scraped, "player_id": player_id,
                             "position": position, "pos_rank": pos_rank, "ecr": float(row["ecr"])})
-    # A player on two position pages in one snapshot (e.g. a QB/TE) keeps his better line: the table's key has no position.
+    # A player on two position pages in one snapshot (e.g. a QB/TE) is stored once: the table's key has no position.
+    def preference(row: dict) -> tuple[bool, int]:
+        return row["position"] != matcher.positions.get(row["player_id"]), row["pos_rank"]
+
     best: dict[tuple[str, str, int], dict] = {}
     for row in out:
         key = (row["kind"], row["scrape_date"], row["player_id"])
-        if key not in best or row["pos_rank"] < best[key]["pos_rank"]:
+        if key not in best or preference(row) < preference(best[key]):
             best[key] = row
     out = list(best.values())
     if unmatched:
@@ -194,7 +219,7 @@ def load_expert_ranks(session: Session, season: int, force: bool = False) -> dic
     if dates is None:
         return {"rows": stored, "errors": {"experts": "NoSchedule"}}
     try:
-        raw, crosswalk = download(), fp_crosswalk()
+        raw, crosswalk = archive()
     except Exception as exc:                            # nflreadpy raises a mix of HTTP and parsing errors
         log.warning("experts %s: download failed (%s)", season, type(exc).__name__)
         return {"rows": stored, "errors": {"experts": type(exc).__name__}}

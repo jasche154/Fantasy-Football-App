@@ -1,8 +1,8 @@
 """Replay League: the labeled trade set (tests/data/replay_trade_cases.json) on the committed season slices.
 
 Each case is put to a CPU in three drafted leagues (seeds) under every persona: a must_accept deal is
-accepted and a must_decline deal declined every time; an even deal only has to be judged without error (its
-accept rate is printed, run with -s to see it). `python -m services.replay_trade_eval` prints the same on the
+accepted and a must_decline deal declined every time; each even deal only has to be judged without error (its
+accept rate is printed, run with -s to see it), but pooled the even deals are accepted EVEN_RATE of the time. `python -m services.replay_trade_eval` prints the same on the
 real database with every score.
 """
 import pytest
@@ -11,6 +11,7 @@ from services import replay_trade_eval as te, replay_values as rv
 from tests import replay_fakes as fakes
 
 CASES = te.load_cases()
+EVEN_RATE = (0.10, 0.70)        # wide: even deals should split, not all go one way
 
 
 def test_the_set_is_balanced_and_well_formed():
@@ -45,3 +46,11 @@ def test_a_slice_rebuilds_the_same_values():
     before, after = (rv.knowledge(d, league, 6, 16) for d in (data, copy))
     top = [v for v in before.values[:60]]
     assert all(abs(after.by_id[v.player_id].chart - v.chart) <= 5 for v in top)
+
+
+def test_even_deals_split_between_accept_and_decline():
+    results = [r for case in CASES if case["label"] == "even"
+               for seed in te.SEEDS for r in te.judge(te.load_slice(case["season"]), case, seed)]
+
+    rate = sum(r.accepted for r in results) / len(results)
+    assert EVEN_RATE[0] <= rate <= EVEN_RATE[1], f"even deals accepted {rate:.0%}"

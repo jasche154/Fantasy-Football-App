@@ -7,7 +7,7 @@ each other.
 
 - `start_week`: CPU IR moves, CPU free agency, then CPU trades and a possible offer to the user, then every
   dropped player comes off waivers, the phase is "open" and each CPU covers any starting slot a trade left
-  it unable to fill (`replay_waiver_ai.cpu_cover`). A trade accepted in the open phase is covered at once; one
+  it unable to fill (`replay_cover.cpu_cover`). A trade accepted in the open phase is covered at once; one
   in the waivers phase waits for this, as every unrostered player is on waivers until then.
 - Trades are open through `trade_deadline_week` and its waiver phase (`replay_state.trades_open`): the
   deadline passes when the user presses "Sim to Wednesday" after the deadline week's games. A declined

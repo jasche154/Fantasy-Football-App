@@ -54,7 +54,7 @@ def add_expert_rows(session: Session, seasons: list[int]) -> None:
     missing = [s for s in seasons if s >= replay_experts.FIRST_SEASON and not replay_experts.stored_rows(session, s)]
     if not missing:
         return
-    raw, crosswalk = replay_experts.download(), replay_experts.fp_crosswalk()
+    raw, crosswalk = replay_experts.archive()
     for season in missing:
         dates = replay_experts._season_dates(session, season)
         rows = replay_experts.expert_rows(season, raw, SeasonMatcher(session, season), crosswalk, *dates) if dates else []

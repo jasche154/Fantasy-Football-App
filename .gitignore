@@ -12,3 +12,4 @@ backend/data/
 backend/database/backups/
 backend/.snapshot_key*
 backend/eval_runs/
+frontend/*.tsbuildinfo

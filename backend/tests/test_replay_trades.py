@@ -187,7 +187,16 @@ def test_hard_difficulty_needs_more_back_than_normal():
     normal_verdict, hard_verdict = judge(*deal), judge(*deal, settings=hard)
 
     assert normal_verdict.accepted and not hard_verdict.accepted
-    assert said(hard_verdict, "They want 8% more than they give.")
+    assert said(hard_verdict, "They want 11% more than they give.")              # 1.08 x the 3% margin
+
+
+def test_a_value_decline_names_the_margin_and_a_lineup_loss():
+    verdict = judge(RICH, [SCRUB], [P("RB", 2)])                         # a scrub for its starting back
+
+    assert said(verdict, "They want 3% more than they give.")
+    assert said(verdict, "It would weaken their starting lineup")
+    assert not said(judge(8, [RB14], [P("QB", 4)], settings=fakes.fake_settings(difficulty="hard")),
+                    "weaken their starting lineup")
 
 
 def test_asking_again_gives_the_same_verdict_and_a_declined_proposal_is_kept_once():
@@ -496,10 +505,8 @@ def test_verdicts_do_not_change_when_the_future_does(week):
 
 
 def test_on_the_real_chart_the_star_for_two_deal_is_declined():
-    """Needs replay_chart (W2): the fake season's own chart, not `charted`."""
+    """The fake season's own chart (replay_chart), not `charted`."""
     state, know = replace(fakes.drafted_state(), week=1), fakes.fake_knowledge(1)
-    if not any(v.chart for v in know.values):
-        pytest.skip("the chart is not built yet")
     best = max((know.by_id[pid] for pid in rs.team(state, NEEDS_RB).roster), key=lambda v: v.chart)
     mine = sorted((know.by_id[pid] for pid in rs.user_team(state).roster if know.by_id[pid].chart < best.chart),
                   key=lambda v: -v.chart)

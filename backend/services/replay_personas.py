@@ -8,7 +8,7 @@
 - steady: trusts draft day (0.35 x star x (pre_chart - chart)): won't sell a slumping star cheap.
 - gambler: chases hot streaks (0.5 x a positive form_chart) and pays more for the best player in a deal.
 - shark: the chart, but wants a SHARK_MARGIN edge; hunts buy-low stars and offers the user the most.
-Pure. See .plans/pr1-plan.md section D.
+Pure.
 """
 from collections.abc import Sequence
 

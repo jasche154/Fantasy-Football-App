@@ -1,9 +1,17 @@
 """Replay League trade chart: every player on one 0-1000 scale, rank-based (two good players can't add up
 to a star).
 
-A position rank becomes the ADP pick where that season's Nth player at the position went (`slot_curve`),
-and a pick becomes points on a convex curve (`pick_value`). Nothing depends on the weeks left: values move
-with injuries, form, expert ranks and a small bump once a player's bye is behind him.
+A position rank becomes the ADP pick where that season's Nth player at the position went (`slot_curve`;
+past the last drafted, PICKS_PAST_LAST picks per rank; fractional ranks interpolate), and a pick becomes
+points on a convex curve (`pick_value` = 1000 x exp(-(pick - 1) / TAU)), so stars carry a premium. Nothing
+depends on the weeks left: values move with injuries, form, expert ranks and a small bump once a player's
+bye is behind him.
+
+- pre_rank: overall order of preseason picks (the slot of his preseason expert rank, else his ADP);
+  star = clamp((STAR_TOP - pre_rank) / STAR_SPAN, 0, 1).
+- model_ppg: ros_ppg + k x (mean of his last <= FORM_GAMES real games - ros_ppg), k = n / FORM_GAMES x
+  FORM_WEIGHT, x (1 - FORM_STAR_DOWN x star) for a dip, x (1 + FORM_STAR_UP x star) for a rise while ros_ppg
+  is below his prior.
 
 - healthy_chart = w x value_at(expert rank) + (1 - w) x value_at(model rank), x BYE_BUMP once the bye is
   past. The model rank is his fractional position rank on `model_ppg` (ros_ppg moved toward his last real
@@ -13,9 +21,10 @@ with injuries, form, expert ranks and a small bump once a player's bye is behind
   out for the season; from his second week out only the model half is discounted, the experts already price
   it). Out without a report: healthy_chart x the OUT_SHARE availability replay_values gives him.
 
-Pure: no database, no Knowledge. See .plans/pr1-plan.md section C for the formula.
+Pure: no database, no Knowledge.
 """
 import math
+from bisect import bisect_left, bisect_right
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from functools import lru_cache
@@ -101,15 +110,19 @@ def star(pre_rank: int | None) -> float:
 
 
 def fractional_ranks(scores: Mapping[int, float]) -> dict[int, float]:
-    """{id: 1-based rank}, fractional by where his score sits between the players just above and below."""
-    order = sorted(scores, key=lambda pid: (-scores[pid], pid))
+    """{id: 1-based rank}. A lone score between two others sits between their ranks by where it falls between
+    their scores (evenly spaced scores get 1, 2, 3, ...); the top, the bottom and every tied score take the
+    first rank their score holds, however many share it."""
+    ascending = sorted(scores.values())
+    count = len(ascending)
     ranks: dict[int, float] = {}
-    for j, pid in enumerate(order):
-        if j == 0 or j == len(order) - 1:
-            ranks[pid] = float(j + 1)
+    for pid, mine in scores.items():
+        lower, higher = bisect_left(ascending, mine), count - bisect_right(ascending, mine)
+        if higher == 0 or lower == 0 or count - higher - lower > 1:
+            ranks[pid] = float(higher + 1)
             continue
-        above, mine, below = scores[order[j - 1]], scores[pid], scores[order[j + 1]]
-        ranks[pid] = j + ((above - mine) / (above - below) if above > below else 1.0)
+        above, below = ascending[count - higher], ascending[lower - 1]     # ranks `higher` and `higher + 2`
+        ranks[pid] = higher + 2 * (above - mine) / (above - below)
     return ranks
 
 

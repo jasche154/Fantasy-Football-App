@@ -353,7 +353,12 @@ def test_the_week_flow_follows_the_waiver_mode():
     assert [(s.label, s.week, s.state.phase) for s in wednesday.steps[2:5]] == [
         ("play", 1, "waivers"), ("wednesday", 2, "open"), ("play", 2, "waivers")]
     assert [(s.label, s.week, s.state.phase) for s in none.steps[2:4]] == [("play", 1, "open"), ("play", 2, "open")]
-    assert all(step.state.locked == () for run in (wednesday, none) for step in run.steps if step.state.phase == "open")
+    for run in (wednesday, none):       # locks clear as the week opens; only a cover drop after that locks anyone
+        for before, step in zip(run.steps, run.steps[1:]):
+            if step.state.phase == "open":
+                dropped = {e.player_ids[-1] for e in step.state.events[len(before.state.events):]
+                           if e.kind in ("add", "drop")}
+                assert set(step.state.locked) <= dropped, (step.label, step.week, step.state.locked)
 
 
 def test_the_user_can_answer_a_cpu_offer_until_it_no_longer_stands():

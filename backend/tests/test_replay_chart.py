@@ -71,12 +71,32 @@ def test_fewer_games_move_the_rate_less_and_only_the_last_three_count():
     assert chart.model_ppg(10.0, 10.0, (13, 13, 13, 100), 0.0) == pytest.approx(11.5)
 
 
-def test_fractional_ranks_sit_between_neighbours():
+def test_evenly_spaced_scores_get_whole_ranks():
+    assert chart.fractional_ranks({1: 4.0, 2: 3.0, 3: 2.0, 4: 1.0}) == {1: 1.0, 2: 2.0, 3: 3.0, 4: 4.0}
+
+
+def test_fractional_ranks_sit_between_the_neighbours_ranks():
     ranks = chart.fractional_ranks({1: 20.0, 2: 19.9, 3: 10.0, 4: 5.0})
 
     assert ranks[1] == 1.0 and ranks[4] == 4.0
-    assert 1.0 < ranks[2] < 1.1 and 2.0 < ranks[3] < 3.0
+    assert ranks[2] == pytest.approx(1 + 2 * 0.1 / 10.0)              # just below the top
+    assert ranks[3] == pytest.approx(2 + 2 * 9.9 / 14.9)              # between 19.9 (rank 2) and 5 (rank 4)
     assert chart.fractional_ranks({}) == {} and chart.fractional_ranks({9: 3.0}) == {9: 1.0}
+
+
+@pytest.mark.parametrize("tied", [2, 3, 5])
+def test_tied_scores_share_their_first_rank_whatever_the_group_size(tied):
+    scores = {0: 10.0, **{pid: 8.0 for pid in range(1, tied + 1)}, 99: 6.0}
+
+    ranks = chart.fractional_ranks(scores)
+    assert ranks[0] == 1.0 and {ranks[pid] for pid in range(1, tied + 1)} == {2.0} and ranks[99] == tied + 2
+    assert set(chart.fractional_ranks({pid: 7.0 for pid in range(tied)}).values()) == {1.0}
+
+
+def test_a_score_next_to_a_tie_sits_between_the_tie_and_its_other_neighbour():
+    ranks = chart.fractional_ranks({1: 10.0, 2: 10.0, 3: 8.0, 4: 6.0})
+
+    assert ranks[1] == ranks[2] == 1.0 and ranks[3] == pytest.approx(3.0) and ranks[4] == 4.0
 
 
 def test_expert_weight_halves_per_week_past_fresh():

@@ -186,6 +186,7 @@ class State(_Record):
     champion: int | None = None
     next_id: int = 1                          # the next Claim / Offer / Event id
     faab_spent: Mapping[int, int] = field(default_factory=dict, hash=False)   # team id -> FAAB dollars spent
+    counter_searched: Mapping[int, int] = field(default_factory=dict, hash=False)  # CPU id -> week it last looked
 
 
 # ---------------- JSON ----------------

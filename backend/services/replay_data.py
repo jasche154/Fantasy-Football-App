@@ -37,7 +37,7 @@ from integrations import adp_history, espn_history, sleeper_projections
 from integrations.adp_history import PAUSE_SECONDS, AdpEntry, HistoryClient, HistoryError, SeasonMatcher, name_key
 from integrations.espn_history import WeekProjection
 from integrations.weekly_sources import normalize_team
-from services import replay_pool, system_status
+from services import replay_experts, replay_pool, system_status
 from services.replay_experts import load_expert_ranks
 from services.replay_injuries import load_injuries
 
@@ -375,6 +375,7 @@ def _run_prepare(bind: Engine, season: int, force: bool) -> None:
                 session.rollback()
                 system_status.record(session, STATUS_KEY, _state(season, "failed", None, type(exc).__name__))
     finally:
+        replay_experts.clear_cache()
         _prepare_lock.release()
 
 
@@ -415,7 +416,7 @@ def main(argv: list[str] | None = None) -> None:
     logging.getLogger("alembic").setLevel(logging.WARNING)
     print(f"Database: {engine.url.render_as_string(hide_password=True)} (schema {ensure_schema(engine)})")
     failed = False
-    for season in parse_seasons(args.seasons):
+    for season in parse_seasons(args.seasons):              # one expert archive download serves every season
         with Session(engine) as session:
             try:
                 summary = prepare_season(session, season, force=args.force)
@@ -424,6 +425,7 @@ def main(argv: list[str] | None = None) -> None:
                 summary = {"season": season, "errors": {"prepare": type(exc).__name__}}
         print(json.dumps(summary, indent=1))
         failed = failed or bool(summary.get("errors"))
+    replay_experts.clear_cache()
     if failed:
         raise SystemExit(1)                         # so a script can tell an import went wrong
 
