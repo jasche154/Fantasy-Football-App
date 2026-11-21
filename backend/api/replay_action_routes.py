@@ -1,15 +1,15 @@
 """Replay League: what the user does in a game (draft, lineup, waivers, trades, moving time forward).
 
 Every route here answers {game: Summary, events: Event[], ...extras} (see services/replay_views.py) and
-runs under the game's lock (`replay_routes.turn`). A declined trade is a 200 with its verdict.
+runs under the replay lock (`replay_routes.turn`). A declined trade is a 200 with its verdict.
 """
 from typing import Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from api.replay_routes import errors, open_game, turn
+from api.replay_routes import GameId, errors, open_game, turn
 from database.db import get_session
 from services import replay_game as rg, replay_views as views, replay_views_league as league_views
 
@@ -23,6 +23,7 @@ Ids = Field(default_factory=list, max_length=MAX_LISTED)
 
 class PickBody(BaseModel):
     player_id: int = PlayerId
+    overall: int | None = Field(None, ge=1)         # draft: the pick the page shows on the clock, 409 when stale
 
 
 class LineupBody(BaseModel):
@@ -56,66 +57,67 @@ class RespondBody(BaseModel):
 
 
 @router.post("/draft/pick")
-def draft_pick(game_id: int, body: PickBody, session: Session = Depends(get_session)) -> dict:
+def draft_pick(game_id: GameId, body: PickBody, session: Session = Depends(get_session)) -> dict:
     """The user's pick; the CPUs then pick up to the user's next turn (`events` lists them)."""
-    with turn(session, game_id) as t:
+    with turn(session, game_id, overall=body.overall) as t:
         return t.done(rg.pick(*t.args, t.seed, body.player_id))
 
 
 @router.post("/draft/auto")
-def draft_auto(game_id: int, whole_draft: bool = False, session: Session = Depends(get_session)) -> dict:
-    """Auto-pick for the user: this pick, or with whole_draft=true every pick left."""
-    with turn(session, game_id) as t:
+def draft_auto(game_id: GameId, whole_draft: bool = False, overall: int | None = Query(None, ge=1),
+               session: Session = Depends(get_session)) -> dict:
+    """Auto-pick for the user: this pick, or with whole_draft=true every pick left. `overall`: see PickBody."""
+    with turn(session, game_id, overall=overall) as t:
         return t.done((rg.auto_draft if whole_draft else rg.auto_pick)(*t.args, t.seed))
 
 
 @router.post("/lineup")
-def set_lineup(game_id: int, body: LineupBody, session: Session = Depends(get_session)) -> dict:
+def set_lineup(game_id: GameId, body: LineupBody, session: Session = Depends(get_session)) -> dict:
     with turn(session, game_id) as t:
         state = rg.clear_lineup(t.state) if body.starters is None else rg.set_lineup(*t.args, body.starters)
         return t.done(state, team=views.team)
 
 
 @router.post("/claims")
-def submit_claim(game_id: int, body: ClaimBody, session: Session = Depends(get_session)) -> dict:
+def submit_claim(game_id: GameId, body: ClaimBody, session: Session = Depends(get_session)) -> dict:
     with turn(session, game_id) as t:
         return t.done(rg.submit_claim(*t.args, body.add, body.drop))
 
 
 @router.post("/claims/reorder")
-def reorder_claims(game_id: int, body: ReorderBody, session: Session = Depends(get_session)) -> dict:
+def reorder_claims(game_id: GameId, body: ReorderBody, session: Session = Depends(get_session)) -> dict:
     with turn(session, game_id) as t:
         return t.done(rg.reorder_claims(t.state, body.ids))
 
 
 @router.post("/claims/{claim_id}/cancel")
-def cancel_claim(game_id: int, claim_id: int, session: Session = Depends(get_session)) -> dict:
+def cancel_claim(game_id: GameId, claim_id: int, session: Session = Depends(get_session)) -> dict:
     with turn(session, game_id) as t:
         return t.done(rg.cancel_claim(t.state, claim_id))
 
 
 @router.post("/add-drop")
-def add_drop(game_id: int, body: ClaimBody, session: Session = Depends(get_session)) -> dict:
+def add_drop(game_id: GameId, body: ClaimBody, session: Session = Depends(get_session)) -> dict:
     """Add a free agent now (after the week's waiver run), dropping `drop` when the roster is full."""
     with turn(session, game_id) as t:
         return t.done(rg.add_drop(*t.args, body.add, body.drop))
 
 
 @router.post("/drop")
-def drop(game_id: int, body: PickBody, session: Session = Depends(get_session)) -> dict:
+def drop(game_id: GameId, body: PickBody, session: Session = Depends(get_session)) -> dict:
     with turn(session, game_id) as t:
         return t.done(rg.drop(*t.args, body.player_id))
 
 
 @router.post("/advance")
-def advance(game_id: int, body: AdvanceBody, session: Session = Depends(get_session)) -> dict:
+def advance(game_id: GameId, body: AdvanceBody, session: Session = Depends(get_session)) -> dict:
     """Move time forward: "wednesday" runs the waivers, "play" scores the week."""
     with turn(session, game_id, week=body.week) as t:
         return t.done(rg.advance(*t.args, t.seed, body.step), step=body.step, week=body.week)
 
 
 @router.post("/trades/evaluate")
-def evaluate_trade(game_id: int, body: TradeBody, session: Session = Depends(get_session)) -> dict:
+def evaluate_trade(game_id: GameId, body: TradeBody, session: Session = Depends(get_session)) -> dict:
     """Would that CPU take it? Changes nothing."""
     with errors():
         game = open_game(session, game_id)
@@ -125,7 +127,7 @@ def evaluate_trade(game_id: int, body: TradeBody, session: Session = Depends(get
 
 
 @router.post("/trades/propose")
-def propose_trade(game_id: int, body: TradeBody, session: Session = Depends(get_session)) -> dict:
+def propose_trade(game_id: GameId, body: TradeBody, session: Session = Depends(get_session)) -> dict:
     """Offer a CPU a trade: carried out at once when it accepts, otherwise the verdict says why not."""
     with turn(session, game_id) as t:
         state, found = rg.propose_trade(*t.args, body.to_team, body.give, body.get, body.drops)
@@ -133,7 +135,7 @@ def propose_trade(game_id: int, body: TradeBody, session: Session = Depends(get_
 
 
 @router.post("/trades/offers/{offer_id}/respond")
-def respond_offer(game_id: int, offer_id: int, body: RespondBody, session: Session = Depends(get_session)) -> dict:
+def respond_offer(game_id: GameId, offer_id: int, body: RespondBody, session: Session = Depends(get_session)) -> dict:
     """Accept or decline a CPU's offer. One that no longer stands is saved as expired and answered with
     expired=true and the reason."""
     with turn(session, game_id) as t:

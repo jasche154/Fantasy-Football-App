@@ -5,18 +5,19 @@
 - MyFantasyLeague (MFL): real-draft ADP after August 15, about 300 deep. It supplies the long tail and the
   kickers and defenses FFC lacks, and its ids map to gsis ids through the DynastyProcess crosswalk.
 
-Both report a player's team and bye as of today or the end of that season, which is hindsight, so only a
-defense's team is kept. Also home of what the history imports share: HistoryClient (the polite fetcher)
+Both report a player's team as of today or the end of that season, which is hindsight for anyone who moved.
+The team is kept for every player (a defense is matched by it; replay_pool uses it only for a drafted player
+who never plays) and is not validated here (MFL says 'FA'). Malformed rows are skipped. Also home of what the history imports share: HistoryClient (the polite fetcher)
 and SeasonMatcher (a site's player -> players.id for a past season).
 """
 import logging
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from database.models import KickerGame, Player, PlayerStatsWeekly
@@ -79,7 +80,7 @@ class AdpEntry:
     position: str                 # QB, RB, WR, TE, K, DST
     adp: float
     stdev: float | None = None
-    team: str | None = None       # defenses only (nflverse code)
+    team: str | None = None       # the site's team code, normalized; end-of-season (hindsight), unvalidated
     mfl_id: str | None = None
     espn_id: str | None = None
 
@@ -96,17 +97,35 @@ def team_code(code: str | None) -> str | None:
     return normalize_team(MFL_TEAMS.get(upper, upper))
 
 
+def parse_rows(label: str, rows: Iterable[Any], convert: Callable[[Any], Any]) -> list:
+    """convert() each row, dropping None results and rows too malformed to read (one warning, no content)."""
+    out, skipped = [], 0
+    for row in rows:
+        try:
+            item = convert(row)
+        except (AttributeError, KeyError, TypeError, ValueError):
+            skipped += 1
+            continue
+        if item is not None:
+            out.append(item)
+    if skipped:
+        log.warning("%s: skipped %d malformed rows", label, skipped)
+    return out
+
+
+def _ffc_entry(row: dict) -> AdpEntry | None:
+    position, adp = POSITIONS.get(str(row.get("position") or "").upper()), _number(row.get("adp"))
+    if position is None or adp is None or not row.get("name"):
+        return None
+    return AdpEntry(FFC, str(row["name"]), position, adp, _number(row.get("stdev")), team_code(row.get("team")))
+
+
 def parse_ffc(payload: Any) -> list[AdpEntry]:
     """FFC answers HTTP 200 with status "Error", or "Success" with no players, when it has no data."""
-    if not isinstance(payload, dict) or payload.get("status") != "Success" or not payload.get("players"):
+    ok = isinstance(payload, dict) and payload.get("status") == "Success" and isinstance(payload.get("players"), list)
+    entries = parse_rows("Fantasy Football Calculator ADP", payload["players"], _ffc_entry) if ok else []
+    if not entries:                     # an empty list too: a forced load would replace the season with MFL alone
         raise HistoryError("Fantasy Football Calculator has no ADP for that season.")
-    entries = []
-    for row in payload["players"]:
-        position, adp = POSITIONS.get(str(row.get("position") or "").upper()), _number(row.get("adp"))
-        if position is None or adp is None or not row.get("name"):
-            continue
-        entries.append(AdpEntry(FFC, str(row["name"]), position, adp, _number(row.get("stdev")),
-                                team_code(row.get("team")) if position == "DST" else None))
     return sorted(entries, key=lambda e: e.adp)
 
 
@@ -125,19 +144,19 @@ def parse_mfl(adp_payload: Any, players_payload: Any) -> list[AdpEntry]:
     """Join MFL's ADP ids to that season's player file; defensive players (LB, DT, ...) are dropped."""
     try:
         picks = adp_payload["adp"]["player"]
-        details = {str(p["id"]): p for p in players_payload["players"]["player"]}
+        details = {str(p["id"]): p for p in players_payload["players"]["player"] if isinstance(p, dict) and "id" in p}
     except (KeyError, TypeError) as exc:
         raise HistoryError("MyFantasyLeague returned an unexpected response.") from exc
-    entries = []
-    for pick in picks if isinstance(picks, list) else []:
+
+    def entry(pick: dict) -> AdpEntry | None:
         player = details.get(str(pick.get("id"))) or {}
         position, adp = POSITIONS.get(str(player.get("position") or "").upper()), _number(pick.get("averagePick"))
         if position is None or adp is None or not player.get("name"):
-            continue
-        entries.append(AdpEntry(MFL, _first_last(str(player["name"])), position, adp,
-                                team=team_code(player.get("team")) if position == "DST" else None,
-                                mfl_id=str(pick["id"]),
-                                espn_id=str(player["espn_id"]) if player.get("espn_id") else None))
+            return None
+        return AdpEntry(MFL, _first_last(str(player["name"])), position, adp, team=team_code(player.get("team")),
+                        mfl_id=str(pick["id"]), espn_id=str(player["espn_id"]) if player.get("espn_id") else None)
+
+    entries = parse_rows("MyFantasyLeague ADP", picks if isinstance(picks, list) else [], entry)
     if not entries:
         raise HistoryError("MyFantasyLeague has no ADP for that season.")
     return sorted(entries, key=lambda e: e.adp)
@@ -156,6 +175,10 @@ ALIASES = {"hollywood brown": "marquise brown", "joshua palmer": "josh palmer", 
            "kenneth gainwell": "kenny gainwell", "chigoziem okonkwo": "chig okonkwo",
            "michael badgley": "mike badgley"}
 FANTASY_POSITIONS = ("QB", "RB", "WR", "TE", "K", "DST")
+# Two-way players nflverse files under their defensive position: gsis id -> the position fantasy sites draft
+# and project them at. Everyone else stored under another position (real defenders) stays unmatched.
+# shortcut: a hand-kept list (one such player in 2018-2025); store the site's position with the ADP if it grows.
+TWO_WAY = {"00-0040718": "WR"}          # Travis Hunter, stored as CB
 
 
 def name_key(name: str) -> str:
@@ -169,12 +192,13 @@ class SeasonMatcher:
     FFC has no usable ids and every site lists a few players under ids the crosswalk lacks, so names are
     matched among the six fantasy positions, preferring players who played that season: old seasons
     bring namesakes (two Mike Williams, two Adrian Petersons) that today's rosters do not have.
+    A TWO_WAY player counts as his fantasy position; nobody else stored under another position is known.
     """
 
     def __init__(self, session: Session, season: int):
         rows = session.execute(select(Player.id, Player.full_name, Player.position, Player.nfl_team, Player.gsis_id,
                                       Player.espn_player_id, Player.sleeper_player_id)
-                               .where(Player.position.in_(FANTASY_POSITIONS))).all()
+                               .where(or_(Player.position.in_(FANTASY_POSITIONS), Player.gsis_id.in_(TWO_WAY)))).all()
         played = set(session.scalars(select(PlayerStatsWeekly.player_id).where(
             PlayerStatsWeekly.season == season).distinct()))
         played |= set(session.scalars(select(KickerGame.player_id).where(KickerGame.season == season).distinct()))
@@ -185,7 +209,8 @@ class SeasonMatcher:
         self._names: dict[str, list[tuple[int, str, bool]]] = {}       # name -> (player id, position, played)
         for r in rows:
             if r.position != "DST":
-                self._names.setdefault(normalize_name(r.full_name), []).append((r.id, r.position, r.id in played))
+                position = TWO_WAY.get(r.gsis_id, r.position)
+                self._names.setdefault(normalize_name(r.full_name), []).append((r.id, position, r.id in played))
 
     def defense(self, team: str | None) -> int | None:
         return self._defenses.get(normalize_team(team) or "")

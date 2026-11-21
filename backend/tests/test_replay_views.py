@@ -131,6 +131,7 @@ def test_summary_follows_the_game_from_the_draft_to_the_champion():
     assert (draft["phase"], draft["on_the_clock"], draft["matchup"]) == ("draft", USER, None)
     assert [s["next_action"]["step"] for s in (draft, waivers, open_, done)] == ["pick", "wednesday", "play", "done"]
     assert open_["next_action"]["label"] == "Play week 3" and open_["week"] == 3
+    assert waivers["next_action"] == {"step": "wednesday", "label": "Sim to Wednesday"}
     assert set(open_["matchup"]) == {"week", "playoff", "label", "you", "opponent"}
     assert set(open_["matchup"]["you"]) == SIDE and open_["matchup"]["you"]["team_id"] == USER
     assert open_["matchup"]["you"]["points"] is None and open_["matchup"]["you"]["projected"] > 50
@@ -153,7 +154,7 @@ def test_draft_board_lists_who_is_left_in_adp_order_with_filters_and_paging():
     assert set(board) >= PAGE | {"phase", "on_the_clock", "is_user_turn", "round", "overall", "rounds",
                                  "total_picks", "order", "picks", "roster"}
     assert adps == sorted(adps) and board["is_user_turn"] and (board["round"], board["overall"]) == (1, USER)
-    assert board["total"] == len(DATA.players) - len(board["picks"]) and len(board["picks"]) == USER - 1
+    assert board["total"] == len(DATA.as_of(0).players) - len(board["picks"]) and len(board["picks"]) == USER - 1
     assert set(board["results"][0]) == {"player", "adp", "pos_rank", "rank", "projection"}
     assert {row["player"]["position"] for row in backs["results"]} == {"RB"}
     assert {row["player"]["position"] for row in flex["results"]} == {"RB", "WR", "TE"}
@@ -301,7 +302,8 @@ def test_activity_is_newest_first_and_filters_by_kind():
     ids = [event["id"] for event in everything["results"]]
     assert set(everything) == PAGE and ids == sorted(ids, reverse=True) and everything["total"] == len(at(6).events)
     assert set(everything["results"][0]) == {"id", "week", "kind", "team", "text", "players"}
-    assert {event["kind"] for event in moves["results"]} == {"add", "drop"} and moves["total"] > 10
+    kinds = {event["kind"] for event in moves["results"]}
+    assert "add" in kinds and kinds <= {"add", "drop"} and moves["total"] > 5    # an add-with-drop is one "add"
     assert all(event["players"] and event["team"] for event in moves["results"])
     assert (paged["total"], len(paged["results"])) == (180, 7)
     assert paged["results"][0]["id"] == league.activity(shown, kind="draft", limit=4)["results"][3]["id"]
@@ -330,7 +332,8 @@ def test_players_default_to_the_available_ones_best_value_first():
 
     rostered = rs.rostered(state)
     assert set(wire) == PAGE | {"week"} and set(wire["results"][0]) == WIRE_ROW
-    assert wire["total"] == len(DATA.players) - 180 and everyone["total"] == len(DATA.players)
+    known = len(DATA.as_of(6).players)                     # the pool as known in week 6, not the whole season's
+    assert wire["total"] == known - 180 and everyone["total"] == known < len(DATA.players)
     assert all(row["status"] == "waivers" and row["owner"] is None for row in wire["results"])
     assert not {row["player"]["id"] for row in wire["results"]} & rostered
     assert [row["rank"] for row in wire["results"]] == sorted(row["rank"] for row in wire["results"])

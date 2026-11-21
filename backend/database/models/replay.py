@@ -35,6 +35,9 @@ class ReplayAdp(Base):
     adp: Mapped[float]
     stdev: Mapped[float | None]
     source: Mapped[str]                        # "ffc" or "mfl"
+    # The ADP source's team code. End-of-season, so hindsight for anyone who moved: replay_pool uses it
+    # only for a drafted player who never plays.
+    team: Mapped[str | None]
 
 
 class ReplayProjection(Base):

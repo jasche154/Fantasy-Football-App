@@ -31,10 +31,10 @@ def middling_roster(know: rv.Knowledge) -> list[rv.ReplayValue]:
 
 # ---------------- the shape of Knowledge ----------------
 
-def test_knowledge_covers_the_whole_pool_ranked_best_first():
+def test_knowledge_covers_the_pool_known_that_week_ranked_best_first():
     data, know = fakes.fake_season(), know_at(5)
 
-    assert len(know.values) == len(data.players) == len(know.by_id)
+    assert len(know.values) == len(data.as_of(5).players) == len(know.by_id) < len(data.players)
     assert [v.rank for v in know.values] == list(range(1, len(know.values) + 1))
     assert all(a.trade_value >= b.trade_value for a, b in zip(know.values, know.values[1:]))
     assert all(know.by_id[v.player_id] is v for v in know.values)
@@ -61,7 +61,7 @@ def test_kickers_and_defenses_have_no_trade_value_but_still_project():
     specials = [v for v in know.values if v.position in ("K", "DST")]
     kickers = sorted((v for v in specials if v.position == "K"), key=lambda v: int(v.pos_rank[1:]))
 
-    assert len(specials) == 66
+    assert len(specials) == 66 - len(fakes.KICKER_CHANGES)          # the replacement kickers are not known yet
     assert all(v.trade_value == 0.0 and v.vorp_per_game == 0.0 and v.healthy_value == 0.0 for v in specials)
     assert sum(v.ros_ppg > 5 for v in specials) >= 60 and sum(v.projection > 0 for v in specials) >= 60
     assert all(a.ros_ppg >= b.ros_ppg for a, b in zip(kickers, kickers[1:]))       # ranked by rate within position
@@ -143,10 +143,9 @@ def test_week_one_values_still_track_adp_within_a_position(position):
 def test_an_undrafted_player_starts_from_his_own_week_one_projection():
     data, know = fakes.fake_season(), know_at(0)
     undrafted = next(v for v in know.values if v.adp is None and v.position == "WR")
-    new_kicker = know.by_id[fakes.player_id("K", fakes.KICKER_CHANGES[0][1])]
 
     assert undrafted.ros_ppg == data.projection(undrafted.player_id, 1) > 0
-    assert (new_kicker.ros_ppg, new_kicker.projection, new_kicker.availability) == (0.0, 0.0, 1.0)
+    assert fakes.player_id("K", fakes.KICKER_CHANGES[0][1]) not in know.by_id      # nobody has heard of him yet
 
 
 def test_rest_of_season_rate_weights_the_last_four_projections_newest_first():
@@ -243,10 +242,13 @@ def test_a_drafted_player_who_never_plays_is_out_from_week_one_and_fades():
 
     assert values[0].availability == 1.0 and not values[0].out          # draft day: nobody knows yet
     assert [values[w].availability for w in (1, 3, 6, 16)] == [0.55, 0.4, 0.1, 0.1]
-    assert all(values[w].out and values[w].team is None and values[w].projection == 0.0 for w in (1, 3, 6, 16))
+    team = fakes.fake_season().players[fakes.NEVER_PLAYED_ID].adp_team      # the only team anyone knows for him
+    assert team and all(values[w].out and values[w].team == team and values[w].projection == 0.0
+                        for w in (1, 3, 6, 16))
     assert values[0].trade_value > values[1].trade_value > values[3].trade_value > values[6].trade_value > 0
     assert len({values[w].ros_ppg for w in values}) == 1                # only ever his ADP prior
-    assert all(rv.projector(know_at(6)).points(values[6], w) == 0.0 for w in range(6, 17))
+    ahead = [rv.projector(know_at(6)).points(values[6], w) for w in range(6, 17)]
+    assert ahead[:-1] == [0.0] * 10 and ahead[-1] > 0       # like any long absence: back for the last of his games
 
 
 def test_a_bye_week_is_not_an_absence():
@@ -289,8 +291,8 @@ def test_a_replaced_kicker_becomes_unavailable_and_his_replacement_appears():
 
     before, after = know_at(first_week - 1), know_at(first_week + 4)
 
-    assert before.by_id[old_id].availability == 1.0 and before.by_id[new_id].ros_ppg == 0.0
-    assert before.by_id[new_id].expected_missed == 0.0                  # never projected: nobody is waiting on him
+    assert before.by_id[old_id].availability == 1.0 and new_id not in before.by_id      # not in the pool yet
+    assert know_at(first_week).by_id[new_id].expected_missed == 0.0     # his first week: nobody was waiting on him
     assert after.by_id[old_id].out and 0 < after.by_id[old_id].availability <= 0.35
     assert after.by_id[old_id].projection == 0.0
     assert after.by_id[new_id].ros_ppg > 4.5 and after.by_id[new_id].projection > 0     # four projections in
@@ -477,19 +479,15 @@ def test_market_value_is_the_trade_value_for_a_starter_and_a_floor_for_the_rest(
 
 
 @pytest.mark.parametrize("position", ["K", "DST"])
-def test_kickers_and_defenses_are_worth_little_but_never_nothing(position):
-    know, teams = know_at(6), fakes.fake_settings().teams
-    ranked = sorted((v for v in know.values if v.position == position), key=lambda v: -v.ros_ppg)
-    best, streamer = ranked[0], ranked[teams]
-    floors = {v.player_id: round(trade.FAIR_POINTS_PER_WEEK * v.games_left, 1) for v in ranked}
-    healthy = [v for v in ranked if not v.out]
+def test_kickers_and_defenses_are_worth_a_roster_spot_and_no_more(position):
+    # an elite unit counts for no more than a waiver one: else a free-agent unit buys skill value
+    for week in (1, 6, 12):
+        know = know_at(week)
+        ranked = sorted((v for v in know.values if v.position == position), key=lambda v: -v.ros_ppg)
 
-    assert best.market_value == pytest.approx(
-        floors[best.player_id] + (best.ros_ppg - streamer.ros_ppg) * best.games_left, abs=0.06)
-    assert floors[best.player_id] < best.market_value < 40              # a fraction of a skill starter
-    assert all(v.market_value == floors[v.player_id] for v in ranked[teams:])       # waiver level: the floor
-    assert all(a.market_value >= b.market_value - 1.0 for a, b in zip(healthy, healthy[1:]))    # byes differ by 0.4
-    assert best.market_value < roster_of(know, "RB24")[0].market_value
+        assert ranked[0].ros_ppg > ranked[-1].ros_ppg
+        assert all(v.market_value == round(trade.FAIR_POINTS_PER_WEEK * v.games_left, 1) > 0 for v in ranked)
+        assert all(v.trade_value == 0.0 for v in ranked)
 
 
 def test_market_floor_shrinks_with_the_games_left():

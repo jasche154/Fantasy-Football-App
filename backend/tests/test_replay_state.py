@@ -290,6 +290,15 @@ def test_release_takes_a_player_off_the_roster_and_puts_him_on_waivers():
     assert after.teams[1:] == state.teams[1:] and after.claims == state.claims
 
 
+def test_release_without_logging_still_puts_him_on_waivers():
+    state = make_state()
+
+    after = rs.release(state, Settings(season=2021), 1, 12, log=False)
+
+    assert rs.team(after, 1).roster == (11, 13) and after.locked == (77, 78, 12)
+    assert after.events == state.events and after.next_id == state.next_id
+
+
 def test_release_works_for_cpu_teams_without_a_name_and_never_locks_twice():
     state = make_state(locked=(21, 77))
 

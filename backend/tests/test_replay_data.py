@@ -10,7 +10,8 @@ from sqlalchemy.orm import Session
 from database.models import KickerGame, NflGame, Player, PlayerStatsWeekly, ReplayAdp, ReplayProjection, TeamGameStats
 from integrations import adp_history, espn_history, sleeper_projections
 from integrations.adp_history import AdpEntry, HistoryClient, HistoryError, SeasonMatcher
-from services import replay_data
+from services import replay_data, replay_pool
+from tests import replay_fakes as fakes
 
 SEASON = 2019
 
@@ -149,12 +150,13 @@ def adp_by_gsis(session: Session) -> dict[str, tuple[float, str]]:
 
 # --- site payloads -------------------------------------------------------------------------------------------
 
-def test_ffc_players_are_sorted_by_adp_with_kickers_and_defenses_renamed_and_hindsight_teams_dropped():
+def test_ffc_players_are_sorted_by_adp_with_kickers_and_defenses_renamed_and_every_team_kept():
     entries = adp_history.parse_ffc(FFC_PAYLOAD)
 
     assert [e.name for e in entries] == ["Christian McCaffrey", "Mike Williams", "LA Rams Defense",
                                          "Michael Badgley", "Nobody Unknown"]
-    assert [(e.position, e.team) for e in entries[:4]] == [("RB", None), ("WR", None), ("DST", "LA"), ("K", None)]
+    assert [(e.position, e.team) for e in entries] == [("RB", "SF"), ("WR", "LAC"), ("DST", "LA"), ("K", "LAC"),
+                                                       ("WR", "FA")]
     assert (entries[0].adp, entries[0].stdev, entries[0].source) == (1.5, 0.5, "ffc")
 
 
@@ -171,7 +173,7 @@ def test_mfl_adp_is_joined_to_names_and_defensive_players_are_dropped():
     assert [(e.name, e.position, e.mfl_id) for e in entries] == [
         ("Christian McCaffrey", "RB", "100"), ("Rookie Hurt", "RB", "200"), ("Oakland Raiders", "DST", "0501"),
         ("Greg Zuerlein", "K", "400")]
-    assert entries[2].team == "LV" and entries[3].espn_id == "14993"
+    assert [e.team for e in entries] == ["CAR", "FA", "LV", "LA"] and entries[3].espn_id == "14993"
 
 
 def test_mfl_unexpected_response_raises_a_history_error():
@@ -278,6 +280,43 @@ def test_name_match_uses_aliases_ignores_suffixes_and_tolerates_a_different_posi
     assert matcher.by_name("Nobody Unknown", "WR") is None
 
 
+def test_a_two_way_player_filed_as_a_defender_is_matched_and_real_defenders_are_not(db, monkeypatch):
+    monkeypatch.setitem(adp_history.TWO_WAY, "00-2WAY", "WR")
+    db.add_all([Player(gsis_id="00-2WAY", full_name="Two Way", position="CB", espn_player_id="901",
+                       sleeper_player_id="902"),
+                Player(gsis_id="00-LB", full_name="Luke Kuechly", position="LB", espn_player_id="777",
+                       sleeper_player_id="778")])
+    db.commit()
+
+    matcher = SeasonMatcher(db, SEASON)
+
+    two_way = player_id(db, "00-2WAY")
+    assert matcher.by_gsis["00-2WAY"] == matcher.by_espn["901"] == matcher.by_sleeper["902"] == two_way
+    assert matcher.by_name("Two Way", "WR") == two_way
+    assert "00-LB" not in matcher.by_gsis and "777" not in matcher.by_espn and "778" not in matcher.by_sleeper
+    assert matcher.by_name("Luke Kuechly", "LB") is None
+
+
+def test_a_two_way_player_is_in_the_pool_at_his_fantasy_position_with_his_games(engine, monkeypatch):
+    data = fakes.fake_season()
+    two_way, defender = fakes.BUST_ID, fakes.player_id("WR", 5)
+    with Session(engine) as session:
+        fakes.seed_db(session, data)
+        for pid in (two_way, defender):
+            session.get(Player, pid).position = "CB"          # how nflverse files a cornerback who also catches
+        session.commit()
+        monkeypatch.setitem(adp_history.TWO_WAY, session.get(Player, two_way).gsis_id, "WR")
+
+        loaded = replay_pool.load_season_data(session, data.season, data.scoring)
+
+    assert loaded.players[two_way] == data.players[two_way] and loaded.players[two_way].position == "WR"
+    for table in ("actual", "projected"):
+        mine = {key: value for key, value in getattr(data, table).items() if key[0] == two_way}
+        assert mine and {key: value for key, value in getattr(loaded, table).items() if key[0] == two_way} == mine
+    assert loaded.team_by_week[two_way] == data.team_by_week[two_way]
+    assert defender not in loaded.players and len(loaded.players) == len(data.players) - 1
+
+
 def test_defenses_match_by_team_code_including_old_codes(db):
     matcher = SeasonMatcher(db, SEASON)
 
@@ -325,6 +364,9 @@ def test_adp_is_stored_from_ffc_first_then_mfl_matching_ids_names_kickers_and_de
     assert summary["ffc_matched"] == "4/5" and summary["mfl_matched"] == "4/4"
     assert summary["unmatched"] == ["Nobody Unknown (WR, ffc 160.0)"]
     assert summary["players_created"] == 1                # the drafted rookie who never played
+    teams = dict(db.execute(select(Player.gsis_id, ReplayAdp.team).join(ReplayAdp, ReplayAdp.player_id == Player.id)).all())
+    assert teams == {"00-CMC": "SF", "00-MW1": "LAC", "DST-LA": "LA", "00-BADG": "LAC", "00-HURT": "FA",
+                     "DST-LV": "LV", "00-ZUER": "LA"}
 
 
 def test_adp_import_is_idempotent_and_force_fetches_again(db):
@@ -420,7 +462,8 @@ def test_game_results_load_only_what_is_missing_and_never_the_depth_charts(db, l
     first = replay_data.load_game_results(db, 2018)
     second = replay_data.load_game_results(db, 2018)
 
-    assert loaders == ["stats", "crosswalk", "schedules", "advanced"]          # the second run loaded nothing
+    # the second run loaded nothing; the id sync runs every time
+    assert loaders == ["stats", "crosswalk", "schedules", "advanced", "crosswalk"]
     assert first["games_renamed"] == 1 and first["nfl_games"] == 1 and second["loaded"] == []
     assert db.scalar(select(NflGame.away_team).where(NflGame.season == 2018)) == "LV"
 
@@ -443,13 +486,13 @@ def test_prepare_season_runs_every_step_and_a_second_run_makes_no_requests(db, l
     summary = replay_data.prepare_season(db, SEASON, http=sites.client(), on_step=steps.append)
     again = replay_data.prepare_season(db, SEASON, http=sites.client())
 
-    assert steps == ["game_results", "adp", "projections"] and loaders == []
+    assert steps == ["game_results", "adp", "projections"] and loaders == ["crosswalk", "crosswalk"]
     assert summary["errors"] == {} and summary["requests"] == 7 and summary["defenses"] == 32
     assert summary["adp"]["rows"] == 7 and summary["projections"]["weeks"] == 2
     assert again["requests"] == 0 and again["adp"] == {"rows": 7, "skipped": True}
 
 
-def test_prepare_season_reports_a_missing_ffc_season_by_error_type_and_still_loads_projections(db):
+def test_prepare_season_reports_a_missing_ffc_season_by_error_type_and_still_loads_projections(db, loaders):
     for week in (1, 2):
         db.add(team_game(SEASON, week))
     db.commit()

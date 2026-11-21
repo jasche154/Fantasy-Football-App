@@ -119,14 +119,15 @@ def test_fake_season_scripted_stories():
     assert data.on_bye(star.player_id, 12)
 
 
-def test_a_drafted_player_who_never_plays_is_in_the_pool_without_a_team():
+def test_a_drafted_player_who_never_plays_is_in_the_pool_on_his_adp_team():
     data = fakes.fake_season()
     ghost = data.players[fakes.NEVER_PLAYED_ID]
 
-    assert ghost.adp < 100 and ghost.position == "WR"
+    assert ghost.adp < 100 and ghost.position == "WR" and ghost.adp_team in fakes.TEAMS
     assert not any(pid == ghost.player_id for pid, _ in (*data.actual, *data.projected))
-    assert fakes.NEVER_PLAYED_ID not in data.team_by_week and data.team_at(ghost.player_id, 9) is None
-    assert not any(data.on_bye(ghost.player_id, week) for week in WEEKS)        # out, never "on bye"
+    assert fakes.NEVER_PLAYED_ID not in data.team_by_week and data.team_at(ghost.player_id, 9) == ghost.adp_team
+    assert [week for week in WEEKS if data.on_bye(ghost.player_id, week)] == [
+        week for week in WEEKS if data.schedule.opponent(ghost.adp_team, week) is None]
 
 
 def test_fake_schedule_has_game_rows_the_lineup_engine_can_count():
@@ -188,9 +189,11 @@ def test_as_of_keeps_only_what_was_known_before_the_week(week):
     assert dict(known.projected) == {key: v for key, v in data.projected.items() if key[1] <= max(1, week)}
     assert all(games == tuple(g for g in data.team_by_week[pid] if g[0] < week) or games == data.team_by_week[pid][:1]
                for pid, games in known.team_by_week.items())
-    assert set(known.team_by_week) == set(data.team_by_week)
+    assert set(known.team_by_week) == set(data.team_by_week) & set(known.players)
     assert (known.known_before, data.known_before) == (week, None)
-    assert known.players is data.players and known.schedule is data.schedule and known.last_week == data.last_week
+    assert known.players == {pid: p for pid, p in data.players.items()
+                             if p.adp is not None or pid in {k[0] for k in (*known.actual, *known.projected)}}
+    assert known.schedule is data.schedule and known.last_week == data.last_week
 
 
 @pytest.mark.parametrize("week", [0, 1, 6, 12])
@@ -198,7 +201,7 @@ def test_as_of_answers_every_point_in_time_question_like_the_full_season(week):
     data = fakes.fake_season()
     known = data.as_of(week)
 
-    for pid in data.players:
+    for pid in known.players:                   # the pool known then; later arrivals are tested elsewhere
         for w in range(0, week + 1):
             assert known.team_at(pid, w) == data.team_at(pid, w) and known.on_bye(pid, w) == data.on_bye(pid, w)
         assert known.projection(pid, week) == data.projection(pid, week)
@@ -434,15 +437,17 @@ def test_a_missing_defense_player_makes_the_season_not_ready(small_db):
         replay_pool.load_season_data(small_db, fakes.SEASON, "half")
 
 
-@pytest.mark.parametrize("weeks, ready", [(10, False), (15, False), (16, True)])
-def test_a_season_needs_sixteen_weeks_of_projections(small_db, weeks, ready):
-    small_db.execute(delete(ReplayProjection).where(ReplayProjection.week > weeks))
+@pytest.mark.parametrize("missing", [(), (17,), (11,), (1,)])
+def test_a_season_needs_projections_for_every_regular_season_week(small_db, missing):
+    small_db.execute(delete(ReplayProjection).where(ReplayProjection.week.in_(missing)))
     small_db.commit()
 
     status = replay_pool.readiness(small_db, fakes.SEASON)
 
-    assert status["projection_weeks"] == weeks and status["ready"] is ready
-    assert replay_pool.ready_seasons(small_db) == ([fakes.SEASON] if ready else [])
+    assert status["projection_weeks"] == 17 - len(missing)
+    assert status["ready"] is (not missing)                  # one hole zeroes every player that week
+    assert replay_pool.ready_seasons(small_db) == ([] if missing else [fakes.SEASON])
+    assert not hasattr(replay_pool, "MIN_PROJECTION_WEEKS")
 
 
 @pytest.mark.parametrize("kept, ready", [(179, False), (180, True)])

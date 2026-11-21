@@ -55,7 +55,8 @@ INJURED_STAR_ID = player_id("RB", 3)    # out (no projection, no game) in INJURE
 INJURED_WEEKS = (6, 7, 8, 9)
 TRADED_ID = player_id("WR", 21)         # changes NFL team: his first game for the new one is TRADED_WEEK
 TRADED_WEEK = 9
-NEVER_PLAYED_ID = player_id("WR", 30)   # drafted mid-round on his ADP; no game and no projection all season
+NEVER_PLAYED_ID = player_id("WR", 30)   # drafted mid-round on his ADP; no game and no projection all season;
+                                        # his team is the one stored with his ADP (PoolPlayer.adp_team)
 EVERY_WEEK = tuple(range(1, 19))
 STORY_IDS = frozenset({BREAKOUT_ID, BUST_ID, INJURED_STAR_ID, TRADED_ID, NEVER_PLAYED_ID})
 KICKER_CHANGES = ((31, 33, 9), (32, 34, 11))     # (starter rank, replacement rank, replacement's first week)
@@ -207,7 +208,8 @@ def _season(season: int, scoring: str, seed: int, weeks: int) -> SeasonData:
         games = _games(spec, schedule, weeks, missed[row])
         if not games and spec.player_id not in adp:
             continue                                          # never seen: not in the pool
-        players[spec.player_id] = PoolPlayer(spec.player_id, spec.name, spec.position, *adp.get(spec.player_id, ()))
+        players[spec.player_id] = PoolPlayer(spec.player_id, spec.name, spec.position, *adp.get(spec.player_id, ()),
+                                             adp_team=spec.team if spec.player_id == NEVER_PLAYED_ID else None)
         if games:
             team_by_week[spec.player_id] = games
         for week, _ in games:
@@ -377,7 +379,8 @@ def seed_db(session: Session, data: SeasonData) -> None:
     points, projections, teams and schedule. K and DST points must be whole numbers (DST -4 or more)."""
     tables = {Player: _player_rows(data), NflGame: _game_rows(data), **_result_rows(data),
               ReplayAdp: [{"season": data.season, "player_id": pid, "adp": p.adp, "stdev": p.adp_stdev,
-                           "source": "ffc"} for pid, p in data.players.items() if p.adp is not None],
+                           "source": "ffc", "team": p.adp_team}
+                          for pid, p in data.players.items() if p.adp is not None],
               ReplayProjection: _projection_rows(data)}
     for model, rows in tables.items():
         if rows:

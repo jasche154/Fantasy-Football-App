@@ -3,7 +3,9 @@
 `load_season_data` is the only place the engine reads the database. Everything it returns is immutable and
 point-in-time friendly: `actual` holds what really happened (used to score a week once it is played),
 `projected` holds what a reputable site said BEFORE each game (ESPN, with Sleeper filling the gaps), and
-`team_at` gives the team a player was last seen on before a week, never his team today.
+`team_at` gives the team a player was last seen on before a week, never his team today. `players` is the
+whole season's pool; `as_of(week)` narrows it to those known by then (an ADP, a projection or a game), so
+a player who only turns up in week 9 is not on the draft board or the wire before week 9.
 """
 import logging
 from collections import defaultdict
@@ -19,10 +21,11 @@ from sqlalchemy.orm import Session
 from database.models import (
     KickerGame, NflGame, Player, PlayerStatsWeekly, ReplayAdp, ReplayProjection, TeamGameStats,
 )
+from integrations.adp_history import TWO_WAY
 from services import kdst_model
 from services.build_locks import key_lock
 from services.kdst_rankings import DST_PREFIX
-from services.projections import REGULAR_SEASON, load_player_seasons
+from services.projections import REGULAR_SEASON, load_game_lines
 from services.schedule_strength import Schedule, load_schedule
 from services.scoring import scoring_for
 from services.valuation import NoDataError
@@ -34,7 +37,6 @@ SKILL = ("QB", "RB", "WR", "TE")
 ALL_POSITIONS = SKILL + ("K", "DST")
 SOURCES = ("espn", "sleeper")               # in order of preference
 MIN_ADP_PLAYERS = 180                       # a 12-team, 15-round draft
-MIN_PROJECTION_WEEKS = 16                   # a default league plays 16 weeks
 MIN_KICKERS = MIN_DEFENSES = 14             # one each for the largest league (ADP or a week-1 projection)
 
 PlayerWeek = tuple[int, int]                # (player_id, week)
@@ -47,6 +49,7 @@ class PoolPlayer:
     position: str
     adp: float | None = None
     adp_stdev: float | None = None
+    adp_team: str | None = None             # the team stored with his ADP, only if it is a schedule team
 
 
 @dataclass(frozen=True, eq=False)           # compared and hashed by identity: one object per loaded season
@@ -66,7 +69,10 @@ class SeasonData:
 
         Real points for weeks < week, pre-game projections for weeks <= week (week 1's at draft time: the
         preseason curve is built from them), and each player's games before `week`, or else his first game
-        of the season (the `team_at` fallback). Give CPU logic and views this, never the full season."""
+        of the season (the `team_at` fallback; an accepted limit: wrong only for a drafted player who changed
+        teams before his first game). `players` holds only those who existed by then: an ADP, a projection
+        or a real game in those weeks; it only grows with the week, so anyone rostered at week W is in every
+        later copy. Give CPU logic and views this, never the full season."""
         if week < 0:
             raise ValueError(f"Week {week} is not a valid week.")
         if self.known_before is not None and self.known_before <= week:
@@ -74,14 +80,21 @@ class SeasonData:
         return _as_of(self, week)
 
     def team_at(self, player_id: int, week: int) -> str | None:
-        """His team as known before `week`: the team of his last game before it, else of his first game."""
+        """His team as known before `week`: the team of his last game before it, else of his first game of
+        the season, else the team stored with his ADP (a drafted player who never plays).
+
+        The first-game fallback is an accepted limit: no stored source is point-in-time before a player's
+        first game, so it is wrong only for a drafted player who changed teams before then."""
         games = self.team_by_week.get(player_id, ())
         team = None
         for game_week, game_team in games:
             if game_week >= week:
                 break
             team = game_team
-        return team if team is not None else (games[0][1] if games else None)
+        if team is not None or games:
+            return team if team is not None else games[0][1]
+        player = self.players.get(player_id)
+        return player.adp_team if player else None
 
     def on_bye(self, player_id: int, week: int) -> bool:
         """His team has no game that week. A player with no known team is never 'on bye' (he is just out)."""
@@ -97,11 +110,16 @@ class SeasonData:
 
 @lru_cache(maxsize=256)
 def _as_of(data: SeasonData, week: int) -> SeasonData:
-    games = {pid: tuple(g for g in played if g[0] < week) or played[:1] for pid, played in data.team_by_week.items()}
+    actual = {key: points for key, points in data.actual.items() if key[1] < week}
+    projected = {key: points for key, points in data.projected.items() if key[1] <= max(1, week)}
+    seen = {pid for pid, _ in (*actual, *projected)}
+    players = {pid: p for pid, p in data.players.items() if p.adp is not None or pid in seen}
+    games = {pid: tuple(g for g in played if g[0] < week) or played[:1]
+             for pid, played in data.team_by_week.items() if pid in players}
     return replace(
-        data, known_before=week, team_by_week=MappingProxyType(games),
-        actual=MappingProxyType({key: points for key, points in data.actual.items() if key[1] < week}),
-        projected=MappingProxyType({key: points for key, points in data.projected.items() if key[1] <= max(1, week)}))
+        data, known_before=week, players=MappingProxyType(players), team_by_week=MappingProxyType(games),
+        actual=MappingProxyType({key: v for key, v in actual.items() if key[0] in players}),
+        projected=MappingProxyType({key: v for key, v in projected.items() if key[0] in players}))
 
 
 # ---------------- loading ----------------
@@ -166,10 +184,14 @@ def readiness(session: Session, season: int) -> dict:
                 and _count(session, TeamGameStats.id, TeamGameStats.season == season) > 0
                 and all(f"{DST_PREFIX}{team}" in defenses for team in teams))     # every team's D/ST row exists
     adp_players = _count(session, ReplayAdp.id, ReplayAdp.season == season)
-    projection_weeks = _count(session, ReplayProjection.week.distinct(), ReplayProjection.season == season)
+    weeks = set(session.scalars(select(ReplayProjection.week.distinct()).where(ReplayProjection.season == season)))
+    last_week = session.scalar(select(func.max(NflGame.week)).where(
+        NflGame.season == season, NflGame.game_type == REGULAR_SEASON)) or 0
+    every_week = last_week > 0 and set(range(1, last_week + 1)) <= weeks    # a hole would zero a whole week
     kickers, defenses = _draftable(session, season, "K"), _draftable(session, season, "DST")
     ready = (has_stats and bool(teams) and has_kdst and adp_players >= MIN_ADP_PLAYERS
-             and projection_weeks >= MIN_PROJECTION_WEEKS and kickers >= MIN_KICKERS and defenses >= MIN_DEFENSES)
+             and every_week and kickers >= MIN_KICKERS and defenses >= MIN_DEFENSES)
+    projection_weeks = len(weeks)
     return {"season": season, "ready": ready, "has_stats": has_stats, "has_schedule": bool(teams),
             "has_kdst": has_kdst, "adp_players": adp_players, "projection_weeks": projection_weeks,
             "kickers": kickers, "defenses": defenses}
@@ -180,14 +202,24 @@ def ready_seasons(session: Session) -> list[int]:
     return [season for season in SUPPORTED_SEASONS if readiness(session, season)["ready"]]
 
 
-def _skill_games(session: Session, season: int, scoring: str, schedule: Schedule,
-                 last_week: int) -> tuple[dict[PlayerWeek, float], dict[PlayerWeek, str]]:
+def _two_way(session: Session) -> dict[int, tuple[str, str]]:
+    """{player id: (stored position, fantasy position)} for adp_history.TWO_WAY players filed as defenders."""
+    rows = session.execute(select(Player.id, Player.position, Player.gsis_id).where(Player.gsis_id.in_(TWO_WAY)))
+    return {pid: (stored, TWO_WAY[gsis]) for pid, stored, gsis in rows if stored not in ALL_POSITIONS}
+
+
+def _skill_games(session: Session, season: int, scoring: str, schedule: Schedule, last_week: int,
+                 two_way: Mapping[int, tuple[str, str]]) -> tuple[dict[PlayerWeek, float], dict[PlayerWeek, str]]:
     actual, teams = {}, {}
-    for player in load_player_seasons(session, season, scoring_for(scoring)):
-        for game in player.games:
+    lines = load_game_lines(session, season, scoring_for(scoring))
+    if two_way:                                       # the skill-position load leaves them out
+        lines.update(load_game_lines(session, season, scoring_for(scoring), list(two_way),
+                                     positions=tuple({stored for stored, _ in two_way.values()})))
+    for player_id, (_, games) in lines.items():
+        for game in games:
             if game.week > last_week:
                 continue
-            key = (player.player_id, game.week)
+            key = (player_id, game.week)
             actual[key] = game.fantasy_points
             team = schedule.opponent(game.opponent, game.week)      # the opponent's opponent that week
             if team:
@@ -238,12 +270,16 @@ def _projections(session: Session, season: int, scoring: str, last_week: int) ->
     return merged
 
 
-def _pool(session: Session, season: int, ids: set[int]) -> dict[int, PoolPlayer]:
+def _pool(session: Session, season: int, ids: set[int], two_way: Mapping[int, tuple[str, str]],
+          teams: set[str]) -> dict[int, PoolPlayer]:
+    """`teams` are the season's schedule teams: an ADP team code outside them ('FA', an old code) is dropped,
+    or that player would be on a bye every week."""
     adp = {row.player_id: row for row in session.scalars(select(ReplayAdp).where(ReplayAdp.season == season))}
     people = session.execute(select(Player.id, Player.full_name, Player.position).where(
-        Player.position.in_(ALL_POSITIONS)))
-    return {pid: PoolPlayer(pid, name, position, adp[pid].adp if pid in adp else None,
-                            adp[pid].stdev if pid in adp else None)
+        or_(Player.position.in_(ALL_POSITIONS), Player.id.in_(list(two_way)))))
+    return {pid: PoolPlayer(pid, name, two_way[pid][1] if pid in two_way else position,
+                            adp[pid].adp if pid in adp else None, adp[pid].stdev if pid in adp else None,
+                            adp[pid].team if pid in adp and adp[pid].team in teams else None)
             for pid, name, position in people if pid in ids or pid in adp}
 
 
@@ -267,13 +303,15 @@ def _build(session: Session, season: int, scoring: str) -> SeasonData:
     # Final scores are results: replay code uses the schedule for byes and opponents only.
     schedule = replace(loaded, games=tuple(replace(g, home_score=None, away_score=None) for g in loaded.games))
     last_week = max(game.week for game in schedule.games)
-    parts = (_skill_games(session, season, scoring, schedule, last_week),
+    two_way = _two_way(session)
+    parts = (_skill_games(session, season, scoring, schedule, last_week, two_way),
              _kicker_games(session, season, last_week),
              _defense_games(session, season, last_week, schedule, _defense_ids(session)))
     actual = {key: points for part, _ in parts for key, points in part.items()}
     teams = {key: team for _, part in parts for key, team in part.items()}
     projected = _projections(session, season, scoring, last_week)
-    players = _pool(session, season, {pid for pid, _ in (*actual, *projected)})
+    players = _pool(session, season, {pid for pid, _ in (*actual, *projected)}, two_way,
+                    {team for team, _ in schedule.opponents})
     actual, projected, teams = ({key: value for key, value in table.items() if key[0] in players}
                                 for table in (actual, projected, teams))
     unplaced = sum(1 for key in actual if key not in teams)

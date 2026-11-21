@@ -289,6 +289,57 @@ def test_a_cpu_covers_a_starting_slot_that_would_be_empty_this_week():
     assert rv.can_field_lineup([knowledge.by_id[pid].position for pid in roster], SETTINGS)
 
 
+@pytest.mark.parametrize("phase", ["waivers", "open"])       # a league with a weekly waiver run, and without
+def test_a_cpu_covers_every_slot_nobody_plays_in_however_many_there_are(phase):
+    week, team_id = 7, CPUS[3]
+    resting = [pid for position in ("QB", "TE", "K", "DST") for pid in at(league(week), team_id, position, week)]
+    data = fakes.patched(fakes.fake_season(), projected={(pid, week): None for pid in resting})
+    knowledge = fakes.fake_knowledge(week, SETTINGS, data)
+    state = league(week, phase)
+
+    after = ai.cpu_free_agency(state, SETTINGS, knowledge, SEED)
+
+    idle = rv.idle_slots(knowledge, rs.team(state, team_id).roster, SETTINGS)
+    roster = rs.team(after, team_id).roster
+    assert set(idle) >= {"QB", "TE", "K", "DST"} and len(idle) > ai.MAX_FREE_AGENT_MOVES
+    assert rv.idle_slots(knowledge, roster, SETTINGS) == []
+    assert sum(e.kind == "add" and e.team_id == team_id for e in after.events) == len(idle)
+    assert len(roster) == SETTINGS.roster_size
+    assert rv.can_field_lineup([knowledge.by_id[pid].position for pid in roster], SETTINGS)
+
+
+def test_a_cpu_does_not_cover_one_slot_by_emptying_another():
+    week, team_id = 3, CPUS[0]
+    state = league(week)
+    lineup = rv.best_lineup(know(week), rs.team(state, team_id).roster, SETTINGS)
+    starting, tight_end = {pid for ids in lineup.values() for pid in ids}, lineup["TE"][0]
+    bench = [v.player_id for v in values(state, team_id, week) if v.player_id not in starting and v.position in SKILL]
+    data = fakes.patched(fakes.fake_season(), projected={(pid, week): None for pid in (tight_end, *bench)})
+    knowledge = fakes.fake_knowledge(week, SETTINGS, data)
+    roster = [knowledge.by_id[pid] for pid in rs.team(state, team_id).roster]
+    free, ctx = replay_waivers.available_players(state, knowledge), ai._context(knowledge, SETTINGS)
+
+    only_starters = ai._cover(roster, free, replace(ctx, protected=frozenset({tight_end, *bench})))
+    anyone = ai._cover(roster, free, replace(ctx, protected=frozenset()))
+
+    assert rv.idle_slots(knowledge, [v.player_id for v in roster], SETTINGS) == ["TE"]
+    assert only_starters is None                             # whoever went would leave his own slot empty
+    assert anyone is not None and knowledge.by_id[anyone[0]].position == "TE" and anyone[1] in bench
+
+
+def test_a_defense_that_plays_is_swapped_only_for_a_clear_edge():
+    state, knowledge = league(3), know(3)
+    ctx, roster = ai._context(knowledge, SETTINGS), values(state, CPUS[0], 3)
+    own = next(v for v in roster if v.position == "DST")
+    other = replay_waivers.available_players(state, knowledge, "DST")[0]
+
+    close = ai._stream(roster, [replace(other, projection=own.projection + ai.STREAM_EDGE - 0.1)], ctx)
+    clear = ai._stream(roster, [replace(other, projection=own.projection + ai.STREAM_EDGE)], ctx)
+
+    assert own.projection > 0 and ai.STREAM_EDGE >= 2.0      # never for less than two projected points
+    assert close is None and clear == (other.player_id, own.player_id)
+
+
 def test_free_agency_works_in_either_phase_and_gives_the_same_moves_every_time():
     state, knowledge = league(9, "open"), know(9)
 
@@ -314,6 +365,7 @@ def test_cpus_never_drop_a_top_hundred_player_or_the_injured_star_and_never_touc
     owner = next(t.id for t in season[0].before.teams if fakes.INJURED_STAR_ID in t.roster)
     for week in season:
         dropped = {e.player_ids[0] for e in week.events if e.kind == "drop"}
+        dropped |= {e.player_ids[1] for e in week.events if e.kind in ("add", "claim") and len(e.player_ids) == 2}
         skill = {pid for pid in dropped if week.know.by_id[pid].position in SKILL}
 
         assert not skill & top_hundred(week.know)
@@ -322,11 +374,26 @@ def test_cpus_never_drop_a_top_hundred_player_or_the_injured_star_and_never_touc
     assert owner != USER and {w.week for w in season} >= set(fakes.INJURED_WEEKS)
 
 
-def test_cpus_stay_within_two_claims_and_two_free_agent_moves_a_week(season):
+def test_cpus_stay_within_two_claims_and_two_free_agent_moves_beyond_the_slots_they_cover(season):
     for week in season:
         for team_id in CPUS:
+            idle = len(rv.idle_slots(week.know, rs.team(week.after_claims, team_id).roster, SETTINGS))
+            moves = sum(e.kind == "add" and e.team_id == team_id for e in week.events)
+
             assert len(week.claims.get(team_id, ())) <= ai.MAX_CLAIMS
-            assert sum(e.kind == "add" and e.team_id == team_id for e in week.events) <= ai.MAX_FREE_AGENT_MOVES
+            assert moves <= ai.MAX_FREE_AGENT_MOVES + idle           # one per slot covered: no back and forth
+            assert len(rv.idle_slots(week.know, rs.team(week.after, team_id).roster, SETTINGS)) <= idle
+
+
+def test_no_cpu_adds_to_a_position_it_is_full_at_while_one_of_its_own_plays_there(season):
+    for week in season:
+        for team_id in CPUS:
+            before = [week.know.by_id[pid] for pid in rs.team(week.before, team_id).roster]
+            after = [week.know.by_id[pid] for pid in rs.team(week.after, team_id).roster]
+            for position, cap in (("QB", 2), ("TE", 2), ("K", 1), ("DST", 1)):
+                had = [v for v in before if v.position == position]
+                grew = sum(v.position == position for v in after) > max(cap, len(had))
+                assert not (grew and any(v.projection > 0 for v in had)), (week.week, team_id, position)
 
 
 def test_kickers_and_defenses_are_only_swapped_like_for_like_and_for_a_clear_edge(season):

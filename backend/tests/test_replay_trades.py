@@ -76,17 +76,43 @@ def test_hard_difficulty_needs_a_higher_multiple_than_normal():
     assert hard_verdict.reasons[0].endswith("They want 8% more than they give.")
 
 
-def test_a_value_decline_suggests_the_cheapest_player_that_closes_the_gap():
+def test_a_value_decline_suggests_points_when_the_closest_player_would_be_cut():
     hard = fakes.fake_settings(difficulty="hard")
 
     short = judge(NEEDS_RB, [RB14], [TE6], settings=hard)
-    fixed = judge(NEEDS_RB, [RB14, SCRUB], [TE6], settings=hard)
+    cut = judge(NEEDS_RB, [RB14, SCRUB], [TE6], settings=hard)      # WR54 closes it on paper, but CPU 9 cuts him
     full = judge(RICH, [SCRUB, SCRUB2, SCRUB3], [P("RB", 2)])
 
-    assert short.suggestion == "Add Replay WR54 to make this fair."
-    assert not said(fixed, "Value is too far apart") and fixed.suggestion is None
+    assert short.suggestion == "Add about 4 points of value to make this fair."
+    assert said(cut, "Value is too far apart") and cut.their_drops == (SCRUB,)
     assert full.suggestion.startswith("Add about ") and full.suggestion.endswith(" points of value to make this fair.")
     assert judge(DEEP_AT_WR, [P("WR", 31)], [P("WR", 24)]).suggestion is None      # value was not the problem
+
+
+def test_a_small_gap_never_suggests_adding_a_star():
+    hard = fakes.fake_settings(difficulty="hard")
+    state, know = league(settings=hard)
+    user = rs.user_team(state)
+    stars_only = rs.with_team(state, replace(user, roster=(RB14, P("RB", 1), P("RB", 10))))
+
+    verdict = rt.evaluate(stars_only, hard, know, USER, NEEDS_RB, [RB14], [TE6])
+
+    gap = verdict.value_get * rs.USER_TRADE_MULTIPLE["hard"] - verdict.value_give
+    assert 0 < gap < 10 < know.by_id[P("RB", 10)].market_value         # either star would close it many times over
+    assert verdict.suggestion in {f"Add about {points} points of value to make this fair." for points in range(2, 11)}
+
+
+def test_the_suggested_player_is_the_one_worth_closest_to_what_is_missing():
+    state, know = league()
+    spare = sorted((know.by_id[pid] for pid in rs.user_team(state).roster if pid != SCRUB
+                    and know.by_id[pid].position in SKILL), key=lambda v: v.market_value)
+
+    verdict = judge(DEEP_AT_WR, [SCRUB], [P("RB", 30)])
+
+    missing = verdict.value_get - verdict.value_give
+    closers = [v for v in spare if rt.package_value(know, [SCRUB, v.player_id]) >= verdict.value_get]
+    assert missing < closers[0].market_value <= rt.SUGGEST_WITHIN * missing and len(closers) > 1
+    assert verdict.suggestion == f"Add {closers[0].name} to make this fair."
 
 
 # ---------------- lineup ----------------
@@ -349,16 +375,77 @@ def test_verdicts_do_not_change_when_the_future_does(week):
 
 # ---------------- scams from the design review ----------------
 
+def with_best_free_defense(state: rs.State, know) -> tuple[rs.State, int, int]:
+    """The user swaps his defense for the best one on waivers: (state, his old defense, the new one)."""
+    user = rs.user_team(state)
+    old = next(pid for pid in user.roster if know.by_id[pid].position == "DST")
+    new = max((v for v in know.values if v.position == "DST" and v.player_id not in rs.rostered(state)),
+              key=lambda v: v.ros_ppg).player_id
+    return rs.with_team(state, replace(user, roster=tuple(new if pid == old else pid for pid in user.roster))), old, new
+
+
+def defense_of(state: rs.State, know, team_id: int) -> int:
+    return next(pid for pid in rs.team(state, team_id).roster if know.by_id[pid].position == "DST")
+
+
 class TestExploits:
-    def test_the_user_cannot_dump_a_player_who_just_got_hurt_though_cpus_may_trade_him(self):
+    def test_nobody_deals_for_a_player_who_just_got_hurt_cpus_included(self):
         state, know = league(week=6)
         seller = as_user(state, DEEP_AT_WR)                 # the user owns the injured star, knows he is out a month
 
         between_cpus = rt.evaluate(state, SETTINGS, know, DEEP_AT_WR, RICH, *STAR_SALE)
         with_user = rt.evaluate(seller, SETTINGS, know, DEEP_AT_WR, RICH, *STAR_SALE)
+        bought = rt.evaluate(state, SETTINGS, know, RICH, DEEP_AT_WR, STAR_SALE[1], STAR_SALE[0])
 
-        assert know.by_id[fakes.INJURED_STAR_ID].out and between_cpus.accepted and not with_user.accepted
-        assert said(with_user, "They won't deal for or away a player who is out right now: Injured Star.")
+        assert know.by_id[fakes.INJURED_STAR_ID].out
+        for verdict in (between_cpus, with_user, bought):           # on either side, with or without the user
+            assert not verdict.accepted
+            assert said(verdict, "They won't deal for or away a player who is out right now: Injured Star.")
+
+    def test_an_elite_free_agent_defense_buys_no_skill_value(self):
+        state, know = league()
+        state, _, elite = with_best_free_defense(state, know)
+        cheap, dear = P("WR", 31), P("TE", 8)                # CPU 8's TE8 is worth more than the user's WR31
+        theirs = defense_of(state, know, 8)
+
+        verdict = rt.evaluate(state, SETTINGS, know, USER, 8, [elite, cheap], [theirs, dear])
+
+        assert know.by_id[elite].ros_ppg > know.by_id[theirs].ros_ppg + 1.5         # a big upgrade for CPU 8
+        assert know.by_id[dear].market_value > know.by_id[cheap].market_value
+        assert know.by_id[elite].market_value == know.by_id[theirs].market_value
+        assert not verdict.accepted and said(verdict, "Value is too far apart")
+
+    def test_a_cpu_wont_swap_its_defense_for_a_weaker_one(self):
+        state, know = league()
+        mine, theirs = defense_of(state, know, USER), defense_of(state, know, NEEDS_RB)
+        better, _, elite = with_best_free_defense(state, know)
+
+        weaker = rt.evaluate(state, SETTINGS, know, USER, NEEDS_RB, [RB14, mine], [TE7, theirs])
+        stronger = rt.evaluate(better, SETTINGS, know, USER, NEEDS_RB, [RB14, elite], [TE7, theirs])
+
+        assert judge(*FAIR).accepted and know.by_id[mine].ros_ppg < know.by_id[theirs].ros_ppg
+        assert weaker.reasons == ("CPU 9 won't swap its defense for a weaker one.",)
+        assert stronger.accepted
+
+    def test_a_throw_in_the_cpu_would_cut_counts_for_nothing(self):
+        star_for_star = judge(8, [RB14], [P("QB", 4)])
+        padded = judge(8, [RB14, SCRUB], [P("QB", 4)])
+
+        assert not star_for_star.accepted and said(star_for_star, "Value is too far apart")
+        assert rt.package_value(fakes.fake_knowledge(1), [RB14, SCRUB]) >= star_for_star.value_get     # once enough
+        assert SCRUB in padded.their_drops and not padded.accepted
+        assert said(padded, "They would drop Replay WR54 to make room")
+        assert padded.value_give == rt.package_value(fakes.fake_knowledge(1), [RB14, SCRUB])        # the user's view
+
+    def test_the_suggestion_never_names_a_player_the_cpu_would_cut(self):
+        verdict = judge(8, [RB14], [P("QB", 4)])
+
+        assert verdict.suggestion and not verdict.suggestion.startswith("Add Replay")
+        for to_team, give, get in [(8, RB14, P("QB", 4)), (8, P("WR", 31), P("TE", 8)), (4, P("WR", 51), P("WR", 45))]:
+            text = judge(to_team, [give], [get]).suggestion or ""
+            if text.startswith("Add Replay"):
+                named = next(v.player_id for v in fakes.fake_knowledge(1).values if text == f"Add {v.name} to make this fair.")
+                assert named not in judge(to_team, [give, named], [get]).their_drops
 
     def test_the_user_cannot_buy_an_injured_star_cheaply_before_he_returns(self):
         state, know = league(week=fakes.INJURED_WEEKS[-1])

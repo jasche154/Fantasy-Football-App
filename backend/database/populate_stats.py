@@ -33,10 +33,10 @@ from database.models import (
     PlayerReceivingAdvancedWeekly, PlayerRushingAdvancedWeekly, PlayerSnapCountsWeekly,
     PlayerStatsWeekly,
 )
+from services.projections import FIRST_SEASON  # noqa: F401  (database.populate_stats.FIRST_SEASON stays)
 
 log = logging.getLogger("populate_stats")
 
-FIRST_SEASON = 2021
 BATCH_SIZE = 5000
 SKIPPED_COLUMNS = {"id", "player_id"}
 EXPERT_PAGES = {"qb": None, "ppr-rb": "ppr", "ppr-wr": "ppr", "ppr-te": "ppr"}

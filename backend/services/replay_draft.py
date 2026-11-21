@@ -9,7 +9,8 @@ projection. Its pick is the lowest `(adp + noise) x need x lean` among the best 
 
 Hard rules sit on top: a roster must always be able to end legal (every starting slot filled, K and DST
 included), position caps, kickers and defenses only in the last rounds, no backup QB or TE before round
-10 of 15, never a reach of more than 25 picks, and at least two bench backs and two bench receivers.
+10 of 15, never a reach of more than a round of picks in rounds 1-4, a round and a half in rounds 5-9 and
+25 picks later (never more than 25), and at least two bench backs and two bench receivers.
 The user may pick anyone as long as the roster can still end legal. Players without an ADP come after
 everyone who has one, by their own week-1 projection.
 
@@ -25,7 +26,7 @@ from functools import lru_cache
 from services import replay_state as rs
 from services.replay_pool import ALL_POSITIONS, PoolPlayer, SeasonData
 from services.replay_state import Pick, Settings, State, Team
-from services.replay_values import lineup_holes
+from services.replay_values import lineup_holes, position_cap
 
 log = logging.getLogger(__name__)
 
@@ -42,10 +43,9 @@ SIGMA_BASE, SIGMA_PER_PICK = 2.0, 0.11  # spread of a player's draft slot when h
 MIN_DRAW = 0.5                          # a noisy ADP never drops below this (keeps the multipliers meaningful)
 BAND_ENDS = (4, 9)                      # last round of the early and of the middle part of a draft
 WINDOWS = (36, 60, 90)                  # how many of the best available (by ADP) a CPU looks at, per part
+REACH_ROUNDS = (1.0, 1.5, None)         # furthest reach per part, in rounds of picks (late: REACH_LIMIT)
 REACH_LIMIT = 25                        # never a player whose ADP is more than this many picks away
-BENCH_CAPS = {"QB": 1, "RB": 3, "WR": 4, "TE": 1}     # most bench players per position (QB 2, RB 6, WR 7, TE 2)
 BENCH_FLOORS = {"RB": 2, "WR": 2}       # fewest bench players per position (4 RB and 4 WR by default)
-SHARES_FLEX = ("RB", "WR")              # a FLEX slot raises these positions' caps
 BACKUP_GATE = (2, 3)                    # no second QB or TE before this share of the rounds (round 10 of 15)
 OPEN_STARTER_NEED = (0.95, 0.85, 0.75)  # RB/WR with a starting spot still open, per part of the draft
 STARTER_NEED_LATE = 0.7                 # QB1/TE1 still missing: 1.0 in round 1 down to this ...
@@ -134,10 +134,9 @@ def _band(round_: int) -> int:
 def _caps(settings: Settings) -> dict[str, int]:
     """Most players a CPU takes per position: QB 2, RB 6, WR 7, TE 2, K 1, DST 1 on the default roster.
     A deeper bench than the caps can fill goes to backs and receivers."""
-    starters = settings.starters
-    flex = starters.get("FLEX", 0)
-    caps = {position: starters.get(position, 0) + BENCH_CAPS.get(position, 0)
-            + (flex if position in SHARES_FLEX else 0) for position in ALL_POSITIONS}
+    caps = {position: position_cap(position, settings) for position in ALL_POSITIONS}
+    # shortcut: waivers and trades (position_cap) do not share this spare; it only exists for a bench above
+    # 10, move it into position_cap when bench becomes configurable
     spare = max(0, settings.rounds - sum(caps.values()))
     return {**caps, "RB": caps["RB"] + spare // 2, "WR": caps["WR"] + spare - spare // 2}
 
@@ -202,7 +201,9 @@ def _candidates(state: State, known: SeasonData, allowed: Sequence[str], round_:
     ranked = [p for p in pool if p.adp is not None][:WINDOWS[_band(round_)]]
     if not ranked:
         return pool[:1], False
-    return [p for p in ranked if p.adp <= overall + REACH_LIMIT] or ranked, True
+    rounds = REACH_ROUNDS[_band(round_)]
+    reach = REACH_LIMIT if rounds is None else min(REACH_LIMIT, round(rounds * len(state.draft_order)))
+    return [p for p in ranked if p.adp <= overall + reach] or ranked, True
 
 
 def _scores(team: Team, players: Sequence[PoolPlayer], counts: Counter, round_: int, settings: Settings,

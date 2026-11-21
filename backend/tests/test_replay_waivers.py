@@ -294,7 +294,7 @@ def test_a_successful_user_claim_is_logged_with_both_players_and_clears_the_clai
 
     kinds = [(e.kind, e.team_id, e.player_ids) for e in after.events]
     names = know().by_id
-    assert kinds == [("drop", USER, (cut,)), ("claim", USER, (add, cut))]
+    assert kinds == [("claim", USER, (add, cut))]                       # one event for the whole move
     assert after.events[-1].text == f"You claimed {names[add].name}, dropping {names[cut].name}"
     assert after.claims == () and after.locked == (cut,)
     assert add in roster(after, USER) and len(roster(after, USER)) == SETTINGS.roster_size
@@ -352,7 +352,7 @@ def test_add_drop_swaps_a_free_agent_for_the_dropped_player_who_goes_on_waivers(
 
     assert add in roster(after, USER) and cut not in roster(after, USER)
     assert after.locked == (cut,) and after.waiver_order == state.waiver_order
-    assert [(e.kind, e.player_ids) for e in after.events] == [("drop", (cut,)), ("add", (add, cut))]
+    assert [(e.kind, e.player_ids) for e in after.events] == [("add", (add, cut))]     # one event, not two
     assert roster(state, USER)[-1] == cut                               # the input is untouched
 
 

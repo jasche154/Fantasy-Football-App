@@ -84,7 +84,7 @@ only *explains* numbers that came back from a tool call. Every output is labeled
   - waivers limited to players actually free in your league;
   - trade ideas with the real teams in your league, matched to each team's weak positions.
   The AI assistant uses the same roster.
-- **Replay League (game engine and API):** a single-player season replay. Pick a past season (2018 on, or
+- **Replay League:** a single-player season replay with its own page. Pick a past season (2018 on, or
   "random"), draft against CPU managers who only know that summer's ADP, then play it week by week with
   waivers, free agency and trades; matchups are scored with the players' real points. Every number shown
   before a week is played is point-in-time (preseason ADP, that week's pre-game ESPN/Sleeper projection).
@@ -157,6 +157,9 @@ free public sources, no keys):
 python -m services.replay_data --seasons 2019,2023   # or 2018-2025; --force re-imports
 ```
 
+The Replay League page does the same from the browser: a season that is not ready has a
+**Prepare &lt;season&gt; data** button under the new-league form.
+
 A season only replaces existing rows after its download succeeds, so a network hiccup
 never wipes data. `populate_stats` also brings the schema up to date first, and it works on
 databases built by the project's older scripts (all migrations are idempotent).
@@ -202,6 +205,7 @@ Open <http://localhost:5173>. The UI talks to `http://localhost:8000` by default
 | **Player page** | Weekly chart of actual vs expected points, game log, NGS stats, projection, signals. **Position percentiles** rank his season stats against his position (green = good, red = bad, grey for context stats like aDOT; "Small sample" until he has enough volume). **What changed** compares his last 3 games with the earlier games (snap share, target share, air-yard share, targets, carries, pass attempts) and flags big moves |
 | **Odds & Props** | Pick a week: every game's kickoff, closing spread and total, and each team's implied total. **Show props** opens the player props stored for that game (expected passing/rushing/receiving yards, receptions, TDs implied by the lines) with how long before kickoff they were bought. Props appear game by game on game day; before that the page says why they're missing |
 | **Ask AI** | Ask questions in plain English; each answer shows which tools it used |
+| **Replay League** | A game: replay a past season against CPU managers. **Start:** under **New league** pick a season (or Random), 8–14 teams, scoring, your draft slot, waivers (Wednesday waivers or free agency only) and difficulty, then **Create league and draft**. Saved leagues are listed above the form (Resume, Delete). **Draft:** press **Draft** next to a player on your turn, or auto-pick one pick or the rest; the CPUs pick in between. **The week loop:** the one primary button at the top says what comes next. **Play week N** scores the week with the real results; then every unrostered player is on waivers, you put in claims on the Players tab, and **Sim to Wednesday** settles them by priority and lets the CPUs move; then lineups, free-agent adds and trades are open again until you play the next week. **Tabs:** My Team (set your lineup with Move, drop players, look at any team or past week), Matchup (your game and the week's scoreboard), Players (the waiver wire, adds and claims), Trades (CPU offers, and a builder that shows the CPU's verdict before you propose) and League (standings, schedule, scoreboard, activity). After 14 weeks the top four play two playoff weeks for the title. **No hindsight:** nothing on screen comes from a week you have not played. Before a week is played you see only its pre-game projection; points, records and standings stop at the last week played, the My Team and Matchup week pickers end at the current week, and later weeks on the League scoreboard show the pairings only |
 | **Settings** | League scoring, size, superflex, and TE premium (used everywhere); connect Yahoo; check integrations. **System** shows when the auto-update last ran and what it did, Odds API credits left, data freshness and the last backup, with **Back up now**. **API access** takes the token when the backend has `API_TOKEN` set |
 
 ## How the numbers work
@@ -839,10 +843,18 @@ that week's games on; only scoring a week reads its real points.
 
 - **Data:** `python -m services.replay_data --seasons 2019` loads the season's results (nflverse), ADP
   and weekly projections into `replay_adp` / `replay_projections`. `GET /api/replay/seasons` says which
-  seasons are ready (stats, schedule, K/DST, 180+ ADP players, 16+ projection weeks).
-- **Draft:** a snake draft, 15 rounds by default (QB, 2 RB, 2 WR, TE, FLEX, K, DST, 6 bench). A CPU takes
-  the lowest `(ADP + noise) x need x taste` among the best players left, with position caps, K and DST
-  in the last two rounds and no reach of more than 25 picks. "Hard" halves the noise.
+  seasons are ready (stats, schedule, K/DST, 180+ ADP players, and projections for every week of the
+  regular season: one missing week would zero it). A re-run of Prepare fetches the MyFantasyLeague ADP
+  tail again while a season has none.
+- **Draft:** a snake draft, 15 rounds by default (QB, 2 RB, 2 WR, TE, FLEX, K, DST, 6 bench). CPUs follow
+  ADP: each takes the lowest `(ADP + noise) x need x taste` among the best players left, with position
+  caps, K and DST in the last rounds, and never reaches further than a round of picks past the current
+  pick in rounds 1-4, a round and a half in rounds 5-9, and 25 picks after that (never more than 25).
+  "Hard" halves the noise.
+- **CPU rosters:** at most 2 QB, 2 TE, 1 K, 1 DST, 6 RB and 7 WR. A CPU takes one extra only while nobody
+  it has at that starting slot plays that week, and trims it afterwards. It streams kickers and defenses:
+  a unit that plays is swapped only for one projected `replay_waiver_ai.STREAM_EDGE` (4) points better;
+  one on a bye or without a projection is always replaced.
 - **Values:** `ros_ppg` is the weighted mean (4, 3, 2, 1) of a player's last four pre-game projections,
   with a preseason rate (the ADP order mapped onto the week-1 projection curve) filling the slots that
   do not exist yet. Trade value is points over replacement x games left x the share of them he is
@@ -853,13 +865,26 @@ that week's games on; only scoring a week reads its real points.
   by hand), scored with real points. With waivers off, every unrostered player is a free agent.
 - **Trades:** a CPU accepts only if the package it gets is worth at least what it gives (8% more on
   hard) and its rest-of-season lineup improves; both teams must still field a full lineup. Declines
-  come with the reasons. CPUs also trade with each other and send you offers.
+  come with the reasons. A kicker or defense counts for a roster spot only, and a CPU will not swap its
+  own for a weaker one; a throw-in the CPU would cut to make room counts for nothing. Nobody who is out
+  that week is traded, in any deal. CPUs also trade with each other (each attempt asks up to
+  `replay_trade_ai.MAX_PAIRS` (3) pairs of CPUs, about 4 trades a season) and send you offers.
 - **Season:** 14 weeks, then two playoff weeks: seeds 1-4 play for the title, everyone else plays
   consolation games.
+- **Limits of "no hindsight":** a week's projection is the sites' final pre-game number, and it is
+  already visible at that week's Wednesday waiver run. A player appears on the board and the wire once
+  he has an ADP, a projection or a game by that week. A player's NFL team before his first game is the
+  team of that first game.
 
 The game is saved as one JSON document per league (`replay_leagues`); all randomness derives from the
-league's seed, so reloading never re-rolls a pick or a trade. This is the backend; response shapes are
-documented at the top of `services/replay_views.py`.
+league's seed, so reloading never re-rolls a pick or a trade. Response shapes are documented at the top
+of `services/replay_views.py` and mirrored in `frontend/src/api/types/replay.ts` and `replayLeague.ts`.
+
+The page is `frontend/src/pages/replay` (`#/replay` for the saved leagues and the new-league form,
+`#/replay?game=ID&view=team|matchup|players|trades|league` for a league). `GameHub` holds the game
+summary; every change goes through its `act`, which swaps in the new summary, reloads the open screen
+and lists what the action caused under "What just happened". The screens show only what the API sends,
+and the API sends no result of an unplayed week.
 
 ## API reference
 
@@ -923,8 +948,8 @@ League parameters accepted by every valuation endpoint: `scoring=ppr|half|std`,
 | GET | `/api/replay/games/{id}` | Game summary: phase, week, your record and matchup, what to do next, champion |
 | POST | `/api/replay/games/{id}/delete` | Delete the league |
 | GET | `/api/replay/games/{id}/draft?position=&search=&limit=&offset=` | Draft room: picks, order, your roster, players left by ADP |
-| POST | `/api/replay/games/{id}/draft/pick` | Body `{"player_id": 1}`; your pick, then the CPUs pick up to your next turn |
-| POST | `/api/replay/games/{id}/draft/auto?whole_draft=` | Auto-pick for you: this pick, or every pick left |
+| POST | `/api/replay/games/{id}/draft/pick` | Body `{"player_id": 1, "overall": 6}`; your pick, then the CPUs pick up to your next turn. `overall` is optional: the pick number the page shows; 409 if the draft is at another pick, so a double click never picks twice |
+| POST | `/api/replay/games/{id}/draft/auto?whole_draft=&overall=` | Auto-pick for you: this pick, or every pick left (`overall` as above) |
 | GET | `/api/replay/games/{id}/team?team_id=&week=` | Any team's lineup and bench for a week up to the current one, with projections, values and (once played) real points |
 | POST | `/api/replay/games/{id}/lineup` | Body `{"starters": {"QB": [id], ...}}`, or `{"starters": null}` for the best lineup |
 | GET | `/api/replay/games/{id}/matchup?week=&team_id=` | One game's two lineups side by side |
@@ -933,7 +958,7 @@ League parameters accepted by every valuation endpoint: `scoring=ppr|half|std`,
 | GET | `/api/replay/games/{id}/schedule?team_id=` | A team's opponents and results |
 | GET | `/api/replay/games/{id}/activity?kind=&limit=&offset=` | The league log (picks, moves, trades, results), newest first |
 | GET | `/api/replay/games/{id}/players?position=&search=&status=&sort=&limit=&offset=` | The player pool (default: unrostered) with status, projection, value and points so far |
-| GET | `/api/replay/games/{id}/players/{player_id}` | One player's weeks so far (projection, real points, value by week) and who owns him |
+| GET | `/api/replay/games/{id}/players/{player_id}` | One player's weeks so far (projection, real points, value by week; from the week he entered the pool) and who owns him |
 | GET | `/api/replay/games/{id}/claims` | Your pending waiver claims in order, and the waiver priority |
 | POST | `/api/replay/games/{id}/claims` | Body `{"add": id, "drop": id}`; a waiver claim (before the week's waiver run) |
 | POST | `/api/replay/games/{id}/claims/{claim_id}/cancel` | Cancel a claim |
@@ -1310,6 +1335,7 @@ backend/
   alembic/                  schema migrations
   tests/                    pytest suite
 frontend/                   React + TypeScript + Vite web app
+  src/pages/replay/         Replay League: home and setup, the league hub, one view per tab, the draft room
 docs/                       plan, data sources, API contract
 ```
 

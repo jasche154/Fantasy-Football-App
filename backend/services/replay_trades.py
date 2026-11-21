@@ -6,15 +6,19 @@ its reasons. Every CPU team in the deal must pass all of these, on point-in-time
 
 1. Value. The package it receives is worth at least the package it gives x a multiple: 1.00 (normal) or 1.08
    (hard) against the user, 0.95 against another CPU. A package is `replay_values.market_value` per player,
-   best first, weighted by `trade.DEPTH_WEIGHTS`. Kickers and defenses are worth little but never nothing.
+   best first, weighted by `trade.DEPTH_WEIGHTS`. Kickers and defenses count for a roster spot only, and a
+   CPU won't send its kicker or defense for a weaker one. A player it receives and cuts at once counts for
+   nothing.
 2. Lineup. Its rest-of-season lineup points (`lineup_gain`, skill positions, after any forced drop) rise by at
    least MIN_TRADE_GAIN. This is what stops a team with six bench receivers taking a seventh.
 3. One accepted trade per CPU per week.
+4. Depth. It never ends up with more players at a position it is already full at (`replay_values.crowded`:
+   2 QB, 6 RB, 7 WR, 2 TE, 1 K, 1 DST, unless nobody it has there plays this week).
 
 And for both teams: at most MAX_PLAYERS_PER_SIDE players a side, nobody traded in the last two weeks, a full
 legal starting lineup at all six positions afterwards, a roster within the limit (the user names who to drop;
-a CPU cuts its lowest healthy-value skill players, never its only kicker or defense), and, in a deal with the
-user, nobody who is out right now. Every drop goes through `replay_state.release`, so he is on waivers.
+a CPU cuts its lowest healthy-value skill players, never its only kicker or defense), and, in every deal (CPU-CPU
+too), nobody who is out right now. Every drop goes through `replay_state.release`, so he is on waivers.
 
 The user is always the proposer in `evaluate`: to look at a CPU's offer, mirror it (`respond` does).
 """
@@ -35,6 +39,7 @@ TRADE_PHASES = ("waivers", "open")
 MAX_PLAYERS_PER_SIDE = 3
 CPU_TRADE_MULTIPLE = 0.95       # between two CPUs: each needs back at least this share of what it gives
 MIN_TRADE_GAIN = 0.5            # season-weighted lineup points a CPU must gain
+SUGGEST_WITHIN = 1.5            # a player suggested to close a value gap is worth at most this x what is missing
 
 
 @dataclass(frozen=True)
@@ -179,7 +184,8 @@ def _side(settings: Settings, know: Knowledge, team: Team, sends: tuple[int, ...
         cut = _cpu_drops(settings, know, kept)
     roster = tuple(pid for pid in kept if pid not in (cut or ()))
     gain = _season(settings, know, roster) - _season(settings, know, team.roster)
-    return _Side(team, sends, receives, cut, roster, package_value(know, sends), package_value(know, receives),
+    kept_in = [pid for pid in receives if pid not in (cut or ())]      # a throw-in it cuts at once is worth nothing
+    return _Side(team, sends, receives, cut, roster, package_value(know, sends), package_value(know, kept_in),
                  round(gain, 2))
 
 
@@ -190,7 +196,7 @@ def _rule_reasons(state: State, know: Knowledge, sender: Team, receiver: Team, m
         reasons.append(f"Traded in the last {rs.RETRADE_LOCK_WEEKS} weeks, so not yet tradable again: "
                        f"{_names(know, locked)}.")
     out = [pid for pid in moved if know.by_id[pid].out]
-    if out and (sender.is_user or receiver.is_user):
+    if out:
         reasons.append(f"They won't deal for or away a player who is out right now: {_names(know, out)}.")
     reasons.extend(f"{team.name} has already made a trade this week." for team in (sender, receiver)
                    if not team.is_user and rs.has_traded_this_week(state, team.id))
@@ -226,9 +232,23 @@ def _side_reasons(side: _Side, other: Team, settings: Settings, know: Knowledge)
                        f"(short at {_short_at(settings, know, side.roster)}).")
     if side.team.is_user:
         return reasons                       # the user needs no value or lineup test: their choice
+    had, have = Counter(_positions(know, side.team.roster)), Counter(_positions(know, side.roster))
+    kept = [know.by_id[pid] for pid in side.roster if pid not in side.receives]
+    new = [know.by_id[pid] for pid in side.receives if pid in side.roster]
+    reasons.extend(f"It would leave {name} with {have[position]} at {position}, more than they carry."
+                   for position in sorted({value.position for value in new})
+                   if have[position] > had[position] and rv.crowded(kept, new, position, settings))
+    for position, unit in (("K", "kicker"), ("DST", "defense")):        # worth a roster spot, but not a downgrade
+        best = [max((know.by_id[pid].ros_ppg for pid in roster if know.by_id[pid].position == position), default=0.0)
+                for roster in (side.team.roster, side.roster)]
+        if position in _positions(know, side.sends) and best[1] < best[0]:
+            reasons.append(f"{name} won't swap its {unit} for a weaker one.")
     multiple = needed_multiple(settings, other)
     if side.received < side.sent * multiple:
         extra = f" They want {multiple - 1:.0%} more than they give." if multiple > 1 else ""
+        cut = [pid for pid in side.receives if pid in (side.drops or ())]
+        if cut:
+            extra += f" They would drop {_names(know, cut)} to make room, so that counts for nothing."
         reasons.append(f"Value is too far apart: {name} would give {side.sent:.1f} points of value and get "
                        f"{side.received:.1f} back.{extra}")
     if side.gain < MIN_TRADE_GAIN:
@@ -236,21 +256,36 @@ def _side_reasons(side: _Side, other: Team, settings: Settings, know: Knowledge)
     return reasons
 
 
+def _points_text(points: float) -> str:
+    whole = max(1, round(points))
+    return f"Add about {whole} point{'' if whole == 1 else 's'} of value to make this fair."
+
+
 def _suggestion(state: State, settings: Settings, know: Knowledge, mine: _Side, theirs: _Side) -> str | None:
-    """How the proposer could fix a value decline by to_team: the cheapest of his skill players that closes
-    the gap when added, else the points of value still missing."""
+    """How the proposer could fix a value decline by to_team: add the one of his skill players worth closest
+    to what one more player must be worth to close the gap, else that many points of value. A small gap
+    never asks for a star: he is worth at most SUGGEST_WITHIN times what is missing, or a roster spot."""
     needed = theirs.sent * needed_multiple(settings, mine.team)
     if theirs.received >= needed:
         return None
-    sending = [rv.market_value(know, pid) for pid in mine.sends]
+    if len(mine.sends) >= MAX_PLAYERS_PER_SIDE:              # nobody can be added: the package must get better
+        return _points_text(needed - theirs.received)
+    sending = [rv.market_value(know, pid) for pid in mine.sends if pid not in (theirs.drops or ())]
+    low, missing = 0.0, needed                               # as the best player, `needed` alone closes it
+    for _ in range(trade.EVEN_IT_STEPS):                     # the package discount makes it more than the gap
+        middle = (low + missing) / 2
+        low, missing = (low, middle) if trade.adjusted_total([*sending, middle]) >= needed else (middle, missing)
     spare = [know.by_id[pid] for pid in mine.team.roster if pid not in mine.sends
-             and len(mine.sends) < MAX_PLAYERS_PER_SIDE and not rs.retrade_locked(state, pid)]
-    enough = [value for value in spare if value.position in SKILL and not (mine.team.is_user and value.out)
-              and trade.adjusted_total([*sending, value.market_value]) >= needed]
+             and not rs.retrade_locked(state, pid)]
+    most = max(SUGGEST_WITHIN * missing, trade.FAIR_POINTS_PER_WEEK * know.weeks_remaining)
+    enough = [value for value in spare if value.position in SKILL and not value.out
+              and value.market_value <= most and trade.adjusted_total([*sending, value.market_value]) >= needed]
     if enough:
-        cheapest = min(enough, key=lambda v: (v.market_value, v.player_id))
-        return f"Add {cheapest.name} to make this fair."
-    return f"Add about {max(1, round(needed - theirs.received))} points of value to make this fair."
+        closest = min(enough, key=lambda v: (abs(v.market_value - missing), v.player_id))
+        kept = (*(pid for pid in theirs.team.roster if pid not in theirs.sends), *theirs.receives, closest.player_id)
+        if closest.player_id not in (_cpu_drops(settings, know, kept) or ()):      # never one they would cut
+            return f"Add {closest.name} to make this fair."
+    return _points_text(missing)
 
 
 def evaluate(state: State, settings: Settings, know: Knowledge, from_team: int, to_team: int,

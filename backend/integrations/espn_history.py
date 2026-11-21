@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from integrations import espn
-from integrations.adp_history import HistoryClient, HistoryError
+from integrations.adp_history import HistoryClient, HistoryError, parse_rows
 from services.scoring import scoring_for
 from services.weekly_model import points_from_stats
 
@@ -90,8 +90,7 @@ def _projection(player: dict, week: int) -> WeekProjection | None:
 def parse_week(payload: Any, week: int) -> list[WeekProjection]:
     """Every player ESPN projected above zero for the week."""
     entries = (payload.get("players") or []) if isinstance(payload, dict) else []
-    projections = (_projection(entry.get("player") or {}, week) for entry in entries)
-    return [p for p in projections if p is not None]
+    return parse_rows("ESPN projections", entries, lambda entry: _projection(entry.get("player") or {}, week))
 
 
 def week_projections(http: HistoryClient, season: int, week: int) -> list[WeekProjection]:

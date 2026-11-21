@@ -7,7 +7,7 @@ today's metadata (current team), so only the name and position are read from it.
 """
 from typing import Any
 
-from integrations.adp_history import HistoryClient, HistoryError
+from integrations.adp_history import HistoryClient, HistoryError, parse_rows
 from integrations.espn_history import WeekProjection
 from integrations.weekly_sources import normalize_team
 
@@ -50,9 +50,7 @@ def _projection(row: dict) -> WeekProjection | None:
 
 def parse_week(payload: Any) -> list[WeekProjection]:
     """Every player Sleeper projected above zero for the week."""
-    rows = payload if isinstance(payload, list) else []
-    projections = (_projection(row) for row in rows if isinstance(row, dict))
-    return [p for p in projections if p is not None]
+    return parse_rows("Sleeper projections", payload if isinstance(payload, list) else [], _projection)
 
 
 def week_projections(http: HistoryClient, season: int, week: int) -> list[WeekProjection]:

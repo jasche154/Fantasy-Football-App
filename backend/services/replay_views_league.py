@@ -134,11 +134,13 @@ def _history_row(game: Game, player_id: int, week: int) -> dict:
 
 
 def player(game: Game, player_id: int) -> dict:
-    """One player: where he stands now and his weeks so far (projection against result, value by week)."""
+    """One player: where he stands now and his weeks so far (projection against result, value by week),
+    from the week he entered the pool (a late arrival has no earlier weeks)."""
     if player_id not in game.know.by_id:
         raise rs.ReplayNotFound(f"There is no player {player_id} in the {game.settings.season} player pool.")
     return {"player": _wire_row(game, player_id, _owners(game), _season_points(game)),
-            "weeks": [_history_row(game, player_id, week) for week in range(1, game.state.week + 1)]}
+            "weeks": [_history_row(game, player_id, week) for week in range(1, game.state.week + 1)
+                      if player_id in game.know_at(week).by_id]}
 
 
 # ---------------- claims and trades ----------------

@@ -28,6 +28,7 @@ Shared pieces
       label         null | "Semi-final" | "Championship" | "Third place" | "Consolation"
   Event      {id, week, kind, team: TeamRef | null, text, players: PlayerRef[]}
       kind          draft | add | drop | claim | trade | result | playoffs | champion
+      an add or claim with a drop is ONE event (no separate "drop"): players = [added, dropped]
   Page       {total, limit, offset, results: [...]}
   Verdict    {accepted, reasons: string[], fair_label, value_give, value_get, percent, your_gain, their_gain,
               give: [{player: PlayerRef, value}], get: [same], your_drops: PlayerRef[], their_drops: PlayerRef[],
@@ -52,8 +53,10 @@ GET  /games/{id}                  Summary
                pending: {claims, offers}, champion: TeamRef | null, updated_at}
 Every POST under /games answers {game: Summary, events: Event[], ...extras}: `events` is what the action
 caused, oldest first (the CPUs' picks, the waiver run, the week's results). Extras:
-  POST /games (create; season may be "random"), .../draft/pick, draft/auto?whole_draft=, claims,
+  POST /games (create; season may be "random"), .../draft/pick, draft/auto?whole_draft=&overall=, claims,
        claims/{id}/cancel, claims/reorder, add-drop, drop          none
+       draft/pick body {player_id, overall?} and draft/auto ?overall=: optional, the pick number the page
+       shows; 409 when the draft is at another pick (a double click or retry never picks twice)
   POST /games/{id}/delete         instead of the above: {deleted: id}
   POST .../lineup                 team: Team (the user's, with the new lineup)
   POST .../advance                step, week (the week it acted on)
@@ -86,7 +89,8 @@ GET  .../players?position=&search=&status=&sort=&limit=&offset=     Page of Wire
       rostered | all. sort: value (default) | projection | ros_ppg | adp | points | name.
 GET  .../players/{player_id}      {player: WireRow, weeks: [{week, played, team, opponent, bye, out, projection,
                                    points, ros_ppg, value, trade_value, rank, pos_rank}]}
-      weeks 1..current only. points: null when the week is unplayed or he did not play.
+      weeks from the first one he was in the pool (a late arrival has no rows before his first projection
+      or game) to the current one. points: null when the week is unplayed or he did not play.
 GET  .../claims                   {phase, can_claim, priority, waiver_order: TeamRef[],
                                    results: [{id, order, add: PlayerRow, drop: PlayerRow | null}]}
 GET  .../trades                   {open, deadline_week, max_players, offers: [Offer + {verdict, note}],
@@ -324,7 +328,7 @@ def matchup(game: Game, week: int | None = None, team_id: int | None = None) -> 
 
 def _next_action(game: Game) -> dict:
     week, labels = game.state.week, {
-        "pick": "Make your pick", "wednesday": "Sim to Wednesday (process waivers)", "done": "Season complete"}
+        "pick": "Make your pick", "wednesday": "Sim to Wednesday", "done": "Season complete"}
     step = NEXT_STEP[game.state.phase]
     return {"step": step, "label": labels.get(step, f"Play week {week}")}
 

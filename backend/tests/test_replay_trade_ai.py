@@ -4,6 +4,7 @@
 the rosters, so every change in those states is a trade the CPUs made.
 """
 import time
+from collections import Counter
 from dataclasses import dataclass, replace
 from statistics import mean
 
@@ -59,11 +60,77 @@ def offers(season: list[Week]) -> list[tuple[Week, rs.Offer]]:
 
 # ---------------- CPU-CPU trades ----------------
 
-def test_cpus_make_a_handful_of_trades_a_season(seasons):
+def test_cpus_trade_every_season_without_a_frenzy(seasons):
+    """This league is a straight-ADP draft (teams with four quarterbacks next to teams with one) and nothing
+    but trades touches it, so deals are easy to find: about ten a season. Real seasons, with real drafts and
+    waivers, give 1 to 8 (mean 4), which is what MAX_PAIRS, PAIR_SCORED and MIN_CPU_GAIN are tuned for."""
     counts = [len(trades(season)) for season in seasons.values()]
 
-    assert all(1 <= count <= 12 for count in counts), counts
-    assert 2 <= mean(counts) <= 8, counts
+    assert all(4 <= count <= 16 for count in counts), counts
+    assert 6 <= mean(counts) <= 13, counts
+
+
+def test_an_attempt_asks_several_pairs_and_stops_at_the_first_deal(monkeypatch):
+    state, know, asked = fakes.drafted_state(), fakes.fake_knowledge(1), []
+    best_deal = ai._best_deal
+
+    def no_deal(state, settings, know, first, second, scored):
+        asked.append((first.id, second.id))
+
+    def recorded(state, settings, know, first, second, scored):
+        asked.append((first.id, second.id))
+        return best_deal(state, settings, know, first, second, scored) if len(asked) > 1 else None
+
+    monkeypatch.setattr(ai, "_best_deal", no_deal)
+    unchanged = ai._cpu_attempt(state, SETTINGS, know, rs.rng(0, "pairs"))
+    without_luck = list(asked)
+    asked.clear()
+    monkeypatch.setattr(ai, "_best_deal", recorded)
+    traded = [ai._cpu_attempt(state, SETTINGS, know, rs.rng(seed, "pairs")) for seed in SEEDS]
+
+    assert unchanged is state and len(set(without_luck)) == len(without_luck) == ai.MAX_PAIRS > 1
+    assert all(USER not in pair and pair[0] != pair[1] for pair in without_luck)
+    assert any(len(after.offers) == 1 for after in traded)   # the first pair said no, a later one dealt
+    assert len(asked) <= len(SEEDS) * ai.MAX_PAIRS
+
+
+def test_a_deal_that_leaves_a_cpu_a_starting_slot_nobody_plays_in_is_passed_over(monkeypatch):
+    state = fakes.drafted_state()
+    team = rs.team(state, 8)                                  # two tight ends
+    tight_ends = [pid for pid in team.roster if fakes.fake_knowledge(1).by_id[pid].position == "TE"]
+    resting, playing = tight_ends
+    know = fakes.fake_knowledge(1, data=fakes.patched(fakes.fake_season(), projected={(resting, 1): None}))
+    back = next(pid for pid in rs.team(state, 9).roster if know.by_id[pid].position == "RB")
+
+    assert ai._strands_a_starter(SETTINGS, know, team, [playing], [back], [])
+    assert not ai._strands_a_starter(SETTINGS, know, team, [resting], [back], [])
+    assert ai._strands_a_starter(SETTINGS, know, team, [resting], [back], [playing])     # the forced drop does it
+    monkeypatch.setattr(ai, "_strands_a_starter", lambda *args: True)
+    assert all(ai.cpu_trades(state, SETTINGS, fakes.fake_knowledge(1), seed).teams == state.teams for seed in SEEDS)
+
+
+def test_no_cpu_trades_its_way_over_a_positional_limit_or_into_an_idle_slot(seasons):
+    for season in seasons.values():
+        for week, offer in trades(season):
+            know = fakes.fake_knowledge(week.week)
+            for team_id in (offer.from_team, offer.to_team):
+                before, after = rs.team(week.before, team_id).roster, rs.team(week.after, team_id).roster
+                had, have = (Counter(know.by_id[pid].position for pid in roster) for roster in (before, after))
+                assert all(have[p] <= max(had[p], rv.position_cap(p, SETTINGS)) for p in have), (week.week, offer)
+                assert len(rv.idle_slots(know, after, SETTINGS)) <= len(rv.idle_slots(know, before, SETTINGS))
+
+
+def test_the_test_suite_clears_the_trade_and_draft_caches():
+    from services import replay_draft
+    from tests.conftest import _clear_caches
+
+    rt._season(SETTINGS, fakes.fake_knowledge(1), rs.user_team(fakes.drafted_state()).roster)
+    replay_draft._board(fakes.fake_season().as_of(0))
+    assert rt._season.cache_info().currsize and replay_draft._board.cache_info().currsize
+
+    _clear_caches()
+
+    assert rt._season.cache_info().currsize == replay_draft._board.cache_info().currsize == 0
 
 
 def test_every_cpu_trade_passes_the_acceptance_test_for_both_sides(seasons):
@@ -155,16 +222,22 @@ def test_a_second_run_in_the_same_week_does_not_send_a_second_offer(seasons):
     assert sum(o.to_team == USER and o.week == week.week for o in again.offers) == 1
 
 
-def test_players_who_are_out_are_kept_out_of_the_search_for_the_user_only():
+def test_players_who_are_out_are_kept_out_of_every_search():
     state = replace(fakes.drafted_state(), week=6)
-    know = fakes.fake_knowledge(6)
     owner = rs.team(state, STAR_OWNER)
 
-    for_cpu = [v.player_id for v in ai._tradable(state, know, owner, with_user=False)]
-    for_user = [v.player_id for v in ai._tradable(state, know, owner, with_user=True)]
+    hurt = [v.player_id for v in ai._tradable(state, fakes.fake_knowledge(6), owner)]
+    healthy = [v.player_id for v in ai._tradable(state, fakes.fake_knowledge(5), owner)]
 
-    assert fakes.INJURED_STAR_ID in for_cpu and fakes.INJURED_STAR_ID not in for_user
-    assert len(for_cpu) == ai.TOP_SKILL
+    assert fakes.INJURED_STAR_ID in healthy and fakes.INJURED_STAR_ID not in hurt
+    assert len(hurt) == ai.TOP_SKILL
+
+
+def test_no_executed_cpu_trade_includes_a_player_who_was_out_that_week(seasons):
+    moved = [(week.week, pid) for season in seasons.values() for week, offer in trades(season)
+             for pid in (*offer.give, *offer.get)]
+
+    assert moved and not [(w, pid) for w, pid in moved if fakes.fake_knowledge(w).by_id[pid].out]
 
 
 def test_on_hard_an_offer_still_gives_the_cpu_its_premium():
@@ -206,7 +279,7 @@ def test_the_search_is_bounded(monkeypatch):
     for seed in SEEDS:
         ai.cpu_trades(state, SETTINGS, know, seed)
 
-    searches = ai.CPU_ATTEMPTS + 1                       # plus one for the offer to the user
+    searches = ai.CPU_ATTEMPTS * ai.MAX_PAIRS + 1        # plus one for the offer to the user
     assert 0 < len(calls) <= len(SEEDS) * searches * (ai.MAX_SCORED + 1)       # + 1: execute checks again
 
 

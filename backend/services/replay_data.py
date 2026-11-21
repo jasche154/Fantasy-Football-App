@@ -89,11 +89,13 @@ def load_game_results(session: Session, season: int, force: bool = False) -> dic
         # alone on purpose: populate_stats.apply_latest_teams would set it to this old season's team.
         ps.load_feed(session, next(f for f in ps.FEEDS if f.model is PlayerStatsWeekly), [season], index)
         loaded.append("player_stats_weekly")
-        try:
-            ps.sync_crosswalk(session, index)           # ESPN and Sleeper ids for the new players
-        except Exception as exc:                        # ids are a bonus; names still match
-            log.warning("crosswalk: sync failed (%s)", type(exc).__name__)
-            session.rollback()
+    errors: dict[str, str] = {}
+    try:
+        ps.sync_crosswalk(session, index)               # ESPN and Sleeper ids, retried on every prepare
+    except Exception as exc:                            # prepare_season holds back ADP and projections
+        log.warning("crosswalk: sync failed (%s)", type(exc).__name__)
+        session.rollback()
+        errors["crosswalk"] = type(exc).__name__
     if force or not before["nfl_games"]:
         ps.load_schedules(session, [season])
         loaded.append("nfl_games")
@@ -101,14 +103,14 @@ def load_game_results(session: Session, season: int, force: bool = False) -> dic
     if force or not (before["kicker_games"] and before["team_game_stats"]) or _missing_scores(session, season):
         advanced_stats.load_advanced_stats(session, [season], index)    # also creates the kickers
         loaded.append("kicker_games, team_game_stats")
-    if loaded:
+    if loaded and season >= ps.FIRST_SEASON:            # older seasons feed no live model: keep its caches
         ps.record_load(session, [season])               # cached valuations notice the new rows
     counts = table_counts(session, season)
     missing = [name for name, rows in counts.items() if not rows]
     if missing:
         raise ReplayDataError(f"nflverse data for {season} is missing: {', '.join(missing)}.")
     return {**counts, "loaded": loaded, "games_renamed": renamed,
-            "team_games_without_score": _missing_scores(session, season)}
+            "team_games_without_score": _missing_scores(session, season), "errors": errors}
 
 
 def ensure_defenses(session: Session) -> int:
@@ -122,14 +124,13 @@ def ensure_defenses(session: Session) -> int:
 
 
 def mfl_crosswalk() -> dict[str, str]:
-    """MyFantasyLeague id -> gsis id (DynastyProcess, via nflreadpy). Empty when it cannot be loaded."""
+    """MyFantasyLeague id -> gsis id (DynastyProcess, via nflreadpy). HistoryError when it cannot be loaded."""
     import nflreadpy as nfl
 
     try:
         frame = nfl.load_ff_playerids().select(["mfl_id", "gsis_id"]).drop_nulls()
     except Exception as exc:                            # nflreadpy raises a mix of HTTP and parsing errors
-        log.warning("crosswalk: download failed (%s); matching MyFantasyLeague by name", type(exc).__name__)
-        return {}
+        raise HistoryError(f"The player id crosswalk could not be loaded ({type(exc).__name__}).") from exc
     return {str(int(mfl_id)): gsis for mfl_id, gsis in frame.iter_rows()}
 
 
@@ -163,29 +164,38 @@ def adp_rows(season: int, ffc: Sequence[tuple[AdpEntry, int | None]],
         if player_id is not None and player_id not in seen:
             seen.add(player_id)
             rows.append({"season": season, "player_id": player_id, "adp": entry.adp, "stdev": entry.stdev,
-                         "source": adp_history.FFC})
+                         "source": adp_history.FFC, "team": entry.team})
     pick = max((row["adp"] for row in rows), default=0.0)
     for entry, player_id in sorted(mfl, key=lambda pair: pair[0].adp):
         if player_id is not None and player_id not in seen:
             seen.add(player_id)
             pick = round(pick + 1.0, 1)
             rows.append({"season": season, "player_id": player_id, "adp": pick, "stdev": None,
-                         "source": adp_history.MFL})
+                         "source": adp_history.MFL, "team": entry.team})
     return rows
 
 
 def load_adp(session: Session, season: int, client: HistoryClient, force: bool = False) -> dict:
-    """Step 3. FFC is required; if MFL fails its tail is skipped (re-run with force to add it later)."""
-    stored = session.scalar(select(func.count()).select_from(ReplayAdp).where(ReplayAdp.season == season)) or 0
-    if stored and not force:
-        return {"rows": stored, "skipped": True}
+    """Step 3. FFC is required (its failure changes nothing). A season is complete once it has MFL rows;
+    until then every run fetches again. If MFL or the id crosswalk fails, a stored season is left exactly
+    as it is (never shrunk) and the error reported; with nothing stored, FFC alone is stored for now."""
+    stored = dict(session.execute(select(ReplayAdp.source, func.count()).where(
+        ReplayAdp.season == season).group_by(ReplayAdp.source)).all())
+    total = sum(stored.values())
+    if stored.get(adp_history.MFL) and not force:
+        return {"rows": total, "skipped": True}
     ffc = adp_history.fetch_ffc(client, season)
     errors: dict[str, str] = {}
+    mfl: list[AdpEntry] = []
+    crosswalk: dict[str, str] = {}
     try:
         mfl = adp_history.fetch_mfl(client, season)
-    except HistoryError as exc:
-        mfl, errors = [], {"adp mfl": type(exc).__name__}
-    crosswalk = mfl_crosswalk() if mfl else {}
+        crosswalk = mfl_crosswalk()
+    except HistoryError as exc:                         # MFL rows without ids would be matched by name alone
+        errors["adp crosswalk" if mfl else "adp mfl"] = type(exc).__name__
+        mfl = []
+    if errors and total:
+        return {"rows": total, "kept": True, "errors": errors}
     created = create_drafted_players(session, mfl, crosswalk)
     matcher = SeasonMatcher(session, season)
     mfl_pairs = [(e, _adp_player(matcher, e, crosswalk, {})) for e in mfl]
@@ -288,8 +298,11 @@ def prepare_season(session: Session, season: int, http: httpx.Client | None = No
     try:
         run("game_results", lambda: load_game_results(session, season, force))
         summary["defenses"] = ensure_defenses(session)
-        run("adp", lambda: load_adp(session, season, client, force))
-        run("projections", lambda: load_projections(session, season, client, force))
+        if "crosswalk" in summary["errors"]:          # nothing is stored without ids; the next run retries
+            summary["adp"] = summary["projections"] = {"skipped": "player ids not synced"}
+        else:
+            run("adp", lambda: load_adp(session, season, client, force))
+            run("projections", lambda: load_projections(session, season, client, force))
     finally:
         client.close()
         replay_pool.clear_cache()           # a season loaded before this import is read again

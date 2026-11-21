@@ -84,12 +84,13 @@ def execute_move(state: State, settings: Settings, know: Knowledge, team_id: int
     """Put an unrostered player on a team, releasing `drop` first (he goes on waivers). No phase or
     waiver-status check: `add_drop`, `process_claims` and the CPU free-agency pass do their own.
 
-    Logs the release's "drop" event, then one `kind` event ("add" or "claim") naming both players."""
+    Logs one `kind` event ("add" or "claim") naming both players (ids: add, then drop); the release
+    itself logs nothing, so a move is one line in the activity log."""
     problem = _problem(state, settings, know, team_id, add, drop)
     if problem:
         raise ValueError(problem)
     if drop is not None:
-        state = rs.release(state, settings, team_id, drop, _name(know, drop))
+        state = rs.release(state, settings, team_id, drop, log=False)
     team = rs.team(state, team_id)
     state = rs.with_team(state, replace(team, roster=(*team.roster, add)))
     verb = "claimed" if kind == "claim" else "added"

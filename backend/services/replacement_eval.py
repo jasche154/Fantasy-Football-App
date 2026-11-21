@@ -36,7 +36,7 @@ import numpy as np  # noqa: E402
 from sqlalchemy.orm import Session  # noqa: E402
 
 from services.league import POSITIONS, LeagueSettings, replacement_levels, starter_counts  # noqa: E402
-from services.projections import PlayerSeason, load_player_seasons  # noqa: E402
+from services.projections import PlayerSeason, load_player_seasons, prior_player_seasons  # noqa: E402
 from services.valuation import value_players  # noqa: E402
 
 GWTTKB_DEPTH = {"QB": 1.17, "RB": 2.83, "WR": 3.67, "TE": 0.75}
@@ -139,7 +139,7 @@ def run(session: Session, seasons: Iterable[int], weeks: Sequence[int], league: 
     rows = []
     for season in seasons:
         full = load_player_seasons(session, season, scoring)
-        previous = load_player_seasons(session, season - 1, scoring)
+        previous = prior_player_seasons(session, season, scoring)
         if not full:
             log.warning("%s: no stats loaded, skipped", season)
             continue

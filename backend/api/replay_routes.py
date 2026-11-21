@@ -1,16 +1,18 @@
 """Replay League: seasons, saved games and every screen of a game (the user's actions are in
 api/replay_action_routes.py). Response shapes are documented at the top of services/replay_views.py.
 
-Every change to a game runs load -> engine -> save under that game's lock (`turn`), so two overlapping
-requests can never lose a write or play a week twice.
+Every change to a game runs load -> engine -> save under the replay lock (`turn`, `game_lock`), so two
+overlapping requests can never lose a write or play a week twice. The lock is never evicted (unlike
+build_locks.key_lock, whose bounded dict can hand two requests different locks for one key).
 """
 import secrets
+import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Literal
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -21,7 +23,6 @@ from services import (
     replay_data, replay_game as rg, replay_pool, replay_state as rs, replay_views as views,
     replay_views_league as league_views,
 )
-from services.build_locks import key_lock
 from services.replay_pool import SeasonData
 from services.replay_state import Settings, State
 from services.valuation import NoDataError
@@ -34,6 +35,15 @@ Limit = Query(views.DEFAULT_PAGE, ge=1, le=views.MAX_PAGE)
 Offset = Query(0, ge=0)
 Week = Query(None, ge=0, le=22)
 TeamId = Query(None, ge=1)
+GameId = Annotated[int, Path(ge=1, le=2 ** 63 - 1)]      # SQLite INTEGER range: a bigger id is a 422, not a 500
+
+_GAME_LOCK = threading.Lock()
+
+
+def game_lock(game_id: int) -> threading.Lock:
+    """The lock a change to a replay game runs under. shortcut: one lock for every game (single-user app);
+    key it by game id (in a dict that never evicts) if games ever need to change in parallel."""
+    return _GAME_LOCK
 
 
 @contextmanager
@@ -90,12 +100,15 @@ class Turn:
 
 
 @contextmanager
-def turn(session: Session, game_id: int, week: int | None = None) -> Iterator[Turn]:
-    """The game loaded under its lock. `week` is the week the caller believes it is: 409 when it is not."""
-    with errors(), key_lock(("replay", game_id)):
+def turn(session: Session, game_id: int, week: int | None = None, overall: int | None = None) -> Iterator[Turn]:
+    """The game loaded under its lock. `week` is the week the caller believes it is, `overall` the draft
+    pick it believes is on the clock: 409 when either is given and wrong."""
+    with errors(), game_lock(game_id):
         row, settings, state = rs.load(session, game_id)
         if week is not None and week != state.week:
             raise HTTPException(409, f"This league is in week {state.week}, not week {week}. Reload it.")
+        if overall is not None and overall != len(state.picks) + 1:
+            raise HTTPException(409, f"The draft is at pick {len(state.picks) + 1}, not pick {overall}. Reload it.")
         data = replay_pool.load_season_data(session, settings.season, settings.scoring)
         yield Turn(session, row, settings, state, data)
 
@@ -163,13 +176,13 @@ def create_game(body: CreateBody, session: Session = Depends(get_session)) -> di
 
 
 @router.get("/games/{game_id}")
-def game_summary(game_id: int, session: Session = Depends(get_session)) -> dict:
+def game_summary(game_id: GameId, session: Session = Depends(get_session)) -> dict:
     return show(session, game_id, views.summary)
 
 
 @router.post("/games/{game_id}/delete")
-def delete_game(game_id: int, session: Session = Depends(get_session)) -> dict:
-    with errors(), key_lock(("replay", game_id)):
+def delete_game(game_id: GameId, session: Session = Depends(get_session)) -> dict:
+    with errors(), game_lock(game_id):
         rs.delete(session, game_id)
     return {"deleted": game_id}
 
@@ -177,46 +190,46 @@ def delete_game(game_id: int, session: Session = Depends(get_session)) -> dict:
 # ---------------- a game's screens ----------------
 
 @router.get("/games/{game_id}/draft")
-def draft_board(game_id: int, position: str | None = None, search: str | None = Query(None, max_length=60),
+def draft_board(game_id: GameId, position: str | None = None, search: str | None = Query(None, max_length=60),
                 limit: int = Limit, offset: int = Offset, session: Session = Depends(get_session)) -> dict:
     return show(session, game_id, lambda game: views.draft(game, position, search, limit, offset))
 
 
 @router.get("/games/{game_id}/team")
-def team(game_id: int, team_id: int | None = TeamId, week: int | None = Week,
+def team(game_id: GameId, team_id: int | None = TeamId, week: int | None = Week,
          session: Session = Depends(get_session)) -> dict:
     return show(session, game_id, lambda game: views.team(game, team_id, week))
 
 
 @router.get("/games/{game_id}/matchup")
-def matchup(game_id: int, week: int | None = Week, team_id: int | None = TeamId,
+def matchup(game_id: GameId, week: int | None = Week, team_id: int | None = TeamId,
             session: Session = Depends(get_session)) -> dict:
     return show(session, game_id, lambda game: views.matchup(game, week, team_id))
 
 
 @router.get("/games/{game_id}/scoreboard")
-def scoreboard(game_id: int, week: int | None = Week, session: Session = Depends(get_session)) -> dict:
+def scoreboard(game_id: GameId, week: int | None = Week, session: Session = Depends(get_session)) -> dict:
     return show(session, game_id, lambda game: views.scoreboard(game, week))
 
 
 @router.get("/games/{game_id}/standings")
-def standings(game_id: int, session: Session = Depends(get_session)) -> dict:
+def standings(game_id: GameId, session: Session = Depends(get_session)) -> dict:
     return show(session, game_id, league_views.standings)
 
 
 @router.get("/games/{game_id}/schedule")
-def schedule(game_id: int, team_id: int | None = TeamId, session: Session = Depends(get_session)) -> dict:
+def schedule(game_id: GameId, team_id: int | None = TeamId, session: Session = Depends(get_session)) -> dict:
     return show(session, game_id, lambda game: league_views.schedule(game, team_id))
 
 
 @router.get("/games/{game_id}/activity")
-def activity(game_id: int, kind: str | None = Query(None, max_length=80), limit: int = Limit,
+def activity(game_id: GameId, kind: str | None = Query(None, max_length=80), limit: int = Limit,
              offset: int = Offset, session: Session = Depends(get_session)) -> dict:
     return show(session, game_id, lambda game: league_views.activity(game, kind, limit, offset))
 
 
 @router.get("/games/{game_id}/players")
-def players(game_id: int, position: str | None = None, search: str | None = Query(None, max_length=60),
+def players(game_id: GameId, position: str | None = None, search: str | None = Query(None, max_length=60),
             status: str | None = None, sort: str = "value", limit: int = Limit, offset: int = Offset,
             session: Session = Depends(get_session)) -> dict:
     """The waiver wire: the whole pool, filtered and paged."""
@@ -225,15 +238,15 @@ def players(game_id: int, position: str | None = None, search: str | None = Quer
 
 
 @router.get("/games/{game_id}/players/{player_id}")
-def player(game_id: int, player_id: int, session: Session = Depends(get_session)) -> dict:
+def player(game_id: GameId, player_id: int, session: Session = Depends(get_session)) -> dict:
     return show(session, game_id, lambda game: league_views.player(game, player_id))
 
 
 @router.get("/games/{game_id}/claims")
-def claims(game_id: int, session: Session = Depends(get_session)) -> dict:
+def claims(game_id: GameId, session: Session = Depends(get_session)) -> dict:
     return show(session, game_id, league_views.claims)
 
 
 @router.get("/games/{game_id}/trades")
-def trades(game_id: int, session: Session = Depends(get_session)) -> dict:
+def trades(game_id: GameId, session: Session = Depends(get_session)) -> dict:
     return show(session, game_id, league_views.trades)

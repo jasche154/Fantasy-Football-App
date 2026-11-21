@@ -116,7 +116,7 @@ def test_available_lists_adp_order_then_players_without_adp_by_preseason_project
     board = rd.available(state, data)
     ranked, unranked = [p for p in board if p.adp is not None], [p for p in board if p.adp is None]
 
-    assert len(board) == len(data.players) and board[:len(ranked)] == ranked
+    assert len(board) == len(data.as_of(0).players) and board[:len(ranked)] == ranked
     assert [p.adp for p in ranked] == sorted(p.adp for p in ranked)
     week_one = [data.projection(p.player_id, 1) for p in unranked]
     assert unranked and week_one == sorted(week_one, reverse=True)
@@ -129,7 +129,7 @@ def test_available_drops_drafted_players():
 
     after = rd.make_pick(state, settings, data, first.player_id)
 
-    assert first not in rd.available(after, data) and len(rd.available(after, data)) == len(data.players) - 1
+    assert first not in rd.available(after, data) and len(rd.available(after, data)) == len(data.as_of(0).players) - 1
     assert rd.available(drafted(), data)[0].player_id not in rs.rostered(drafted())
 
 
@@ -315,6 +315,38 @@ def test_drafts_follow_adp_loosely_never_exactly(teams):
                    for pick, player in picks_with_players(state)[:ADP_WINDOW])
         mixes = {tuple(sorted(Counter(positions(state, team.id)).items())) for team in state.teams}
         assert len(mixes) > 1                                   # CPUs do not all build the same roster
+
+
+def test_an_early_pick_offers_nobody_more_than_a_round_ahead_of_adp():
+    settings, data = fakes.fake_settings(), fakes.fake_season()
+    state = rd.new_game(settings, 0)
+    for _ in range(5):
+        state = rd.make_pick(state, settings, data, rd.available(state, data)[0].player_id,
+                             rd.on_the_clock(state, settings))
+
+    players, ranked = rd._candidates(state, data.as_of(0), rd.ALL_POSITIONS, 1, 6)
+
+    assert ranked and players
+    assert max(player.adp for player in players) <= 6 + settings.teams
+
+
+@pytest.mark.parametrize("teams", SIZES)
+def test_no_cpu_reaches_more_than_a_round_in_the_early_rounds(teams):
+    for seed in range(40):
+        state = drafted(teams, seed)
+        user = rs.user_team(state).id
+        worst = min(pick.overall - player.adp for pick, player in picks_with_players(state)
+                    if pick.round <= rd.BAND_ENDS[0] and pick.team_id != user)
+        assert worst >= -teams, (seed, worst)
+
+
+@pytest.mark.parametrize("bench", [4, 6, 8, 10])
+def test_draft_caps_are_the_caps_waivers_and_trades_use(bench):
+    settings = fakes.fake_settings(bench=bench)
+
+    caps = rd._caps(settings)
+
+    assert all(caps[p] == rv.position_cap(p, settings) for p in rd.ALL_POSITIONS)
 
 
 def test_the_same_seed_gives_the_same_draft_and_other_seeds_differ():

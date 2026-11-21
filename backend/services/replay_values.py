@@ -15,7 +15,8 @@ results are used for the `games` / `ppg` display fields alone, and only for week
   availability = the share he is expected to play.
 - healthy_value = max(0, ros_ppg - replacement) x his team's games left; trade_value = healthy_value x
   availability. Kickers and defenses have neither; `market_value` is what any player counts for in a trade
-  package (never below a roster-spot floor, so nobody is a free throw-in).
+  package (never below a roster-spot floor, so nobody is a free throw-in; a kicker or defense is worth that
+  floor and no more, so a free-agent unit cannot be turned into skill value).
 
 `Knowledge` and `ReplayValue` duck-type `valuation.Valuation` / `PlayerValue` for services/lineup_gain.py and
 services/trade.py. One difference matters: PlayerValue.ros_ppg is already discounted by availability, a
@@ -37,6 +38,7 @@ RECENCY_WEIGHTS = (4, 3, 2, 1)                        # newest first: the projec
 OUT_SHARE = {1: 0.45, 2: 0.55, 3: 0.60, 4: 0.65, 5: 0.75}    # share of remaining games missed, by weeks out so far
 OUT_SHARE_LONG = 0.90                                 # six or more weeks out (measured, RB/WR/TE 2021-25)
 FLEX_POSITIONS = ("RB", "WR", "TE")
+BACKUPS = {"QB": 1, "RB": 3, "WR": 4, "TE": 1}        # most a CPU carries behind its starters (no spare K or DST)
 
 
 @dataclass(frozen=True)
@@ -60,7 +62,7 @@ class ReplayValue:
     out: bool = False              # no projection this week and not on a bye
     healthy_value: float = 0.0     # vorp_per_game x games_left, no injury discount
     games_left: int = 0            # his team's games from this week to the league's last week
-    market_value: float = 0.0      # what he counts for in a trade package (see market_value)
+    market_value: float = 0.0      # what he counts for in a trade package (K and DST: the roster-spot floor)
     last_projection: float = 0.0   # his most recent non-zero pre-game projection
 
 
@@ -146,13 +148,13 @@ def _row(data: SeasonData, player: PoolPlayer, prior: float, week: int, team: st
     }
 
 
-def _valued(row: dict, levels: Mapping[str, float]) -> dict:
-    """Adds the values. `levels`: replacement for skill positions, the first undrafted K / DST for those."""
-    over = max(0.0, row["ros_ppg"] - levels[row["position"]])
+def _valued(row: dict, replacement: Mapping[str, float]) -> dict:
+    """Adds the values. A kicker or defense is worth a roster spot only: an elite one counts for no more,
+    or the user could turn a free-agent unit into skill value."""
     floor = FAIR_POINTS_PER_WEEK * row["games_left"]
-    if row["position"] not in SKILL:                  # worth very little in a trade, but never nothing
-        market = floor + over * row["games_left"] * row["availability"]
-        return {**row, "vorp_per_game": 0.0, "healthy_value": 0.0, "trade_value": 0.0, "market_value": round(market, 1)}
+    if row["position"] not in SKILL:
+        return {**row, "vorp_per_game": 0.0, "healthy_value": 0.0, "trade_value": 0.0, "market_value": round(floor, 1)}
+    over = max(0.0, row["ros_ppg"] - replacement[row["position"]])
     healthy = over * row["games_left"]
     value = round(healthy * row["availability"], 1)
     return {**row, "vorp_per_game": round(over, 2), "healthy_value": round(healthy, 1), "trade_value": value,
@@ -167,16 +169,6 @@ def _ranked(rows: Iterable[dict]) -> tuple[ReplayValue, ...]:
         counts[row["position"]] += 1
         values.append(ReplayValue(**row, rank=rank, pos_rank=f"{row['position']}{counts[row['position']]}"))
     return tuple(values)
-
-
-def _streamer_levels(rows: Iterable[dict], teams: int) -> dict[str, float]:
-    """ros_ppg of the (teams + 1)th best kicker and defense: the best one nobody needs to roster."""
-    rates: dict[str, list[float]] = {"K": [], "DST": []}
-    for row in rows:
-        if row["position"] in rates:
-            rates[row["position"]].append(row["ros_ppg"])
-    return {position: sorted(found, reverse=True)[teams] if len(found) > teams else 0.0
-            for position, found in rates.items()}
 
 
 @lru_cache(maxsize=256)
@@ -194,8 +186,7 @@ def _knowledge(data: SeasonData, league: LeagueSettings, week: int, end_week: in
     rows = [_row(data, player, priors[pid], week, teams[pid], games_left(teams[pid]))
             for pid, player in data.players.items()]
     replacement = replacement_levels(((r["position"], r["ros_ppg"]) for r in rows if r["position"] in SKILL), league)
-    levels = {**replacement, **_streamer_levels(rows, league.teams)}
-    values = _ranked(_valued(row, levels) for row in rows)
+    values = _ranked(_valued(row, replacement) for row in rows)
     through = max(0, week - 1)
     return Knowledge(season=data.season, week=week, league=league, values=values,
                      by_id=MappingProxyType({v.player_id: v for v in values}),
@@ -245,8 +236,7 @@ def horizon(know: Knowledge, settings: "replay_state.Settings") -> lineup_gain.H
 def market_value(know: Knowledge, player_id: int) -> float:
     """What a player counts for in a trade package: never below trade.FAIR_POINTS_PER_WEEK x his games left.
 
-    Skill: his trade value, or that floor. K and DST: the floor plus what he adds over the best kicker or
-    defense left on waivers (the (teams + 1)th), for the games he is expected to play."""
+    Skill: his trade value, or that floor. K and DST: the floor alone (a roster spot), however good."""
     return _values(know, [player_id])[0].market_value
 
 
@@ -266,6 +256,23 @@ def can_field_lineup(positions: Sequence[str], settings) -> bool:
     return lineup_holes(positions, settings) == 0
 
 
+def position_cap(position: str, settings) -> int:
+    """The most a CPU carries at a position, the limits its draft keeps: its starting slots (a FLEX counts
+    for backs and receivers) plus BACKUPS. 2 QB, 6 RB, 7 WR, 2 TE, 1 K and 1 DST on the default lineup."""
+    flex = settings.starters.get("FLEX", 0) if position in ("RB", "WR") else 0
+    return settings.starters.get(position, 0) + flex + BACKUPS.get(position, 0)
+
+
+def crowded(kept: Sequence[ReplayValue], added: Sequence[ReplayValue], position: str, settings) -> bool:
+    """Would a CPU that keeps `kept` and takes on `added` be over its limit at `position`? One over is fine
+    for each starting slot there that the players it keeps cannot fill this week (bye or out) and a
+    newcomer can: he is then the only way to field a lineup."""
+    old, new = ([v for v in group if v.position == position] for group in (kept, added))
+    idle = settings.starters.get(position, 0) - sum(v.projection > 0 for v in old)
+    needed = max(0, min(idle, sum(v.projection > 0 for v in new)))
+    return len(old) + len(new) - position_cap(position, settings) > needed
+
+
 def _values(know: Knowledge, player_ids: Iterable[int]) -> list[ReplayValue]:
     ids = list(player_ids)
     unknown = [pid for pid in ids if pid not in know.by_id]
@@ -281,6 +288,14 @@ def best_lineup(know: Knowledge, player_ids: Iterable[int], settings) -> dict[st
     with `.starters` (replay Settings or LeagueSettings)."""
     players = sorted(_values(know, player_ids), key=lambda v: (-v.projection, -v.ros_ppg, v.player_id))
     return mt.best_lineup(players, SimpleNamespace(starters=settings.starters, superflex=False))
+
+
+def idle_slots(know: Knowledge, player_ids: Iterable[int], settings) -> list[str]:
+    """The starting slots (FLEX, K and DST included) this roster cannot fill with a projected player this
+    week (bye, out or nobody there), once per missing starter."""
+    lineup = best_lineup(know, player_ids, settings)
+    return [slot for slot, wanted in settings.starters.items()
+            for _ in range(wanted - sum(know.by_id[pid].projection > 0 for pid in lineup.get(slot, ())))]
 
 
 def lineup_points(know: Knowledge, player_ids: Iterable[int]) -> float:

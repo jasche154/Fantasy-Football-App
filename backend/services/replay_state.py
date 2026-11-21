@@ -309,14 +309,18 @@ def retrade_locked(state: State, player_id: int) -> bool:
     return player_id in state.traded and state.week - state.traded[player_id] < RETRADE_LOCK_WEEKS
 
 
-def release(state: State, settings: Settings, team_id: int, player_id: int, name: str | None = None) -> State:
+def release(state: State, settings: Settings, team_id: int, player_id: int, name: str | None = None,
+            log: bool = True) -> State:
     """THE way a player leaves a roster without a trade partner: off the roster, onto waivers (`state.locked`,
-    in both waiver modes) until the next start of week, with a "drop" event (`name` is for its text only)."""
+    in both waiver modes) until the next start of week, with a "drop" event (`name` is for its text only).
+    log=False skips the event, for a caller that logs one event for the whole move (add or claim)."""
     owner = team(state, team_id)
     if player_id not in owner.roster:
         raise ValueError(f"{owner.name} can't drop a player who isn't on the roster.")
     smaller = replace(owner, roster=tuple(pid for pid in owner.roster if pid != player_id))
     dropped = replace(with_team(state, smaller), locked=(*(p for p in state.locked if p != player_id), player_id))
+    if not log:
+        return dropped
     return add_event(dropped, "drop", team_id, f"{owner.name} dropped {name or 'a player'}", (player_id,))
 
 

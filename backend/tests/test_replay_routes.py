@@ -234,8 +234,8 @@ def test_lineup_can_be_set_by_hand_and_handed_back(story):
 def test_free_agents_are_added_once_waivers_have_run(story):
     events, swap = story["add_drop"]["events"], story["swap"]
 
-    assert [event["kind"] for event in events] == ["drop", "add"]
-    assert [player["id"] for player in events[1]["players"]] == [swap["add"], swap["drop"]]
+    assert [event["kind"] for event in events] == ["add"]                  # one event for the whole move
+    assert [player["id"] for player in events[0]["players"]] == [swap["add"], swap["drop"]]
     assert story["claim_too_late"][0] == 422 and "Waiver claims can only be made before" in story["claim_too_late"][1]
     assert story["add_too_early"][0] == 422 and "put in a waiver claim" in story["add_too_early"][1]
 
@@ -383,6 +383,43 @@ def test_unknown_games_players_and_teams_are_reported(client, story):
         assert refused(client, game + "/players", method="GET", **query)[0] == 422, query
     assert refused(client, game + "/activity", method="GET", kind="gossip")[0] == 422
     assert refused(client, game + "/drop", {"player_id": 0})[0] == 422
+
+
+def test_a_game_id_beyond_sqlite_integers_is_a_422_not_a_500(client):
+    huge = "/games/99999999999999999999"
+
+    assert refused(client, huge, method="GET")[0] == 422
+    assert refused(client, huge + "/draft/auto")[0] == 422
+    assert refused(client, "/games/0", method="GET")[0] == 422
+    assert refused(client, f"/games/{2 ** 63 - 1}", method="GET")[0] == 404
+
+
+def test_a_repeated_draft_request_with_the_pick_number_is_refused(client):
+    game = "/games/%d" % post(client, "/games", {"season": SEASON, "seed": SEED, "draft_slot": SLOT})["game"]["id"]
+    overall = SLOT                                              # the user is on the clock at their first pick
+
+    first = post(client, game + "/draft/auto", overall=overall)
+    again = refused(client, game + "/draft/auto", overall=overall)
+    stale_pick = refused(client, game + "/draft/pick", {"player_id": 1, "overall": overall})
+
+    mine = [p for p in get(client, game + "/draft")["picks"] if p["team"]["team_id"] == SLOT]
+    assert first["events"][0]["team"]["is_user"] and len(mine) == 1
+    next_pick = 2 * 12 - SLOT + 1
+    assert again == (409, f"The draft is at pick {next_pick}, not pick {overall}. Reload it.")
+    assert stale_pick[0] == 409
+    post(client, game + "/draft/auto")                          # without `overall`: no check, as before
+    post(client, game + "/draft/auto")
+    assert len([p for p in get(client, game + "/draft")["picks"] if p["team"]["team_id"] == SLOT]) == 3
+
+
+def test_the_replay_lock_survives_build_lock_eviction():
+    from api.replay_routes import game_lock
+    from services import build_locks
+
+    lock = game_lock(7)
+    held = [build_locks.key_lock(("other", n)) for n in range(build_locks.MAX_LOCKS + 1)]
+
+    assert held and game_lock(7) is lock
 
 
 def test_a_drop_and_a_season_without_waivers(client):

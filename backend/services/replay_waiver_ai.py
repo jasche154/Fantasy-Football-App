@@ -5,15 +5,20 @@ numbers for the current week), so no CPU ever sees a result or a projection from
   with `lineup_gain` (points added to its best lineup over the rest of the season, after the drop) and
   claims a player worth about a lineup point a week. At most MAX_CLAIMS, the second planned on the roster
   as it would be after the first.
-- `cpu_free_agency` (after the run): fill an empty roster spot, cover a starting slot that would score
-  nothing this week (bye or out), and stream a kicker or defense only for a clear edge. At most
-  MAX_FREE_AGENT_MOVES per team, free agents only.
-- A CPU drops only one of its DROPPABLE_COUNT least valuable skill players by HEALTHY value, never a
-  top-PROTECTED_RANK player or an injured player who was above replacement, and never into a roster that
-  can't field a lineup. A kicker or defense is only ever swapped for another one.
+- `cpu_free_agency` (after the run), free agents only: first cover every starting slot (kicker and
+  defense included) that nobody on the roster can fill with a projection this week (bye or out), whatever
+  that costs later. Then, up to MAX_FREE_AGENT_MOVES moves in all: fill an empty roster spot, get back
+  under a positional limit, and swap a kicker or defense who does play only for STREAM_EDGE projected points.
+- A CPU never drops a top-PROTECTED_RANK player (by HEALTHY value) or an injured player who was above
+  replacement, and never into a roster that can't field a lineup. For a claim or an open spot it drops only
+  one of its DROPPABLE_COUNT least valuable skill players. A kicker or defense is only ever swapped for
+  another one.
+- No add takes a CPU over its positional limit (`replay_values.crowded`: 2 QB, 2 TE, 1 K, 1 DST, 6 RB,
+  7 WR) unless nobody it has there plays this week, and it lets the extra one go again afterwards.
 
 There is no dice roll: ties go to the better-ranked player, so the same state gives the same moves.
 """
+from collections import Counter
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
@@ -26,11 +31,13 @@ MAX_BY_VALUE = 16                 # shared candidates: the best unrostered skill
 MAX_BY_PROJECTION = 2             # plus this many per skill position by this week's projection (8 in all)
 CLAIM_GAIN_PER_WEEK = 1.0         # claim when the gain is this many lineup points per (weighted) week left
 MAX_CLAIMS = 2                    # per CPU per waiver run
-MAX_FREE_AGENT_MOVES = 2          # per CPU per week
+MAX_FREE_AGENT_MOVES = 2          # per CPU per week (covering a starting slot is always allowed)
 DROPPABLE_COUNT = 4               # a CPU only drops one of its lowest skill players by healthy value
 PROTECTED_RANK = 100              # never a player in the league's top 100 by healthy value
-MIN_FILL_GAIN = 0.0               # covering an empty starting slot must add more than this over the season
-STREAM_EDGE = 1.5                 # projected points a free-agent K / DST must beat the team's own by
+MIN_FILL_GAIN = 0.0               # a player for an open roster spot must add more than this over the season
+STREAM_EDGE = 4.0                 # projected points a free-agent K / DST must beat the team's own by (real
+                                  # seasons: a league's CPUs make about 56 such swaps a season at 2.0, nearly
+                                  # all of them defenses chasing a matchup, 28 at 3.0 and 12 at 4.0)
 STREAMED = ("K", "DST")
 
 Move = tuple[int, int | None]     # (player id to add, player id to drop)
@@ -73,29 +80,32 @@ def _unrostered(state: State, know: Knowledge, also_taken: Iterable[int] = ()) -
     return [v for v in know.values if v.player_id not in taken]
 
 
-def droppable(roster: Sequence[ReplayValue], know: Knowledge, protected: frozenset[int]) -> list[ReplayValue]:
-    """The skill players a CPU is willing to drop, least valuable first (by healthy value, so an injury
+def _spare(roster: Sequence[ReplayValue], know: Knowledge, protected: frozenset[int]) -> list[ReplayValue]:
+    """Every skill player a CPU could bear to lose, least valuable first (by healthy value, so an injury
     alone never makes a good player droppable)."""
     def safe(value: ReplayValue) -> bool:
         if value.position not in SKILL or value.player_id in protected:
             return False                              # (replacement levels exist for skill positions only)
         return not (value.out and value.last_projection > know.replacement[value.position])
 
-    spare = sorted((v for v in roster if safe(v)), key=lambda v: (v.healthy_value, v.ros_ppg, -v.player_id))
-    return spare[:DROPPABLE_COUNT]
+    return sorted((v for v in roster if safe(v)), key=lambda v: (v.healthy_value, v.ros_ppg, -v.player_id))
+
+
+def droppable(roster: Sequence[ReplayValue], know: Knowledge, protected: frozenset[int]) -> list[ReplayValue]:
+    """The DROPPABLE_COUNT skill players a CPU is willing to drop for an add, least valuable first."""
+    return _spare(roster, know, protected)[:DROPPABLE_COUNT]
 
 
 def _legal_drops(roster: Sequence[ReplayValue], add: ReplayValue, drops: Sequence[ReplayValue],
                  ctx: _Context) -> list[ReplayValue]:
-    """The drops that still leave a roster able to fill every starting slot once `add` is on it."""
-    positions = [v.position for v in roster] + [add.position]
+    """The drops that leave the roster, once `add` is on it, able to fill every starting slot and within
+    its positional limit (a like-for-like swap never adds to a position)."""
+    def allowed(out: ReplayValue) -> bool:
+        left = [v for v in roster if v is not out]
+        return (rv.can_field_lineup([*(v.position for v in left), add.position], ctx.settings)
+                and (out.position == add.position or not rv.crowded(left, [add], add.position, ctx.settings)))
 
-    def fields(out: ReplayValue) -> bool:
-        left = list(positions)
-        left.remove(out.position)
-        return rv.can_field_lineup(left, ctx.settings)
-
-    return [out for out in drops if fields(out)]
+    return [out for out in drops if allowed(out)]
 
 
 def _group(position: str) -> str:
@@ -149,6 +159,8 @@ def _best_add(roster: Sequence[ReplayValue], pool: Sequence[ReplayValue], ctx: _
             break                                     # nobody further down the list can do better
         if full and max(add.ros_ppg, add.projection) <= weakest:
             continue
+        if not full and rv.crowded(roster, [add], add.position, ctx.settings):
+            continue
         # Without a drop the gain can only be higher, so this one sum rules out most of the rest.
         gain = round(lineup_gain.season_points([*roster, add], ctx.horizon, ctx.projector, league) - base, 2)
         if gain <= needed:
@@ -200,9 +212,44 @@ def cpu_claims(state: State, settings: Settings, know: Knowledge, seed: int) -> 
 
 # ---------------- free agency ----------------
 
-def _top(players: Sequence[ReplayValue]) -> ReplayValue | None:
-    """The best of them this week: by projection, then rest-of-season rate, then the lower id."""
-    return min(players, key=lambda v: (-v.projection, -v.ros_ppg, v.player_id), default=None)
+def _this_week(value: ReplayValue) -> tuple[float, float, int]:
+    """Sorts best first for this week: by projection, then rest-of-season rate, then the lower id."""
+    return -value.projection, -value.ros_ppg, value.player_id
+
+
+def _top(players: Iterable[ReplayValue]) -> ReplayValue | None:
+    return min(players, key=_this_week, default=None)
+
+
+def _worst_own(roster: Sequence[ReplayValue], add: ReplayValue) -> ReplayValue | None:
+    """The kicker or defense a new one replaces: a CPU never carries a spare."""
+    return max((v for v in roster if v.position == add.position and v.position in STREAMED), key=_this_week,
+               default=None)
+
+
+def _cover(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: _Context) -> Move | None:
+    """A starting slot nobody on the roster can fill with a projection this week gets the best free agent
+    for it, whatever that costs later. He replaces the team's own kicker or defense, or takes an open
+    roster spot, or the place of the least valuable player it can spare whose going leaves one slot fewer
+    without a starter (so never a swap that only moves the gap)."""
+    ids = [v.player_id for v in roster]
+    idle = rv.idle_slots(ctx.know, ids, ctx.settings)
+    for slot in idle:
+        eligible = rv.FLEX_POSITIONS if slot == "FLEX" else (slot,)
+        best = (_top(v for v in free if v.position == position and v.projection > 0) for position in eligible)
+        for add in sorted(filter(None, best), key=_this_week):
+            own = _worst_own(roster, add)
+            if own:
+                return add.player_id, own.player_id
+            if len(roster) < ctx.settings.roster_size:
+                if rv.crowded(roster, [add], add.position, ctx.settings):
+                    continue
+                return add.player_id, None
+            for out in _legal_drops(roster, add, _spare(roster, ctx.know, ctx.protected), ctx):
+                after = [pid for pid in ids if pid != out.player_id] + [add.player_id]
+                if len(rv.idle_slots(ctx.know, after, ctx.settings)) < len(idle):
+                    return add.player_id, out.player_id
+    return None
 
 
 def _fill_spot(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: _Context) -> Move | None:
@@ -214,71 +261,60 @@ def _fill_spot(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: 
     needs = [v for v in free if rv.lineup_holes([*positions, v.position], ctx.settings) < holes]
     if needs:
         return _top(needs).player_id, None
-    pool = candidates(ctx.know, free)
+    pool = [v for v in candidates(ctx.know, free) if not rv.crowded(roster, [v], v.position, ctx.settings)]
     best = _best_add(roster, pool, ctx, MIN_FILL_GAIN)
     add = best[1] if best else next(iter(pool), None)       # nobody helps the lineup: the most valuable
     return (add.player_id, None) if add else None
 
 
-def _empty_slots(roster: Sequence[ReplayValue], ctx: _Context) -> list[str]:
-    """The skill and FLEX starting slots that would score nothing this week (bye, out or nobody there)."""
-    by_id = {v.player_id: v for v in roster}
-    lineup = rv.best_lineup(ctx.know, list(by_id), ctx.settings)
-    return [slot for slot, wanted in ctx.settings.starters.items() if slot not in STREAMED
-            and sum(by_id[pid].projection > 0 for pid in lineup.get(slot, ())) < wanted]
-
-
-def _fill_slot(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: _Context) -> Move | None:
-    """Cover a starting slot that would be empty this week with the best free agent for it, when that
-    still adds to the season after dropping a droppable player."""
-    for slot in _empty_slots(roster, ctx):
-        eligible = rv.FLEX_POSITIONS if slot == "FLEX" else (slot,)
-        add = _top([v for v in free if v.position in eligible and v.projection > 0])
-        legal = _legal_drops(roster, add, droppable(roster, ctx.know, ctx.protected), ctx) if add else []
-        if not legal:
-            continue
-        gain, out = lineup_gain.best_add(roster, legal, add, ctx.horizon, ctx.projector, ctx.know.league)
-        if gain > MIN_FILL_GAIN:
-            return add.player_id, out.player_id
+def _trim(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: _Context) -> Move | None:
+    """Back to the positional limit after a week that needed an extra player: the least valuable one it can
+    spare at an over-full position goes (never one a starting slot needs this week) for whoever fills the
+    open spot best, as long as that is no step down in value."""
+    idle = len(rv.idle_slots(ctx.know, [v.player_id for v in roster], ctx.settings))
+    held = Counter(v.position for v in roster)
+    for out in _spare(roster, ctx.know, ctx.protected):
+        left = [v for v in roster if v is not out]
+        if (held[out.position] > rv.position_cap(out.position, ctx.settings)
+                and len(rv.idle_slots(ctx.know, [v.player_id for v in left], ctx.settings)) <= idle):
+            move = _fill_spot(left, free, ctx)
+            if move is not None and ctx.know.by_id[move[0]].healthy_value >= out.healthy_value:
+                return move[0], out.player_id
     return None
 
 
 def _stream(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: _Context) -> Move | None:
-    """Swap a kicker for a kicker or a defense for a defense: only when the team's own projects nothing this
-    week, or the free agent beats it by STREAM_EDGE. The bigger improvement of the two positions wins."""
+    """Swap a kicker for a kicker or a defense for a defense when the free agent beats the team's own by
+    STREAM_EDGE this week (one who does not play at all is `_cover`'s job). The bigger edge wins."""
     best: tuple[float, Move] | None = None
     for position in STREAMED:
-        own = [v for v in roster if v.position == position]
-        add = _top([v for v in free if v.position == position and v.projection > 0])
-        if not own or add is None:
+        add = _top(v for v in free if v.position == position and v.projection > 0)
+        own = _worst_own(roster, add) if add else None
+        if own is None:
             continue
-        starter = _top(own)
-        spare = max(own, key=lambda v: (-v.projection, -v.ros_ppg, v.player_id))      # the worst of them
-        edge = add.projection - starter.projection
-        if (starter.projection <= 0 or edge >= STREAM_EDGE) and (best is None or edge > best[0]):
-            best = (edge, (add.player_id, spare.player_id))
+        edge = add.projection - _top(v for v in roster if v.position == position).projection
+        if edge >= STREAM_EDGE and (best is None or edge > best[0]):
+            best = (edge, (add.player_id, own.player_id))
     return best[1] if best else None
 
 
-def _next_move(state: State, team_id: int, ctx: _Context) -> Move | None:
+def _next_move(state: State, team_id: int, ctx: _Context, made: int) -> Move | None:
     roster = [ctx.know.by_id[pid] for pid in rs.team(state, team_id).roster]
     free = _unrostered(state, ctx.know, state.locked)
-    for step in (_fill_spot, _fill_slot, _stream):
-        move = step(roster, free, ctx)
-        if move is not None:
-            return move
-    return None
+    steps = (_cover, _fill_spot, _trim, _stream) if made < MAX_FREE_AGENT_MOVES else (_cover,)
+    return next((move for step in steps if (move := step(roster, free, ctx)) is not None), None)
 
 
 def cpu_free_agency(state: State, settings: Settings, know: Knowledge, seed: int) -> State:
     """Every CPU's free-agent moves for this week, in waiver-priority order (which they do not use up):
-    at most MAX_FREE_AGENT_MOVES each, never a player in `state.locked`. Works in any phase; the dropped
-    players go on waivers through `replay_state.release`. `seed` is unused (no randomness)."""
+    never a player in `state.locked`, and at most MAX_FREE_AGENT_MOVES each unless a starting slot still
+    has nobody who plays. Works in any phase; the dropped players go on waivers through
+    `replay_state.release`. `seed` is unused (no randomness)."""
     ctx = _context(know, settings)
     cpus = [team_id for team_id in state.waiver_order if not rs.team(state, team_id).is_user]
     for team_id in cpus:
-        for _ in range(MAX_FREE_AGENT_MOVES):
-            move = _next_move(state, team_id, ctx)
+        for made in range(sum(settings.starters.values())):           # one per starting slot at the very most
+            move = _next_move(state, team_id, ctx, made)
             if move is None:
                 break
             state = replay_waivers.execute_move(state, settings, know, team_id, *move)

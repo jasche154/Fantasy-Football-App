@@ -28,7 +28,7 @@ from database.models import DataLoad, PlayerStatsWeekly
 from services.league import LeagueSettings, replacement_levels
 from services.projections import (
     MIN_PRIOR_GAMES, PlayerSeason, current_rate, latest_season, latest_week,
-    load_player_seasons, project_ros_ppg,
+    load_player_seasons, prior_player_seasons, project_ros_ppg,
 )
 from services import injury_recovery
 from services.injuries import ros_role_losses
@@ -221,7 +221,7 @@ def playoff_weeks(end_week: int) -> tuple[int, int]:
 def _compute(session: Session, league: LeagueSettings, season: int) -> Valuation:
     scoring = league.scoring_settings()
     current = load_player_seasons(session, season, scoring)
-    previous = load_player_seasons(session, season - 1, scoring)
+    previous = prior_player_seasons(session, season, scoring)
     through = latest_week(session, season)
     end_week = get_settings().fantasy_end_week
     remaining = weeks_remaining(through, end_week)
