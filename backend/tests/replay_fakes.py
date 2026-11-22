@@ -9,11 +9,15 @@ Player ids are fixed by position and preseason rank (`player_id("RB", 3)`), so t
 are the same players for every seed. `drafted_state` is a league just after its draft (no replay_draft
 import). `seed_db` writes a season into the real tables in a form `replay_pool.load_season_data` reads
 back to the same data. Every skill game has a `Usage` (snap %, targets, target share, carries) worked out
-from the player's position and that game's points (`_usage`).
+from the player's position and that game's points (`_usage`). Expert ranks (`_expert_ranks`) are a noisy
+order of what the market believes each week (week 0 = preseason, then a Friday snapshot before every week's
+Sunday); `returns` comes from the tags and games through replay_pool.hard_tag_returns. Games are dated on
+Sundays (`sunday`) so seed_db's expert rows load back to the same weeks.
 """
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
+from datetime import date, timedelta
 from functools import lru_cache
 from types import MappingProxyType
 
@@ -22,13 +26,13 @@ from sqlalchemy import insert
 from sqlalchemy.orm import Session
 
 from database.models import (
-    KickerGame, NflGame, Player, PlayerSnapCountsWeekly, PlayerStatsWeekly, ReplayAdp, ReplayInjury, ReplayProjection,
-    TeamGameStats,
+    KickerGame, NflGame, Player, PlayerSnapCountsWeekly, PlayerStatsWeekly, ReplayAdp, ReplayExpertRank, ReplayInjury,
+    ReplayProjection, TeamGameStats,
 )
 from services import replay_values
 from services.kdst_rankings import DST_PREFIX, TEAM_NAMES
 from services.replay_pool import (  # noqa: F401 (Injury re-exported)
-    ALL_POSITIONS, SKILL, Injury, PoolPlayer, SeasonData, Usage,
+    ALL_POSITIONS, SKILL, Injury, PoolPlayer, SeasonData, Usage, hard_tag_returns,
 )
 from services.replay_state import Pick, Settings, State, Team, round_robin
 from services.schedule_strength import Game, Schedule
@@ -71,6 +75,8 @@ DOUBTFUL = (TRADED_ID, 4)               # tagged D with a projection: plays (inf
 STAR_BACK_WEEK = 10                     # INJURED_STAR_ID is tagged O in INJURED_WEEKS, then Q this week
 SCORING_SHIFT = {"ppr": 2.0, "half": 1.0, "std": 0.0}        # seed_db: skill projections differ by format
 SLEEPER_DECOY = 1.5                     # seed_db: Sleeper's number where ESPN also has one
+EXPERT_NOISE = 0.08                     # expert opinion vs the market's belief (lognormal sigma)
+EXPERT_AGE = {"pre": 3, "ros": 2}       # days before the Sunday: Thursday cheatsheet, Friday ROS page
 
 
 @dataclass(frozen=True)
@@ -110,14 +116,20 @@ def _pairings(teams: list[str], round_: int) -> list[tuple[str, str]]:
     return [pair if (i + round_) % 2 else pair[::-1] for i, pair in enumerate(pairs)]
 
 
-def _schedule(order: list[str], weeks: int) -> Schedule:
+def sunday(season: int, week: int) -> date:
+    """The fake season's Sunday of `week` (week 1 = the first Sunday after September 7)."""
+    first = date(season, 9, 8)
+    return first + timedelta(days=(6 - first.weekday()) % 7 + 7 * (week - 1))
+
+
+def _schedule(order: list[str], weeks: int, season: int) -> Schedule:
     """Four teams rest in each of BYE_WEEKS: order[i] is off in week 5 + i % 8."""
     games, opponents = [], {}
     for week in range(1, weeks + 1):
         playing = [team for i, team in enumerate(order) if BYE_WEEKS[i % len(BYE_WEEKS)] != week]
         for home, away in _pairings(playing, week):
             games.append(Game(week=week, home_team=home, away_team=away, home_score=None, away_score=None,
-                              spread_line=None, total_line=None))
+                              spread_line=None, total_line=None, gameday=sunday(season, week).isoformat()))
             opponents[(home, week)] = away
             opponents[(away, week)] = home
     return Schedule(games=tuple(games), opponents=MappingProxyType(opponents))
@@ -215,7 +227,7 @@ def _season(season: int, scoring: str, seed: int, weeks: int) -> SeasonData:
         raise ValueError(f"Can't fake a '{scoring}' season of {weeks} weeks.")
     rng = np.random.default_rng([season, seed])
     order = [str(team) for team in rng.permutation(TEAMS)]
-    schedule = _schedule(order, weeks)
+    schedule = _schedule(order, weeks, season)
     specs = _specs(rng, order, weeks)
     adp = _adp(specs, rng)
     shape = (len(specs), weeks)
@@ -236,10 +248,35 @@ def _season(season: int, scoring: str, seed: int, weeks: int) -> SeasonData:
             if spec.position in SKILL:
                 usage[(spec.player_id, week)] = _usage(spec.position, actual[(spec.player_id, week)])
     injuries = {key: tag for key, tag in _story_tags(weeks).items() if key[1] <= weeks and key[0] in players}
+    ranks = _expert_ranks([spec for spec in specs if spec.player_id in players], players, projected, weeks,
+                          np.random.default_rng([season, seed, 99]))     # own stream: the rest stays as it was
     return SeasonData(season=season, scoring=scoring, players=MappingProxyType(players), schedule=schedule,
                       actual=MappingProxyType(actual), projected=MappingProxyType(projected),
                       team_by_week=MappingProxyType(team_by_week), last_week=weeks,
-                      injuries=MappingProxyType(injuries), usage=MappingProxyType(usage))
+                      injuries=MappingProxyType(injuries), usage=MappingProxyType(usage),
+                      expert_ranks=MappingProxyType(ranks),
+                      expert_age=MappingProxyType({0: EXPERT_AGE["pre"],
+                                                   **dict.fromkeys(range(1, weeks + 1), EXPERT_AGE["ros"])}),
+                      returns=MappingProxyType(hard_tag_returns(injuries, actual, weeks)))
+
+
+def _expert_ranks(specs: list[_Spec], players: Mapping[int, PoolPlayer], projected: Mapping[tuple[int, int], float],
+                  weeks: int, rng: np.random.Generator) -> dict[tuple[int, int], int]:
+    """{(player, week): position rank} by the market's belief that week times noise, among players known by
+    then (an ADP or a projection by that week, as SeasonData.as_of keeps them)."""
+    first_seen: dict[int, int] = {}
+    for pid, week in projected:
+        first_seen[pid] = min(week, first_seen.get(pid, week))
+    ranks: dict[tuple[int, int], int] = {}
+    for week in range(weeks + 1):
+        known = [s for s in specs
+                 if players[s.player_id].adp is not None or first_seen.get(s.player_id, weeks + 1) <= max(1, week)]
+        opinion = {s.player_id: _projection(s, max(1, week), 1.0) * noise
+                   for s, noise in zip(known, rng.lognormal(0.0, EXPERT_NOISE, len(known)))}
+        for position in ALL_POSITIONS:
+            order = sorted((s.player_id for s in known if s.position == position), key=lambda pid: -opinion[pid])
+            ranks.update({(pid, week): rank for rank, pid in enumerate(order, start=1)})
+    return ranks
 
 
 def _story_tags(weeks: int) -> dict[tuple[int, int], Injury]:
@@ -331,7 +368,17 @@ def future_changed(data: SeasonData, after_week: int, seed: int = 1) -> SeasonDa
     usage = {key: Usage(round((u.snap_pct or 0.0) / 2 + 1, 1), u.targets + 3, 0.5, u.carries + 2) if key[1] > after_week
              else u for key, u in data.usage.items()}
     changed = patched(data, projected=shaken(data.projected, 0.1), actual=shaken(data.actual, 0.0))
-    return tagged(replace(changed, usage=MappingProxyType(usage)), tags)
+    ranks = {(pid, week): rank if week <= after_week else rank + 1 + int(rng.integers(0, 60))   # always worse than before
+             for (pid, week), rank in data.expert_ranks.items()}
+    # returns stay the original's on purpose: they are the one sanctioned leak (see returns_changed)
+    return tagged(replace(changed, usage=MappingProxyType(usage), expert_ranks=MappingProxyType(ranks)), tags)
+
+
+def returns_changed(data: SeasonData) -> SeasonData:
+    """A copy where every hard-tag streak ends differently (a return becomes 'never', 'never' becomes the last
+    week); nothing else changes. Only players hard-tagged at the time may look different."""
+    return replace(data, returns=MappingProxyType({key: 0 if back else data.last_week
+                                                   for key, back in data.returns.items()}))
 
 
 # ---------------- writing a season into the real tables ----------------
@@ -349,8 +396,19 @@ def _player_rows(data: SeasonData) -> list[dict]:
 
 def _game_rows(data: SeasonData) -> list[dict]:
     return [{"game_id": f"{data.season}_{g.week:02d}_{g.away_team}_{g.home_team}", "season": data.season,
-             "week": g.week, "game_type": "REG", "home_team": g.home_team, "away_team": g.away_team}
-            for g in data.schedule.games]
+             "week": g.week, "game_type": "REG", "home_team": g.home_team, "away_team": g.away_team,
+             "gameday": g.gameday} for g in data.schedule.games]
+
+
+def _expert_rows(data: SeasonData) -> list[dict]:
+    """Week 0 as a Thursday cheatsheet before week 1, week W as a Friday ROS page before week W's Sunday."""
+    rows = []
+    for (pid, week), rank in data.expert_ranks.items():
+        kind = "pre" if week == 0 else "ros"
+        scraped = sunday(data.season, max(1, week)) - timedelta(days=EXPERT_AGE[kind])
+        rows.append({"season": data.season, "kind": kind, "scrape_date": scraped.isoformat(), "player_id": pid,
+                     "position": data.players[pid].position, "pos_rank": rank, "ecr": float(rank)})
+    return rows
 
 
 def _skill_row(data: SeasonData, pid: int, week: int, points: float, opponent: str | None) -> dict:
@@ -423,7 +481,7 @@ def seed_db(session: Session, data: SeasonData) -> None:
     """Write the season into the real tables (players keep their fake ids) and commit.
 
     Afterwards `replay_pool.load_season_data(session, data.season, data.scoring)` returns the same pool,
-    points, usage, projections, injury tags, teams and schedule. K and DST points must be whole numbers (DST -4
+    points, usage, projections, injury tags, expert ranks, returns, teams and schedule. K and DST points must be whole numbers (DST -4
     or more)."""
     tables = {Player: _player_rows(data), NflGame: _game_rows(data), **_result_rows(data),
               ReplayAdp: [{"season": data.season, "player_id": pid, "adp": p.adp, "stdev": p.adp_stdev,
@@ -435,7 +493,8 @@ def seed_db(session: Session, data: SeasonData) -> None:
                                        for (pid, week), usage in data.usage.items() if usage.snap_pct is not None],
               ReplayInjury: [{"season": data.season, "week": week, "player_id": pid, "tag": tag.tag,
                               "practice": tag.practice, "injury": tag.injury}
-                             for (pid, week), tag in data.injuries.items()]}
+                             for (pid, week), tag in data.injuries.items()],
+              ReplayExpertRank: _expert_rows(data)}
     for model, rows in tables.items():
         if rows:
             session.execute(insert(model), rows)

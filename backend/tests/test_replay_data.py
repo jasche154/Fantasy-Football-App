@@ -523,7 +523,7 @@ def test_prepare_season_runs_every_step_and_a_second_run_makes_no_requests(db, l
     summary = replay_data.prepare_season(db, SEASON, http=sites.client(), on_step=steps.append)
     again = replay_data.prepare_season(db, SEASON, http=sites.client())
 
-    assert steps == ["game_results", "snaps", "adp", "projections", "injuries"]
+    assert steps == ["game_results", "snaps", "adp", "experts", "projections", "injuries"]
     assert loaders == ["crosswalk", "snaps", "crosswalk"]           # stats were stored: snaps still load once
     assert summary["snaps"] == {"rows": 1} and again["snaps"] == {"rows": 1, "skipped": "already loaded"}
     assert summary["errors"] == {} and summary["requests"] == 7 and summary["defenses"] == 32

@@ -342,6 +342,19 @@ def test_a_league_saved_before_the_ir_slot_loads_with_empty_irs():
     assert restored == make_state() and all(t.ir == () for t in restored.teams)
 
 
+def test_a_league_saved_before_personas_and_counters_loads_with_their_defaults():
+    saved = json.loads(rs.to_json(make_state()))
+    for team in saved["teams"]:
+        team.pop("persona")
+    for offer in saved["offers"]:
+        offer.pop("counter_to")
+
+    restored = rs.state_from_json(json.dumps(saved))
+
+    assert restored == make_state()
+    assert all(t.persona == "balanced" for t in restored.teams) and restored.offers[0].counter_to is None
+
+
 def test_held_and_rostered_include_ir_players():
     state = _with_ir(make_state(), 2, (25,))
 
@@ -503,3 +516,14 @@ def test_store_raises_replay_not_found_for_a_missing_league(db):
         rs.load(db, 999)
     with pytest.raises(rs.ReplayNotFound):
         rs.delete(db, 999)
+
+
+@pytest.mark.parametrize(("week", "phase", "mode", "is_open"), [
+    (11, "open", "wednesday", True), (12, "waivers", "wednesday", True), (12, "open", "wednesday", False),
+    (12, "waivers", "faab", True), (11, "open", "none", True), (12, "open", "none", False),
+    (13, "waivers", "wednesday", False),
+])
+def test_trades_close_at_the_waiver_run_after_the_deadline_week(week, phase, mode, is_open):
+    settings = Settings(season=2023, waiver_mode=mode)
+
+    assert rs.trades_open(make_state(week=week, phase=phase), settings) is is_open

@@ -206,6 +206,7 @@ class SeasonMatcher:
         self.by_espn = {r.espn_player_id: r.id for r in rows if r.espn_player_id}
         self.by_sleeper = {r.sleeper_player_id: r.id for r in rows if r.sleeper_player_id}
         self._defenses = {r.nfl_team: r.id for r in rows if r.position == "DST"}
+        self.positions = {r.id: TWO_WAY.get(r.gsis_id, r.position) for r in rows}      # players.id -> position
         self._names: dict[str, list[tuple[int, str, bool]]] = {}       # name -> (player id, position, played)
         for r in rows:
             if r.position != "DST":

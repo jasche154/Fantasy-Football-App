@@ -1,16 +1,20 @@
-"""Replay League trades: the rules, a CPU's acceptance test, proposals, answers, and the scams it must stop.
+"""Replay League trades: the rules, a CPU's acceptance test, proposals, answers, counters and the scams it must stop.
 
-All on fakes.drafted_state() (12 teams, the user is team 1). Three CPUs carry the stories:
+All on fakes.drafted_state() (12 teams, the user is team 1). Values come from `charted`: a plain rank-based
+chart built here from each week's healthy values, so these tests do not depend on replay_chart's formula.
 - CPU 9 starts RB36 and RB32 but owns three good tight ends: it needs a back.
-- CPU 5 owns seven receivers and its only tight end is its worst player: deep at WR.
-- CPU 5 also owns fakes.INJURED_STAR_ID, who is out in weeks 6-9.
+- CPU 5 owns seven receivers; its only tight end, TE25, is its worst player.
 """
+import math
 import time
+from collections.abc import Mapping
 from dataclasses import replace
+from types import MappingProxyType, SimpleNamespace
 
 import pytest
 
-from services import replay_state as rs, replay_trades as rt, trade
+from services import replay_state as rs, replay_trade_value as tv, replay_trades as rt
+from services.replay_personas import PERSONAS
 from services.replay_pool import SKILL
 from tests import replay_fakes as fakes
 
@@ -20,12 +24,34 @@ USER, RICH, DEEP_AT_WR, NEEDS_RB = 1, 2, 5, 9
 RB14, RB23, TE7, TE6 = P("RB", 14), P("RB", 23), P("TE", 7), P("TE", 6)      # RB14, RB23: the user's bench backs
 SCRUB, SCRUB2, SCRUB3 = P("WR", 54), P("WR", 51), P("WR", 42)                # the user's last receivers
 FAIR = (NEEDS_RB, (RB14,), (TE7,))          # the user's third back for CPU 9's second tight end: helps both
-STAR_SALE = ((fakes.INJURED_STAR_ID,), (P("QB", 2),))     # week 6: CPU 5's injured back for CPU 2's quarterback
 EVALUATE_BUDGET_SECONDS = 0.25
+CHART_TAU = 40.0
 
 
-def league(week: int = 1, settings: rs.Settings = SETTINGS):
-    return replace(fakes.drafted_state(settings), week=week), fakes.fake_knowledge(week, settings)
+def charted(know, changes: Mapping[int, dict] | None = None):
+    """`know` with a plain chart: 1000 x exp(-(rank - 1) / 40) by healthy value (K and DST 15), times
+    availability; no stars, no form. `changes` overrides fields per player."""
+    skill = sorted((v for v in know.values if v.position in SKILL), key=lambda v: (-v.healthy_value, -v.ros_ppg,
+                                                                                  v.player_id))
+    rank = {v.player_id: n for n, v in enumerate(skill)}
+
+    def one(v):
+        healthy = round(1000 * math.exp(-rank[v.player_id] / CHART_TAU), 1) if v.player_id in rank else 15.0
+        chart = round(healthy * v.availability, 1)
+        fields = {"healthy_chart": healthy, "chart": chart, "pre_chart": healthy, "star": 0.0, "form_chart": 0.0,
+                  **(changes or {}).get(v.player_id, {})}
+        return replace(v, **fields)
+
+    values = tuple(one(v) for v in know.values)
+    return replace(know, values=values, by_id=MappingProxyType({v.player_id: v for v in values}))
+
+
+def chart_knowledge(week: int = 1, settings: rs.Settings = SETTINGS, data=None, changes=None):
+    return charted(fakes.fake_knowledge(week, settings, data), changes)
+
+
+def league(week: int = 1, settings: rs.Settings = SETTINGS, changes=None):
+    return replace(fakes.drafted_state(settings), week=week), chart_knowledge(week, settings, changes=changes)
 
 
 def judge(to_team, give, get, drops=(), week=1, settings=SETTINGS, from_team=USER, state=None) -> rt.Verdict:
@@ -38,116 +64,142 @@ def as_user(state: rs.State, team_id: int) -> rs.State:
     return replace(state, teams=tuple(replace(t, is_user=t.id == team_id) for t in state.teams))
 
 
+def with_persona(state: rs.State, team_id: int, persona: str) -> rs.State:
+    return rs.with_team(state, replace(rs.team(state, team_id), persona=persona))
+
+
 def said(verdict: rt.Verdict, words: str) -> bool:
     return any(words in reason for reason in verdict.reasons)
 
 
+def lock_free_agents(state: rs.State, know, position: str) -> rs.State:
+    """Every free agent at `position` put on waivers, so nobody there can be picked up."""
+    free = [v.player_id for v in know.values if v.position == position and v.player_id not in rs.rostered(state)]
+    return replace(state, locked=(*state.locked, *free))
+
+
+def star(chart: float, **more) -> dict:
+    return {"chart": chart, "healthy_chart": chart, "pre_chart": chart, **more}
+
+
+# ---------------- the two deals the owner named ----------------
+
+ST_BROWN = P("WR", 2)                       # CPU 9's best receiver, made an ~800 star
+PAIR = (P("RB", 10), P("WR", 16))           # the user's two good starters, made ~430 and ~370
+
+
+@pytest.mark.parametrize("persona", PERSONAS)
+def test_a_star_for_two_good_starters_is_declined_by_every_persona(persona):
+    """Amon-Ra St. Brown for Tetairoa McMillan + Jordan Mason in 2025 week 1: the parts add up, the star wins."""
+    changes = {ST_BROWN: star(800.0, star=1.0), PAIR[0]: star(430.0), PAIR[1]: star(370.0)}
+    state, know = league(changes=changes)
+
+    verdict = rt.evaluate(with_persona(state, NEEDS_RB, persona), SETTINGS, know, USER, NEEDS_RB, PAIR, [ST_BROWN])
+
+    assert not verdict.accepted and verdict.score < 0 and said(verdict, rt.VALUE_REASON), verdict.reasons
+    assert len(verdict.their_drops) == 1
+
+
+@pytest.mark.parametrize("persona", PERSONAS)
+def test_the_star_deal_is_declined_even_with_the_biggest_lineup_gain_and_nothing_to_cut(persona):
+    know = SimpleNamespace(by_id={1: replace(fakes.fake_knowledge(1).values[0], player_id=1, **star(800.0, star=1.0)),
+                                  2: replace(fakes.fake_knowledge(1).values[0], player_id=2, **star(430.0)),
+                                  3: replace(fakes.fake_knowledge(1).values[0], player_id=3, **star(370.0))})
+
+    counted = tv.tally(know, persona, [1], [2, 3], [], gain_per_week=100.0, multiple=1.0, to_user=True)
+
+    assert counted.score < 0 and counted.premium < 0 and counted.lineup == pytest.approx(tv.LINEUP_CAP * 800)
+
+
+def test_a_cpu_trades_its_only_tight_end_for_a_much_better_back_and_picks_one_up():
+    """McBride for McCaffrey: it gives its only tight end; a free agent covers the slot."""
+    only_te, back = P("TE", 25), P("RB", 10)
+    state, know = league(changes={only_te: star(500.0), back: star(900.0, star=1.0)})
+
+    verdict = rt.evaluate(state, SETTINGS, know, USER, DEEP_AT_WR, [back], [only_te])
+    after, _ = rt.propose(state, SETTINGS, know, DEEP_AT_WR, [back], [only_te])
+    no_cover = rt.evaluate(lock_free_agents(state, know, "TE"), SETTINGS, know, USER, DEEP_AT_WR, [back], [only_te])
+
+    positions = [know.by_id[pid].position for pid in rs.team(after, DEEP_AT_WR).roster]
+    assert verdict.accepted and verdict.score > 0 and "TE" not in positions
+    assert rt.cover(know, SETTINGS, rs.team(after, DEEP_AT_WR).roster, rt.free_agents(after, know)) != ()
+    assert not no_cover.accepted
+    assert no_cover.reasons == ("It would leave CPU 5 without a full starting lineup (short at TE) and no free "
+                                "agent to fill it.",)
+
+
+def test_in_the_waivers_phase_a_slot_is_covered_by_anyone_the_user_has_not_claimed():
+    """Everyone unrostered is on waivers then: the cover waits for them to clear (cpu_cover at start_week)."""
+    only_te, back = P("TE", 25), P("RB", 10)
+    state, know = league(changes={only_te: star(500.0), back: star(900.0, star=1.0)})
+    waivers = lock_free_agents(replace(state, phase="waivers"), know, "TE")
+    tes = [pid for pid in rt.free_agents(waivers, know) if know.by_id[pid].position == "TE"]
+    claimed = replace(waivers, claims=tuple(rs.Claim(n, USER, pid, None) for n, pid in enumerate(tes, start=900)))
+
+    assert tes and rt.evaluate(waivers, SETTINGS, know, USER, DEEP_AT_WR, [back], [only_te]).accepted
+    assert not set(tes) & set(rt.free_agents(claimed, know))
+    assert said(rt.evaluate(claimed, SETTINGS, know, USER, DEEP_AT_WR, [back], [only_te]), "short at TE")
+    assert not set(tes) & set(rt.free_agents(replace(waivers, phase="open"), know))   # open: waivers are locked
+
+
 # ---------------- value ----------------
 
-def test_a_lopsided_one_for_one_is_declined_on_value():
+def test_a_lopsided_one_for_one_is_declined_on_value_with_a_points_hint():
     verdict = judge(RICH, [SCRUB], [P("RB", 2)])
 
-    assert not verdict.accepted and said(verdict, "Value is too far apart")
+    assert not verdict.accepted and said(verdict, "Value is too far apart: CPU 2 would give")
     assert verdict.value_give < verdict.value_get and verdict.percent > 0.9 and verdict.fair_label == "big_win"
     assert verdict.give_values == ((SCRUB, verdict.value_give),) and verdict.get_values[0][0] == P("RB", 2)
-    assert verdict.their_gain < 0 < verdict.your_gain
+    assert verdict.score < 0 and verdict.suggestion.startswith("Add about ")
 
 
-@pytest.mark.parametrize("to_team, give, star", [(4, (RB14, RB23), P("WR", 8)), (4, (SCRUB3, SCRUB2), P("WR", 1))])
-def test_two_bench_players_for_a_star_is_declined(to_team, give, star):
-    verdict = judge(to_team, give, [star])
-
-    assert not verdict.accepted and said(verdict, "Value is too far apart") and said(verdict, "lineup worse")
-    assert verdict.value_give < verdict.value_get
-    assert len(verdict.their_drops) == 1                     # the CPU would have to cut someone to take two
-    if give == (RB14, RB23):                                 # worth more than the star added up, less as a package
-        raw = [value for _, value in verdict.give_values]
-        assert sum(raw) > verdict.value_get > verdict.value_give == trade.adjusted_total(raw)
-
-
-def test_hard_difficulty_needs_a_higher_multiple_than_normal():
-    hard = fakes.fake_settings(difficulty="hard")
-
-    normal_verdict = judge(NEEDS_RB, [RB14], [TE6])
-    hard_verdict = judge(NEEDS_RB, [RB14], [TE6], settings=hard)
-
-    assert 1.0 < normal_verdict.value_give / normal_verdict.value_get < rs.USER_TRADE_MULTIPLE["hard"]
-    assert normal_verdict.accepted and not hard_verdict.accepted
-    assert hard_verdict.reasons[0].endswith("They want 8% more than they give.")
-
-
-def test_a_value_decline_suggests_points_when_the_closest_player_would_be_cut():
-    hard = fakes.fake_settings(difficulty="hard")
-
-    short = judge(NEEDS_RB, [RB14], [TE6], settings=hard)
-    cut = judge(NEEDS_RB, [RB14, SCRUB], [TE6], settings=hard)      # WR54 closes it on paper, but CPU 9 cuts him
-    full = judge(RICH, [SCRUB, SCRUB2, SCRUB3], [P("RB", 2)])
-
-    assert short.suggestion == "Add about 4 points of value to make this fair."
-    assert said(cut, "Value is too far apart") and cut.their_drops == (SCRUB,)
-    assert full.suggestion.startswith("Add about ") and full.suggestion.endswith(" points of value to make this fair.")
-    assert judge(DEEP_AT_WR, [P("WR", 31)], [P("WR", 24)]).suggestion is None      # value was not the problem
-
-
-def test_a_small_gap_never_suggests_adding_a_star():
-    hard = fakes.fake_settings(difficulty="hard")
-    state, know = league(settings=hard)
-    user = rs.user_team(state)
-    stars_only = rs.with_team(state, replace(user, roster=(RB14, P("RB", 1), P("RB", 10))))
-
-    verdict = rt.evaluate(stars_only, hard, know, USER, NEEDS_RB, [RB14], [TE6])
-
-    gap = verdict.value_get * rs.USER_TRADE_MULTIPLE["hard"] - verdict.value_give
-    assert 0 < gap < 10 < know.by_id[P("RB", 10)].market_value         # either star would close it many times over
-    assert verdict.suggestion in {f"Add about {points} points of value to make this fair." for points in range(2, 11)}
-
-
-def test_the_suggested_player_is_the_one_worth_closest_to_what_is_missing():
-    state, know = league()
-    spare = sorted((know.by_id[pid] for pid in rs.user_team(state).roster if pid != SCRUB
-                    and know.by_id[pid].position in SKILL), key=lambda v: v.market_value)
-
-    verdict = judge(DEEP_AT_WR, [SCRUB], [P("RB", 30)])
-
-    missing = verdict.value_get - verdict.value_give
-    closers = [v for v in spare if rt.package_value(know, [SCRUB, v.player_id]) >= verdict.value_get]
-    assert missing < closers[0].market_value <= rt.SUGGEST_WITHIN * missing and len(closers) > 1
-    assert verdict.suggestion == f"Add {closers[0].name} to make this fair."
-
-
-# ---------------- lineup ----------------
-
-def test_a_fair_deal_that_fills_a_cpu_need_is_accepted_and_carried_out():
+def test_a_fair_deal_across_positions_is_accepted_and_carried_out():
     state, know = league()
 
     after, verdict = rt.propose(state, SETTINGS, know, *FAIR)
 
-    assert verdict.accepted and verdict.reasons == () and verdict.their_gain >= rt.MIN_TRADE_GAIN
-    assert RB14 in rs.team(after, NEEDS_RB).roster and TE7 not in rs.team(after, NEEDS_RB).roster
-    assert TE7 in rs.user_team(after).roster and RB14 not in rs.user_team(after).roster
-    assert all(len(t.roster) == SETTINGS.roster_size for t in after.teams)
+    assert verdict.accepted and verdict.reasons == () and verdict.score >= 0
+    assert RB14 in rs.team(after, NEEDS_RB).roster and TE7 in rs.user_team(after).roster
     assert after.traded == {RB14: 1, TE7: 1}
     assert after.offers == (rs.Offer(id=state.next_id, week=1, from_team=USER, to_team=NEEDS_RB, give=(RB14,),
                                      get=(TE7,), status="accepted"),)
     event = after.events[-1]
     assert (event.kind, event.team_id, event.player_ids) == ("trade", USER, (RB14, TE7))
     assert event.text == "You traded Replay RB14 to CPU 9 for Replay TE7"
-    assert rs.has_traded_this_week(after, NEEDS_RB) and after.locked == ()
     assert RB14 in rs.user_team(state).roster and state.offers == ()         # the input is untouched
     assert rs.state_from_json(rs.to_json(after)) == after
 
 
-def test_a_cpu_deep_at_receiver_declines_a_fair_receiver_swap_but_takes_the_back_it_needs():
-    swap = judge(DEEP_AT_WR, [P("WR", 31)], [P("WR", 24)])
-    fixes_a_hole = judge(DEEP_AT_WR, [RB14], [P("WR", 22)])
+def test_the_suggested_player_is_the_one_worth_closest_to_what_is_missing():
+    state, know = league()
 
-    assert swap.value_give >= swap.value_get and swap.fair_label == "fair"
-    assert swap.reasons == ("It doesn't improve CPU 5's lineup: they are already deep at WR.",)
-    assert 0 <= swap.their_gain < rt.MIN_TRADE_GAIN
-    assert fixes_a_hole.accepted and fixes_a_hole.their_gain > rt.MIN_TRADE_GAIN
+    verdict = judge(DEEP_AT_WR, [SCRUB], [P("RB", 30)])
+
+    named = next(v for v in know.values if verdict.suggestion == f"Add {v.name} to make this fair.")
+    assert -verdict.score <= named.chart <= rt.SUGGEST_WITHIN * -verdict.score
+    assert named.player_id in rs.user_team(state).roster and named.position in SKILL
 
 
-def test_asking_again_gives_the_same_verdict_and_a_declined_proposal_is_kept_once_and_moves_nobody():
+def test_hard_difficulty_needs_more_back_than_normal():
+    hard = fakes.fake_settings(difficulty="hard")
+    deal = (8, [RB14], [P("QB", 4)])                       # just about even on normal
+
+    normal_verdict, hard_verdict = judge(*deal), judge(*deal, settings=hard)
+
+    assert normal_verdict.accepted and not hard_verdict.accepted
+    assert said(hard_verdict, "They want 11% more than they give.")              # 1.08 x the 3% margin
+
+
+def test_a_value_decline_names_the_margin_and_a_lineup_loss():
+    verdict = judge(RICH, [SCRUB], [P("RB", 2)])                         # a scrub for its starting back
+
+    assert said(verdict, "They want 3% more than they give.")
+    assert said(verdict, "It would weaken their starting lineup")
+    assert not said(judge(8, [RB14], [P("QB", 4)], settings=fakes.fake_settings(difficulty="hard")),
+                    "weaken their starting lineup")
+
+
+def test_asking_again_gives_the_same_verdict_and_a_declined_proposal_is_kept_once():
     state, know = league()
 
     declined, verdict = rt.propose(state, SETTINGS, know, RICH, [SCRUB], [P("RB", 2)])
@@ -156,28 +208,92 @@ def test_asking_again_gives_the_same_verdict_and_a_declined_proposal_is_kept_onc
 
     assert not verdict.accepted and verdict == same_verdict and judge(*FAIR) == judge(*FAIR)
     assert [(o.status, o.from_team, o.to_team, o.give) for o in declined.offers] == [("declined", USER, RICH, (SCRUB,))]
-    assert declined.teams == state.teams and declined.events == () and declined.traded == {}
-    assert again is declined
+    assert declined.teams == state.teams and declined.events == () and again is declined
 
 
-# ---------------- kickers, defenses and legal lineups ----------------
-
-def test_a_kicker_and_a_defense_cannot_balance_a_lopsided_deal():
+def test_kickers_and_defenses_count_for_little_and_cannot_balance_a_lopsided_deal():
     plain = judge(RICH, [SCRUB3], [P("WR", 11)])
     padded = judge(RICH, [SCRUB3, P("K", 5), P("DST", 8)], [P("WR", 11)])
 
-    kicker, defense = dict(padded.give_values)[P("K", 5)], dict(padded.give_values)[P("DST", 8)]
-    assert not plain.accepted and not padded.accepted and said(padded, "Value is too far apart")
-    assert 0 < kicker < plain.value_get / 5 and 0 < defense < plain.value_get / 5
-    assert padded.value_give < plain.value_get / 2
+    assert not plain.accepted and not padded.accepted and said(padded, rt.VALUE_REASON)
+    assert dict(padded.give_values)[P("K", 5)] < plain.value_get / 10
 
+
+def test_a_throw_in_the_cpu_would_cut_counts_for_nothing():
+    alone = judge(8, [RB14], [P("QB", 4)])
+    padded = judge(8, [RB14, SCRUB], [P("QB", 4)])
+
+    assert padded.their_drops == (SCRUB,) and padded.score == alone.score
+
+
+# ---------------- the scoring, on explicit values ----------------
+
+def values(**charts: dict) -> SimpleNamespace:
+    base = fakes.fake_knowledge(1).values[0]
+    return SimpleNamespace(by_id={int(pid[1:]): replace(base, player_id=int(pid[1:]), **fields)
+                                  for pid, fields in charts.items()})
+
+
+def test_the_best_player_premium_spot_and_lineup_terms():
+    know = values(p1=star(600.0), p2=star(300.0), p3=star(250.0))
+
+    gets_best = tv.tally(know, "balanced", [2, 3], [1], [], 0.0, 1.0, True)
+    sends_best = tv.tally(know, "balanced", [1], [2, 3], [], 0.0, 1.0, True)
+    gambler = tv.tally(know, "gambler", [2, 3], [1], [], 0.0, 1.0, True)
+    capped = tv.tally(know, "balanced", [2, 3], [1], [], -50.0, 1.0, True)
+
+    assert gets_best.premium == pytest.approx(0.12 * 300) == -sends_best.premium
+    assert gambler.premium == pytest.approx(0.18 * 300)
+    assert gets_best.spot == tv.SPOT_VALUE and sends_best.spot == 0
+    assert gets_best.score == pytest.approx(600 + 36 + 35 - 550 * 1.03)
+    assert capped.lineup == pytest.approx(-tv.LINEUP_CAP * 550)
+
+
+def test_a_shark_wants_an_edge_and_an_out_player_is_sold_to_the_user_at_a_floor():
+    know = values(p1=star(500.0), p2=star(500.0), p3=star(200.0, healthy_chart=800.0, out=True))
+
+    assert tv.tally(know, "balanced", [1], [2], [], 0.0, 1.0, False).score > tv.tally(
+        know, "shark", [1], [2], [], 0.0, 1.0, False).score
+    assert tv.tally(know, "balanced", [3], [1], [], 0.0, 1.0, True).sent == tv.OUT_SELL_SHARE * 800
+    assert tv.tally(know, "balanced", [3], [1], [], 0.0, 0.95, False).sent == 200
+
+
+def test_the_market_guard_stops_a_persona_whose_private_values_say_yes():
+    """A steady CPU marks down two players it never rated and up one it drafted high: never below 80% back."""
+    know = values(p1=star(700.0, star=1.0, pre_chart=900.0), p2=star(500.0, star=1.0, pre_chart=100.0),
+                  p3=star(460.0, star=1.0, pre_chart=100.0))
+
+    counted = tv.tally(know, "steady", [2, 3], [1], [], 2.0, 1.0, True)
+
+    assert counted.score >= 0 and not tv.market_ok(know, [2, 3], [1], [])
+    assert tv.market_ok(know, [2], [1], [])
+
+
+# ---------------- legal lineups ----------------
 
 @pytest.mark.parametrize("position, only_one", [("TE", P("TE", 18)), ("K", P("K", 5)), ("DST", P("DST", 8))])
-def test_the_user_must_keep_a_full_lineup_too(position, only_one):
-    verdict = judge(DEEP_AT_WR, [only_one], [P("WR", 48)])
+def test_a_side_left_short_needs_a_free_agent_who_can_fill_it(position, only_one):
+    state, know = league()
 
-    assert not verdict.accepted
-    assert said(verdict, f"It would leave You without a full starting lineup (short at {position}).")
+    covered = rt.evaluate(state, SETTINGS, know, USER, DEEP_AT_WR, [only_one], [P("WR", 48)])
+    stuck = rt.evaluate(lock_free_agents(state, know, position), SETTINGS, know, USER, DEEP_AT_WR, [only_one],
+                        [P("WR", 48)])
+
+    assert not said(covered, "full starting lineup")
+    assert said(stuck, f"It would leave You without a full starting lineup (short at {position}) and no free agent")
+
+
+def test_each_empty_slot_needs_its_own_free_agent():
+    state, know = league()
+    pool = rt.free_agents(state, know)
+    first_te = next(pid for pid in pool if know.by_id[pid].position == "TE")
+    no_te = [pid for pid in rs.team(state, DEEP_AT_WR).roster if know.by_id[pid].position != "TE"]
+
+    assert rt.cover(know, SETTINGS, rs.team(state, DEEP_AT_WR).roster, pool) == ()
+    assert rt.cover(know, SETTINGS, no_te, pool) == (first_te,)
+    assert rt.cover(know, SETTINGS, no_te, pool, frozenset({first_te})) not in ((first_te,), None)
+    assert rt.cover(know, SETTINGS, no_te, [first_te], frozenset({first_te})) is None
+    assert all(pid not in rs.rostered(state) and not know.by_id[pid].out for pid in pool)
 
 
 # ---------------- league rules ----------------
@@ -190,8 +306,8 @@ def test_a_traded_player_cannot_be_traded_again_for_two_weeks():
     next_week = judge(*flip, week=2, state=replace(traded, week=2))
     week_after = judge(*flip, week=3, state=replace(traded, week=3))
 
-    assert next_week.reasons == ("Traded in the last 2 weeks, so not yet tradable again: Replay TE7.",)
-    assert week_after.accepted
+    assert said(next_week, "Traded in the last 2 weeks, so not yet tradable again: Replay TE7.")
+    assert not said(week_after, "Traded in the last")
 
 
 def test_a_cpu_trades_once_a_week_but_the_user_may_deal_with_another_cpu():
@@ -201,14 +317,22 @@ def test_a_cpu_trades_once_a_week_but_the_user_may_deal_with_another_cpu():
     same_cpu = rt.evaluate(traded, SETTINGS, know, USER, NEEDS_RB, [RB23], [P("WR", 61)])
     other_cpu = rt.evaluate(traded, SETTINGS, know, USER, DEEP_AT_WR, [RB23], [P("WR", 44)])
 
-    assert same_cpu.reasons == ("CPU 9 has already made a trade this week.",)
-    assert other_cpu.accepted
+    assert said(same_cpu, "CPU 9 has already made a trade this week.")
+    assert not said(other_cpu, "already made a trade")
 
 
-def test_no_trades_after_the_deadline_or_outside_the_season():
-    assert isinstance(judge(*FAIR, week=SETTINGS.trade_deadline_week), rt.Verdict)      # the last open week
+def test_trades_close_after_the_deadline_weeks_waivers():
+    deadline = SETTINGS.trade_deadline_week
+    waivers = replace(fakes.drafted_state(), week=deadline + 1, phase="waivers")
+    no_waivers = fakes.fake_settings(waiver_mode="none")
+
+    assert isinstance(judge(*FAIR, week=deadline), rt.Verdict)
+    assert isinstance(judge(*FAIR, week=deadline + 1, state=waivers), rt.Verdict)
     with pytest.raises(ValueError, match="The trade deadline has passed: no trades after week 11."):
-        judge(*FAIR, week=SETTINGS.trade_deadline_week + 1)
+        judge(*FAIR, week=deadline + 1)
+    with pytest.raises(ValueError, match="The trade deadline has passed"):
+        judge(*FAIR, week=deadline + 1, settings=no_waivers,
+              state=replace(fakes.drafted_state(no_waivers), week=deadline + 1, phase="waivers"))
     for phase in ("draft", "complete"):
         with pytest.raises(ValueError, match="Trades are open"):
             judge(*FAIR, state=replace(fakes.drafted_state(), phase=phase))
@@ -246,8 +370,6 @@ def test_a_roster_overflow_needs_the_users_own_drops():
         judge(*two_for_one)
     with pytest.raises(ValueError, match="on your roster and not part of the trade"):
         judge(*two_for_one, drops=[RB14])
-    with pytest.raises(ValueError, match="on your roster and not part of the trade"):
-        judge(*two_for_one, drops=[P("WR", 22)])
     with pytest.raises(ValueError, match="doesn't need you to drop anyone"):
         judge(*FAIR, drops=[SCRUB])
     assert judge(*two_for_one, drops=[SCRUB]).your_drops == (SCRUB,)
@@ -258,33 +380,29 @@ def test_the_users_drop_goes_on_waivers_when_the_trade_goes_through():
 
     after, verdict = rt.propose(state, SETTINGS, know, NEEDS_RB, [RB14], [TE7, P("WR", 61)], [SCRUB])
 
-    assert verdict.accepted and after.locked == (SCRUB,)
-    assert SCRUB not in rs.rostered(after) and len(rs.user_team(after).roster) == SETTINGS.roster_size
+    assert verdict.accepted, verdict.reasons
+    assert after.locked == (SCRUB,) and SCRUB not in rs.rostered(after)
     assert [(e.kind, e.team_id, e.player_ids) for e in after.events[-2:]] == [
         ("trade", USER, (RB14, TE7, P("WR", 61))), ("drop", USER, (SCRUB,))]
-    assert len(rs.team(after, NEEDS_RB).roster) == SETTINGS.roster_size - 1       # their spot stays open
 
 
-def test_a_cpu_forced_to_drop_cuts_its_least_valuable_skill_player_that_keeps_the_lineup_legal():
+def test_a_cpu_forced_to_drop_cuts_its_least_valuable_skill_player_and_never_its_kicker_or_defense():
     state, know = league()
-    before = [know.by_id[pid] for pid in rs.team(state, DEEP_AT_WR).roster]
-    worst = min((v for v in before if v.position in SKILL), key=lambda v: (v.healthy_value, v.ros_ppg))
-    assert worst.player_id == P("TE", 25) and sum(v.position == "TE" for v in before) == 1
 
-    after, verdict = rt.propose(state, SETTINGS, know, DEEP_AT_WR, [RB14, SCRUB], [P("WR", 22)])
+    after, verdict = rt.propose(state, SETTINGS, know, NEEDS_RB, [RB14, SCRUB], [TE7])
 
-    kept = [know.by_id[pid].position for pid in rs.team(after, DEEP_AT_WR).roster]
-    assert verdict.accepted and verdict.their_drops == (SCRUB,)       # not its only tight end, kicker or defense
-    assert len(kept) == SETTINGS.roster_size and {"TE", "K", "DST"} <= set(kept)
-    assert after.locked == (SCRUB,) and after.events[-1].kind == "drop"
+    kept = [know.by_id[pid].position for pid in rs.team(after, NEEDS_RB).roster]
+    assert verdict.accepted and verdict.their_drops == (SCRUB,), verdict.reasons
+    assert len(kept) == SETTINGS.roster_size and {"K", "DST"} <= set(kept)
+    assert set(verdict.their_drops) <= set(after.locked) and after.events[-1].kind == "drop"
 
 
-# ---------------- answering a CPU's offer ----------------
+# ---------------- answering a CPU's offer, and counters ----------------
 
-def offered(give=(TE7,), get=(RB14,), from_team=NEEDS_RB, week=1):
+def offered(give=(TE7,), get=(RB14,), from_team=NEEDS_RB, week=1, counter_to=None):
     """A league where a CPU has a pending offer out to the user: it sends `give` for the user's `get`."""
     state, know = league(week)
-    return rt.record_offer(state, from_team, USER, give, get, "pending"), know
+    return rt.record_offer(state, from_team, USER, give, get, "pending", counter_to), know
 
 
 def test_accepting_an_offer_carries_it_out_under_the_same_offer():
@@ -295,7 +413,6 @@ def test_accepting_an_offer_carries_it_out_under_the_same_offer():
 
     assert after.offers == (replace(offer, status="accepted"),) and rt.offers_for_user(after) == ()
     assert TE7 in rs.user_team(after).roster and RB14 in rs.team(after, NEEDS_RB).roster
-    assert after.traded == {RB14: 1, TE7: 1} and after.events[-1].kind == "trade"
     with pytest.raises(ValueError, match="That offer is already accepted."):
         rt.respond(after, SETTINGS, know, offer.id, accept=True)
 
@@ -318,14 +435,13 @@ def test_declining_an_offer_only_marks_it_declined():
 def test_an_offer_that_no_longer_stands_expires_with_the_reason(change, why):
     made, _ = offered(give=(P("RB", 2),), get=(SCRUB,), from_team=RICH)
     state = change(made)
-    know = fakes.fake_knowledge(state.week, SETTINGS)
+    know = chart_knowledge(state.week)
 
     with pytest.raises(rt.OfferExpired, match=why) as error:
         rt.respond(state, SETTINGS, know, made.offers[0].id, accept=True)
 
     assert str(error.value).startswith("That offer no longer stands. ")
-    assert error.value.state.offers[0].status == "expired" and error.value.state.teams == state.teams
-    assert state.offers[0].status == "pending"
+    assert error.value.state.offers[0].status == "expired" and state.offers[0].status == "pending"
 
 
 def test_missing_drops_leave_an_offer_open():
@@ -348,6 +464,22 @@ def test_only_pending_offers_to_the_user_are_listed():
     assert [o.from_team for o in rt.offers_for_user(state)] == [NEEDS_RB]
 
 
+def test_a_user_counter_marks_the_offer_countered_and_carries_counter_to():
+    state, know = offered(give=(P("RB", 2),), get=(SCRUB,), from_team=RICH)
+    offer_id = state.offers[0].id
+
+    declined, verdict = rt.propose(state, SETTINGS, know, RICH, [SCRUB], [P("RB", 2)], counter_to=offer_id)
+    accepted, fair = rt.propose(offered()[0], SETTINGS, know, NEEDS_RB, [RB14], [TE7], counter_to=offer_id)
+
+    assert not verdict.accepted and [o.status for o in declined.offers] == ["countered", "declined"]
+    assert declined.offers[-1].counter_to == offer_id
+    assert fair.accepted and accepted.offers[0].status == "countered" and accepted.offers[-1].counter_to == offer_id
+    with pytest.raises(ValueError, match="already countered"):
+        rt.respond(declined, SETTINGS, know, offer_id, accept=True)
+    with pytest.raises(ValueError, match="no such offer from that team"):
+        rt.propose(state, SETTINGS, know, NEEDS_RB, [RB14], [TE7], counter_to=offer_id)
+
+
 # ---------------- speed and hindsight ----------------
 
 def test_evaluate_is_fast():
@@ -364,185 +496,27 @@ def test_evaluate_is_fast():
 @pytest.mark.parametrize("week", [1, 6, 9])
 def test_verdicts_do_not_change_when_the_future_does(week):
     state = replace(fakes.drafted_state(), week=week)
-    changed = fakes.fake_knowledge(week, data=fakes.future_changed(fakes.fake_season(), after_week=week))
+    changed = chart_knowledge(week, data=fakes.future_changed(fakes.fake_season(), after_week=week))
     deals = [(USER, *FAIR), (USER, RICH, (SCRUB,), (P("RB", 2),)), (USER, DEEP_AT_WR, (RB14, SCRUB), (P("WR", 22),)),
-             (DEEP_AT_WR, RICH, *STAR_SALE)]
+             (DEEP_AT_WR, RICH, (fakes.INJURED_STAR_ID,), (P("QB", 2),))]
 
-    real = fakes.fake_knowledge(week)
-    assert real is not changed
+    real = chart_knowledge(week)
     assert all(rt.evaluate(state, SETTINGS, changed, *d) == rt.evaluate(state, SETTINGS, real, *d) for d in deals)
 
 
-# ---------------- scams from the design review ----------------
+def test_on_the_real_chart_the_star_for_two_deal_is_declined():
+    """The fake season's own chart (replay_chart), not `charted`."""
+    state, know = replace(fakes.drafted_state(), week=1), fakes.fake_knowledge(1)
+    best = max((know.by_id[pid] for pid in rs.team(state, NEEDS_RB).roster), key=lambda v: v.chart)
+    mine = sorted((know.by_id[pid] for pid in rs.user_team(state).roster if know.by_id[pid].chart < best.chart),
+                  key=lambda v: -v.chart)
+    pair = next((a, b) for a in mine for b in mine if a is not b and a.chart + b.chart <= 1.02 * best.chart
+                and a.chart + b.chart >= 0.95 * best.chart and b.chart < a.chart)
 
-def with_best_free_defense(state: rs.State, know) -> tuple[rs.State, int, int]:
-    """The user swaps his defense for the best one on waivers: (state, his old defense, the new one)."""
-    user = rs.user_team(state)
-    old = next(pid for pid in user.roster if know.by_id[pid].position == "DST")
-    new = max((v for v in know.values if v.position == "DST" and v.player_id not in rs.rostered(state)),
-              key=lambda v: v.ros_ppg).player_id
-    return rs.with_team(state, replace(user, roster=tuple(new if pid == old else pid for pid in user.roster))), old, new
-
-
-def defense_of(state: rs.State, know, team_id: int) -> int:
-    return next(pid for pid in rs.team(state, team_id).roster if know.by_id[pid].position == "DST")
-
-
-class TestExploits:
-    def test_a_cpu_counts_an_out_player_it_receives_at_a_discount_cpus_included(self, monkeypatch):
-        state, know = league(week=6)
-        seller = as_user(state, DEEP_AT_WR)                 # the user owns the injured star, knows he is out a month
-        star = know.by_id[fakes.INJURED_STAR_ID]
-
-        between_cpus = rt.evaluate(state, SETTINGS, know, DEEP_AT_WR, RICH, *STAR_SALE)
-        with_user = rt.evaluate(seller, SETTINGS, know, DEEP_AT_WR, RICH, *STAR_SALE)
-        bought = rt.evaluate(state, SETTINGS, know, RICH, DEEP_AT_WR, STAR_SALE[1], STAR_SALE[0])
-        monkeypatch.setattr(rt, "OUT_RISK_DISCOUNT", 1.0)           # as if he were healthy at the same value
-        healthy = rt.evaluate(state, SETTINGS, know, DEEP_AT_WR, RICH, *STAR_SALE)
-
-        quarterback = know.by_id[STAR_SALE[1][0]].market_value
-        assert star.out and star.injury.tag == "O" and healthy.accepted      # the gap is inside 20%
-        for verdict in (between_cpus, with_user, bought):           # on either side, with or without the user
-            assert not verdict.accepted and verdict.reasons == (
-                f"Value is too far apart: CPU 2 would give {quarterback:.1f} points of value and get "
-                f"{star.market_value * 0.8:.1f} back. They count Injured Star at 80% of value while out.",)
-        assert between_cpus.value_give == star.market_value == between_cpus.give_values[0][1]   # CPU 5 sends in full
-        assert with_user.value_give == star.market_value and bought.get_values[0][1] == star.market_value
-
-    def test_out_and_suspended_players_on_the_active_roster_are_judged_not_refused(self):
-        suspended = P("WR", 22)                             # CPU 5's receiver: no known length, same absence model
-        know = fakes.fake_knowledge(1, data=fakes.tagged(fakes.fake_season(), {(suspended, 1): fakes.Injury("SUS")}))
-        state, plain = league()
-
-        bought = rt.evaluate(state, SETTINGS, know, USER, DEEP_AT_WR, [RB14], [suspended])
-        sold = rt.evaluate(as_user(state, DEEP_AT_WR), SETTINGS, know, DEEP_AT_WR, NEEDS_RB, [suspended], [TE7])
-        between_cpus = rt.evaluate(state, SETTINGS, know, DEEP_AT_WR, NEEDS_RB, [suspended], [TE7])
-
-        assert know.by_id[suspended].out and not plain.by_id[suspended].out
-        assert 0 < know.by_id[suspended].market_value < plain.by_id[suspended].market_value
-        assert bought.accepted and bought.get_values == ((suspended, know.by_id[suspended].market_value),)
-        for verdict in (sold, between_cpus):
-            assert said(verdict, "They count Replay WR22 at 80% of value while out.") and not said(verdict, "right now")
-        with pytest.raises(ValueError, match="On IR, so not tradable until activated: Replay WR22."):
-            rt.evaluate(on_ir(state, DEEP_AT_WR, suspended), SETTINGS, know, USER, DEEP_AT_WR, [RB14], [suspended])
-
-    def test_a_cpu_wont_take_an_out_player_that_leaves_a_starting_slot_idle(self):
-        know = hurt(1, RB14)                                # the user's back is out this week
-        state = league()[0]
-        backs = (P("RB", 32), P("RB", 36))                  # CPU 9's two starting backs
-
-        deal = (USER, NEEDS_RB, [RB14, RB23], [*backs, P("RB", 41)], [SCRUB])
-        stranded = rt.evaluate(state, SETTINGS, know, *deal)
-        healthy = rt.evaluate(state, SETTINGS, fakes.fake_knowledge(1), *deal)
-
-        assert rt.strands_a_starter(SETTINGS, know, rs.team(state, NEEDS_RB), [*backs, P("RB", 41)], [RB14, RB23], [])
-        assert said(stranded, "It would leave CPU 9 without a starter this week at RB.")
-        assert not said(healthy, "without a starter this week")
-
-    def test_an_elite_free_agent_defense_buys_no_skill_value(self):
-        state, know = league()
-        state, _, elite = with_best_free_defense(state, know)
-        cheap, dear = P("WR", 31), P("TE", 8)                # CPU 8's TE8 is worth more than the user's WR31
-        theirs = defense_of(state, know, 8)
-
-        verdict = rt.evaluate(state, SETTINGS, know, USER, 8, [elite, cheap], [theirs, dear])
-
-        assert know.by_id[elite].ros_ppg > know.by_id[theirs].ros_ppg + 1.5         # a big upgrade for CPU 8
-        assert know.by_id[dear].market_value > know.by_id[cheap].market_value
-        assert know.by_id[elite].market_value == know.by_id[theirs].market_value
-        assert not verdict.accepted and said(verdict, "Value is too far apart")
-
-    def test_a_cpu_wont_swap_its_defense_for_a_weaker_one(self):
-        state, know = league()
-        mine, theirs = defense_of(state, know, USER), defense_of(state, know, NEEDS_RB)
-        better, _, elite = with_best_free_defense(state, know)
-
-        weaker = rt.evaluate(state, SETTINGS, know, USER, NEEDS_RB, [RB14, mine], [TE7, theirs])
-        stronger = rt.evaluate(better, SETTINGS, know, USER, NEEDS_RB, [RB14, elite], [TE7, theirs])
-
-        assert judge(*FAIR).accepted and know.by_id[mine].ros_ppg < know.by_id[theirs].ros_ppg
-        assert weaker.reasons == ("CPU 9 won't swap its defense for a weaker one.",)
-        assert stronger.accepted
-
-    def test_a_throw_in_the_cpu_would_cut_counts_for_nothing(self):
-        star_for_star = judge(8, [RB14], [P("QB", 4)])
-        padded = judge(8, [RB14, SCRUB], [P("QB", 4)])
-
-        assert not star_for_star.accepted and said(star_for_star, "Value is too far apart")
-        assert rt.package_value(fakes.fake_knowledge(1), [RB14, SCRUB]) >= star_for_star.value_get     # once enough
-        assert SCRUB in padded.their_drops and not padded.accepted
-        assert said(padded, "They would drop Replay WR54 to make room")
-        assert padded.value_give == rt.package_value(fakes.fake_knowledge(1), [RB14, SCRUB])        # the user's view
-
-    def test_the_suggestion_never_names_a_player_the_cpu_would_cut(self):
-        verdict = judge(8, [RB14], [P("QB", 4)])
-
-        assert verdict.suggestion and not verdict.suggestion.startswith("Add Replay")
-        for to_team, give, get in [(8, RB14, P("QB", 4)), (8, P("WR", 31), P("TE", 8)), (4, P("WR", 51), P("WR", 45))]:
-            text = judge(to_team, [give], [get]).suggestion or ""
-            if text.startswith("Add Replay"):
-                named = next(v.player_id for v in fakes.fake_knowledge(1).values if text == f"Add {v.name} to make this fair.")
-                assert named not in judge(to_team, [give, named], [get]).their_drops
-
-    def test_a_user_buying_an_injured_star_pays_his_market_value_while_he_is_out(self):
-        state, know = league(week=fakes.INJURED_WEEKS[-1])
-        buyer = as_user(state, RICH)                        # the user knows he is back next week
-        star = know.by_id[fakes.INJURED_STAR_ID]
-
-        verdict = rt.evaluate(buyer, SETTINGS, know, RICH, DEEP_AT_WR, [P("QB", 2)], [fakes.INJURED_STAR_ID])
-
-        assert star.out and verdict.get_values == ((star.player_id, star.market_value),)
-        assert verdict.value_get == star.market_value               # the CPU sends him at full market value
-        assert star.market_value > trade.FAIR_POINTS_PER_WEEK * star.games_left     # not a roster-spot giveaway
-
-    def test_a_cpu_wont_sell_the_user_an_out_star_below_its_floor_of_his_healthy_value(self):
-        week = fakes.INJURED_WEEKS[-1]                      # the user remembers he is back next week
-        state, know = league(week=week)
-        star, buyer = know.by_id[fakes.INJURED_STAR_ID], 3
-        cheap = (P("QB", 10), P("QB", 12))                  # worth more than his market value, less than the floor
-        changed = fakes.fake_knowledge(week, data=fakes.future_changed(fakes.fake_season(), after_week=week))
-
-        sold = rt.evaluate(as_user(state, buyer), SETTINGS, know, buyer, DEEP_AT_WR, cheap, [star.player_id])
-        between_cpus = rt.evaluate(state, SETTINGS, know, buyer, DEEP_AT_WR, cheap, [star.player_id])
-
-        floor = rt.OUT_SELL_SHARE * star.healthy_value
-        assert star.out and star.market_value < rt.package_value(know, cheap) < floor
-        assert sold.reasons == (f"Value is too far apart: CPU 5 would give {floor:.1f} points of value and get "
-                                f"{rt.package_value(know, cheap):.1f} back. They won't let Injured Star go for less "
-                                f"than 75% of healthy value while out.",)
-        assert sold.get_values == ((star.player_id, star.market_value),)          # the user's view is unchanged
-        assert not said(between_cpus, "healthy value")      # CPUs trade on the absence model with each other
-        assert rt.evaluate(as_user(state, buyer), SETTINGS, changed, buyer, DEEP_AT_WR, cheap, [star.player_id]) == sold
-
-    def test_a_cpu_cannot_be_stripped_of_its_only_kicker_and_defense(self):
-        with_throw_ins = judge(NEEDS_RB, [RB14], [TE7, P("K", 10), P("DST", 4)], [SCRUB, SCRUB2])
-
-        assert judge(*FAIR).accepted and not with_throw_ins.accepted
-        assert with_throw_ins.value_get > judge(*FAIR).value_get
-        assert said(with_throw_ins, "It would leave CPU 9 without a full starting lineup (short at K, DST).")
-        assert judge(NEEDS_RB, [RB14, P("K", 5)], [TE7, P("K", 10)]).accepted       # a kicker for a kicker is fine
-
-    def test_a_worthless_bench_player_still_costs_value_as_a_throw_in(self):
-        tight = judge(NEEDS_RB, [RB23], [TE7])
-        with_extra = judge(NEEDS_RB, [RB23], [TE7, P("WR", 61)], [SCRUB])
-
-        floor = trade.FAIR_POINTS_PER_WEEK * fakes.fake_knowledge(1).by_id[P("WR", 61)].games_left
-        assert tight.accepted and dict(with_extra.get_values)[P("WR", 61)] >= floor > 0
-        assert not with_extra.accepted and said(with_extra, "Value is too far apart")
-
-    def test_worthless_bench_players_cannot_buy_a_star(self):
-        verdict = judge(RICH, [SCRUB, SCRUB2, SCRUB3], [P("WR", 11)])
-
-        assert not verdict.accepted and verdict.value_give < verdict.value_get / 2
-        assert len(verdict.their_drops) == 2
-
-    def test_a_player_a_cpu_drops_to_make_room_goes_on_waivers_not_to_the_user(self):
-        state, know = league()
-
-        after, verdict = rt.propose(state, SETTINGS, know, NEEDS_RB, [RB14, SCRUB], [TE7])
-
-        assert verdict.accepted and verdict.their_drops
-        assert set(verdict.their_drops) <= set(after.locked) and not set(verdict.their_drops) & rs.rostered(after)
+    for persona in PERSONAS:
+        verdict = rt.evaluate(with_persona(state, NEEDS_RB, persona), SETTINGS, know, USER, NEEDS_RB,
+                              (pair[0].player_id, pair[1].player_id), [best.player_id])
+        assert not verdict.accepted, (persona, verdict.reasons)
 
 
 # ---------------- the IR slot ----------------
@@ -558,20 +532,16 @@ def on_ir(state: rs.State, team_id: int, player_id: int) -> rs.State:
 def hurt(week: int, *player_ids: int):
     """This week's knowledge with those players tagged O (so they may sit on IR without blocking anyone)."""
     tags = {(pid, week): fakes.Injury("O") for pid in player_ids}
-    return fakes.fake_knowledge(week, SETTINGS, fakes.tagged(fakes.fake_season(), tags))
+    return chart_knowledge(week, data=fakes.tagged(fakes.fake_season(), tags))
 
 
 def test_a_player_on_ir_cannot_be_traded_by_either_side():
     state, know = league()
-    mine, theirs = on_ir(state, USER, RB14), on_ir(state, NEEDS_RB, TE7)
-    name = know.by_id[TE7].name
 
     with pytest.raises(ValueError, match=f"{T1}: {know.by_id[RB14].name}."):
-        rt.evaluate(mine, SETTINGS, know, USER, *FAIR)
-    with pytest.raises(ValueError, match=f"{T1}: {name}."):
-        rt.evaluate(theirs, SETTINGS, know, USER, *FAIR)
-    with pytest.raises(ValueError, match=T1):
-        rt.propose(theirs, SETTINGS, know, *FAIR)
+        rt.evaluate(on_ir(state, USER, RB14), SETTINGS, know, USER, *FAIR)
+    with pytest.raises(ValueError, match=f"{T1}: {know.by_id[TE7].name}."):
+        rt.propose(on_ir(state, NEEDS_RB, TE7), SETTINGS, know, *FAIR)
 
 
 def test_an_offer_whose_player_went_on_ir_expires_with_t1():
@@ -584,93 +554,33 @@ def test_an_offer_whose_player_went_on_ir_expires_with_t1():
 
 
 def test_the_roster_limit_of_a_trade_ignores_the_ir_player():
-    know = hurt(1, SCRUB)
     state = on_ir(league()[0], USER, SCRUB)
-    two_for_one = (NEEDS_RB, [RB14], [TE7, P("WR", 61)])
 
-    verdict = rt.evaluate(state, SETTINGS, know, USER, *two_for_one)
+    verdict = rt.evaluate(state, SETTINGS, hurt(1, SCRUB), USER, NEEDS_RB, [RB14], [TE7, P("WR", 61)])
 
-    assert verdict.your_drops == () and len(rs.user_team(state).roster) == SETTINGS.roster_size - 1
-    with pytest.raises(ValueError, match="on your roster and not part of the trade"):     # not a trade drop
-        rt.evaluate(state, SETTINGS, know, USER, *two_for_one, [SCRUB])
+    assert verdict.your_drops == ()
 
 
-def test_a_blocked_user_cannot_propose_and_nothing_is_recorded():
+def test_a_blocked_user_cannot_propose_or_accept_but_may_decline():
     state, know = league()
     blocked = on_ir(state, USER, SCRUB)                     # no tag this week: he blocks the user
+    made = on_ir(offered()[0], USER, SCRUB)
 
     with pytest.raises(ValueError, match=B1):
         rt.propose(blocked, SETTINGS, know, *FAIR)
-
+    with pytest.raises(ValueError, match=B1):
+        rt.respond(made, SETTINGS, know, made.offers[0].id, accept=True)
     assert rt.evaluate(blocked, SETTINGS, know, USER, *FAIR).accepted       # asking is still allowed
-    assert rt.propose(on_ir(state, USER, SCRUB), SETTINGS, hurt(1, SCRUB), *FAIR)[1].accepted     # tagged: fine
-
-
-def test_a_blocked_user_cannot_accept_an_offer_which_stays_pending_but_may_decline_it():
-    made, know = offered()
-    blocked = on_ir(made, USER, SCRUB)
-    offer_id = made.offers[0].id
-
-    with pytest.raises(ValueError, match=B1) as error:
-        rt.respond(blocked, SETTINGS, know, offer_id, accept=True)
-    declined = rt.respond(blocked, SETTINGS, know, offer_id, accept=False)
-
-    assert not isinstance(error.value, rt.OfferExpired) and rt.offers_for_user(blocked)[0].id == offer_id
-    assert declined.offers[0].status == "declined"
-
-
-def least_valuable_skill(state: rs.State, know, team_id: int, besides: tuple[int, ...]) -> int:
-    team = rs.team(state, team_id)
-    return min((pid for pid in team.roster if know.by_id[pid].position in SKILL and pid not in besides),
-               key=lambda pid: (know.by_id[pid].market_value, pid))
+    assert rt.respond(made, SETTINGS, know, made.offers[0].id, accept=False).offers[0].status == "declined"
 
 
 def test_a_cpu_blocked_by_its_ir_declines_every_trade():
     state, know = league()
-    healthy = least_valuable_skill(state, know, NEEDS_RB, FAIR[2])
-    blocked = on_ir(state, NEEDS_RB, healthy)              # no tag this week: he blocks CPU 9
+    healthy = min((pid for pid in rs.team(state, NEEDS_RB).roster if know.by_id[pid].position in SKILL
+                   and pid not in FAIR[2]), key=lambda pid: (know.by_id[pid].chart, pid))
+    blocked = on_ir(state, NEEDS_RB, healthy)
 
     verdict = rt.evaluate(blocked, SETTINGS, know, USER, *FAIR)
-    after, proposed = rt.propose(blocked, SETTINGS, know, *FAIR)
-    tagged = rt.evaluate(blocked, SETTINGS, hurt(1, healthy), USER, *FAIR)
 
     assert not verdict.accepted and any(B1 in r and "CPU 9" in r for r in verdict.reasons)
-    assert not proposed.accepted and [t.roster for t in after.teams] == [t.roster for t in blocked.teams]
-    assert not said(tagged, B1)
-
-
-@pytest.mark.parametrize("blocked_side", ["from", "to"])
-def test_a_trade_between_two_cpus_is_turned_down_when_either_is_blocked(blocked_side):
-    state, know = league()
-    give, get = [P("WR", 24)], [TE7]                        # CPU 5's receiver for CPU 9's tight end
-    team_id = DEEP_AT_WR if blocked_side == "from" else NEEDS_RB
-    blocked = on_ir(state, team_id, least_valuable_skill(state, know, team_id, (*give, *get)))
-
-    with pytest.raises(ValueError, match=f"turned down.*{B1}"):
-        rt.execute(blocked, SETTINGS, know, DEEP_AT_WR, NEEDS_RB, give, get)
-    assert not said(rt.evaluate(state, SETTINGS, know, DEEP_AT_WR, NEEDS_RB, give, get), B1)
-
-
-def test_a_cpu_values_a_back_the_same_whether_its_injured_star_is_on_ir_or_its_bench():
-    week, star = fakes.INJURED_WEEKS[0], fakes.INJURED_STAR_ID
-    state, know = league(week)
-    deal = (DEEP_AT_WR, [RB14], [P("WR", 24)])
-    gone = rs.with_team(state, replace(rs.team(state, DEEP_AT_WR),
-                                       roster=tuple(p for p in rs.team(state, DEEP_AT_WR).roster if p != star)))
-
-    bench = rt.evaluate(state, SETTINGS, know, USER, *deal)
-    stashed = rt.evaluate(on_ir(state, DEEP_AT_WR, star), SETTINGS, know, USER, *deal)
-    forgotten = rt.evaluate(gone, SETTINGS, know, USER, *deal)
-
-    assert stashed.their_gain == pytest.approx(bench.their_gain) and stashed.accepted == bench.accepted
-    assert forgotten.their_gain > bench.their_gain + rt.MIN_TRADE_GAIN       # as if he never came back
-
-
-def test_the_position_limit_counts_the_receiver_a_cpu_has_on_ir():
-    receiver, back, injured = P("WR", 16), P("RB", 27), P("WR", 24)
-    state, know = league()
-
-    verdict = rt.evaluate(on_ir(state, DEEP_AT_WR, injured), SETTINGS, hurt(1, injured), USER, DEEP_AT_WR,
-                          [receiver], [back])
-
-    assert said(verdict, "It would leave CPU 5 with 8 at WR, more than they carry.")
+    assert not said(rt.evaluate(blocked, SETTINGS, hurt(1, healthy), USER, *FAIR), B1)

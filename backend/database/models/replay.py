@@ -69,3 +69,20 @@ class ReplayInjury(Base):
     tag: Mapped[str]                           # Q | D | O | IR | PUP | SUS
     practice: Mapped[str | None]               # DNP | LP | FP
     injury: Mapped[str | None]
+
+
+class ReplayExpertRank(Base):
+    """A FantasyPros consensus position rank from one snapshot: the last preseason cheatsheet ("pre") or an
+    in-season rest-of-season page ("ros"). services/replay_experts.py loads and reads them."""
+
+    __tablename__ = "replay_expert_ranks"
+    __table_args__ = (Index("ux_replay_expert_ranks_key", "season", "kind", "scrape_date", "player_id", unique=True),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    season: Mapped[int]
+    kind: Mapped[str]                          # "pre" | "ros"
+    scrape_date: Mapped[str]                   # ISO date the page was captured
+    player_id: Mapped[int] = mapped_column(ForeignKey("players.id"))
+    position: Mapped[str]
+    pos_rank: Mapped[int]                      # 1-based order by ecr within the page and snapshot
+    ecr: Mapped[float]

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { getReplayTeam, getReplayTrades } from '../../api/replay';
 import type { ReplayOffer, ReplaySummary, ReplayTrades } from '../../api/types';
 import { AsyncView } from '../../components/AsyncView';
@@ -17,19 +17,20 @@ const STATUS: Readonly<Record<ReplayOffer['status'], { label: string; tone: stri
   declined: { label: 'Declined', tone: 'out' },
   expired: { label: 'Expired', tone: 'missing' },
   pending: { label: 'Pending', tone: 'missing' },
+  countered: { label: 'Countered', tone: 'neutral' },
 };
 
 /** The CPU's acceptance test in one line (backend/services/replay_trades.py). */
 function rulesText(game: ReplaySummary): string {
   const extra = game.settings.difficulty === 'hard' ? ' (on Hard they want about 8% more than they give)' : '';
-  return `CPU managers only accept a trade that is fair in value for them${extra} and makes their own lineup better. `
-    + 'Each CPU team trades at most once a week.';
+  return `CPU managers accept a trade that is worth it to them on the 0-1000 trade chart${extra}; each one has its own `
+    + 'trading style. A CPU that turns you down may counter, and you can counter its offers. Each CPU team trades at most once a week.';
 }
 
 function closedText(game: ReplaySummary, trades: ReplayTrades): string {
-  return game.week > trades.deadline_week
-    ? `The trade deadline has passed: no trades after week ${trades.deadline_week}.`
-    : 'Trades are closed: the season is over.';
+  if (game.phase === 'complete') return 'Trades are closed: the season is over.';
+  if (game.phase === 'draft') return 'Trades open once the draft is done.';
+  return `The trade deadline has passed: trades closed at week ${trades.deadline_week}'s waivers.`;
 }
 
 /** Every other offer and trade in the league, newest first. */
@@ -82,21 +83,35 @@ export function TradesView({ game, version, act, isBusy, openPlayer }: ReplayVie
     if (notice) noticeRef.current?.focus();
   }, [notice]);
   const noticeTone = notice ? (notice.isGood ? ' success-text' : ' notice') : '';
+  // The offer being countered, by id: it is looked up among the pending offers, so it ends once that offer is answered.
+  // The id also keys the builder, which stays mounted after a declined counter to show why.
+  const [counteringId, setCounteringId] = useState<number | null>(null);
+  const builderTitleRef = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (counteringId !== null) builderTitleRef.current?.focus();
+  }, [counteringId]);
   return (
     <>
       <ReplayIrBlockedNotice game={game} />
       <p className="hint">{rulesText(game)}</p>
+      {game.rank_source === 'model' && (
+        <p className="hint">No expert ranks are loaded for this week: values come from the app's model ranks.</p>
+      )}
       <p ref={noticeRef} tabIndex={-1} role="status" className={`replay-trades__notice${noticeTone}`}>{notice?.text}</p>
       <AsyncView state={loaded} loading={<Skeleton lines={6} label="Loading trades…" />} errorTitle="Couldn't load trades">
-        {([trades, mine]) => (
+        {([trades, mine]) => {
+          const countering = trades.offers.find((offer) => offer.id === counteringId) ?? null;
+          return (
           <>
             {!trades.open && <p className="notice">{closedText(game, trades)}</p>}
             <h2 className="section-title">Offers for you</h2>
             <TradeOffers game={game} version={version} offers={trades.offers} roster={mine.results} isOpen={trades.open}
-              actions={actions} openPlayer={openPlayer} />
+              actions={actions} openPlayer={openPlayer} onCounter={(offer) => setCounteringId(offer.id)} isCountering={countering !== null} />
             {trades.open && (
-              <Card title="Propose a trade" eyebrow={`Open through week ${trades.deadline_week}`}>
-                <TradeBuilder game={game} version={version} roster={mine.results} maxPlayers={trades.max_players} outDiscount={trades.out_discount}
+              <Card title={<span ref={builderTitleRef} tabIndex={-1}>{countering ? `Counter ${countering.from_team.name}'s offer` : 'Propose a trade'}</span>}
+                eyebrow={`Open through week ${trades.deadline_week}'s waivers`}>
+                <TradeBuilder key={counteringId ?? 'new'} game={game} version={version} roster={mine.results}
+                  maxPlayers={trades.max_players} counterTo={countering} onCounterDone={() => setCounteringId(null)}
                   initialPartner={parsePositiveInt(query.with)} initialWant={parsePositiveInt(query.want)}
                   actions={actions} openPlayer={openPlayer} />
               </Card>
@@ -104,7 +119,8 @@ export function TradesView({ game, version, act, isBusy, openPlayer }: ReplayVie
             <h2 className="section-title">Trades and offers so far</h2>
             <TradeHistory offers={trades.results} openPlayer={openPlayer} />
           </>
-        )}
+          );
+        }}
       </AsyncView>
     </>
   );

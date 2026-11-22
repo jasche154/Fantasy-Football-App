@@ -165,6 +165,10 @@ def story(client) -> dict:
         if summary["phase"] == "waivers":
             post(client, game + "/advance", {"step": "wednesday", "week": week})
         for offer in get(client, game + "/trades")["offers"]:
+            if "counter" not in seen and offer["verdict"]:          # the first one is countered with the same deal
+                deal = {"give": [p["id"] for p in offer["get"]], "get": [p["id"] for p in offer["give"]]}
+                seen["counter"] = (offer, post(client, f"{game}/trades/offers/{offer['id']}/counter", deal))
+                continue
             accept = len(seen["answers"]) % 2 == 0
             answer = post(client, f"{game}/trades/offers/{offer['id']}/respond", {"accept": accept})
             seen["answers"].append((accept, offer, answer))
@@ -261,7 +265,9 @@ def test_a_lopsided_trade_is_declined_with_reasons_and_changes_nothing(story):
     assert any("Value is too far apart" in reason for reason in verdict["reasons"]) and verdict["suggestion"]
     assert verdict["fair_label"] == "big_win" and verdict["value_get"] > 5 * verdict["value_give"]
     assert [row["player"]["id"] for row in verdict["give"]] == story["deal"]["give"]
-    assert set(proposed) == {"game", "events", "verdict", "executed"} and proposed["verdict"] == verdict
+    assert set(proposed) == {"game", "events", "verdict", "executed", "counter"} and proposed["verdict"] == verdict
+    countered = proposed["counter"]
+    assert countered is None or (countered["counter_to"], countered["status"]) == (declined_id(story), "pending")
     assert (proposed["executed"], proposed["events"]) == (False, [])
     declined = [row for row in story["trades"]["results"] if row["status"] == "declined"]
     assert len(declined) == 1 and declined[0]["to_team"]["team_id"] == PARTNER      # asked twice, kept once
@@ -283,6 +289,19 @@ def test_cpu_offers_are_previewed_and_answered(story):
             assert answer["expired"] and answer["message"].startswith("That offer no longer stands")
     history = {row["id"]: row["status"] for row in story["final"]["trades"]["results"]}
     assert all(history[offer["id"]] in ("accepted", "declined", "expired") for _, offer, _ in answers)
+
+
+def declined_id(story) -> int:
+    return next(row["id"] for row in story["trades"]["results"] if row["status"] == "declined")
+
+
+def test_a_cpu_offer_can_be_countered(story):
+    offer, answer = story["counter"]
+    history = {row["id"]: row for row in story["final"]["trades"]["results"]}
+
+    assert set(answer) == {"game", "events", "verdict", "executed", "counter"}
+    assert history[offer["id"]]["status"] == "countered"
+    assert any(row["counter_to"] == offer["id"] for row in history.values())    # the user's own deal, kept
 
 
 def test_time_only_moves_forward_one_step_at_a_time(story):
@@ -317,7 +336,7 @@ def test_responses_have_the_documented_keys(story):
     assert set(final["players"]["results"][0]) == WIRE_ROW and final["players"]["week"] == 16
     assert set(final["claims"]) == {"phase", "can_claim", "priority", "waiver_order", "results", "faab"}
     assert final["claims"]["faab"] is None                     # a "wednesday" league
-    assert set(final["trades"]) == {"open", "deadline_week", "max_players", "offers", "results", "out_discount"}
+    assert set(final["trades"]) == {"open", "deadline_week", "max_players", "offers", "results"}
     assert set(final["draft"]["picks"][0]) == {"overall", "round", "team", "player"}
 
 
@@ -376,7 +395,8 @@ def test_unknown_games_players_and_teams_are_reported(client, story):
                        ("/advance", {"step": "play", "week": 1}),
                        ("/trades/evaluate", {"to_team": 1, "give": [1], "get": [2]}),
                        ("/trades/propose", {"to_team": 1, "give": [1], "get": [2]}),
-                       ("/trades/offers/1/respond", {"accept": True}), ("/delete", None)):
+                       ("/trades/offers/1/respond", {"accept": True}),
+                       ("/trades/offers/1/counter", {"give": [1], "get": [2]}), ("/delete", None)):
         assert refused(client, "/games/999999" + path, body)[0] == 404, path
     assert refused(client, game + "/players/5", method="GET")[0] == 404
     assert refused(client, game + "/team", method="GET", team_id=99) == (422, "No team 99 in this league.")
@@ -547,7 +567,12 @@ def _idle_to(client: TestClient, week: int) -> str:
 
 
 def test_an_offer_that_no_longer_stands_is_saved_as_expired(client):
-    game = _idle_to(client, 2)                                   # this seed: an offer arrives in week 2
+    game = _idle_to(client, 2)
+    for week in range(2, 11):                                   # on to the first week a CPU makes an offer
+        if get(client, game + "/trades")["offers"]:
+            break
+        post(client, game + "/advance", {"step": "play", "week": week})
+        post(client, game + "/advance", {"step": "wednesday", "week": week + 1})
     offer = get(client, game + "/trades")["offers"][0]
     post(client, game + "/drop", {"player_id": offer["get"][0]["id"]})     # the player the CPU asked for
 
@@ -633,7 +658,8 @@ def test_prepare_runs_in_the_background_and_reports_its_status(client, story, mo
 
 def test_a_prepared_season_is_read_again(monkeypatch):
     cleared = []
-    for step in ("load_game_results", "load_snaps", "load_adp", "load_projections", "load_injuries"):
+    for step in ("load_game_results", "load_snaps", "load_adp", "load_expert_ranks", "load_projections",
+                 "load_injuries"):
         monkeypatch.setattr(replay_data, step, lambda *args, **kwargs: {})
     monkeypatch.setattr(replay_data, "ensure_defenses", lambda session: 32)
     monkeypatch.setattr(replay_pool, "clear_cache", lambda: cleared.append(True))

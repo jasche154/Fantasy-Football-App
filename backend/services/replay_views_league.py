@@ -41,14 +41,14 @@ def standings(game: Game) -> dict:
     state, settings = game.state, game.settings
     teams = {t.id: t for t in state.teams}
     playoff_weeks = range(settings.regular_season_weeks + 1, settings.end_week + 1)
-    rows = [{**team_ref(teams[row["team_id"]]), **record(game, row["team_id"]), "seed": row["rank"],
+    rows = [{**team_ref(game, teams[row["team_id"]]), **record(game, row["team_id"]), "seed": row["rank"],
              "in_playoffs": row["rank"] <= replay_season.BRACKET_SIZE} for row in game.table]
     return {"results": rows, "regular_season_weeks": settings.regular_season_weeks,
             "playoff_teams": replay_season.BRACKET_SIZE,
             "seeds_final": result_of(state, settings.regular_season_weeks) is not None,
             "bracket": [scoreboard(game, week) for week in playoff_weeks
                         if state.phase != "draft" and replay_season.matchups_for_week(state, settings, week)],
-            "champion": team_ref(teams[state.champion]) if state.champion in teams else None}
+            "champion": team_ref(game, teams[state.champion]) if state.champion in teams else None}
 
 
 def _schedule_row(game: Game, owner: Team, week: int) -> dict:
@@ -58,7 +58,7 @@ def _schedule_row(game: Game, owner: Team, week: int) -> dict:
     won = winner(game, pair, week) if pair and result else None
     outcome = None if result is None else "T" if won is None else "W" if won == owner.id else "L"
     return {"week": week, "playoff": replay_season.is_playoff_week(game.settings, week),
-            "played": result is not None, "opponent": team_ref(opponent) if opponent else None,
+            "played": result is not None, "opponent": team_ref(game, opponent) if opponent else None,
             "points": result.scores[owner.id] if result else None,
             "opponent_points": result.scores[opponent.id] if result and opponent else None, "result": outcome}
 
@@ -68,7 +68,7 @@ def schedule(game: Game, team_id: int | None = None) -> dict:
     opponent is null until it is known; empty during the draft."""
     owner = rs.team(game.state, game.user.id if team_id is None else team_id)
     weeks = range(1, game.settings.end_week + 1) if game.state.phase != "draft" else ()
-    return {"team": team_ref(owner), "results": [_schedule_row(game, owner, week) for week in weeks]}
+    return {"team": team_ref(game, owner), "results": [_schedule_row(game, owner, week) for week in weeks]}
 
 
 def activity(game: Game, kind: str | None = None, limit: int = DEFAULT_PAGE, offset: int = 0) -> dict:
@@ -121,7 +121,7 @@ def _wire_row(game: Game, player_id: int, owners: dict[int, Team], totals: dict[
     owner = owners.get(player_id)
     return {**player_row(game, game.know, player_id),
             "status": replay_waivers.player_status(game.state, player_id),
-            "owner": team_ref(owner) if owner else None, "season_points": round(totals.get(player_id, 0.0), 2),
+            "owner": team_ref(game, owner) if owner else None, "season_points": round(totals.get(player_id, 0.0), 2),
             "last_points": game.data.actual.get((player_id, game.played)), "usage": usage.get(player_id)}
 
 
@@ -157,7 +157,7 @@ def _history_row(game: Game, player_id: int, week: int) -> dict:
     return {"week": week, "played": week <= game.played, "team": row["player"]["team"],
             "injury": row["player"]["injury"],
             **{key: row[key] for key in ("opponent", "bye", "out", "projection", "points", "ros_ppg", "value",
-                                         "trade_value", "rank", "pos_rank")},
+                                         "rank", "pos_rank", "expert_rank", "news")},
             "usage": _usage([usage] if usage else [])}          # played weeks only: `Game.data`
 
 
@@ -181,11 +181,11 @@ def claims(game: Game) -> dict:
     faab = None
     if game.settings.waiver_mode == "faab":
         faab = {"budget": rs.FAAB_BUDGET, "left": rs.faab_left(state, game.user.id),
-                "teams": [{"team": team_ref(rs.team(state, team_id)), "left": rs.faab_left(state, team_id)}
+                "teams": [{"team": team_ref(game, rs.team(state, team_id)), "left": rs.faab_left(state, team_id)}
                           for team_id in order]}
     return {"phase": state.phase, "can_claim": state.phase == "waivers",
             "priority": order.index(game.user.id) + 1 if game.user.id in order else None,
-            "waiver_order": [team_ref(rs.team(state, team_id)) for team_id in order], "faab": faab,
+            "waiver_order": [team_ref(game, rs.team(state, team_id)) for team_id in order], "faab": faab,
             "results": [{"id": claim.id, "order": place, "add": player_row(game, know, claim.add),
                          "drop": player_row(game, know, claim.drop) if claim.drop is not None else None,
                          "bid": claim.bid}
@@ -207,11 +207,12 @@ def verdict(game: Game, found: Verdict) -> dict:
             "suggestion": found.suggestion}
 
 
-def _offer_row(game: Game, offer: Offer) -> dict:
+def offer_row(game: Game, offer: Offer) -> dict:
     state = game.state
     return {"id": offer.id, "week": offer.week, "status": offer.status,
-            "from_team": team_ref(rs.team(state, offer.from_team)), "to_team": team_ref(rs.team(state, offer.to_team)),
-            "give": refs(game, offer.give), "get": refs(game, offer.get)}
+            "from_team": team_ref(game, rs.team(state, offer.from_team)),
+            "to_team": team_ref(game, rs.team(state, offer.to_team)),
+            "give": refs(game, offer.give), "get": refs(game, offer.get), "counter_to": offer.counter_to}
 
 
 def _preview(game: Game, offer: Offer) -> dict:
@@ -229,8 +230,7 @@ def trades(game: Game) -> dict:
     state, settings = game.state, game.settings
     pending = replay_trades.offers_for_user(state)
     waiting = {offer.id for offer in pending}
-    return {"open": state.phase in replay_trades.TRADE_PHASES and state.week <= settings.trade_deadline_week,
+    return {"open": state.phase in replay_trades.TRADE_PHASES and rs.trades_open(state, settings),
             "deadline_week": settings.trade_deadline_week, "max_players": replay_trades.MAX_PLAYERS_PER_SIDE,
-            "out_discount": replay_trades.OUT_RISK_DISCOUNT,
-            "offers": [{**_offer_row(game, offer), **_preview(game, offer)} for offer in pending],
-            "results": [_offer_row(game, offer) for offer in reversed(state.offers) if offer.id not in waiting]}
+            "offers": [{**offer_row(game, offer), **_preview(game, offer)} for offer in pending],
+            "results": [offer_row(game, offer) for offer in reversed(state.offers) if offer.id not in waiting]}

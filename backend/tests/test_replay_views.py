@@ -13,20 +13,22 @@ import pytest
 from services import (
     replay_game as rg, replay_state as rs, replay_trades, replay_views as views, replay_views_league as league,
 )
+from services.replay_news import Report
 from tests import replay_fakes as fakes
 
 DATA = fakes.fake_season()
 SETTINGS = fakes.fake_settings(draft_slot=4)
 SEED = 7
 USER = SETTINGS.draft_slot
-PLAYER_ROW = {"player", "opponent", "bye", "out", "projection", "points", "ros_ppg", "value", "trade_value", "rank",
-              "pos_rank", "adp", "games", "ppg", "trade_locked"}
+PLAYER_ROW = {"player", "opponent", "bye", "out", "projection", "points", "ros_ppg", "value", "rank", "pos_rank",
+              "adp", "pre_rank", "expert_rank", "news", "games", "ppg", "trade_locked"}
 WIRE_ROW = PLAYER_ROW | {"status", "owner", "season_points", "last_points", "usage"}
-SIDE = {"team_id", "name", "is_user", "projected", "points", "record"}
+SIDE = {"team_id", "name", "is_user", "tendency", "projected", "points", "record"}
 RECORD = {"wins", "losses", "ties", "rank", "points_for", "points_against", "place"}
 PLAYER_REF = {"id", "name", "position", "team", "injury"}
 SUMMARY = {"id", "name", "season", "phase", "week", "end_week", "user_team_id", "settings", "teams", "on_the_clock",
-           "next_action", "record", "matchup", "pending", "champion", "updated_at", "ir_blocked", "has_injuries"}
+           "next_action", "record", "matchup", "pending", "champion", "updated_at", "ir_blocked", "has_injuries",
+           "trades_open", "rank_source"}
 SETTING_KEYS = {"teams", "scoring", "starters", "bench", "roster_size", "draft_slot", "waiver_mode", "difficulty",
                 "regular_season_weeks", "playoff_teams", "trade_deadline_week"}
 PAGE = {"total", "limit", "offset", "results"}
@@ -52,7 +54,7 @@ def finished() -> rs.State:
 
 
 def game(state: rs.State, data=DATA) -> views.Game:
-    return views.Game(1, "Test league", SETTINGS, state, data, "2026-01-01T00:00:00")
+    return views.Game(1, "Test league", SETTINGS, state, data, "2026-01-01T00:00:00", SEED)
 
 
 def every_view(state: rs.State, data=DATA) -> dict[str, str]:
@@ -154,6 +156,25 @@ def test_summary_follows_the_game_from_the_draft_to_the_champion():
     assert open_["settings"]["starters"]["FLEX"] == 1 and open_["settings"]["roster_size"] == 15
     assert done["champion"]["team_id"] == finished().champion and done["record"]["place"] in range(1, 13)
     assert done["matchup"]["you"]["points"] is not None and open_["champion"] is None
+    assert open_["rank_source"] in ("experts", "model")
+
+
+def test_a_cpus_tendency_shows_after_three_weeks_and_its_persona_never_does():
+    early, later = views.summary(game(at(3))), views.summary(game(at(4)))
+    personas = {team.persona for team in at(4).teams}
+
+    assert all(team["tendency"] is None for team in early["teams"])
+    assert [team["tendency"] is None for team in later["teams"]] == [team["is_user"] for team in later["teams"]]
+    assert not any(persona in json.dumps(views.summary(game(at(4)))) for persona in personas - {"balanced"})
+
+
+def test_a_player_row_carries_his_injury_news_only_while_a_report_exists():
+    healthy = game(at(3)).know.values[0]
+    out = replace(healthy, news=Report(since=2, back=6, text="Expected back in week 6."))
+    gone = replace(healthy, news=Report(since=2, back=None, text="Out for the season."))
+
+    assert views.news(healthy) is None and views.news(out) == {"back": 6, "text": "Expected back in week 6."}
+    assert views.news(gone) == {"back": None, "text": "Out for the season."}
 
 
 def test_draft_board_lists_who_is_left_in_adp_order_with_filters_and_paging():
@@ -206,7 +227,8 @@ def test_team_lists_starters_in_slot_order_then_the_bench():
                                                                                                    False)
     assert all(row["points"] is None for row in rows)
     assert {row["player"]["id"] for row in rows} == set(rs.user_team(state).roster)
-    assert views.team(game(state), team_id=9)["team"] == {"team_id": 9, "name": state.teams[8].name, "is_user": False}
+    assert views.team(game(state), team_id=9)["team"] == {"team_id": 9, "name": state.teams[8].name, "is_user": False,
+                                                          "tendency": None}
     with pytest.raises(ValueError, match="No team 99"):
         views.team(game(state), team_id=99)
 
@@ -232,7 +254,7 @@ def test_a_manual_lineup_is_flagged_and_shown():
     starters = {slot: [row["player"]["id"] for row in best if row["slot"] == slot] for slot in SETTINGS.starters}
     starters["FLEX"] = [bench["player"]["id"]]
 
-    manual = views.team(game(rg.set_lineup(state, SETTINGS, DATA, starters)))
+    manual = views.team(game(rg.set_lineup(state, SETTINGS, DATA, starters, seed=SEED)))
 
     slots = {row["player"]["id"]: row["slot"] for row in manual["results"]}
     assert manual["manual_lineup"] is True
@@ -247,7 +269,8 @@ def test_out_and_bye_players_are_flagged_with_no_projection():
 
     assert (healthy["out"], healthy["bye"]) == (False, False) and healthy["projection"] > 10
     assert (out["out"], out["bye"], out["projection"]) == (True, False, 0.0) and out["opponent"] != "BYE"
-    assert out["ros_ppg"] > 10 and 0 < out["value"] < healthy["value"]
+    now = game(at(7)).know.by_id[fakes.INJURED_STAR_ID]                 # his value is discounted while out
+    assert out["ros_ppg"] > 10 and 0 < out["value"] == round(now.chart) and now.chart < now.healthy_chart
     assert len(resting) > 20 and all(row["opponent"] == "BYE" and row["projection"] == 0 for row in resting)
     assert sum(row["out"] for row in resting) < 5                # out before the bye: both flags
 
@@ -278,7 +301,7 @@ def test_standings_run_from_seeds_to_the_final_order_with_the_bracket():
     early, done = league.standings(game(at(4))), league.standings(game(finished()))
 
     assert set(early) == {"results", "regular_season_weeks", "playoff_teams", "seeds_final", "bracket", "champion"}
-    assert set(early["results"][0]) == RECORD | {"team_id", "name", "is_user", "seed", "in_playoffs"}
+    assert set(early["results"][0]) == RECORD | {"team_id", "name", "is_user", "tendency", "seed", "in_playoffs"}
     assert [row["seed"] for row in early["results"]] == list(range(1, 13))
     assert (early["seeds_final"], early["bracket"], early["champion"]) == (False, [], None)
     assert all(row["place"] is None for row in early["results"])
@@ -398,7 +421,7 @@ def test_player_page_has_his_weeks_so_far_and_who_owns_him():
     assert detail["player"]["owner"]["team_id"] == USER and detail["player"]["status"] == "rostered"
     assert [row["week"] for row in weeks] == [1, 2, 3, 4, 5, 6]
     assert set(weeks[0]) == {"week", "played", "team", "opponent", "bye", "out", "projection", "points", "ros_ppg",
-                             "value", "trade_value", "rank", "pos_rank", "injury", "usage"}
+                             "value", "rank", "pos_rank", "expert_rank", "news", "injury", "usage"}
     assert [row["played"] for row in weeks] == [True] * 5 + [False] and weeks[5]["points"] is None
     assert all(row["points"] == DATA.actual.get((owned, row["week"])) for row in weeks[:5])
     assert all(row["projection"] == round(DATA.projection(owned, row["week"]), 2) for row in weeks)
@@ -414,7 +437,8 @@ def test_claims_are_listed_in_the_users_order_with_the_waiver_priority():
     state = at(4, "waivers")
     wire = [row["player"]["id"] for row in league.players(game(state), limit=2)["results"]]
     drop = rs.user_team(state).roster[-3]
-    claimed = rg.submit_claim(rg.submit_claim(state, SETTINGS, DATA, wire[0], drop), SETTINGS, DATA, wire[1], drop)
+    claimed = rg.submit_claim(rg.submit_claim(state, SETTINGS, DATA, wire[0], drop, seed=SEED), SETTINGS, DATA, wire[1],
+                             drop, seed=SEED)
 
     listed, idle = league.claims(game(claimed)), league.claims(game(at(4)))
 
@@ -431,11 +455,11 @@ def test_claims_are_listed_in_the_users_order_with_the_waiver_priority():
 
 def _swap(state: rs.State, partner: int) -> tuple[list[int], list[int]]:
     """The user's and the partner's most valuable running backs."""
-    know = rg.knowledge(state, SETTINGS, DATA)
+    know = rg.knowledge(state, SETTINGS, DATA, seed=SEED)
 
     def best_back(team_id: int) -> int:
         return max((pid for pid in rs.team(state, team_id).roster if know.by_id[pid].position == "RB"),
-                   key=lambda pid: know.by_id[pid].market_value)
+                   key=lambda pid: know.by_id[pid].chart)
 
     return [best_back(USER)], [best_back(partner)]
 
@@ -443,7 +467,7 @@ def _swap(state: rs.State, partner: int) -> tuple[list[int], list[int]]:
 def test_verdict_is_told_from_the_users_side():
     state = at(3)
     give, get = _swap(state, 9)
-    found = rg.evaluate_trade(state, SETTINGS, DATA, 9, give, get)
+    found = rg.evaluate_trade(state, SETTINGS, DATA, 9, give, get, seed=SEED)
 
     shown = league.verdict(game(state), found)
 
@@ -463,15 +487,24 @@ def test_trades_show_pending_offers_with_a_preview_and_the_history_newest_first(
     screen = league.trades(game(declined))
 
     offer = screen["offers"][0]
-    assert set(screen) == {"open", "deadline_week", "max_players", "out_discount", "offers", "results"}
-    assert screen["out_discount"] == replay_trades.OUT_RISK_DISCOUNT == 0.8
-    assert set(offer) == {"id", "week", "status", "from_team", "to_team", "give", "get", "verdict", "note"}
+    assert set(screen) == {"open", "deadline_week", "max_players", "offers", "results"}
+    assert set(offer) == {"id", "week", "status", "from_team", "to_team", "give", "get", "counter_to", "verdict",
+                          "note"}
     assert (offer["status"], offer["from_team"]["team_id"], offer["to_team"]["is_user"]) == ("pending", 9, True)
     assert [p["id"] for p in offer["give"]] == theirs and [p["id"] for p in offer["get"]] == mine
     assert [row["player"]["id"] for row in offer["verdict"]["give"]] == mine and offer["note"] is None
     assert screen["results"][0]["id"] == 9001 and offer["id"] not in [row["id"] for row in screen["results"]]
     assert [row["id"] for row in screen["results"]] == sorted((row["id"] for row in screen["results"]), reverse=True)
-    assert screen["open"] is True and league.trades(game(at(12)))["open"] is False
+    assert screen["open"] is True and offer["counter_to"] is None
+
+
+def test_trades_stay_open_through_the_deadline_weeks_waivers_and_close_at_wednesday():
+    deadline = SETTINGS.trade_deadline_week
+    waivers, after = game(at(deadline + 1, "waivers")), game(at(deadline + 1))
+
+    assert league.trades(waivers)["open"] is views.summary(waivers)["trades_open"] is True
+    assert league.trades(after)["open"] is views.summary(after)["trades_open"] is False
+    assert views.summary(game(drafting()))["trades_open"] is False
 
 
 def test_an_offer_that_cannot_be_judged_gets_a_note_instead_of_a_verdict():
@@ -572,5 +605,5 @@ def test_an_offer_for_a_player_since_moved_to_ir_says_why_it_cannot_be_accepted(
 
     offer = league.trades(game(offered))["offers"][0]
 
-    name = rg.knowledge(state, SETTINGS, DATA).by_id[mine[0]].name
+    name = rg.knowledge(state, SETTINGS, DATA, seed=SEED).by_id[mine[0]].name
     assert (offer["verdict"], offer["note"]) == (None, f"On IR, so not tradable until activated: {name}.")

@@ -244,9 +244,9 @@ def test_a_faab_league_plays_then_bids_then_opens_the_week():
     state = rg.auto_draft(rg.create_game(FAAB, DATA, 1), FAAB, DATA, 1)
 
     played = rg.advance(state, FAAB, DATA, 1, "play")
-    add = next(v.player_id for v in rg.knowledge(played, FAAB, DATA).values if v.player_id not in rs.rostered(played))
+    add = next(v.player_id for v in rg.knowledge(played, FAAB, DATA, seed=1).values if v.player_id not in rs.rostered(played))
     cut = rs.user_team(played).roster[-1]
-    claimed = rg.set_claim_bid(rg.submit_claim(played, FAAB, DATA, add, cut, 3), FAAB, played.next_id, 4)
+    claimed = rg.set_claim_bid(rg.submit_claim(played, FAAB, DATA, add, cut, 3, seed=1), FAAB, played.next_id, 4)
     after = rg.advance(claimed, FAAB, DATA, 1, "wednesday")
 
     assert (played.phase, played.week) == ("waivers", 2) and claimed.claims[0].bid == 4

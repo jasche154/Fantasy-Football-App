@@ -30,11 +30,11 @@ function verdict(overrides: Partial<ReplayVerdict> = {}): ReplayVerdict {
 /** Blitz Brigade offers Mostert for Etienne. */
 function offer(overrides: Partial<ReplayPendingOffer> = {}): ReplayPendingOffer {
   return { id: 61, week: 5, status: 'pending', from_team: BRIGADE, to_team: teamRef(USER_TEAM_ID), give: [MOSTERT], get: [ETIENNE],
-    verdict: verdict(), note: null, ...overrides };
+    verdict: verdict(), note: null, counter_to: null, ...overrides };
 }
 
 function trades(overrides: Partial<ReplayTrades> = {}): ReplayTrades {
-  return { open: true, deadline_week: 11, max_players: 3, out_discount: 0.8, offers: [], results: [], ...overrides };
+  return { open: true, deadline_week: 11, max_players: 3, offers: [], results: [], ...overrides };
 }
 
 /** GET team: the user's roster, or a CPU roster of Mostert and Collins (locked). */
@@ -59,11 +59,12 @@ async function tickBothSides(user: ReturnType<typeof userEvent.setup>) {
 describe('TradesView offers', () => {
   it('shows an offer with its values, fairness and lineup gain, and the history with a status', async () => {
     const openPlayer = vi.fn();
-    const past = { id: 50, week: 3, status: 'declined' as const, from_team: teamRef(USER_TEAM_ID), to_team: GHOSTS, give: [MCCAFFREY], get: [COLLINS] };
+    const past = { id: 50, week: 3, status: 'declined' as const, from_team: teamRef(USER_TEAM_ID), to_team: GHOSTS, give: [MCCAFFREY], get: [COLLINS], counter_to: null };
     const { user } = renderTrades(trades({ offers: [offer()], results: [past] }), [], { props: { openPlayer } });
 
     const card = await screen.findByRole('listitem', { name: 'Offer from Blitz Brigade' });
-    expect(screen.getByText(/CPU managers only accept a trade that is fair in value for them and makes their own lineup better/)).toBeInTheDocument();
+    expect(screen.getByText(/CPU managers accept a trade that is worth it to them on the 0-1000 trade chart/)).toBeInTheDocument();
+    expect(screen.queryByText(/model ranks/)).not.toBeInTheDocument();
     expect(within(card).getByText('You give').parentElement).toHaveTextContent('Travis Etienne');
     expect(within(card).getByText('You give').parentElement).toHaveTextContent('31.5 value');
     expect(within(card).getByText('You get').parentElement).toHaveTextContent('35.0 value');
@@ -253,11 +254,17 @@ describe('TradesView builder', () => {
 describe('TradesView rules and errors', () => {
   it('closes the builder after the deadline and only lets an offer be declined', async () => {
     renderTrades(trades({ open: false, offers: [offer()] }), [], { props: { game: summary({ week: 12 }) } });
-    expect(await screen.findByText('The trade deadline has passed: no trades after week 11.')).toBeInTheDocument();
+    expect(await screen.findByText("The trade deadline has passed: trades closed at week 11's waivers.")).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Propose trade' })).not.toBeInTheDocument();
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Accept offer from Blitz Brigade' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Counter offer from Blitz Brigade' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Decline offer from Blitz Brigade' })).toBeEnabled();
+  });
+
+  it('says the values come from model ranks when no expert ranks are loaded', async () => {
+    renderTrades(trades(), [], { props: { game: summary({ rank_source: 'model' }) } });
+    expect(await screen.findByText(/values come from the app's model ranks/)).toBeInTheDocument();
   });
 
   it('mentions the extra value CPUs want on Hard, and the empty lists', async () => {
@@ -278,7 +285,15 @@ describe('TradesView injuries and IR', () => {
   it('states the dealing rules, including IR and the CPUs\' out discount', async () => {
     renderTrades(trades({ max_players: 2 }));
     expect(await screen.findByText("Up to 2 players a side. A player on IR or traded in the last two weeks can't be dealt. "
-      + 'CPUs count a player who is out this week at 80% of his value.')).toBeInTheDocument();
+      + 'Values are on a 0-1000 trade chart; an injured player counts for the games he is expected to play.')).toBeInTheDocument();
+  });
+
+  it('shows the injury news under a tagged player in the builder', async () => {
+    const news = { back: 8, text: 'Expected back in week 8.' };
+    const roster = team({ results: [rosterRow(tagged(ETIENNE, 'O', 'DNP', 'Ankle'), 'RB', { out: true, news })] });
+    mockFetch([META_ROUTE, { path: TRADES_PATH, reply: json(trades()) }, { path: `${PATH}/team`, reply: json(roster) }]);
+    renderWithProviders(<TradesView {...viewProps()} />);
+    expect(await screen.findAllByText('Expected back in week 8.')).not.toHaveLength(0);
   });
 
   it('shows the IR banner while blocked, and leaves the offer answerable', async () => {
@@ -309,5 +324,66 @@ describe('TradesView injuries and IR', () => {
     renderTrades(trades({ offers: [offer({ give: [hurt], verdict: verdict({ get: [{ player: hurt, value: 35 }] }) })] }));
     const card = await screen.findByRole('listitem', { name: 'Offer from Blitz Brigade' });
     expect(within(card).getByTitle('Questionable: Hamstring (limited practice)')).toHaveTextContent('Q');
+  });
+});
+
+describe('TradesView counters', () => {
+  it('counters an offer from the builder, prefilled with its deal', async () => {
+    const COUNTER_PATH = `${TRADES_PATH}/offers/61/counter`;
+    const { api, user } = renderTrades(trades({ offers: [offer()] }), [
+      { method: 'POST', path: EVALUATE_PATH, reply: json({ verdict: verdict() }) },
+      { method: 'POST', path: COUNTER_PATH, reply: json({ ...actionResult(), verdict: verdict(), executed: true, counter: null }) },
+    ]);
+    await user.click(await screen.findByRole('button', { name: 'Counter offer from Blitz Brigade' }));
+
+    expect(await screen.findByText("Counter Blitz Brigade's offer")).toBeInTheDocument();
+    expect(await screen.findByRole('checkbox', { name: 'Give Travis Etienne' })).toBeChecked();
+    expect(await screen.findByRole('checkbox', { name: 'Get Raheem Mostert' })).toBeChecked();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send counter' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Send counter' }));
+
+    await waitFor(() => expect(api.callsTo(COUNTER_PATH, 'POST').map((call) => call.body))
+      .toEqual([{ give: [ETIENNE.id], get: [MOSTERT.id], drops: [] }]));
+    expect(await screen.findByText('Trade executed with Blitz Brigade.')).toBeInTheDocument();
+  });
+
+  it('locks the partner and other offers while countering, and keeps a declined counter on screen', async () => {
+    const COUNTER_PATH = `${TRADES_PATH}/offers/61/counter`;
+    const no = verdict({ accepted: false, reasons: ['Value is too far apart.'], suggestion: 'Add Nico Collins to make this fair.' });
+    const back = { id: 71, week: 5, status: 'pending' as const, from_team: BRIGADE, to_team: teamRef(USER_TEAM_ID),
+      give: [MOSTERT], get: [MCCAFFREY], counter_to: 70 };
+    const other = offer({ id: 62, from_team: GHOSTS });
+    const { user } = renderTrades(trades({ offers: [offer(), other] }), [
+      { method: 'POST', path: EVALUATE_PATH, reply: json({ verdict: no }) },
+      { method: 'POST', path: COUNTER_PATH, reply: json({ ...actionResult(), verdict: no, executed: false, counter: back }) },
+    ]);
+    await user.click(await screen.findByRole('button', { name: 'Counter offer from Blitz Brigade' }));
+
+    expect(await screen.findByText("Counter Blitz Brigade's offer")).toHaveFocus();
+    expect(screen.getByRole('combobox', { name: 'Trade with' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Counter offer from Gridiron Ghosts' })).toBeDisabled();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send counter' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Send counter' }));
+
+    const outcome = (await screen.findByText('Blitz Brigade turned it down.')).closest('.replay-verdict') as HTMLElement;
+    expect(within(outcome).getByText('Value is too far apart.')).toBeInTheDocument();
+    expect(within(outcome).getByText('Add Nico Collins to make this fair.')).toBeInTheDocument();
+    expect(within(outcome).getByText('Blitz Brigade countered:').closest('p')).toHaveTextContent('you give Christian McCaffrey for Raheem Mostert.');
+  });
+
+  it("shows the CPU's counter after it turns a proposal down", async () => {
+    const no = verdict({ accepted: false, reasons: ['Value is too far apart.'] });
+    const counter = { id: 70, week: 5, status: 'pending' as const, from_team: GHOSTS, to_team: teamRef(USER_TEAM_ID),
+      give: [COLLINS], get: [ETIENNE], counter_to: 69 };
+    const { user } = renderTrades(trades(), [
+      { method: 'POST', path: EVALUATE_PATH, reply: json({ verdict: no }) },
+      { method: 'POST', path: PROPOSE_PATH, reply: json({ ...actionResult(), verdict: no, executed: false, counter }) },
+    ]);
+    await tickBothSides(user);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Propose trade' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Propose trade' }));
+
+    const shown = (await screen.findByText('Gridiron Ghosts countered:')).closest('p');
+    expect(shown).toHaveTextContent('you give Travis Etienne for Nico Collins. Answer it under Offers for you.');
   });
 });

@@ -223,13 +223,14 @@ interface TeamSelectProps {
   label?: string;
   /** Leave the user's team out (e.g. picking a trade partner). */
   excludeUser?: boolean;
+  disabled?: boolean;
 }
 
 /** The league's teams, the user's first. */
-export function TeamSelect({ game, value, onChange, label = 'Team', excludeUser = false }: TeamSelectProps) {
+export function TeamSelect({ game, value, onChange, label = 'Team', excludeUser = false, disabled }: TeamSelectProps) {
   const teams = [...game.teams.filter((team) => team.is_user && !excludeUser), ...game.teams.filter((team) => !team.is_user)];
   const options = teams.map((team) => ({ value: team.team_id, label: team.is_user ? `${team.name} (you)` : team.name }));
-  return <SelectField label={label} isInline value={value} options={options} onChange={(id) => onChange(Number(id))} />;
+  return <SelectField label={label} isInline value={value} options={options} disabled={disabled} onChange={(id) => onChange(Number(id))} />;
 }
 
 interface ConfirmButtonProps {

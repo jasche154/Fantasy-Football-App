@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
-from api.replay_routes import GameId, errors, open_game, turn
+from api.replay_routes import GameId, Turn, errors, open_game, turn
 from database.db import get_session
 from services import replay_game as rg, replay_state as rs, replay_views as views, replay_views_league as league_views
 
@@ -62,11 +62,14 @@ class AdvanceBody(BaseModel):
     week: int = Field(..., ge=1, le=MAX_WEEK)       # the week the page is showing: 409 when the league moved on
 
 
-class TradeBody(BaseModel):
-    to_team: int = Field(..., ge=1)
-    give: list[int] = Field(..., max_length=MAX_LISTED)
+class CounterBody(BaseModel):
+    give: list[int] = Field(..., max_length=MAX_LISTED)     # what the user sends
     get: list[int] = Field(..., max_length=MAX_LISTED)
     drops: list[int] = Ids                          # the user's own drops when the deal overfills the roster
+
+
+class TradeBody(CounterBody):
+    to_team: int = Field(..., ge=1)
 
 
 class RespondBody(BaseModel):
@@ -92,14 +95,14 @@ def draft_auto(game_id: GameId, whole_draft: bool = False, overall: int | None =
 @router.post("/lineup")
 def set_lineup(game_id: GameId, body: LineupBody, session: Session = Depends(get_session)) -> dict:
     with turn(session, game_id) as t:
-        state = rg.clear_lineup(t.state) if body.starters is None else rg.set_lineup(*t.args, body.starters)
+        state = rg.clear_lineup(t.state) if body.starters is None else rg.set_lineup(*t.args, body.starters, seed=t.seed)
         return t.done(state, team=views.team)
 
 
 @router.post("/claims")
 def submit_claim(game_id: GameId, body: ClaimBody, session: Session = Depends(get_session)) -> dict:
     with turn(session, game_id) as t:
-        return t.done(rg.submit_claim(*t.args, body.add, body.drop, body.bid))
+        return t.done(rg.submit_claim(*t.args, body.add, body.drop, body.bid, seed=t.seed))
 
 
 @router.post("/claims/reorder")
@@ -125,27 +128,27 @@ def cancel_claim(game_id: GameId, claim_id: int, session: Session = Depends(get_
 def add_drop(game_id: GameId, body: AddBody, session: Session = Depends(get_session)) -> dict:
     """Add a free agent now (after the week's waiver run), dropping `drop` when the roster is full."""
     with turn(session, game_id) as t:
-        return t.done(rg.add_drop(*t.args, body.add, body.drop))
+        return t.done(rg.add_drop(*t.args, body.add, body.drop, seed=t.seed))
 
 
 @router.post("/drop")
 def drop(game_id: GameId, body: PickBody, session: Session = Depends(get_session)) -> dict:
     with turn(session, game_id) as t:
-        return t.done(rg.drop(*t.args, body.player_id))
+        return t.done(rg.drop(*t.args, body.player_id, seed=t.seed))
 
 
 @router.post("/ir/place")
 def ir_place(game_id: GameId, body: PickBody, session: Session = Depends(get_session)) -> dict:
     """Move a player tagged O, IR or PUP this week to the team's IR slot."""
     with turn(session, game_id) as t:
-        return t.done(rg.ir_place(*t.args, body.player_id))
+        return t.done(rg.ir_place(*t.args, body.player_id, seed=t.seed))
 
 
 @router.post("/ir/activate")
 def ir_activate(game_id: GameId, body: ActivateBody, session: Session = Depends(get_session)) -> dict:
     """Bring a player back from IR, dropping `drop` when the roster is full or moving `swap` to IR instead."""
     with turn(session, game_id) as t:
-        return t.done(rg.ir_activate(*t.args, body.player_id, body.drop, body.swap))
+        return t.done(rg.ir_activate(*t.args, body.player_id, body.drop, body.swap, seed=t.seed))
 
 
 @router.post("/advance")
@@ -161,7 +164,7 @@ def evaluate_trade(game_id: GameId, body: TradeBody, session: Session = Depends(
     with errors():
         game = open_game(session, game_id)
         found = rg.evaluate_trade(game.state, game.settings, game.full_season, body.to_team, body.give,
-                                  body.get, body.drops)
+                                  body.get, body.drops, seed=game.seed)
         return {"verdict": league_views.verdict(game, found)}
 
 
@@ -169,8 +172,20 @@ def evaluate_trade(game_id: GameId, body: TradeBody, session: Session = Depends(
 def propose_trade(game_id: GameId, body: TradeBody, session: Session = Depends(get_session)) -> dict:
     """Offer a CPU a trade: carried out at once when it accepts, otherwise the verdict says why not."""
     with turn(session, game_id) as t:
-        state, found = rg.propose_trade(*t.args, body.to_team, body.give, body.get, body.drops)
-        return t.done(state, verdict=lambda game: league_views.verdict(game, found), executed=found.accepted)
+        return _proposed(t, *rg.propose_trade(*t.args, t.seed, body.to_team, body.give, body.get, body.drops))
+
+
+@router.post("/trades/offers/{offer_id}/counter")
+def counter_offer(game_id: GameId, offer_id: int, body: CounterBody, session: Session = Depends(get_session)) -> dict:
+    """Answer a CPU's pending offer with a deal of your own: its offer is marked countered and yours is
+    proposed to the same CPU (same answer as propose)."""
+    with turn(session, game_id) as t:
+        return _proposed(t, *rg.counter_offer(*t.args, t.seed, offer_id, body.give, body.get, body.drops))
+
+
+def _proposed(t: Turn, state: rs.State, found: rg.Verdict, counter: rs.Offer | None) -> dict:
+    return t.done(state, verdict=lambda game: league_views.verdict(game, found), executed=found.accepted,
+                  counter=(lambda game: league_views.offer_row(game, counter)) if counter else None)
 
 
 @router.post("/trades/offers/{offer_id}/respond")
@@ -179,7 +194,7 @@ def respond_offer(game_id: GameId, offer_id: int, body: RespondBody, session: Se
     expired=true and the reason."""
     with turn(session, game_id) as t:
         try:
-            state = rg.respond_offer(*t.args, offer_id, body.accept, body.drops)
+            state = rg.respond_offer(*t.args, offer_id, body.accept, body.drops, seed=t.seed)
         except rg.OfferExpired as exc:
             found = exc.verdict
             return t.done(exc.state, accepted=False, expired=True, message=str(exc),

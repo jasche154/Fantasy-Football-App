@@ -30,6 +30,7 @@ from dataclasses import dataclass, replace
 
 from services import lineup_gain, replay_claim_ai as claim_ai, replay_ir, replay_state as rs, replay_values as rv
 from services import replay_waivers
+from services.replay_cover import cpu_cover  # noqa: F401  (re-exported: replay_game and tests call it here)
 from services.replay_pool import SKILL
 from services.replay_state import Claim, Settings, State
 from services.replay_values import Knowledge, ReplayValue

@@ -19,10 +19,14 @@ interface OfferCardProps {
   isOpen: boolean;
   actions: TradeActions;
   openPlayer: (playerId: number) => void;
+  /** Opens the trade builder with this offer's deal, to change and send back. */
+  onCounter: (offer: ReplayPendingOffer) => void;
+  /** A counter is being built: starting another would throw that deal away. */
+  isCountering: boolean;
 }
 
 /** A CPU's offer: what goes each way, the preview verdict, the user's drops when it overfills the roster. */
-function OfferCard({ game, version, offer, roster, isOpen, actions, openPlayer }: OfferCardProps) {
+function OfferCard({ game, version, offer, roster, isOpen, actions, openPlayer, onCounter, isCountering }: OfferCardProps) {
   const [picked, setPicked] = useState<number[]>([]);
   const partner = offer.from_team.name;
   const sends = playerIds(offer.get);                      // the offer is written from the CPU's side
@@ -57,7 +61,7 @@ function OfferCard({ game, version, offer, roster, isOpen, actions, openPlayer }
   return (
     <li className="league-trade replay-offer" aria-label={`Offer from ${partner}`}>
       <p className="league-trade__head">
-        <strong>{partner}</strong> <span className="league-trade__owner">offered this in week {offer.week}</span>
+        <strong>{partner}</strong> <span className="league-trade__owner">{offer.counter_to === null ? 'offered' : 'countered with'} this in week {offer.week}</span>
       </p>
       <div className="replay-trade__sides">
         <TradeSide title="You give" players={verdict?.give ?? offer.get.map((player) => ({ player }))} onOpen={openPlayer} />
@@ -73,6 +77,9 @@ function OfferCard({ game, version, offer, roster, isOpen, actions, openPlayer }
         <button type="button" className="btn btn--primary btn--sm" disabled={actions.isBusy || !isOpen || !hasDrops || verdict?.accepted !== true}
           onClick={() => void answer(true)}>
           {actions.pendingKey === acceptKey ? 'Accepting…' : <>Accept <span className="sr-only">offer from {partner}</span></>}
+        </button>
+        <button type="button" className="btn btn--ghost btn--sm" disabled={actions.isBusy || !isOpen || isCountering} onClick={() => onCounter(offer)}>
+          Counter <span className="sr-only">offer from {partner}</span>
         </button>
         <button type="button" className="btn btn--ghost btn--sm" disabled={actions.isBusy} onClick={() => void answer(false)}>
           {actions.pendingKey === declineKey ? 'Declining…' : <>Decline <span className="sr-only">offer from {partner}</span></>}

@@ -4,7 +4,7 @@ from functools import lru_cache
 
 import pytest
 
-from services import replay_draft as rd, replay_state as rs, replay_values as rv
+from services import replay_draft as rd, replay_personas, replay_state as rs, replay_values as rv
 from services.replay_pool import SeasonData
 from services.replay_state import Settings, State
 from tests import replay_fakes as fakes
@@ -417,3 +417,13 @@ def test_players_with_adp_are_drafted_on_adp_alone_and_from_the_week_zero_copy()
     assert play_out(start, settings, no_week_one, 8).picks == drafted(12, 8).picks
     assert play_out(start, settings, data.as_of(0), 8) == drafted(12, 8)
     assert dict(data.as_of(0).actual) == {}                     # nothing to peek at
+
+
+def test_each_cpu_gets_a_seeded_persona_once_and_the_user_none():
+    settings = fakes.fake_settings()
+
+    teams = rd.new_game(settings, 4).teams
+    cpus = [t.persona for t in teams if not t.is_user]
+
+    assert [t.persona for t in teams if t.is_user] == ["balanced"] and {"shark", "panicky"} <= set(cpus)
+    assert set(cpus) <= set(replay_personas.PERSONAS) and teams == rd.new_game(settings, 4).teams

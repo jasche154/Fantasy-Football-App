@@ -194,40 +194,15 @@ def test_a_spot_opened_by_an_ir_move_is_filled_within_the_limits():
 
 # ---------------- trades ----------------
 
-def test_a_cpu_with_two_quarterbacks_will_not_trade_for_a_third_but_swaps_one():
+def test_trades_ignore_the_positional_limits():
+    """The limits are for waivers. A CPU with two quarterbacks may take a third, and one with seven receivers
+    an eighth, when the value is there: no deal is turned down for its positions."""
     state, know = league()
     theirs = roster(state, know, TWO_QBS)
     others = [v.player_id for v in theirs if v.position in ("RB", "WR")]
-    backup = min((v for v in theirs if v.position == "QB"), key=lambda v: v.ros_ppg).player_id
 
     added = [rt.evaluate(state, SETTINGS, know, USER, TWO_QBS, [USERS_SPARE_QB], [pid]) for pid in others]
-    swapped = rt.evaluate(state, SETTINGS, know, USER, TWO_QBS, [USERS_SPARE_QB], [backup])
-
-    assert all(f"It would leave CPU 8 with 3 at QB, {OVER}." in verdict.reasons for verdict in added)
-    assert not any(verdict.accepted for verdict in added) and OVER not in " ".join(swapped.reasons)
-
-
-def test_the_week_its_own_quarterbacks_do_not_play_a_cpu_takes_one_who_does():
-    state, _ = league()
-    own = [v.player_id for v in roster(state, fakes.fake_knowledge(1), TWO_QBS) if v.position == "QB"]
-    know = without_projection(1, own)
-    scrub = min((v for v in roster(state, know, TWO_QBS) if v.position == "WR"), key=lambda v: v.market_value)
-
-    verdict = rt.evaluate(state, SETTINGS, know, USER, TWO_QBS, [USERS_SPARE_QB], [scrub.player_id])
-
-    assert know.by_id[USERS_SPARE_QB].projection > 0 and OVER not in " ".join(verdict.reasons)
-
-
-def test_a_cpu_with_a_bench_full_of_receivers_will_not_trade_for_another():
-    """The owner's rule: "they won't trade for a WR if they have 6 on the bench". CPU 5 would start the
-    receiver it is offered, so the lineup test alone lets the deal through."""
-    state, know = league()
-    receiver, back, their_receiver = P("WR", 16), P("RB", 27), P("WR", 26)
-
-    one_more = rt.evaluate(state, SETTINGS, know, USER, FULL_AT_WR, [receiver], [back])
-    swap = rt.evaluate(state, SETTINGS, know, USER, FULL_AT_WR, [receiver], [their_receiver])
+    one_more = rt.evaluate(state, SETTINGS, know, USER, FULL_AT_WR, [P("WR", 16)], [P("RB", 27)])
 
     assert held(state, know, FULL_AT_WR)["WR"] == rv.position_cap("WR", SETTINGS) == 7
-    assert one_more.their_gain >= rt.MIN_TRADE_GAIN and one_more.value_give >= one_more.value_get
-    assert one_more.reasons == (f"It would leave CPU 5 with 8 at WR, {OVER}.",)
-    assert swap.accepted                                     # a better receiver for one of its own is fine
+    assert not any(OVER in reason for verdict in (*added, one_more) for reason in verdict.reasons)

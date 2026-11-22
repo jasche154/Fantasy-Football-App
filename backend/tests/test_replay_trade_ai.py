@@ -1,7 +1,8 @@
 """Replay League: the trades CPU managers make on their own (services/replay_trade_ai.py).
 
-`seasons` plays cpu_trades for weeks 1-11 on fakes.drafted_state() for several seeds. Nothing else touches
-the rosters, so every change in those states is a trade the CPUs made.
+`seasons` plays cpu_trades for weeks 1-11 on fakes.drafted_state() for several seeds, with personas from
+replay_personas.assign and the plain chart of test_replay_trades (independent of replay_chart). Nothing else
+touches the rosters, so every change in those states is a trade the CPUs made.
 """
 import sys
 import time
@@ -11,8 +12,9 @@ from statistics import mean
 
 import pytest
 
-from services import replay_state as rs, replay_trade_ai as ai, replay_trades as rt, replay_values as rv
+from services import replay_personas, replay_state as rs, replay_trade_ai as ai, replay_trades as rt
 from tests import replay_fakes as fakes
+from tests.test_replay_trades import chart_knowledge
 
 P = fakes.player_id
 SETTINGS = fakes.fake_settings()
@@ -36,11 +38,20 @@ class Week:
         return list(self.after.offers[len(self.before.offers):])
 
 
+def with_personas(state: rs.State, seed: int) -> rs.State:
+    picked = replay_personas.assign(seed, [t.id for t in state.teams if not t.is_user])
+    return replace(state, teams=tuple(replace(t, persona=picked.get(t.id, t.persona)) for t in state.teams))
+
+
+def knowledge(week: int, settings: rs.Settings = SETTINGS, data=None):
+    return chart_knowledge(week, settings, data)
+
+
 def play(seed: int, settings: rs.Settings = SETTINGS) -> list[Week]:
-    state, weeks = fakes.drafted_state(settings), []
+    state, weeks = with_personas(fakes.drafted_state(settings), seed), []
     for week in WEEKS:
         before = replace(state, week=week)
-        know = fakes.fake_knowledge(week, settings)
+        know = knowledge(week, settings)
         started = time.perf_counter()
         state = ai.cpu_trades(before, settings, know, seed)
         weeks.append(Week(week, before, state, time.perf_counter() - started))
@@ -64,16 +75,15 @@ def offers(season: list[Week]) -> list[tuple[Week, rs.Offer]]:
 
 def test_cpus_trade_every_season_without_a_frenzy(seasons):
     """This league is a straight-ADP draft (teams with four quarterbacks next to teams with one) and nothing
-    but trades touches it, so deals are easy to find: about ten a season. Real seasons, with real drafts and
-    waivers, give 1 to 8 (mean 4), which is what MAX_PAIRS, PAIR_SCORED and MIN_CPU_GAIN are tuned for."""
+    but trades touches it, so deals are easy to find."""
     counts = [len(trades(season)) for season in seasons.values()]
 
-    assert all(4 <= count <= 16 for count in counts), counts
-    assert 6 <= mean(counts) <= 13, counts
+    assert all(3 <= count <= 12 for count in counts), counts
+    assert 5 <= mean(counts) <= 10, counts
 
 
 def test_an_attempt_asks_several_pairs_and_stops_at_the_first_deal(monkeypatch):
-    state, know, asked = fakes.drafted_state(), fakes.fake_knowledge(1), []
+    state, know, asked = fakes.drafted_state(), knowledge(1), []
     best_deal = ai._best_deal
 
     def no_deal(state, settings, know, first, second, scored):
@@ -96,56 +106,38 @@ def test_an_attempt_asks_several_pairs_and_stops_at_the_first_deal(monkeypatch):
     assert len(asked) <= len(SEEDS) * ai.MAX_PAIRS
 
 
-def test_a_deal_that_leaves_a_cpu_a_starting_slot_nobody_plays_in_is_passed_over(monkeypatch):
-    state = fakes.drafted_state()
-    team = rs.team(state, 8)                                  # two tight ends
-    tight_ends = [pid for pid in team.roster if fakes.fake_knowledge(1).by_id[pid].position == "TE"]
-    resting, playing = tight_ends
-    know = fakes.fake_knowledge(1, data=fakes.patched(fakes.fake_season(), projected={(resting, 1): None}))
-    back = next(pid for pid in rs.team(state, 9).roster if know.by_id[pid].position == "RB")
-
-    assert rt.strands_a_starter(SETTINGS, know, team, [playing], [back], [])
-    assert not rt.strands_a_starter(SETTINGS, know, team, [resting], [back], [])
-    assert rt.strands_a_starter(SETTINGS, know, team, [resting], [back], [playing])     # the forced drop does it
-    monkeypatch.setattr(rt, "strands_a_starter", lambda *args: True)
-    assert all(ai.cpu_trades(state, SETTINGS, fakes.fake_knowledge(1), seed).teams == state.teams for seed in SEEDS)
-
-
-def test_no_cpu_trades_its_way_over_a_positional_limit_or_into_an_idle_slot(seasons):
+def test_every_cpu_trade_leaves_each_roster_able_to_fill_its_lineup(seasons):
+    """Positions need not match; a slot the deal empties must have its own free agent to fill it."""
     for season in seasons.values():
         for week, offer in trades(season):
-            know = fakes.fake_knowledge(week.week)
+            know = knowledge(week.week)
+            pool = rt.free_agents(week.after, know)
             for team_id in (offer.from_team, offer.to_team):
-                before, after = rs.team(week.before, team_id).roster, rs.team(week.after, team_id).roster
-                had, have = (Counter(know.by_id[pid].position for pid in roster) for roster in (before, after))
-                assert all(have[p] <= max(had[p], rv.position_cap(p, SETTINGS)) for p in have), (week.week, offer)
-                assert len(rv.idle_slots(know, after, SETTINGS)) <= len(rv.idle_slots(know, before, SETTINGS))
+                assert rt.cover(know, SETTINGS, rs.team(week.after, team_id).roster, pool) is not None
 
 
 def test_the_test_suite_clears_the_trade_and_draft_caches():
     from services import replay_draft
     from tests.conftest import _clear_caches
 
-    rt._season(SETTINGS, fakes.fake_knowledge(1), rs.user_team(fakes.drafted_state()).roster)
+    rt._season(SETTINGS, knowledge(1), rs.user_team(fakes.drafted_state()).roster)
     replay_draft._board(fakes.fake_season().as_of(0))
-    assert rt._season.cache_info().currsize and replay_draft._board.cache_info().currsize
+    assert rt._seasons.cache_info().currsize and replay_draft._board.cache_info().currsize
 
     _clear_caches()
 
-    assert rt._season.cache_info().currsize == replay_draft._board.cache_info().currsize == 0
+    assert rt._seasons.cache_info().currsize == replay_draft._board.cache_info().currsize == 0
 
 
 def test_every_cpu_trade_passes_the_acceptance_test_for_both_sides(seasons):
     for season in seasons.values():
         for week, offer in trades(season):
-            know = fakes.fake_knowledge(week.week)
+            know = knowledge(week.week)
 
             verdict = rt.evaluate(week.before, SETTINGS, know, offer.from_team, offer.to_team, offer.give, offer.get)
 
-            assert verdict.accepted, (week.week, offer, verdict.reasons)
-            assert min(verdict.your_gain, verdict.their_gain) >= ai.MIN_CPU_GAIN > rt.MIN_TRADE_GAIN
-            assert verdict.value_get >= verdict.value_give * rt.CPU_TRADE_MULTIPLE
-            assert verdict.value_give >= verdict.value_get * rt.CPU_TRADE_MULTIPLE
+            assert verdict.accepted and verdict.score >= 0, (week.week, offer, verdict.reasons)
+            assert verdict.value_get >= verdict.value_give * 0.8 and verdict.value_give >= verdict.value_get * 0.8
 
 
 def test_a_cpu_trades_at_most_once_a_week_and_never_moves_the_users_players(seasons):
@@ -162,14 +154,12 @@ def test_trades_are_carried_out_and_leave_every_roster_legal(seasons):
     for season in seasons.values():
         for week, offer in trades(season):
             sender, receiver = rs.team(week.after, offer.from_team), rs.team(week.after, offer.to_team)
-            know = fakes.fake_knowledge(week.week)
 
             assert set(offer.get) <= set(sender.roster) and set(offer.give) <= set(receiver.roster)
             assert all(week.after.traded[pid] == week.week for pid in (*offer.give, *offer.get))
             assert max(len(offer.give), len(offer.get)) <= max(ai.PACKAGE_SIZES)
             for team in (sender, receiver):
                 assert len(team.roster) <= SETTINGS.roster_size
-                assert rv.can_field_lineup([know.by_id[pid].position for pid in team.roster], SETTINGS)
         events = [event for event in season[-1].after.events if event.kind == "trade"]
         assert len(events) == len(trades(season))
 
@@ -190,13 +180,12 @@ def test_the_user_gets_at_most_one_offer_a_week_and_each_passes_the_cpus_own_tes
         for week in season:
             assert sum(offer.status == "pending" for offer in week.made) <= 1
         for week, offer in offers(season):
-            know = fakes.fake_knowledge(week.week)
+            know = knowledge(week.week)
 
             verdict = rt.evaluate(week.after, SETTINGS, know, USER, offer.from_team, offer.get, offer.give)
 
             assert offer.to_team == USER and offer.week == week.week
             assert verdict.accepted and verdict.your_drops == (), (week.week, offer, verdict.reasons)
-            assert verdict.their_gain >= ai.MIN_CPU_GAIN
             assert ai.fair_for_user(SETTINGS, know, verdict.value_give, verdict.value_get)
             assert not verdict.fair_label.endswith("loss")
     assert sum(len(offers(season)) for season in seasons.values()) >= len(SEEDS)
@@ -204,7 +193,7 @@ def test_the_user_gets_at_most_one_offer_a_week_and_each_passes_the_cpus_own_tes
 
 def test_an_offer_moves_nobody_until_the_user_accepts_it(seasons):
     week, offer = next(found for season in seasons.values() for found in offers(season))
-    know = fakes.fake_knowledge(week.week)
+    know = knowledge(week.week)
 
     accepted = rt.respond(week.after, SETTINGS, know, offer.id, accept=True)
 
@@ -216,44 +205,58 @@ def test_an_offer_moves_nobody_until_the_user_accepts_it(seasons):
 
 def test_a_second_run_in_the_same_week_does_not_send_a_second_offer(seasons):
     seed, (week, _) = next((seed, found) for seed, season in seasons.items() for found in offers(season))
-    know = fakes.fake_knowledge(week.week)
+    know = knowledge(week.week)
 
     again = ai.cpu_trades(week.after, SETTINGS, know, seed)
 
     assert sum(o.to_team == USER and o.week == week.week for o in again.offers) == 1
 
 
-def test_an_out_player_on_the_active_roster_is_in_the_search_and_a_cpu_counts_him_down_coming_in():
+def test_an_out_player_on_the_active_roster_is_in_the_search():
     state = replace(fakes.drafted_state(), week=6)
-    know = fakes.fake_knowledge(6)
+    know = knowledge(6)
     owner, star = rs.team(state, STAR_OWNER), fakes.INJURED_STAR_ID
 
     tradable = [v.player_id for v in ai._tradable(state, know, owner)]
-    alone = next(p for p in ai._packages(know, [know.by_id[star]]))
 
     assert know.by_id[star].out and star in tradable and len(tradable) == ai.TOP_SKILL
-    value = know.by_id[star]
-    assert alone == (value.market_value, (star,), value.market_value * rt.OUT_RISK_DISCOUNT,
-                     round(rt.OUT_SELL_SHARE * value.healthy_value, 1))     # to the user: the sell floor, above market value
-    assert rt.OUT_SELL_SHARE * value.healthy_value > value.market_value
+    assert ai._packages([know.by_id[star]]) == [(know.by_id[star].chart, (star,))]
 
 
-OUT_DEAL = ((P("WR", 12), fakes.INJURED_STAR_ID), (P("WR", 14), P("QB", 12)))     # week 9: CPU 5 -> CPU 3
+def test_a_shark_looks_first_at_slumping_stars_and_sells_its_hot_players():
+    state = fakes.drafted_state()
+    user = rs.user_team(state)
+    slumping, hot = P("RB", 23), P("RB", 31)
+    know = chart_knowledge(1, changes={slumping: {"star": 0.9, "form_chart": -150.0},
+                                       hot: {"form_chart": 120.0}})
+
+    assert ai._tradable(state, know, user, "buy")[0].player_id == slumping
+    assert ai._tradable(state, know, user, "sell")[0].player_id == hot
+    assert ai._tradable(state, know, user)[0].player_id == P("RB", 1)
+
+
+def test_sharks_send_the_user_the_most_offers(seasons):
+    sent = Counter(seasons[seed][0].before.teams[offer.from_team - 1].persona
+                   for seed in SEEDS for _, offer in offers(seasons[seed]))
+    sharks = Counter(t.persona for seed in SEEDS for t in seasons[seed][0].before.teams if not t.is_user)
+
+    per_team = {persona: sent[persona] / sharks[persona] for persona in sharks}
+    assert per_team["shark"] == max(per_team.values()), per_team
 
 
 def test_cpu_trades_can_move_a_player_who_is_out(monkeypatch):
-    week, (give, get) = fakes.INJURED_WEEKS[-1], OUT_DEAL
-    state, know = replace(fakes.drafted_state(), week=week), fakes.fake_knowledge(week)
-    monkeypatch.setattr(ai, "_fair_deals", lambda state, settings, know, sender, receiver:
-                        [(give, get)] if (sender.id, receiver.id) == (STAR_OWNER, 3) else
-                        [(get, give)] if (sender.id, receiver.id) == (3, STAR_OWNER) else [])
-    changed = fakes.fake_knowledge(week, data=fakes.future_changed(fakes.fake_season(), after_week=week))
+    week, star = fakes.INJURED_WEEKS[-1], fakes.INJURED_STAR_ID
+    state, know = replace(fakes.drafted_state(), week=week), knowledge(week)
+    candidates = ai._candidates
+    monkeypatch.setattr(ai, "_candidates", lambda *args: [deal for deal in candidates(*args) if star in (*deal[0],
+                                                                                                         *deal[1])])
+    changed = knowledge(week, data=fakes.future_changed(fakes.fake_season(), after_week=week))
 
-    after = [ai.cpu_trades(state, SETTINGS, know, seed) for seed in range(100)]
-    moved = [made for made in after if fakes.INJURED_STAR_ID in rs.team(made, 3).roster]
+    after = [ai.cpu_trades(state, SETTINGS, know, seed) for seed in range(20)]
+    moved = [made for made in after if star not in rs.team(made, STAR_OWNER).roster]
 
-    assert know.by_id[fakes.INJURED_STAR_ID].out and moved
-    assert [rs.to_json(ai.cpu_trades(state, SETTINGS, changed, seed)) for seed in range(100)] == list(
+    assert know.by_id[star].out and moved
+    assert [rs.to_json(ai.cpu_trades(state, SETTINGS, changed, seed)) for seed in range(20)] == list(
         map(rs.to_json, after))
 
 
@@ -263,9 +266,9 @@ def test_on_hard_an_offer_still_gives_the_cpu_its_premium():
 
     assert made
     for week, offer in made:
-        know = fakes.fake_knowledge(week.week, hard)
+        know = knowledge(week.week, hard)
         verdict = rt.evaluate(week.after, hard, know, USER, offer.from_team, offer.get, offer.give)
-        assert verdict.accepted and verdict.value_give >= verdict.value_get * rs.USER_TRADE_MULTIPLE["hard"]
+        assert verdict.accepted and verdict.score >= 0
         assert ai.fair_for_user(hard, know, verdict.value_give, verdict.value_get)
 
 
@@ -280,16 +283,16 @@ def test_the_same_seed_gives_the_same_trades_and_another_seed_different_ones(sea
 
 def test_nothing_happens_after_the_deadline_or_outside_the_trading_phases():
     late = replace(fakes.drafted_state(), week=SETTINGS.trade_deadline_week + 1)
-    know = fakes.fake_knowledge(late.week)
+    know = knowledge(late.week)
 
     assert ai.cpu_trades(late, SETTINGS, know, 0) is late
     for phase in ("draft", "complete"):
         closed = replace(fakes.drafted_state(), phase=phase)
-        assert ai.cpu_trades(closed, SETTINGS, fakes.fake_knowledge(1), 0) is closed
+        assert ai.cpu_trades(closed, SETTINGS, knowledge(1), 0) is closed
 
 
 def test_the_search_is_bounded(monkeypatch):
-    state, know, calls = fakes.drafted_state(), fakes.fake_knowledge(1), []
+    state, know, calls = fakes.drafted_state(), knowledge(1), []
     evaluate = rt.evaluate
     monkeypatch.setattr(rt, "evaluate", lambda *args, **kwargs: calls.append(args) or evaluate(*args, **kwargs))
 
@@ -302,7 +305,7 @@ def test_the_search_is_bounded(monkeypatch):
 
 def test_a_player_on_ir_is_never_searched_or_offered(monkeypatch):
     """Every team's two most valuable skill players go on IR (no tag, so nothing else excludes them)."""
-    state, know = fakes.drafted_state(), fakes.fake_knowledge(1)
+    state, know = fakes.drafted_state(), knowledge(1)
     for team in state.teams:
         best = [v.player_id for v in ai._tradable(state, know, team)[:2]]
         state = rs.with_team(state, replace(team, roster=tuple(p for p in team.roster if p not in best), ir=tuple(best)))
@@ -334,7 +337,7 @@ def test_cpu_trades_stays_within_its_time_budget(seasons):
 @pytest.mark.parametrize("week", [1, 4, 7, 10])
 def test_cpu_trades_are_identical_when_the_future_is_different(seasons, week):
     changed = fakes.future_changed(fakes.fake_season(), after_week=week)
-    know = fakes.fake_knowledge(week, data=changed)
+    know = knowledge(week, data=changed)
 
     for seed, season in seasons.items():
         played = season[week - 1]
