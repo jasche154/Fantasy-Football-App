@@ -27,8 +27,8 @@ SLOTS = ("QB", "RB", "WR", "TE", "FLEX", "K", "DST")
 DEFAULT_STARTERS = MappingProxyType({"QB": 1, "RB": 2, "WR": 2, "TE": 1, "FLEX": 1, "K": 1, "DST": 1})
 WAIVER_MODES = ("wednesday", "faab", "none")
 FAAB_BUDGET = 100                         # whole dollars per team per season ("faab" waivers)
-PLAYOFF_WEEKS = 2
-VALID_TEAMS = (8, 10, 12, 14)
+VALID_TEAMS = (4, 6, 8, 10, 12, 14, 16)
+PLAYOFF_TEAMS_RANGE = (4, 8)              # title bracket sizes (capped at the league size)
 USER_TRADE_MULTIPLE = MappingProxyType({"normal": 1.00, "hard": 1.08})   # value a CPU needs back from the USER
 DRAFT_CHAOS_SCALE = MappingProxyType({"normal": 1.0, "hard": 0.5})       # on a CPU's Team.chaos in the draft
 DIFFICULTIES = tuple(USER_TRADE_MULTIPLE)
@@ -68,7 +68,7 @@ class Settings(_Record):
     draft_slot: int = 1                      # the user's first-round pick, 1-based
     waiver_mode: str = "wednesday"           # "wednesday" | "faab" | "none" (always free agency)
     regular_season_weeks: int = 14
-    playoff_teams: int = 4                   # playoffs are the 2 weeks after the regular season
+    playoff_teams: int = 4                   # playoffs are the playoff_rounds() weeks after the regular season
     trade_deadline_week: int = 11            # the last week traded in, plus its waiver phase (`trades_open`)
     season_hidden: bool = False              # reserved; not used in v1
     difficulty: str = "normal"               # "normal" | "hard": see USER_TRADE_MULTIPLE, DRAFT_CHAOS_SCALE
@@ -85,7 +85,16 @@ class Settings(_Record):
 
     @property
     def end_week(self) -> int:
-        return self.regular_season_weeks + PLAYOFF_WEEKS
+        return self.regular_season_weeks + playoff_rounds(self.playoff_teams)
+
+
+def playoff_rounds(playoff_teams: int) -> int:
+    """Weeks of playoffs: a 4-team bracket is 2 rounds, 5-8 teams (with byes) 3."""
+    return 2 if playoff_teams <= 4 else 3
+
+
+def default_playoff_teams(teams: int) -> int:
+    return 4 if teams < 10 else 6 if teams < 14 else 8
 
 
 def _validate(s: Settings) -> None:
@@ -96,10 +105,14 @@ def _validate(s: Settings) -> None:
         (s.difficulty in DIFFICULTIES, f"Unknown difficulty '{s.difficulty}'. Valid: {list(DIFFICULTIES)}"),
         (s.teams in VALID_TEAMS, f"A league has {', '.join(map(str, VALID_TEAMS[:-1]))} or {VALID_TEAMS[-1]} teams."),
         (1 <= s.draft_slot <= s.teams, f"Draft slot must be between 1 and {s.teams}."),
-        (2 <= s.playoff_teams <= s.teams, f"Playoff teams must be between 2 and {s.teams}."),
+        (PLAYOFF_TEAMS_RANGE[0] <= s.playoff_teams <= min(PLAYOFF_TEAMS_RANGE[1], s.teams),
+         f"A {s.teams}-team league has a {s.teams}-team playoff." if s.teams <= PLAYOFF_TEAMS_RANGE[0] else
+         f"Playoff teams must be between {PLAYOFF_TEAMS_RANGE[0]} and {min(PLAYOFF_TEAMS_RANGE[1], s.teams)}."),
         (not unknown, f"Unknown lineup slots {unknown}. Valid: {list(SLOTS)}"),
         (s.bench >= 0 and min(s.starters.values(), default=0) >= 0, "Starter and bench counts can't be negative."),
         (s.regular_season_weeks >= 1, "The regular season needs at least one week."),
+        (s.trade_deadline_week <= s.regular_season_weeks,
+         f"The trade deadline (week {s.trade_deadline_week}) must be in the {s.regular_season_weeks}-week regular season."),
     )
     for passed, message in checks:
         if not passed:

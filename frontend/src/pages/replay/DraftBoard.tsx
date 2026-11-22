@@ -1,19 +1,30 @@
 import { useId } from 'react';
-import type { ReplayDraft } from '../../api/types';
+import type { ReplayDraft, ReplayDraftSort, ReplaySummary } from '../../api/types';
 import { Card } from '../../components/Card';
+import { SortableHeader, type SortState } from '../../components/SortableHeader';
 import { EmptyState } from '../../components/StatusViews';
-import { formatNumber } from '../../lib/format';
+import { formatInteger, formatNumber } from '../../lib/format';
 import { formatPoints, PositionTabs, ReplayPlayerCell, type ReplayPositionTab } from './shared';
 
 /** The backend's `search` limit. */
 const MAX_SEARCH_LENGTH = 60;
+const SORT_NAMES: Record<ReplayDraftSort, string> = { rank: 'rank', adp: 'ADP', projection: 'projection' };
+const RANK_NOTES: Record<ReplaySummary['rank_source'], string> = {
+  experts: 'Rank: preseason expert consensus (ADP order where no expert rank).',
+  model: 'Rank: ADP order — no expert ranks for this season.',
+};
+const PROJ_NOTE = 'Proj: raw points a game, not adjusted for position.';
 
 interface DraftBoardProps {
   draft: ReplayDraft;
+  /** Where the Rank column comes from: expert ranks, or ADP order when the season has none. */
+  rankSource: ReplaySummary['rank_source'];
   position: ReplayPositionTab;
   onPosition: (position: ReplayPositionTab) => void;
   search: string;
   onSearch: (search: string) => void;
+  sort: SortState<ReplayDraftSort>;
+  onSort: (key: ReplayDraftSort) => void;
   /** Undefined when every match is shown or the page is as long as the server allows. */
   onShowMore?: () => void;
   /** The user's turn, and nothing in flight. */
@@ -26,14 +37,15 @@ interface DraftBoardProps {
   openPlayer: (playerId: number) => void;
 }
 
-/** Who is left, in draft (ADP) order, with a Draft button per row that works on the user's turn. */
+/** Who is left, sorted by rank, ADP or projection, with a Draft button per row that works on the user's turn. */
 export function DraftBoard({
-  draft, position, onPosition, search, onSearch, onShowMore, canDraft, isBusy, pressedId, error, onDraft, openPlayer,
+  draft, rankSource, position, onPosition, search, onSearch, sort, onSort, onShowMore, canDraft, isBusy, pressedId, error, onDraft,
+  openPlayer,
 }: DraftBoardProps) {
   const searchId = useId();
   const isOver = draft.round === null;
   return (
-    <Card title="Available players" eyebrow="In draft order">
+    <Card title="Available players" eyebrow={`By ${SORT_NAMES[sort.key]}`}>
       <div className="weekly-controls">
         <PositionTabs value={position} onChange={onPosition} withFlex />
         <div className="field field--inline">
@@ -49,24 +61,25 @@ export function DraftBoard({
       ) : (
         <div className="table-wrap">
           <table className="data-table data-table--compact">
-            <caption className="sr-only">Available players in draft order</caption>
+            <caption className="sr-only">Available players</caption>
             <thead>
               <tr>
-                <th scope="col" className="num" title="Place among the players shown, in draft (ADP) order">#</th>
+                <SortableHeader columnKey="rank" sort={sort} onSort={onSort}>Rank</SortableHeader>
+                <th scope="col" className="num" title="The round his rank puts him in">Rd</th>
                 <th scope="col">Player</th>
                 <th scope="col">Pos rank</th>
-                <th scope="col" className="num" title="Preseason average draft position">ADP</th>
-                <th scope="col" className="num" title="Preseason projection, points a game">Proj</th>
+                <SortableHeader columnKey="adp" sort={sort} onSort={onSort} title="Preseason average draft position">ADP</SortableHeader>
+                <SortableHeader columnKey="projection" sort={sort} onSort={onSort}>Proj</SortableHeader>
                 <th scope="col"><span className="sr-only">Draft</span></th>
               </tr>
             </thead>
             <tbody>
-              {draft.results.map((row, index) => {
+              {draft.results.map((row) => {
                 const isPressed = row.player.id === pressedId;
                 return (
                   <tr key={row.player.id}>
-                    {/* The board always starts at offset 0, so this is the place in ADP order. */}
-                    <td className="num">{index + 1}</td>
+                    <td className="num">{formatInteger(row.pre_rank)}</td>
+                    <td className="num">{formatInteger(row.round)}</td>
                     <td className="td--player"><ReplayPlayerCell player={row.player} onOpen={openPlayer} /></td>
                     <td>{row.pos_rank}</td>
                     <td className="num">{formatNumber(row.adp)}</td>
@@ -84,6 +97,7 @@ export function DraftBoard({
               })}
             </tbody>
           </table>
+          <p className="hint">{RANK_NOTES[rankSource]} {PROJ_NOTE}</p>
         </div>
       )}
       <div className="weekly-controls">

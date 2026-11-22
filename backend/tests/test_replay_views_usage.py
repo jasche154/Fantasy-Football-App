@@ -1,12 +1,13 @@
-"""Replay League views, round 2: usage numbers, FAAB on the claims screen and the consolation place labels."""
+"""Replay League views, round 2: usage numbers, FAAB on the claims screen, playoff labels, byes and idle weeks."""
 from dataclasses import replace
+from functools import lru_cache
 from statistics import mean
 
 import pytest
 
-from services import replay_state as rs, replay_views as views, replay_views_league as league
+from services import replay_game as rg, replay_state as rs, replay_views as views, replay_views_league as league
 from tests import replay_fakes as fakes
-from tests.test_replay_views import DATA, SETTINGS, USER, at, finished, game, hidden_changed
+from tests.test_replay_views import DATA, SEED, SETTINGS, USER, at, finished, game, hidden_changed
 
 USAGE = {"games", "snap_pct", "targets", "target_share", "carries"}
 
@@ -112,24 +113,56 @@ def test_claims_have_no_faab_block_outside_faab_leagues():
     assert league.claims(game(at(4, "waivers")))["faab"] is None
 
 
-# ---------------- playoff labels ----------------
+# ---------------- playoff labels, byes and idle weeks ----------------
 
-@pytest.mark.parametrize("teams, final_week", [
-    (10, ["Championship", "Third place", "5th place", "7th place", "9th place"]),
-    (12, ["Championship", "Third place", "5th place", "7th place", "9th place", "11th place"]),
-    (14, ["Championship", "Third place", "5th place", "7th place", "9th place", "11th place", "13th place"]),
-])
-def test_playoff_week_two_names_every_place_game(teams, final_week):
-    settings = fakes.fake_settings(teams=teams)
-    first, second = settings.regular_season_weeks + 1, settings.regular_season_weeks + 2
+SIX = fakes.fake_settings(draft_slot=4, playoff_teams=6)        # 14 weeks, then quarter-finals, semis, final
 
-    assert [views.label(settings, first, i) for i in range(teams // 2)] == \
-        ["Semi-final"] * 2 + ["Consolation"] * (teams // 2 - 2)
-    assert [views.label(settings, second, i) for i in range(teams // 2)] == final_week
-    assert views.label(settings, settings.regular_season_weeks, 0) is None
+
+@lru_cache(maxsize=None)
+def six_team_bracket() -> rs.State:
+    state = rg.auto_draft(rg.create_game(SIX, DATA, SEED), SIX, DATA, SEED)
+    while state.phase != "complete":
+        state = rg.advance(state, SIX, DATA, SEED, "wednesday" if state.phase == "waivers" else "play")
+    return state
+
+
+def six_game(state: rs.State) -> views.Game:
+    return views.Game(1, "Six-team bracket", SIX, state, DATA, "2026-01-01T00:00:00", SEED)
 
 
 def test_the_finished_seasons_final_week_labels_match():
     board = views.scoreboard(game(finished()), SETTINGS.end_week)
 
-    assert [row["label"] for row in board["results"]][2:] == ["5th place", "7th place", "9th place", "11th place"]
+    assert [row["label"] for row in board["results"]] == ["Championship", "Third place"] + ["Consolation"] * 4
+    assert views.scoreboard(game(finished()), SETTINGS.regular_season_weeks)["results"][0]["label"] is None
+
+
+def test_a_six_team_bracket_names_its_rounds_and_shows_the_byes():
+    shown = six_game(six_team_bracket())
+    table = league.standings(shown)
+
+    labels = [[row["label"] for row in week["results"]] for week in table["bracket"]]
+    assert (table["playoff_weeks"], table["byes"], table["playoff_teams"]) == ([15, 16, 17], 2, 6)
+    assert sum(row["in_playoffs"] for row in table["results"]) == 6
+    assert labels[0][:2] == ["Quarter-final"] * 2 and set(labels[0][2:]) <= {"Consolation"}
+    assert labels[1][:2] == ["Semi-final"] * 2 and labels[2][:2] == ["Championship", "Third place"]
+    assert table["champion"]["team_id"] == table["bracket"][2]["results"][0]["winner"]
+
+
+def test_a_bye_week_is_an_idle_schedule_row_and_the_matchup_shows_the_first_game():
+    state = six_team_bracket()
+    top = next(row["team_id"] for row in league.standings(six_game(state))["results"] if row["seed"] == 1)
+    as_top = replace(state, teams=tuple(replace(t, is_user=t.id == top) for t in state.teams))  # top seed = user
+    shown = six_game(as_top)
+
+    rows = {row["week"]: row for row in league.schedule(shown)["results"]}
+    first_round = views.scoreboard(shown, 15)["results"][0]
+    shown_game = views.matchup(shown, week=15)
+    assert rows[15]["idle"] and (rows[15]["opponent"], rows[15]["result"], rows[15]["opponent_points"]) == (
+        None, None, None)
+    assert not any(row["idle"] for week, row in rows.items() if week != 15)
+    assert (shown_game["home"]["team"]["team_id"], shown_game["away"]["team"]["team_id"]) == (
+        first_round["home"]["team_id"], first_round["away"]["team_id"])
+    assert shown_game["label"] == "Quarter-final"
+    with pytest.raises(ValueError, match="no game for that team"):
+        views.matchup(shown, week=15, team_id=top)

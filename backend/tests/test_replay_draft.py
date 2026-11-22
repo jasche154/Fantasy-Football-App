@@ -8,12 +8,16 @@ from services import replay_draft as rd, replay_personas, replay_state as rs, re
 from services.replay_pool import SeasonData
 from services.replay_state import Settings, State
 from tests import replay_fakes as fakes
+from tests.test_replay_chart import early_dst_season
 
 SEEDS = range(20)
 SIZES = rs.VALID_TEAMS
 DEFAULT_CAPS = {"QB": 2, "RB": 6, "WR": 7, "TE": 2, "K": 1, "DST": 1}
-ADP_WINDOW = 100                    # the picks where a draft should still track ADP closely
-MAX_MEAN_ADP_GAP = 8.0              # measured 4.2 to 5.2 picks on the fake season
+ADP_WINDOW = 100                    # the picks where a draft should still track ADP closely (before K/DST rounds)
+MAX_MEAN_ADP_GAP = 8.0              # measured 2.4 (4 teams) to 5.7 (8 teams) picks on the fake season
+FIRST_QB_ROUNDS = (4, 10)           # 8-14 teams: most take their first QB in these rounds, none after the last
+FIRST_QB_PICKS = (30, 130)          # 4, 6 and 16 teams (rounds too short, or QBs go in round 3): an overall-pick window
+LAST_FIRST_QB_PICK = 150
 
 
 def play_out(state: State, settings: Settings, data: SeasonData, seed: int) -> State:
@@ -41,8 +45,14 @@ def picks_with_players(state: State) -> list[tuple[rs.Pick, object]]:
     return [(pick, players[pick.player_id]) for pick in state.picks]
 
 
+def adp_window(teams: int) -> int:
+    """The first picks to compare with ADP: ADP_WINDOW, or every pick before the K/DST rounds of a small league."""
+    return min(ADP_WINDOW, teams * (fakes.fake_settings().rounds - 2))
+
+
 def mean_adp_gap(state: State) -> float:
-    gaps = [abs(pick.overall - player.adp) for pick, player in picks_with_players(state)[:ADP_WINDOW]]
+    window = picks_with_players(state)[:adp_window(len(state.teams))]
+    gaps = [abs(pick.overall - player.adp) for pick, player in window]
     return sum(gaps) / len(gaps)
 
 
@@ -283,6 +293,16 @@ def test_kickers_defenses_and_backups_wait_for_their_rounds(teams):
                 assert pick.round >= 10
 
 
+@pytest.mark.parametrize("teams", [4, 12, 16])
+def test_defenses_wait_for_the_last_two_rounds_even_with_real_world_dst_adp(teams):
+    settings, data = fakes.fake_settings(teams=teams, draft_slot=2), early_dst_season()     # DST1 ADP 92
+
+    for seed in range(8):
+        state = play_out(rd.new_game(settings, seed), settings, data, seed)
+        kdst = [pick.round for pick in state.picks if data.players[pick.player_id].position in ("K", "DST")]
+        assert len(kdst) == 2 * teams and min(kdst) > settings.rounds - 2
+
+
 @pytest.mark.parametrize("teams", SIZES)
 def test_the_position_mix_by_round_looks_like_a_real_draft(teams):
     early: Counter = Counter()
@@ -292,13 +312,16 @@ def test_the_position_mix_by_round_looks_like_a_real_draft(teams):
         picks = picks_with_players(drafted(teams, seed))
         early.update(player.position for pick, player in picks if pick.round <= 3)
         for team_id in range(1, teams + 1):
-            first_qb.append(next(pick.round for pick, player in picks
+            first_qb.append(next((pick.round, pick.overall) for pick, player in picks
                                  if pick.team_id == team_id and player.position == "QB"))
 
     assert (early["RB"] + early["WR"]) / sum(early.values()) >= 0.75
     assert early["K"] == early["DST"] == 0
-    assert sum(4 <= round_ <= 10 for round_ in first_qb) / len(first_qb) >= 0.75
-    assert max(first_qb) <= 10
+    index, (low, high), last = ((0, FIRST_QB_ROUNDS, FIRST_QB_ROUNDS[1]) if 8 <= teams <= 14
+                                else (1, FIRST_QB_PICKS, LAST_FIRST_QB_PICK))
+    taken = [qb[index] for qb in first_qb]
+    assert sum(low <= when <= high for when in taken) / len(taken) >= 0.75
+    assert max(taken) <= last
 
 
 @pytest.mark.parametrize("teams", SIZES)
@@ -308,11 +331,11 @@ def test_drafts_follow_adp_loosely_never_exactly(teams):
 
     for seed in SEEDS:
         state = drafted(teams, seed)
-        order = [pick.player_id for pick in state.picks]
-        assert order[:ADP_WINDOW] != by_adp[:ADP_WINDOW]
+        order, window = [pick.player_id for pick in state.picks], adp_window(teams)
+        assert order[:window] != by_adp[:window]
         assert mean_adp_gap(state) <= MAX_MEAN_ADP_GAP
         assert all(player.adp <= pick.overall + rd.REACH_LIMIT
-                   for pick, player in picks_with_players(state)[:ADP_WINDOW])
+                   for pick, player in picks_with_players(state)[:window])
         mixes = {tuple(sorted(Counter(positions(state, team.id)).items())) for team in state.teams}
         assert len(mixes) > 1                                   # CPUs do not all build the same roster
 

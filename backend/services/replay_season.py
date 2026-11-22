@@ -7,21 +7,21 @@
 - `play_week` is the only place in the engine that reads real points for the week being played, and it reads
   nothing else from the full season: every choice comes from the `Knowledge` it is given. It never makes a
   roster move; the orchestrator runs waivers and trades around it.
-- Playoffs are the two weeks after the regular season. Seeds are the regular-season standings. Seeds 1-4 play
-  the championship bracket (1 v 4, 2 v 3, then the final and a third-place game); every further group of four
-  seeds plays a consolation ladder the same way and a leftover pair plays each other twice, so every team has
-  a scored game every week. A tied playoff game goes to the higher seed.
-- Final places, once the last week is played, come from those games: each group's winners' game decides its
-  top two places and the losers' game the next two; a leftover pair places by wins, then points, then seed.
+- Playoffs are the `rs.playoff_rounds` weeks after the regular season: the title bracket (byes in round one,
+  reseeded every round, a third-place game), the round-one losers' pool and the consolation pool, all built
+  in `replay_bracket` (re-exported here) along with the final places.
 """
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 
 from services import replay_state as rs, replay_values as rv
+from services.replay_bracket import (  # noqa: F401 - re-exported: import the playoffs from this module
+    _decide, _result, byes, final_standings, game_label, is_playoff_week, playoff_matchups, playoff_seeds,
+    title_games,
+)
 from services.replay_pool import SeasonData
 from services.replay_state import Matchups, Settings, State, WeekResult
 
-BRACKET_SIZE = 4                          # seeds per bracket: two playoff weeks = semi-finals, then placing games
 LINEUP_PHASES = ("waivers", "open")       # when the user may set a lineup
 PLAY_PHASE = "open"
 Lineup = dict[str, tuple[int, ...]]       # slot -> starters
@@ -105,66 +105,21 @@ def starters_for(state: State, settings: Settings, know: rv.Knowledge, team_id: 
     return {slot: tuple(best.get(slot, ())) for slot in _slots(settings)}
 
 
-# ---------------- matchups and playoffs ----------------
-
-def is_playoff_week(settings: Settings, week: int) -> bool:
-    return settings.regular_season_weeks < week <= settings.end_week
-
-
-def playoff_seeds(state: State) -> tuple[int, ...]:
-    """Every team id, best seed first (regular-season standings; provisional until that season is over).
-    The first BRACKET_SIZE play for the title."""
-    return tuple(row["team_id"] for row in rs.standings(state))
-
-
-def _result(state: State, week: int) -> WeekResult | None:
-    return next((r for r in state.results if r.week == week), None)
-
-
-def _decide(pair: Sequence[int], scores: Mapping[int, float], seeds: Sequence[int]) -> tuple[int, int]:
-    """(winner, loser) of a game; a tie goes to the higher seed."""
-    high, low = sorted(pair, key=seeds.index)
-    return (high, low) if scores[high] >= scores[low] else (low, high)
-
-
-def _first_round(group: Sequence[int]) -> list[tuple[int, int]]:
-    """A group of seeds, best first: 1 v 4 and 2 v 3. A leftover pair just plays each other."""
-    return [(group[i], group[-1 - i]) for i in range(len(group) // 2)]
-
-
-def _second_round(group: Sequence[int], first: WeekResult, seeds: Sequence[int]) -> list[tuple[int, int]]:
-    """Winners' game, then losers' game (higher seed listed first). A leftover pair plays again."""
-    games = _first_round(group)
-    if len(games) < 2:
-        return games
-    decided = [_decide(game, first.scores, seeds) for game in games]
-    return [tuple(sorted(side, key=seeds.index)) for side in zip(*decided)]
-
-
-def _playoff_matchups(state: State, settings: Settings, week: int) -> Matchups:
-    first_week = settings.regular_season_weeks + 1
-    opening = _result(state, first_week)
-    if _result(state, settings.regular_season_weeks) is None or (week > first_week and opening is None):
-        return ()                                             # not decided yet
-    seeds = playoff_seeds(state)
-    groups = [seeds[i:i + BRACKET_SIZE] for i in range(0, len(seeds), BRACKET_SIZE)]
-    if week == first_week:
-        return tuple(game for group in groups for game in _first_round(group))
-    return tuple(game for group in groups for game in _second_round(group, opening, seeds))
-
+# ---------------- matchups ----------------
 
 def matchups_for_week(state: State, settings: Settings, week: int) -> Matchups:
     """((home, away), ...) for a week: as played if it has been, else the schedule or the playoff games.
 
-    In playoff weeks the title bracket's games come first (the higher seed is home), then each consolation
-    group, then a leftover pair. Empty while a playoff week's teams are not known yet."""
+    In playoff weeks the title bracket's games come first (higher seed home; the final week's first game is
+    the final), then the losers' pool, then the consolation pool. Empty while a playoff week's teams are not
+    known yet. A team with no game that week (a bye, an odd one out in a pool) is in none of them."""
     if not 1 <= week <= settings.end_week:
         raise ValueError(f"This league plays weeks 1 to {settings.end_week}, not week {week}.")
     played = _result(state, week)
     if played is not None:
         return played.matchups
     if is_playoff_week(settings, week):
-        return _playoff_matchups(state, settings, week)
+        return playoff_matchups(state, settings, week)
     if week > len(state.schedule):
         raise ValueError(f"This league has no schedule for week {week}.")
     return state.schedule[week - 1]
@@ -174,29 +129,6 @@ def matchup_for(state: State, settings: Settings, team_id: int, week: int | None
     """That team's (home, away) game in a week (default: the current one); None while it is not known."""
     games = matchups_for_week(state, settings, state.week if week is None else week)
     return next((game for game in games if team_id in game), None)
-
-
-def _pair_order(pair: Sequence[int], games: Sequence[WeekResult], seeds: Sequence[int]) -> list[int]:
-    """A leftover pair that played twice: won both, else more points over the two, else the higher seed."""
-    winners = {_decide(pair, game.scores, seeds)[0] for game in games}
-    points = {team_id: round(sum(game.scores[team_id] for game in games), 2) for team_id in pair}
-    return sorted(pair, key=lambda t: (len(winners) > 1 or t not in winners, -points[t], seeds.index(t)))
-
-
-def final_standings(state: State, settings: Settings) -> list[dict]:
-    """The regular-season table rows with a "place". Once the final week is played, every group of four seeds
-    places by its second-week games (winners' game: 4k+1 and 4k+2, losers' game: 4k+3 and 4k+4) and a
-    leftover pair by `_pair_order`. Before that: regular-season order throughout."""
-    rows = {row["team_id"]: row for row in rs.standings(state)}
-    seeds = tuple(rows)
-    opening, final = _result(state, settings.regular_season_weeks + 1), _result(state, settings.end_week)
-    order = list(seeds)
-    if final is not None and opening is not None:
-        groups = [seeds[i:i + BRACKET_SIZE] for i in range(0, len(seeds), BRACKET_SIZE)]
-        order = [team_id for group in groups for team_id in (
-            _pair_order(group, (opening, final), seeds) if len(group) == 2 else
-            [t for game in _second_round(group, opening, seeds) for t in _decide(game, final.scores, seeds)])]
-    return [{**rows[team_id], "place": place} for place, team_id in enumerate(order, start=1)]
 
 
 # ---------------- playing a week ----------------
@@ -233,11 +165,18 @@ def _log_bracket(state: State, settings: Settings) -> State:
     upcoming = state.week + 1
     if not is_playoff_week(settings, upcoming):
         return state
-    final = upcoming == settings.end_week
     names = {t.id: t.name for t in state.teams}
-    games = matchups_for_week(state, settings, upcoming)[:1 if final else BRACKET_SIZE // 2]
+    games = title_games(state, settings, upcoming)
+    if upcoming == settings.end_week:
+        games, title = games[:1], "Championship game"
+    elif len(games) == 1:                                 # 5 playoff teams: one round-one game, three byes
+        title = "Wild-card game"
+    else:
+        title = f"{game_label(state, settings, upcoming, games[0])}s"
     listed = ", ".join(f"{names[home]} v {names[away]}" for home, away in games)
-    return rs.add_event(state, "playoffs", None, f"{'Championship game' if final else 'Playoffs'}: {listed}")
+    resting = byes(state, settings, upcoming)
+    rest = f" ({'bye' if len(resting) == 1 else 'byes'}: {', '.join(names[t] for t in resting)})" if resting else ""
+    return rs.add_event(state, "playoffs", None, f"{title}: {listed}{rest}")
 
 
 def _crown(state: State, result: WeekResult) -> State:

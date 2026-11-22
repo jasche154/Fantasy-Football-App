@@ -14,7 +14,7 @@ function ScheduleRow({ row }: { row: ReplayScheduleRow }) {
     <tr>
       <td className="num">{row.week}</td>
       <td>
-        {row.opponent?.name ?? (row.played ? 'No game' : 'To be decided')}
+        {row.idle ? 'Bye / no game' : (row.opponent?.name ?? 'To be decided')}
         {row.playoff && <span className="status-badge status-badge--missing replay-league__badge">Playoffs</span>}
       </td>
       <td>{row.result ? <span className={`status-badge status-badge--${RESULT_TONES[row.result]}`}>{row.result}</span> : EMPTY_VALUE}</td>

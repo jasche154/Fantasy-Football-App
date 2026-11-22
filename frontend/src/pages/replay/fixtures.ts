@@ -224,7 +224,8 @@ export function gameListing(overrides: Partial<ReplayGameListing> = {}): ReplayG
 
 export function readiness(season: number, ready = true): ReplayReadiness {
   return { season, ready, has_stats: ready, has_schedule: ready, has_kdst: ready, adp_players: ready ? 240 : 0,
-    projection_weeks: ready ? 18 : 0, kickers: ready ? 32 : 0, defenses: ready ? 32 : 0, injury_weeks: ready ? 18 : 0 };
+    projection_weeks: ready ? 18 : 0, kickers: ready ? 32 : 0, defenses: ready ? 32 : 0, injury_weeks: ready ? 18 : 0,
+    last_week: 18 };
 }
 
 /** GET /seasons: 2022 and 2023 ready, 2024 not, nothing importing. */

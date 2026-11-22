@@ -59,7 +59,8 @@ def test_settings_round_trip_through_json_exactly():
 
 @pytest.mark.parametrize("bad", [
     {"scoring": "superflex"}, {"waiver_mode": "auction"}, {"teams": 11}, {"teams": 2}, {"draft_slot": 0},
-    {"teams": 4}, {"teams": 6}, {"teams": 16}, {"difficulty": "easy"}, {"teams": 8, "draft_slot": 9},
+    {"teams": 18}, {"playoff_teams": 3}, {"playoff_teams": 9}, {"teams": 6, "playoff_teams": 7},
+    {"trade_deadline_week": 15}, {"difficulty": "easy"}, {"teams": 8, "draft_slot": 9},
     {"draft_slot": 13}, {"playoff_teams": 14}, {"starters": {"QB": 1, "IDP": 2}}, {"starters": {"QB": -1}},
     {"bench": -1}, {"regular_season_weeks": 0},
 ])
@@ -68,11 +69,23 @@ def test_settings_reject_bad_input_with_value_error(bad):
         Settings(season=2021, **bad)
 
 
-@pytest.mark.parametrize("teams", [8, 10, 12, 14])
-def test_settings_accept_the_four_league_sizes(teams):
-    settings = Settings(season=2021, teams=teams, draft_slot=teams, playoff_teams=teams)
+@pytest.mark.parametrize("teams", [4, 6, 8, 10, 12, 14, 16])
+def test_settings_accept_every_league_size(teams):
+    settings = Settings(season=2021, teams=teams, draft_slot=teams, playoff_teams=min(8, teams))
 
-    assert settings.teams == teams and rs.VALID_TEAMS == (8, 10, 12, 14)
+    assert settings.teams == teams and rs.VALID_TEAMS == (4, 6, 8, 10, 12, 14, 16)
+
+
+@pytest.mark.parametrize("teams, default", [(4, 4), (6, 4), (8, 4), (10, 6), (12, 6), (14, 8), (16, 8)])
+def test_playoff_size_follows_league_size(teams, default):
+    assert rs.default_playoff_teams(teams) == default
+
+
+@pytest.mark.parametrize("playoff_teams, rounds", [(4, 2), (5, 3), (6, 3), (7, 3), (8, 3)])
+def test_a_four_team_playoff_is_two_weeks_and_bigger_ones_three(playoff_teams, rounds):
+    settings = Settings(season=2021, teams=12, playoff_teams=playoff_teams, regular_season_weeks=14)
+
+    assert rs.playoff_rounds(playoff_teams) == rounds and settings.end_week == 14 + rounds
 
 
 def test_difficulty_sets_what_a_cpu_asks_of_the_user_and_its_draft_chaos():
@@ -527,3 +540,10 @@ def test_trades_close_at_the_waiver_run_after_the_deadline_week(week, phase, mod
     settings = Settings(season=2023, waiver_mode=mode)
 
     assert rs.trades_open(make_state(week=week, phase=phase), settings) is is_open
+
+
+def test_settings_errors_name_the_playoff_size_and_the_deadline():
+    with pytest.raises(ValueError, match="^A 4-team league has a 4-team playoff.$"):
+        Settings(season=2021, teams=4, draft_slot=1, playoff_teams=5)
+    with pytest.raises(ValueError, match=r"^The trade deadline \(week 14\) must be in the 13-week regular season.$"):
+        Settings(season=2021, regular_season_weeks=13, trade_deadline_week=14)

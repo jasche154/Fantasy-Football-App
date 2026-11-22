@@ -177,7 +177,7 @@ def test_a_player_row_carries_his_injury_news_only_while_a_report_exists():
     assert views.news(gone) == {"back": None, "text": "Out for the season."}
 
 
-def test_draft_board_lists_who_is_left_in_adp_order_with_filters_and_paging():
+def test_draft_board_lists_who_is_left_in_rank_order_with_filters_and_paging():
     shown = game(drafting())
 
     board = views.draft(shown, limit=20)
@@ -186,12 +186,13 @@ def test_draft_board_lists_who_is_left_in_adp_order_with_filters_and_paging():
     named = views.draft(shown, search="  rePLAY qb1", limit=500)
     second = views.draft(shown, limit=5, offset=5)
 
-    adps = [row["adp"] for row in board["results"]]
+    ranks = [row["pre_rank"] for row in board["results"]]
     assert set(board) >= PAGE | {"phase", "on_the_clock", "is_user_turn", "round", "overall", "rounds",
                                  "total_picks", "order", "picks", "roster"}
-    assert adps == sorted(adps) and board["is_user_turn"] and (board["round"], board["overall"]) == (1, USER)
+    assert None not in ranks and ranks == sorted(ranks) and board["is_user_turn"] and (board["round"], board["overall"]) == (1, USER)
     assert board["total"] == len(DATA.as_of(0).players) - len(board["picks"]) and len(board["picks"]) == USER - 1
-    assert set(board["results"][0]) == {"player", "adp", "pos_rank", "rank", "projection"}
+    assert set(board["results"][0]) == {"player", "adp", "pos_rank", "rank", "pre_rank", "round", "projection"}
+    assert [row["round"] for row in board["results"]] == [-(-rank // 12) for rank in ranks]
     assert {row["player"]["position"] for row in backs["results"]} == {"RB"}
     assert {row["player"]["position"] for row in flex["results"]} == {"RB", "WR", "TE"}
     assert named["total"] >= 10 and all("Replay QB1" in row["player"]["name"] for row in named["results"])
@@ -199,6 +200,32 @@ def test_draft_board_lists_who_is_left_in_adp_order_with_filters_and_paging():
     assert [team["team_id"] for team in board["order"]] == list(range(1, 13))
     with pytest.raises(ValueError, match="Unknown position"):
         views.draft(shown, position="LB")
+
+
+def test_draft_board_sorts_put_unknowns_last_either_way():
+    shown = game(drafting())
+
+    def board(sort: str, direction: str | None = None) -> list[dict]:
+        return views.draft(shown, sort=sort, direction=direction, limit=views.MAX_PAGE * 5)["results"]
+
+    for sort, key, default_desc in (("rank", "pre_rank", False), ("adp", "adp", False),
+                                    ("projection", "projection", True)):
+        for direction in (None, "asc", "desc"):
+            values = [row[key] for row in board(sort, direction)]
+            known = [v for v in values if v is not None]
+            descending = direction == "desc" or (direction is None and default_desc)
+            assert known == sorted(known, reverse=descending) and values[:len(known)] == known
+    assert any(row["adp"] is None for row in board("adp"))          # undrafted players exist, and sit last
+    with pytest.raises(ValueError, match="Unknown sort"):
+        views.draft(shown, sort="value")
+
+
+def test_sorted_board_keeps_draft_order_for_ties_and_nulls():
+    rows = [replace(next(iter(game(drafting()).know_at(0).by_id.values())), player_id=pid, pre_rank=rank)
+            for pid, rank in ((1, None), (2, 5), (3, None), (4, 5), (5, 1))]
+
+    assert [v.player_id for v in views.sorted_board(rows, "rank", None)] == [5, 2, 4, 1, 3]
+    assert [v.player_id for v in views.sorted_board(rows, "rank", "desc")] == [2, 4, 5, 1, 3]
 
 
 def test_draft_recap_after_the_draft_has_every_pick_and_nobody_left():
@@ -300,7 +327,10 @@ def test_matchup_and_scoreboard_show_both_sides_and_the_winner_once_played():
 def test_standings_run_from_seeds_to_the_final_order_with_the_bracket():
     early, done = league.standings(game(at(4))), league.standings(game(finished()))
 
-    assert set(early) == {"results", "regular_season_weeks", "playoff_teams", "seeds_final", "bracket", "champion"}
+    assert set(early) == {"results", "regular_season_weeks", "playoff_teams", "playoff_weeks", "byes", "seeds_final",
+                          "bracket", "champion"}
+    assert (early["playoff_weeks"], early["byes"], early["playoff_teams"]) == ([15, 16], 0, 4)
+    assert [row["in_playoffs"] for row in early["results"]] == [True] * 4 + [False] * 8
     assert set(early["results"][0]) == RECORD | {"team_id", "name", "is_user", "tendency", "seed", "in_playoffs"}
     assert [row["seed"] for row in early["results"]] == list(range(1, 13))
     assert (early["seeds_final"], early["bracket"], early["champion"]) == (False, [], None)
@@ -310,8 +340,8 @@ def test_standings_run_from_seeds_to_the_final_order_with_the_bracket():
     assert sorted(row["seed"] for row in done["results"][:4]) == [1, 2, 3, 4]
     assert [board["week"] for board in done["bracket"]] == [15, 16]
     assert [row["label"] for row in done["bracket"][0]["results"]] == ["Semi-final"] * 2 + ["Consolation"] * 4
-    assert [row["label"] for row in done["bracket"][1]["results"]] == ["Championship", "Third place", "5th place",
-                                                                     "7th place", "9th place", "11th place"]
+    assert [row["label"] for row in done["bracket"][1]["results"]] == ["Championship", "Third place"] + [
+        "Consolation"] * 4
     assert done["bracket"][1]["results"][0]["winner"] == finished().champion
 
 
@@ -320,7 +350,8 @@ def test_schedule_lists_every_week_with_results_so_far():
 
     rows = mid["results"]
     assert [row["week"] for row in rows] == list(range(1, 17)) and mid["team"]["team_id"] == USER
-    assert set(rows[0]) == {"week", "playoff", "played", "opponent", "points", "opponent_points", "result"}
+    assert set(rows[0]) == {"week", "playoff", "played", "idle", "opponent", "points", "opponent_points", "result"}
+    assert not any(row["idle"] for row in rows)                  # a 4-team bracket: every team plays every week
     assert all(row["result"] in ("W", "L", "T") and row["points"] is not None for row in rows[:5])
     assert all(row["result"] is None and row["points"] is None for row in rows[5:])
     assert all(row["opponent"] for row in rows[:14]) and [row["opponent"] for row in rows[14:]] == [None, None]
@@ -607,3 +638,13 @@ def test_an_offer_for_a_player_since_moved_to_ir_says_why_it_cannot_be_accepted(
 
     name = rg.knowledge(state, SETTINGS, DATA, seed=SEED).by_id[mine[0]].name
     assert (offer["verdict"], offer["note"]) == (None, f"On IR, so not tradable until activated: {name}.")
+
+
+def test_draft_board_gives_no_round_past_the_last_round_of_the_draft():
+    board = views.draft(game(drafting()), limit=500)
+    rounds = board["rounds"]
+
+    deep = [row for row in board["results"] if row["pre_rank"] and -(-row["pre_rank"] // 12) > rounds]
+    assert deep and all(row["round"] is None for row in deep)
+    assert all(row["round"] == -(-row["pre_rank"] // 12) for row in board["results"]
+               if row["pre_rank"] and row not in deep)

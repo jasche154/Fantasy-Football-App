@@ -36,7 +36,10 @@ describe('SetupForm', () => {
     await vi.waitFor(() => expect(onCreated).toHaveBeenCalledWith(CREATED));
     expect(api.callsTo(GAMES_PATH, 'POST')[0].body).toEqual({
       season: 2022, name: 'Throwback', teams: 10, scoring: 'ppr', draft_slot: 3, waiver_mode: 'none', difficulty: 'hard',
+      playoff_end_week: 17,
     });
+    // Playoff teams left at the size's default: the server applies its own default.
+    expect(api.callsTo(GAMES_PATH, 'POST')[0].body).not.toHaveProperty('playoff_teams');
   });
 
   it('defaults to the newest ready season and a random slot, and can send a random season', async () => {
@@ -50,11 +53,15 @@ describe('SetupForm', () => {
     expect(screen.getByLabelText('Draft slot')).toHaveValue('random');
 
     await user.selectOptions(season, 'random');
+    // Every season has a week 17, so a random season is offered windows ending in weeks 16 and 17.
+    const playoffs = screen.getByLabelText('Playoffs');
+    expect(within(playoffs).getAllByRole('option').map((option) => (option as HTMLOptionElement).value)).toEqual(['16', '17']);
+    await user.selectOptions(playoffs, '16');
     await user.click(screen.getByRole('button', { name: 'Create league and draft' }));
     await vi.waitFor(() => expect(onCreated).toHaveBeenCalled());
-    // No name and no draft_slot: the server names the league and draws the slot.
+    // No name, draft_slot or playoff teams: the server names the league, draws the slot and applies the size's default.
     expect(api.callsTo(GAMES_PATH, 'POST')[0].body).toEqual({
-      season: 'random', teams: 12, scoring: 'half', waiver_mode: 'wednesday', difficulty: 'normal',
+      season: 'random', teams: 12, scoring: 'half', waiver_mode: 'wednesday', difficulty: 'normal', playoff_end_week: 16,
     });
   });
 
@@ -64,6 +71,69 @@ describe('SetupForm', () => {
     await user.selectOptions(screen.getByLabelText('Teams'), '8');
     expect(screen.getByLabelText('Draft slot')).toHaveValue('random');
     expect(within(screen.getByLabelText('Draft slot')).getAllByRole('option')).toHaveLength(9);
+  });
+
+  it('offers every league size, and playoff teams that default by size and reset when the size changes', async () => {
+    const { api, onCreated, user } = renderForm([
+      { path: SEASONS_PATH, reply: json(seasons()) },
+      { method: 'POST', path: GAMES_PATH, reply: json(actionResult(CREATED)) },
+    ]);
+    const teams = await screen.findByLabelText('Teams');
+    const playoffTeams = screen.getByLabelText('Playoff teams');
+    const values = (select: HTMLElement) => within(select).getAllByRole('option').map((option) => (option as HTMLOptionElement).value);
+    expect(values(teams)).toEqual(['4', '6', '8', '10', '12', '14', '16']);
+    expect(playoffTeams).toHaveValue('6');
+    expect(within(playoffTeams).getByRole('option', { name: '6 teams (top 2 get a bye)' })).toBeInTheDocument();
+    expect(within(playoffTeams).getByRole('option', { name: '7 teams (top 1 gets a bye)' })).toBeInTheDocument();
+    expect(values(playoffTeams)).toEqual(['4', '5', '6', '7', '8']);
+
+    await user.selectOptions(playoffTeams, '5');
+    await user.selectOptions(teams, '16');
+    expect(screen.getByLabelText('Playoff teams')).toHaveValue('8');
+    await user.selectOptions(teams, '8');
+    expect(screen.getByLabelText('Playoff teams')).toHaveValue('4');
+    await user.selectOptions(teams, '4');
+    expect(values(screen.getByLabelText('Playoff teams'))).toEqual(['4']);
+    await user.selectOptions(teams, '6');
+    expect(values(screen.getByLabelText('Playoff teams'))).toEqual(['4', '5', '6']);
+    await user.selectOptions(screen.getByLabelText('Playoff teams'), '5');
+
+    await user.click(screen.getByRole('button', { name: 'Create league and draft' }));
+    await vi.waitFor(() => expect(onCreated).toHaveBeenCalled());
+    expect(api.callsTo(GAMES_PATH, 'POST')[0].body).toMatchObject({ teams: 6, playoff_teams: 5 });
+  });
+
+  it('offers a week-18 championship only for a season that has a week 18', async () => {
+    const short = { ...readiness(2020), last_week: 17 };
+    const { api, onCreated, user } = renderForm([
+      { path: SEASONS_PATH, reply: json(seasons({ results: [short, readiness(2023)] })) },
+      { method: 'POST', path: GAMES_PATH, reply: json(actionResult(CREATED)) },
+    ]);
+    const playoffs = await screen.findByLabelText('Playoffs');
+    expect(playoffs).toHaveValue('17');
+    expect(within(playoffs).getAllByRole('option').map((option) => option.textContent))
+      .toEqual(['Weeks 14-16 (final week 16)', 'Weeks 15-17 (final week 17)', 'Weeks 16-18 (final week 18)']);
+    await user.selectOptions(playoffs, '18');
+
+    await user.selectOptions(screen.getByLabelText('Season'), '2020');
+    expect(within(screen.getByLabelText('Playoffs')).getAllByRole('option').map((option) => option.textContent))
+      .toEqual(['Weeks 14-16 (final week 16)', 'Weeks 15-17 (final week 17)']);
+    expect(screen.getByLabelText('Playoffs')).toHaveValue('17');
+    await user.selectOptions(screen.getByLabelText('Playoffs'), '16');
+
+    await user.click(screen.getByRole('button', { name: 'Create league and draft' }));
+    await vi.waitFor(() => expect(onCreated).toHaveBeenCalled());
+    expect(api.callsTo(GAMES_PATH, 'POST')[0].body).toMatchObject({ season: 2020, playoff_end_week: 16 });
+  });
+
+  it('labels the playoff windows with the weeks a 4-team bracket really plays', async () => {
+    const { user } = renderForm([{ path: SEASONS_PATH, reply: json(seasons()) }]);
+    await user.selectOptions(await screen.findByLabelText('Playoff teams'), '4');
+    const playoffs = screen.getByLabelText('Playoffs');
+    expect(playoffs).toHaveValue('17');
+    expect(within(playoffs).getByRole('option', { selected: true })).toHaveTextContent('Weeks 16-17 (final week 17)');
+    expect(within(playoffs).getAllByRole('option').map((option) => option.textContent))
+      .toEqual(['Weeks 15-16 (final week 16)', 'Weeks 16-17 (final week 17)', 'Weeks 17-18 (final week 18)']);
   });
 
   it('shows why a league could not be created', async () => {

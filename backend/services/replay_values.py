@@ -262,7 +262,7 @@ def clear_cache() -> None:
 
 
 def league_settings(settings: "replay_state.Settings") -> LeagueSettings:
-    """The app's LeagueSettings for a replay league (K and DST slots included, the two playoff weeks set)."""
+    """The app's LeagueSettings for a replay league (K and DST slots included, the playoff weeks set)."""
     playoffs = tuple(range(settings.regular_season_weeks + 1, settings.end_week + 1))
     return LeagueSettings(scoring=settings.scoring, teams=settings.teams, starters=settings.starters,
                           playoff_weeks=playoffs, bench=settings.bench)

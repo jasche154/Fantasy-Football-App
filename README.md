@@ -215,7 +215,7 @@ Open <http://localhost:5173>. The UI talks to `http://localhost:8000` by default
 | **Player page** | Weekly chart of actual vs expected points, game log, NGS stats, projection, signals. **Position percentiles** rank his season stats against his position (green = good, red = bad, grey for context stats like aDOT; "Small sample" until he has enough volume). **What changed** compares his last 3 games with the earlier games (snap share, target share, air-yard share, targets, carries, pass attempts) and flags big moves |
 | **Odds & Props** | Pick a week: every game's kickoff, closing spread and total, and each team's implied total. **Show props** opens the player props stored for that game (expected passing/rushing/receiving yards, receptions, TDs implied by the lines) with how long before kickoff they were bought. Props appear game by game on game day; before that the page says why they're missing |
 | **Ask AI** | Ask questions in plain English; each answer shows which tools it used |
-| **Replay League** | A game: replay a past season against CPU managers. **Start:** under **New league** pick a season (or Random), 8–14 teams, scoring, your draft slot, waivers (Wednesday waivers; FAAB bidding: $100 per team, blind bids, the highest bid wins, ties go by waiver priority, winning bids show in the activity log; or free agency only) and difficulty, then **Create league and draft**. Saved leagues are listed above the form (Resume, Delete). **Draft:** press **Draft** next to a player on your turn, or auto-pick one pick or the rest; the CPUs pick in between. **The week loop:** the one primary button at the top says what comes next. **Play week N** scores the week with the real results; then every unrostered player is on waivers, you put in claims on the Players tab (with a bid in a FAAB league), and **Sim to Wednesday** settles them (by priority, or by bid in FAAB) and lets the CPUs move; then lineups, free-agent adds and trades are open again until you play the next week. **Tabs:** My Team (set your lineup with Move, drop players, look at any team or past week), Matchup (your game and the week's scoreboard), Players (the waiver wire with each player's usage over his last 3 games, adds and claims), Trades (CPU offers, and a builder that shows the CPU's verdict before you propose) and League (standings, schedule, scoreboard, activity). After 14 weeks the top four play two playoff weeks for the title. **No hindsight:** nothing on screen comes from a week you have not played. Before a week is played you see only its pre-game projection; points, records and standings stop at the last week played, the My Team and Matchup week pickers end at the current week, and later weeks on the League scoreboard show the pairings only |
+| **Replay League** | A game: replay a past season against CPU managers. **Start:** under **New league** pick a season (or Random), 4–16 teams, scoring, your draft slot, the playoff weeks (14–16, 15–17 by default, or 16–18 when the season has a week 18) and how many teams make the playoffs (4–8, default 4 under 10 teams, 6 under 14, else 8), waivers (Wednesday waivers; FAAB bidding: $100 per team, blind bids, the highest bid wins, ties go by waiver priority, winning bids show in the activity log; or free agency only) and difficulty, then **Create league and draft**. Saved leagues are listed above the form (Resume, Delete). **Draft:** the board lists who is left by **Rank** (the preseason expert rank, or the ADP order for 2018–2019, as Yahoo shows a rank next to ADP), with the round that rank implies (**Rd**), ADP and the preseason projection (points a game); sort by Rank, ADP or Proj. Press **Draft** next to a player on your turn, or auto-pick one pick or the rest; the CPUs pick in between. **The week loop:** the one primary button at the top says what comes next. **Play week N** scores the week with the real results; then every unrostered player is on waivers, you put in claims on the Players tab (with a bid in a FAAB league), and **Sim to Wednesday** settles them (by priority, or by bid in FAAB) and lets the CPUs move; then lineups, free-agent adds and trades are open again until you play the next week. **Tabs:** My Team (set your lineup with Move, drop players, look at any team or past week), Matchup (your game and the week's scoreboard), Players (the waiver wire with each player's usage over his last 3 games, adds and claims), Trades (CPU offers, and a builder that shows the CPU's verdict before you propose) and League (standings, schedule, scoreboard, activity). The regular season runs until the playoff weeks you chose; then the top seeds play a title bracket (top seeds get a bye when it has 5–7 teams) and everyone else plays for the places below. **No hindsight:** nothing on screen comes from a week you have not played. Before a week is played you see only its pre-game projection; points, records and standings stop at the last week played, the My Team and Matchup week pickers end at the current week, and later weeks on the League scoreboard show the pairings only |
 | **Settings** | League scoring, size, superflex, and TE premium (used everywhere); connect Yahoo; check integrations. **System** shows when the auto-update last ran and what it did, Odds API credits left, data freshness and the last backup, with **Back up now**. **API access** takes the token when the backend has `API_TOKEN` set |
 
 ## How the numbers work
@@ -858,7 +858,7 @@ that week's games on; only scoring a week reads its real points.
   model; a failure is reported and never blocks the season). `GET /api/replay/seasons` says which
   seasons are ready (stats, schedule, K/DST, 180+ ADP players, and projections for every week of the
   regular season: one missing week would zero it). It also reports `injury_weeks` (weeks with tags
-  stored), which `ready` does not require. A re-run of Prepare fetches the MyFantasyLeague ADP
+  stored), which `ready` does not require, and `last_week` (17 or 18: a week-18 final needs 18). A re-run of Prepare fetches the MyFantasyLeague ADP
   tail again while a season has none.
   The "experts" step (2020 on) stores FantasyPros position ranks from the nflverse archive in
   `replay_expert_ranks` (`services/replay_experts.py`): the last preseason cheatsheet and every in-season
@@ -890,7 +890,9 @@ that week's games on; only scoring a week reads its real points.
   ADP: each takes the lowest `(ADP + noise) x need x taste` among the best players left, with position
   caps, K and DST in the last rounds, and never reaches further than a round of picks past the current
   pick in rounds 1-4, a round and a half in rounds 5-9, and 25 picks after that (never more than 25).
-  "Hard" halves the noise.
+  "Hard" halves the noise. The draft board (`GET .../draft?sort=rank|adp|projection&direction=`) defaults
+  to **Rank** = `pre_rank` (below), with **Rd** = ceil(rank / teams); players without the number sorted on
+  come last either way.
 - **CPU rosters:** at most 2 QB, 2 TE, 1 K, 1 DST, 6 RB and 7 WR. A CPU takes one extra only while nobody
   it has at that starting slot plays that week, and trims it afterwards. A CPU never drops a top-100
   player (100 in a 12-team league, scaled to the league size: 66 with 8 teams, 116 with 14), and drops an
@@ -904,7 +906,12 @@ that week's games on; only scoring a week reads its real points.
   do not exist yet. Waivers still use points over replacement (`trade_value`). Trades and the Value
   column use a **0-1000 trade chart** (`services/replay_chart.py`): a player's rank at his position is
   turned into the ADP pick where that season's Nth player at the position went, and the pick into
-  1000 x exp(-(pick - 1) / 40), so a star is worth more than two good players. The rank blends this
+  1000 x exp(-(pick - 1) / 40), so a star is worth more than two good players. Kickers and defenses are
+  floored: the Nth K or DST (0-based) sits at pick 150 + N at the earliest (`KDST_FIRST_PICK`), because the
+  ADP source drafts them far too early (the top DST around pick 95), which priced a DST1 like a WR4 and put
+  streaming defenses at the top of the wire and in rounds 9-13 of the board. `pre_rank` (the board's
+  Rank, and `star`) is the overall order of these preseason picks: the slot of his preseason expert rank,
+  else of his ADP at his position. The rank blends this
   week's expert rank (weight 0.65 for a fresh snapshot, less as it ages) with the app's model rank
   (`ros_ppg` nudged by his last three real games), and an injured player is priced by the share of his
   team's remaining games he is expected to play.
@@ -953,10 +960,22 @@ that week's games on; only scoring a week reads its real points.
   trades are open through week 11 and its waiver phase, and close when you press Sim to Wednesday after
   week 11's games (in a league without waivers, once week 11 is played). CPUs also trade with each other
   and send you offers.
-- **Season:** 14 weeks, then two playoff weeks: seeds 1-4 play for the title, everyone else plays
-  consolation games in groups of four seeds (semi-finals, then a game for 5th and one for 7th, and so on),
-  so places 5..N come from that ladder. A leftover pair (10 and 14 teams) plays twice: the team that won
-  both places higher; a split goes to more points over the two games, then the higher seed.
+- **Season:** the user picks the championship week (16, 17 or 18; 18 only when the season has a week 18)
+  and the playoff teams P (4-8, at most the league size; default 4 under 10 teams, 6 under 14, else 8).
+  The playoffs last 2 weeks for P = 4 and 3 weeks for 5-8, and the regular season is the weeks before
+  them (e.g. a week-17 final: 15 weeks with 4 teams, 14 with 6). The title bracket is reseeded every
+  round (the top seed left plays the lowest); with 5-7 teams the top 8 - P seeds get a round-one bye. The
+  semi-final losers play for third in the final week. Round-one losers (P >= 5) play on for places 5..P,
+  and the teams that missed the playoffs for P+1..N: each week a pool ranks its teams by pool wins, then
+  points in pool weeks, then seed, and pairs them off (1 v 2, 3 v 4); in an odd pool the team idle least
+  so far sits out (then the lowest in the table), so the bye rotates, and a pool
+  of two plays twice (the team that won both places higher; a split goes to more points, then the higher
+  seed). Games are labelled Quarter-final, Semi-final, Championship, Third place or Consolation; a bye
+  shows as an idle week on the schedule ("Bye / no game"), and the Matchup tab then shows the week's
+  first game. With 5 playoff teams round one is a single wild-card game. Leagues saved before playoff
+  sizes existed keep their title games. Their consolation games may pair differently (by the pool table rather than
+  seeds 5 v 8, 6 v 7): an 8-team league saved before its first playoff week, and a league of 10 or more
+  teams saved before its last playoff week. A finished one may reorder places from 5th down.
 - **Limits of "no hindsight":** a week's projection is the sites' final pre-game number, and it is
   already visible at that week's Wednesday waiver run. An expert snapshot taken on a Friday already knows
   that week's Thursday game. Injury news is built from the real return week (noisy, see above). A player appears on the board and the wire once
@@ -1028,20 +1047,20 @@ League parameters accepted by every valuation endpoint: `scoring=ppr|half|std`,
 | POST | `/api/agent/tools/{name}` | Body `{"arguments": {...}}`; run one tool |
 | POST | `/api/agent/chat` | Body `{"messages": [{"role": "user", "content": "..."}]}`; answer plus tool trace |
 | GET | `/api/rankings/rushing` | Original rushing endpoint (kept for compatibility; now uses the fixed leaderboard math) |
-| GET | `/api/replay/seasons` | Which past seasons can be replayed (readiness per season) and the running data import |
+| GET | `/api/replay/seasons` | Which past seasons can be replayed (readiness per season, with its `last_week`) and the running data import |
 | POST | `/api/replay/seasons/{season}/prepare?force=` | Import that season's results, ADP, pre-game projections and injury tags in the background |
 | GET | `/api/replay/games` | Saved replay leagues, most recently played first |
-| POST | `/api/replay/games` | Body `{"season": 2019, "teams": 12, "scoring": "half", "draft_slot": 6, "waiver_mode": "wednesday", "difficulty": "normal", "name": "...", "seed": 1}` (only `season` is required; it may be `"random"`; teams 8/10/12/14; `waiver_mode` `"wednesday"`, `"faab"` (blind bids from $100) or `"none"` (free agency only); `difficulty` `"hard"`); a new league, drafted up to your first pick |
+| POST | `/api/replay/games` | Body `{"season": 2019, "teams": 12, "scoring": "half", "draft_slot": 6, "waiver_mode": "wednesday", "difficulty": "normal", "playoff_end_week": 17, "playoff_teams": 6, "name": "...", "seed": 1}` (only `season` is required; it may be `"random"`; teams 4/6/8/10/12/14/16; `playoff_end_week` 16/17/18 (default 17; 422 when the season is shorter; a random season is drawn from the ready seasons that long), `playoff_teams` 4-8 (default by league size), the regular season is what the playoff rounds leave before the final; `waiver_mode` `"wednesday"`, `"faab"` (blind bids from $100) or `"none"` (free agency only); `difficulty` `"hard"`); a new league, drafted up to your first pick |
 | GET | `/api/replay/games/{id}` | Game summary: phase, week, your record and matchup, what to do next, champion |
 | POST | `/api/replay/games/{id}/delete` | Delete the league |
-| GET | `/api/replay/games/{id}/draft?position=&search=&limit=&offset=` | Draft room: picks, order, your roster, players left by ADP |
+| GET | `/api/replay/games/{id}/draft?position=&search=&sort=&direction=&limit=&offset=` | Draft room: picks, order, your roster, players left by preseason rank (`sort` `rank`, `adp` or `projection`; `direction` `asc`/`desc`, default asc, desc for projection; unknowns last), each with the round his rank implies |
 | POST | `/api/replay/games/{id}/draft/pick` | Body `{"player_id": 1, "overall": 6}`; your pick, then the CPUs pick up to your next turn. `overall` is optional: the pick number the page shows; 409 if the draft is at another pick, so a double click never picks twice |
 | POST | `/api/replay/games/{id}/draft/auto?whole_draft=&overall=` | Auto-pick for you: this pick, or every pick left (`overall` as above) |
 | GET | `/api/replay/games/{id}/team?team_id=&week=` | Any team's lineup and bench for a week up to the current one, with projections, values and (once played) real points |
 | POST | `/api/replay/games/{id}/lineup` | Body `{"starters": {"QB": [id], ...}}`, or `{"starters": null}` for the best lineup |
 | GET | `/api/replay/games/{id}/matchup?week=&team_id=` | One game's two lineups side by side |
 | GET | `/api/replay/games/{id}/scoreboard?week=` | Every game of a week |
-| GET | `/api/replay/games/{id}/standings` | The table with seeds, and the playoff bracket once known |
+| GET | `/api/replay/games/{id}/standings` | The table with seeds, the playoff weeks and byes, and the playoff bracket once known |
 | GET | `/api/replay/games/{id}/schedule?team_id=` | A team's opponents and results |
 | GET | `/api/replay/games/{id}/activity?kind=&limit=&offset=` | The league log (picks, moves, trades, results), newest first |
 | GET | `/api/replay/games/{id}/players?position=&search=&status=&sort=&limit=&offset=` | The player pool (default: unrostered) with status, projection, value, points so far and usage over his last 3 games |

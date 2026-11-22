@@ -34,6 +34,10 @@ export interface ReplayStandings {
   results: ReplayStandingsRow[];
   regular_season_weeks: number;
   playoff_teams: number;
+  /** The playoff weeks, in order. */
+  playoff_weeks: number[];
+  /** How many top seeds skip the first playoff round. */
+  byes: number;
   seeds_final: boolean;
   /** One scoreboard per playoff week whose games are known. */
   bracket: ReplayScoreboard[];
@@ -44,6 +48,8 @@ export interface ReplayScheduleRow {
   week: number;
   playoff: boolean;
   played: boolean;
+  /** No game that week (a playoff bye, or out of the pool's pairings): opponent and result are null. */
+  idle: boolean;
   /** A playoff opponent is null until it is known. */
   opponent: ReplayTeamRef | null;
   points: number | null;

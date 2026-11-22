@@ -139,3 +139,31 @@ def test_the_first_week_out_discounts_the_whole_chart_and_later_weeks_only_the_m
     whole = round((expert + model) * discount, 1)
     assert value.chart == (whole if week == value.news.since else round(expert + model * discount, 1))
     assert week == value.news.since or value.chart > whole
+
+
+def early_dst_season():
+    """The fake season with real-world DST ADP: the first one at pick 92, one more every 4 picks."""
+    data = fakes.fake_season()
+    early = {pid: replace(p, adp=92.0 + 4 * (pid - fakes.player_id("DST", 1)))
+             for pid, p in data.players.items() if p.position == "DST" and p.adp is not None}
+    return replace(data, players=MappingProxyType({**data.players, **early}))
+
+
+def test_kdst_slot_curve_starts_at_pick_150_and_skill_curves_are_unchanged():
+    data = early_dst_season()
+
+    curve, plain = chart.slot_curve(data), chart.slot_curve(fakes.fake_season())
+    assert curve["DST"][0] >= chart.KDST_FIRST_PICK and list(curve["DST"]) == sorted(curve["DST"])
+    assert all(curve[pos] == plain[pos] for pos in ("QB", "RB", "WR", "TE"))
+    assert min(curve["K"]) >= chart.KDST_FIRST_PICK
+
+
+def test_early_dst_adp_puts_dst1_behind_every_skill_player_drafted_before_150():
+    data = replace(early_dst_season(), expert_ranks=MappingProxyType({}))     # ADP order only (2018-2019)
+    ranks = chart.pre_ranks(chart.pre_picks(data))
+
+    dst1 = min(ranks[pid] for pid, p in data.players.items() if p.position == "DST" and pid in ranks)
+    skill = [ranks[pid] for pid, p in data.players.items()
+             if p.position not in chart.KDST and p.adp is not None and p.adp < chart.KDST_FIRST_PICK]
+    assert skill and dst1 > max(skill)
+    assert chart.pick_value(chart.pre_picks(data)[fakes.player_id("DST", 1)]) < chart.pick_value(chart.KDST_FIRST_PICK - 1)

@@ -3,11 +3,12 @@ to a star).
 
 A position rank becomes the ADP pick where that season's Nth player at the position went (`slot_curve`;
 past the last drafted, PICKS_PAST_LAST picks per rank; fractional ranks interpolate), and a pick becomes
-points on a convex curve (`pick_value` = 1000 x exp(-(pick - 1) / TAU)), so stars carry a premium. Nothing
+points on a convex curve (`pick_value` = 1000 x exp(-(pick - 1) / TAU)), so stars carry a premium. The Nth K/DST is
+floored at pick KDST_FIRST_PICK + N (the ADP source takes them rounds too early). Nothing
 depends on the weeks left: values move with injuries, form, expert ranks and a small bump once a player's
 bye is behind him.
 
-- pre_rank: overall order of preseason picks (the slot of his preseason expert rank, else his ADP);
+- pre_rank: overall order of preseason picks (the slot of his preseason expert rank, else of his ADP);
   star = clamp((STAR_TOP - pre_rank) / STAR_SPAN, 0, 1).
 - model_ppg: ros_ppg + k x (mean of his last <= FORM_GAMES real games - ros_ppg), k = n / FORM_GAMES x
   FORM_WEIGHT, x (1 - FORM_STAR_DOWN x star) for a dip, x (1 + FORM_STAR_UP x star) for a rise while ros_ppg
@@ -37,6 +38,8 @@ TAU = 40.0                     # pick_value decay: 1 -> 1000, 12 -> 760, 24 -> 5
 CHART_MAX = 1000.0
 PICKS_PAST_LAST = 3            # slot curve past the last drafted player: this many picks per rank
 EMPTY_CURVE_START = 200.0      # a position nobody drafted starts here
+KDST = ("K", "DST")
+KDST_FIRST_PICK = 150.0        # K/DST slot curve starts no earlier than this pick (FFC ADP drafts them too early)
 STAR_TOP, STAR_SPAN = 60, 48   # star = clamp((STAR_TOP - pre_rank) / STAR_SPAN, 0, 1)
 FORM_GAMES = 3                 # model_ppg: his last real games
 FORM_WEIGHT = 0.50
@@ -52,12 +55,16 @@ DAYS_PER_WEEK = 7
 
 @lru_cache(maxsize=64)
 def slot_curve(data: SeasonData) -> Mapping[str, tuple[float, ...]]:
-    """{position: (ADP pick of the 1st, 2nd, ... player drafted there)} for that season."""
+    """{position: (ADP pick of the 1st, 2nd, ... player drafted there)} for that season; the Nth K/DST
+    (0-based n) no earlier than KDST_FIRST_PICK + n."""
     picks: dict[str, list[float]] = defaultdict(list)
     for player in data.players.values():
         if player.adp is not None:
             picks[player.position].append(player.adp)
-    return MappingProxyType({position: tuple(sorted(found)) for position, found in picks.items()})
+    curve = {position: sorted(found) for position, found in picks.items()}
+    for position in KDST:
+        curve[position] = [max(pick, KDST_FIRST_PICK + n) for n, pick in enumerate(curve.get(position, ()))]
+    return MappingProxyType({position: tuple(found) for position, found in curve.items() if found})
 
 
 def clear_cache() -> None:
@@ -135,9 +142,16 @@ def _by_week(data: SeasonData) -> Mapping[int, Mapping[int, int]]:
 
 
 def pre_picks(data: SeasonData) -> dict[int, float]:
-    """{id: preseason pick}: the slot of his expert preseason rank, else his ADP."""
+    """{id: preseason pick}: the slot of his expert preseason rank, else his ADP's slot at his position (his
+    ADP itself, except K/DST floored at KDST_FIRST_PICK)."""
     curve, ranked = slot_curve(data), _by_week(data).get(0, {})
-    picks = {pid: p.adp for pid, p in data.players.items() if p.adp is not None}
+    by_adp = sorted((p.adp, pid) for pid, p in data.players.items() if p.adp is not None)
+    seen: dict[str, int] = defaultdict(int)
+    picks: dict[int, float] = {}
+    for _, pid in by_adp:
+        position = data.players[pid].position
+        picks[pid] = curve[position][seen[position]]
+        seen[position] += 1
     picks.update({pid: pick_at(curve, data.players[pid].position, rank)
                   for pid, rank in ranked.items() if pid in data.players})
     return picks

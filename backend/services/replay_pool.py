@@ -243,12 +243,18 @@ def readiness(session: Session, season: int) -> dict:
     return {"season": season, "ready": ready, "has_stats": has_stats, "has_schedule": bool(teams),
             "has_kdst": has_kdst, "adp_players": adp_players, "projection_weeks": projection_weeks,
             "kickers": kickers, "defenses": defenses, "injury_weeks": injury_weeks,
-            "expert_snapshots": expert_snapshots}
+            "expert_snapshots": expert_snapshots, "last_week": last_week}
 
 
-def ready_seasons(session: Session) -> list[int]:
-    """The supported seasons a game can be started on, oldest first."""
-    return [season for season in SUPPORTED_SEASONS if readiness(session, season)["ready"]]
+def ready_last_weeks(session: Session) -> dict[int, int]:
+    """{season: last week} for the supported seasons a game can be started on, oldest first."""
+    rows = (readiness(session, season) for season in SUPPORTED_SEASONS)
+    return {row["season"]: row["last_week"] for row in rows if row["ready"]}
+
+
+def ready_seasons(session: Session, min_last_week: int = 0) -> list[int]:
+    """The supported seasons a game can be started on, oldest first; min_last_week: only those that long."""
+    return [season for season, last in ready_last_weeks(session).items() if last >= min_last_week]
 
 
 def _two_way(session: Session) -> dict[int, tuple[str, str]]:

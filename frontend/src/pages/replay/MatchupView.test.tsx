@@ -141,6 +141,20 @@ describe('MatchupView', () => {
     expect(within(screen.getByRole('region', { name: 'Week 5 scoreboard' })).getAllByRole('button')).toHaveLength(2);
   });
 
+  it('says the user has no game this week (a playoff bye) and shows the first game of the week', async () => {
+    const quarter = matchup({ playoff: true, label: 'Quarter-final', home: team({ team: teamRef(3) }), away: team({ team: teamRef(6) }) });
+    renderMatchup([{ path: MATCHUP_PATH, reply: json(quarter) }]);
+    expect(await screen.findByText(/No game this week for your team\./)).toBeInTheDocument();
+    expect(faceOff()).toHaveTextContent('Quarter-final · Week 5 · Not played yet');
+  });
+
+  it("does not call another week's game the user's bye while this week loads", async () => {
+    const earlier = matchup({ week: 4, home: team({ team: teamRef(3) }), away: team({ team: teamRef(6) }) });
+    renderMatchup([{ path: MATCHUP_PATH, reply: json(earlier) }]);
+    await screen.findAllByRole('table');
+    expect(screen.queryByText(/No game this week for your team/)).not.toBeInTheDocument();
+  });
+
   it('says so when the week has no games', async () => {
     renderMatchup([{ path: SCOREBOARD_PATH, reply: json(scoreboard({ results: [] })) }]);
     expect(await screen.findByText('No games this week.')).toBeInTheDocument();
