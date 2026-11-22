@@ -293,27 +293,35 @@ def _points_text(points: float) -> str:
 
 def _suggestion(state: State, settings: Settings, know: Knowledge, mine: _Side, theirs: _Side) -> str | None:
     """How the user could fix a value decline by to_team: add the one of his spare skill players worth
-    closest to what is missing (at most SUGGEST_WITHIN x it, never one they would cut), else that many points."""
+    closest to what is missing (at most SUGGEST_WITHIN x it) whose counted worth to them (after the depth
+    discount and any player of theirs he makes them cut) covers it, else that many points."""
     counted = theirs.tally
     if counted is None or not mine.team.is_user:
         return None
-    sent = _chart(know, theirs.sends)
-    got = tv.depth_counted([know.by_id[pid].chart for pid in theirs.kept], [know.by_id[pid].chart for pid in theirs.sends])
-    missing = max(-counted.score, tv.MARKET_GUARD * sent - got)
+    sent_charts = [know.by_id[pid].chart for pid in theirs.sends]
+    got = tv.depth_counted([know.by_id[pid].chart for pid in theirs.kept], sent_charts)
+    missing = max(-counted.score, tv.MARKET_GUARD * sum(sent_charts) - got)
     if missing <= 0:
         return None
     if got < _chart(know, theirs.kept):             # the depth discount bit: more pieces count little, ask for better ones
         return DEPTH_HINT
     if len(mine.sends) >= MAX_PLAYERS_PER_SIDE:
         return _points_text(missing)
+    base = tuple(pid for pid in theirs.team.roster if pid not in theirs.sends)
+
+    def worth(receives: tuple[int, ...]) -> float:  # what they count receiving these for, net of their cuts
+        drops = _cpu_drops(settings, know, (*base, *receives)) or ()
+        kept = [know.by_id[pid].chart for pid in receives if pid not in drops]
+        return tv.depth_counted(kept, sent_charts) - _chart(know, [pid for pid in drops if pid not in receives])
+
+    now = worth(theirs.receives)
     spare = [know.by_id[pid] for pid in mine.team.roster if pid not in mine.sends and pid not in (mine.drops or ())
              and not rs.retrade_locked(state, pid)]
-    enough = [v for v in spare if v.position in SKILL and not v.out and missing <= v.chart <= SUGGEST_WITHIN * missing]
+    enough = [v for v in spare if v.position in SKILL and not v.out and missing <= v.chart <= SUGGEST_WITHIN * missing
+              and worth((*theirs.receives, v.player_id)) - now >= missing]
     if enough:
         closest = min(enough, key=lambda v: (v.chart - missing, v.player_id))
-        kept = (*(pid for pid in theirs.team.roster if pid not in theirs.sends), *theirs.receives, closest.player_id)
-        if closest.player_id not in (_cpu_drops(settings, know, kept) or ()):      # never one they would cut
-            return f"Add {closest.name} to make this fair."
+        return f"Add {closest.name} to make this fair."
     return _points_text(missing)
 
 

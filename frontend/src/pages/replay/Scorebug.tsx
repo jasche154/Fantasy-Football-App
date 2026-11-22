@@ -21,7 +21,7 @@ function Score({ game }: { game: ReplaySummary }) {
   const theirs = isFinal ? matchup.opponent.points : matchup.opponent.projected;
   return (
     <div className="scorebug__game">
-      <p className="game-label scorebug__status">{matchup.label ?? `Week ${matchup.week}`} · {isFinal ? 'Final' : 'Projected'}</p>
+      <p className="game-label">{matchup.label ?? `Week ${matchup.week}`} · {isFinal ? 'Final' : 'Projected'}</p>
       <p className="scorebug__score">
         <span className="scorebug__side" aria-hidden="true">You</span>
         <ScoreNumber size="sm" value={mine} label={isFinal ? 'Your score' : 'You, projected'} countUp={arrived} />

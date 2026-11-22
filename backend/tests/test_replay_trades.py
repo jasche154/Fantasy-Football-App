@@ -5,6 +5,7 @@ chart built here from each week's healthy values, so these tests do not depend o
 - CPU 9 starts RB36 and RB32 but owns three good tight ends: it needs a back.
 - CPU 5 owns seven receivers; its only tight end, TE25, is its worst player.
 """
+import itertools
 import math
 import time
 from collections.abc import Mapping
@@ -628,3 +629,20 @@ def test_the_market_guard_counts_depth_at_the_discount():
 
     assert tv.market_ok(know, [1], [2, 3, 4], []) is False         # 450 raw would pass at 80% of 500
     assert tv.market_ok(know, [1], [2, 3], []) is False and tv.market_ok(know, [2, 3], [1], []) is True
+
+
+def test_a_suggested_player_really_makes_the_deal_go_through():
+    """Even with a junk throw-in in what the CPU sends (no discount yet) and its own cuts to make room."""
+    state, know = league()
+    mine = [pid for pid in rs.team(state, USER).roster if know.by_id[pid].position in SKILL]
+    names = {know.by_id[pid].name: pid for pid in mine}
+    followed = 0
+    for give in itertools.combinations(mine, 2):
+        verdict = rt.evaluate(state, SETTINGS, know, USER, RICH, give, (P("WR", 11), P("RB", 44)))
+        named = (verdict.suggestion or "").removeprefix("Add ").removesuffix(" to make this fair.")
+        if verdict.accepted or named not in names:
+            continue
+        after = rt.evaluate(state, SETTINGS, know, USER, RICH, (*give, names[named]), (P("WR", 11), P("RB", 44)))
+        assert after.accepted, (named, after.reasons)
+        followed += 1
+    assert followed >= 5

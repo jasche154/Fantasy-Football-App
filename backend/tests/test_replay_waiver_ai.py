@@ -5,6 +5,7 @@ module; the behaviour tests read that log, the unit tests use one week of a fres
 """
 import time
 from dataclasses import dataclass, replace
+from types import MappingProxyType
 
 import pytest
 
@@ -725,3 +726,26 @@ def test_a_streamer_swaps_a_defense_for_a_smaller_edge():
 
     assert ai._stream(roster, better, ctx) is None                                     # a holder keeps his
     assert ai._stream(roster, better, replace(ctx, stream_edge=ai.STREAMER_EDGE)) == (other.player_id, own.player_id)
+
+
+@pytest.mark.parametrize("streams", [True, False])
+def test_free_agency_gives_streamers_their_smaller_edge(monkeypatch, streams):
+    """Every rostered defense projects 5, one free defense 7.5 (an edge between the two bars), the rest 0."""
+    state, knowledge = league(3, "open"), know(3)
+    rostered = rs.rostered(state)
+    free = next(v.player_id for v in knowledge.values if v.position == "DST" and v.player_id not in rostered)
+    assert ai.STREAMER_EDGE <= 2.5 < ai.STREAM_EDGE
+
+    def projected(v: ReplayValue) -> ReplayValue:
+        if v.position != "DST":
+            return v
+        return replace(v, projection=5.0 if v.player_id in rostered else 7.5 if v.player_id == free else 0.0)
+
+    changed = tuple(projected(v) for v in knowledge.values)
+    knowledge = replace(knowledge, values=changed, by_id=MappingProxyType({v.player_id: v for v in changed}))
+    monkeypatch.setattr(ai, "streamers", lambda seed, cpu_ids: frozenset({CPUS[0]} if streams else ()))
+
+    after = ai.cpu_free_agency(state, SETTINGS, knowledge, SEED)
+
+    added = [e.team_id for e in after.events if e.kind == "add" and e.player_ids[0] == free]
+    assert added == ([CPUS[0]] if streams else [])
