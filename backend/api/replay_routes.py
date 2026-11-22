@@ -150,9 +150,10 @@ def _season(session: Session, wanted: int | str, seed: int, end_week: int) -> in
             seasons_ = replay_pool.SUPPORTED_SEASONS
             raise ValueError(f"Replay seasons run from {seasons_[0]} to {seasons_[-1]}, not {wanted}.")
         return int(wanted)
-    if not replay_pool.ready_seasons(session):
+    ready = replay_pool.ready_last_weeks(session)
+    if not ready:
         raise NoDataError("No season is ready to play yet: prepare one first.")
-    fits = replay_pool.ready_seasons(session, min_last_week=end_week)
+    fits = [season for season, last in ready.items() if last >= end_week]
     if not fits:
         raise ValueError(f"No prepared season has a week {end_week}: pick an earlier championship week.")
     return int(rs.rng(seed, "season").choice(fits))

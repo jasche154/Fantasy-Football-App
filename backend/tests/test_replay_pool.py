@@ -452,6 +452,8 @@ def test_readiness_reports_a_loaded_season_as_ready(seeded_db):
         "adp_players": 220, "projection_weeks": 17, "kickers": 32, "defenses": 32, "injury_weeks": 14,
         "expert_snapshots": 18, "last_week": 17}
     assert replay_pool.ready_seasons(seeded_db) == [fakes.SEASON]
+    assert replay_pool.ready_seasons(seeded_db, min_last_week=17) == [fakes.SEASON]
+    assert replay_pool.ready_seasons(seeded_db, min_last_week=18) == []      # 17 weeks: no week-18 final
 
 
 def test_a_season_without_injury_tags_is_still_ready_and_loads_with_none(small_db):

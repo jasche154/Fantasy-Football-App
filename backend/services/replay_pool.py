@@ -246,10 +246,15 @@ def readiness(session: Session, season: int) -> dict:
             "expert_snapshots": expert_snapshots, "last_week": last_week}
 
 
+def ready_last_weeks(session: Session) -> dict[int, int]:
+    """{season: last week} for the supported seasons a game can be started on, oldest first."""
+    rows = (readiness(session, season) for season in SUPPORTED_SEASONS)
+    return {row["season"]: row["last_week"] for row in rows if row["ready"]}
+
+
 def ready_seasons(session: Session, min_last_week: int = 0) -> list[int]:
     """The supported seasons a game can be started on, oldest first; min_last_week: only those that long."""
-    rows = (readiness(session, season) for season in SUPPORTED_SEASONS)
-    return [row["season"] for row in rows if row["ready"] and row["last_week"] >= min_last_week]
+    return [season for season, last in ready_last_weeks(session).items() if last >= min_last_week]
 
 
 def _two_way(session: Session) -> dict[int, tuple[str, str]]:

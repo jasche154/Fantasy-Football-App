@@ -374,8 +374,7 @@ def test_a_random_season_and_draft_slot_come_from_the_seed(client):
 
 def test_a_random_season_only_comes_from_seasons_long_enough_for_the_window(client, monkeypatch):
     ready = {SEASON + 1: 18, SEASON + 2: 18, SEASON: 17}         # season -> last week
-    monkeypatch.setattr(replay_pool, "ready_seasons",
-                        lambda session, min_last_week=0: [s for s, last in ready.items() if last >= min_last_week])
+    monkeypatch.setattr(replay_pool, "ready_last_weeks", lambda session: ready)
     picked = {seed: replay_routes._season(None, "random", seed, 18) for seed in range(20)}
 
     assert set(picked.values()) == {SEASON + 1, SEASON + 2}      # never the 17-week season
@@ -396,7 +395,7 @@ def test_create_says_what_is_wrong_with_a_league(client, monkeypatch):
     assert create(teams=99)[0] == create(scoring="superflex")[0] == create(season="soon")[0] == 422
     assert create(season=2019)[0] == 503 and "2019 is not ready" in create(season=2019)[1]
     assert create(scoring="ppr")[0] == 200                       # the same season in another scoring
-    monkeypatch.setattr(replay_pool, "ready_seasons", lambda session, min_last_week=0: [])
+    monkeypatch.setattr(replay_pool, "ready_last_weeks", lambda session: {})
     assert create(season="random") == (503, "No season is ready to play yet: prepare one first.")
 
 
