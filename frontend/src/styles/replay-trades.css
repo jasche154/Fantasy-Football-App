@@ -1,14 +1,23 @@
 /* Replay League: the trades screen. */
 
 /* Two sides of a deal (you give | you get): side by side, stacked on a phone. */
-.replay-trade__sides { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: var(--space-3) var(--space-4); align-items: start; }
+.replay-trade__sides { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: var(--space-4) var(--space-6); align-items: start; }
 .replay-trade__sides > * { min-width: 0; }
-.replay-trade__title { margin: 0 0 var(--space-2); padding-bottom: var(--space-1); border-bottom: 1px solid var(--color-border);
-  color: var(--color-text-muted); font-size: var(--text-2xs); font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; }
-.replay-trade__count { margin-inline-start: var(--space-1); color: var(--color-text-subtle); font-size: var(--text-xs); font-weight: 400; }
-.replay-trade__players { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--space-2); }
-.replay-trade__players li { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); }
-.replay-trade__value { color: var(--game-led, var(--color-accent)); font: italic 700 var(--text-base) / 1 var(--font-display); font-variant-numeric: tabular-nums; }
+.replay-trade__title { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); margin: 0 0 var(--space-2);
+  color: var(--color-text); font-size: var(--text-sm); font-weight: 700; }
+.replay-trade__count { color: var(--color-text-muted); font-size: var(--text-xs); font-weight: 500; font-variant-numeric: tabular-nums; }
+/* One hairline between players: up to six a side still reads as a list, not a wall. */
+.replay-trade__players { margin: 0; padding: 0; list-style: none; display: grid; }
+.replay-trade__players li { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-height: 2.5rem;
+  padding-block: var(--space-1); border-top: 1px solid var(--color-border); }
+.replay-trade__players li:last-child { border-bottom: 1px solid var(--color-border); }
+.replay-trade__value { flex: none; color: var(--color-text); font: 600 var(--text-base) / 1 var(--font-display); font-variant-numeric: tabular-nums; }
+/* The builder's rosters scroll inside their own panel, so the verdict stays close; ticked rows are tinted (the box says it too). */
+.card .replay-builder .replay-trade__sides .table-wrap { max-height: 26rem; border: 1px solid var(--color-border); border-radius: var(--radius-md); }
+.replay-builder .data-table tbody tr:has(input:checked) { background: var(--color-accent-soft); }
+.replay-builder .data-table input[type="checkbox"] { width: 1rem; height: 1rem; margin: 0; accent-color: var(--color-accent); }
+/* The league's trades: up to six names a side wrap inside their cell. */
+.data-table td.replay-trade__names { min-width: 10rem; white-space: normal; line-height: 1.45; }
 .replay-trade__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 
 /* Always-mounted live region for trade outcomes: takes no room until it speaks. */
@@ -19,8 +28,8 @@
 /* The builder's always-mounted "turned it down" live region is its last grid row: empty, it gives back the gap above it. */
 .replay-builder > [role='status']:empty { margin-top: calc(-1 * var(--space-3)); }
 
-.replay-verdict { display: grid; gap: var(--space-2); padding: var(--space-3) var(--space-4); border: 1px solid var(--color-border);
-  border-top: 2px solid var(--game-led, var(--color-accent)); border-radius: var(--radius-sm); background: var(--color-surface-2); font-size: var(--text-sm); }
+.replay-verdict { display: grid; gap: var(--space-2); padding: var(--space-4); border-radius: var(--radius-md); background: var(--color-surface-2);
+  font-size: var(--text-sm); line-height: 1.5; }
 .replay-verdict > * { margin: 0; }
 .replay-verdict ul { padding-inline-start: var(--space-4); }
 

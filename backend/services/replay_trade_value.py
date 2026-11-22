@@ -3,13 +3,17 @@
 score = in + premium + spot + 0.5 x lineup - out x multiple x 1.03 (a shark also wants SHARK_MARGIN x out):
 - out: what it sends, at its persona's private value; an out player it sends the user counts at least
   OUT_SELL_SHARE of his healthy chart (the user may know he is back soon).
-- in: what it receives and keeps, minus its own players it must cut to make room.
+- in: what it receives and keeps, minus its own players it must cut to make room. Depth is worth less than
+  quality: when it keeps more players than it sends pieces that matter (worth >= DEPTH_SHARE x its best
+  piece in the deal, so a junk throw-in asked of it changes nothing), its least valuable pieces beyond the
+  first extra one count at DEPTH_SHARE (`depth_counted`), so a pile of bench players never buys a star.
 - premium: the best player in the deal is worth more than parts: rate x (B - v2), B the best chart in the
   deal and v2 the other side's best. Signed: + when the CPU gets B, - when it sends him.
 - spot: SPOT_VALUE per roster spot the deal frees.
 - lineup: LINEUP_PER_WEEK x its lineup gain a week, clamped to +- LINEUP_CAP x out.
 The multiple is 1.00 (normal) or 1.08 (hard) against the user and 0.95 between CPUs; a CPU accepts at
-score >= 0 when `market_ok` (the anti-stupid guard on neutral chart values, whatever the persona) holds too.
+score >= 0 when `market_ok` (the anti-stupid guard on neutral chart values, with the same depth discount,
+whatever the persona) holds too.
 Pure: takes a Knowledge and the players, no state.
 """
 from collections.abc import Sequence
@@ -29,6 +33,7 @@ OUT_MARGIN = 1.03
 OUT_SELL_SHARE = 0.5           # an out player sent to the user counts >= this x healthy_chart
 MARKET_GUARD = 0.80            # neutral market in >= this x out, whatever the persona
 SHARK_MARGIN = 0.05
+DEPTH_SHARE = 0.35             # a piece beyond the first extra one in a many-for-few deal counts at this share
 
 
 @dataclass(frozen=True)
@@ -51,6 +56,15 @@ def premium(know: Knowledge, persona: str, sends: Sequence[int], kept: Sequence[
     return rate * (_best(know, kept) - _best(know, sends))
 
 
+def depth_counted(worth: Sequence[float], sent: Sequence[float]) -> float:
+    """The sum of `worth` (what a team keeps), every piece past n + 1 at DEPTH_SHARE (smallest first), n the
+    pieces in `sent` worth at least DEPTH_SHARE x the best of them."""
+    best = max(sent, default=0.0)
+    matter = sum(w >= DEPTH_SHARE * best for w in sent)
+    ordered = sorted(worth, reverse=True)
+    return sum(w if n <= matter else DEPTH_SHARE * w for n, w in enumerate(ordered))
+
+
 def tally(know: Knowledge, persona: str, sends: Sequence[int], kept: Sequence[int], drops: Sequence[int],
           gain_per_week: float, multiple: float, to_user: bool) -> Tally:
     """The CPU sends `sends`, keeps `kept` of what it receives and cuts `drops` (its own players)."""
@@ -63,7 +77,8 @@ def tally(know: Knowledge, persona: str, sends: Sequence[int], kept: Sequence[in
         return max(private(pid), floor)
 
     sent = sum(sell(pid) for pid in sends)
-    received = sum(private(pid) for pid in kept) - sum(private(pid) for pid in drops)
+    received = (depth_counted([private(pid) for pid in kept], [private(pid) for pid in sends])
+                - sum(private(pid) for pid in drops))
     bonus = premium(know, persona, sends, kept)
     spot = SPOT_VALUE * max(0, len(sends) - len(kept))
     cap = LINEUP_CAP * sent
@@ -78,5 +93,6 @@ def tally(know: Knowledge, persona: str, sends: Sequence[int], kept: Sequence[in
 def market_ok(know: Knowledge, sends: Sequence[int], kept: Sequence[int], drops: Sequence[int]) -> bool:
     """The anti-stupid guard: on neutral chart values it gets back at least MARKET_GUARD of what it sends."""
     chart = know.by_id
-    got = sum(chart[pid].chart for pid in kept) - sum(chart[pid].chart for pid in drops)
+    got = (depth_counted([chart[pid].chart for pid in kept], [chart[pid].chart for pid in sends])
+           - sum(chart[pid].chart for pid in drops))
     return got >= MARKET_GUARD * sum(chart[pid].chart for pid in sends)

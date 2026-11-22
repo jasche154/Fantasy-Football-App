@@ -1,9 +1,10 @@
-import type { ReplayPlayerDetail, ReplayWireRow } from '../../api/types';
+import type { ReplayPlayerDetail, ReplayPlayerWeek, ReplayPosition, ReplayWireRow } from '../../api/types';
+import { Tabs } from '../../components/Tabs';
 import { formatNumber } from '../../lib/format';
+import { ADVANCED_POSITIONS, PlayerAdvanced } from './PlayerAdvanced';
 import { PlayerGameLog } from './PlayerGameLog';
 import { PlayerUpcoming } from './PlayerUpcoming';
 import { formatPoints, injuryLabel, ReplayInjuryBadge, ReplayPositionChip, showsOut } from './shared';
-import { usageLine } from './usage';
 
 function statusText(player: ReplayWireRow): string {
   if (player.owner) return player.owner.is_user ? 'On your team' : `Rostered by ${player.owner.name}`;
@@ -42,7 +43,19 @@ function Tiles({ row }: { row: ReplayWireRow }) {
   );
 }
 
-/** The player card: who he is and his news, five season numbers, his game log and the weeks ahead. */
+/** Game log, plus an Advanced tab (usage and efficiency) for skill players; K and DST get the game log alone. */
+function WeeksTabs({ name, position, weeks }: { name: string; position: ReplayPosition; weeks: readonly ReplayPlayerWeek[] }) {
+  if (!ADVANCED_POSITIONS.includes(position)) return <PlayerGameLog name={name} position={position} weeks={weeks} />;
+  const log = <PlayerGameLog name={name} position={position} weeks={weeks} hasHeading={false} />;
+  return (
+    <Tabs label={`${name} stats`} className="replay-adv__tabs" tabs={[
+      { id: 'log', label: 'Game log', panel: log },
+      { id: 'advanced', label: 'Advanced', panel: <PlayerAdvanced name={name} position={position} weeks={weeks} /> },
+    ]} />
+  );
+}
+
+/** The player card: who he is and his news, five season numbers, his game log (and advanced stats) and the weeks ahead. */
 export function PlayerCard({ detail }: { detail: ReplayPlayerDetail }) {
   const { player: row, weeks, upcoming, defense_basis: basis } = detail;
   const { name, position } = row.player;
@@ -50,11 +63,10 @@ export function PlayerCard({ detail }: { detail: ReplayPlayerDetail }) {
     <div className="replay-card">
       <Header row={row} />
       <Tiles row={row} />
-      {row.usage && <p className="replay-card__usage">{usageLine(row.usage)}</p>}
       {/* During the draft there are no weeks yet. */}
       {weeks.length === 0
         ? <p className="hint">The season has not started: these are his preseason numbers.</p>
-        : <PlayerGameLog name={name} position={position} weeks={weeks} />}
+        : <WeeksTabs name={name} position={position} weeks={weeks} />}
       <PlayerUpcoming name={name} position={position} upcoming={upcoming} basis={basis} />
     </div>
   );

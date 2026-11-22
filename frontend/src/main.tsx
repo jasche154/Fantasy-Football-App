@@ -22,6 +22,7 @@ import './styles/replay-players.css';
 import './styles/replay-trades.css';
 import './styles/replay-league.css';
 import './styles/replay-card.css';
+import './styles/replay-advanced.css';
 import './styles/game.css';
 
 const container = document.getElementById('root');

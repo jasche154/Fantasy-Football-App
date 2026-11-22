@@ -35,15 +35,17 @@ interface PlayerGameLogProps {
   name: string;
   position: ReplayPosition;
   weeks: readonly ReplayPlayerWeek[];
+  /** False inside the card's tabs: the tab already names it. */
+  hasHeading?: boolean;
 }
 
 /** Weeks 1..current: the pre-game projection, the real points and his box score (played weeks only). */
-export function PlayerGameLog({ name, position, weeks }: PlayerGameLogProps) {
+export function PlayerGameLog({ name, position, weeks, hasHeading = true }: PlayerGameLogProps) {
   const headingId = useId();
   const box = boxColumns(position);
   return (
-    <section className="replay-card__section" aria-labelledby={headingId}>
-      <h3 id={headingId} className="game-subhead replay-card__subhead">Game log</h3>
+    <section className="replay-card__section" aria-labelledby={hasHeading ? headingId : undefined}>
+      {hasHeading && <h3 id={headingId} className="game-subhead replay-card__subhead">Game log</h3>}
       <div className="table-wrap">
         <table className="data-table data-table--compact replay-card__table">
           <caption className="sr-only">{name} game log</caption>

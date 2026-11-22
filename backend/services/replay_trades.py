@@ -35,10 +35,11 @@ from services.replay_values import Knowledge
 log = logging.getLogger(__name__)
 
 TRADE_PHASES = ("waivers", "open")
-MAX_PLAYERS_PER_SIDE = 3
+MAX_PLAYERS_PER_SIDE = 6         # many-for-few deals pay a depth discount (replay_trade_value.DEPTH_SHARE)
 CPU_TRADE_MULTIPLE = 0.95       # between two CPUs: each needs back at least this share of what it gives
 SUGGEST_WITHIN = 1.5            # a player suggested to close a value gap is worth at most this x what is missing
 VALUE_REASON = "Value is too far apart"     # every value decline starts so (a counter-offer answers only those)
+DEPTH_HINT = "They'd rather have fewer, better players: offer one stronger player in place of several."
 FLEX_ELIGIBLE = ("RB", "WR", "TE")
 
 
@@ -297,7 +298,10 @@ def _suggestion(state: State, settings: Settings, know: Knowledge, mine: _Side, 
     if counted is None or not mine.team.is_user:
         return None
     sent = _chart(know, theirs.sends)
-    missing = max(-counted.score, tv.MARKET_GUARD * sent - _chart(know, theirs.kept))
+    if len(theirs.kept) > len(theirs.sends):        # more pieces are discounted depth: ask for fewer, better ones
+        return DEPTH_HINT
+    got = tv.depth_counted([know.by_id[pid].chart for pid in theirs.kept], [know.by_id[pid].chart for pid in theirs.sends])
+    missing = max(-counted.score, tv.MARKET_GUARD * sent - got)
     if missing <= 0:
         return None
     if len(mine.sends) >= MAX_PLAYERS_PER_SIDE:

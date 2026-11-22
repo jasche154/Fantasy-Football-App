@@ -345,9 +345,11 @@ def test_free_agency_works_in_either_phase_and_gives_the_same_moves_every_time()
     state, knowledge = league(9, "open"), know(9)
 
     first = ai.cpu_free_agency(state, SETTINGS, knowledge, SEED)
-    again = ai.cpu_free_agency(replace(state, phase="waivers"), SETTINGS, knowledge, SEED + 1)
+    again = ai.cpu_free_agency(state, SETTINGS, knowledge, SEED)
+    waivers = ai.cpu_free_agency(replace(state, phase="waivers"), SETTINGS, knowledge, SEED)
 
     assert first.events and first.teams == again.teams and first.events == again.events
+    assert waivers.events and waivers.phase == "waivers"     # a dropped K / DST is claimable later there
     assert first.waiver_order == state.waiver_order and first.phase == "open"
 
 
@@ -400,13 +402,15 @@ def test_no_cpu_adds_to_a_position_it_is_full_at_while_one_of_its_own_plays_ther
 
 def test_kickers_and_defenses_are_only_swapped_like_for_like_and_for_a_clear_edge(season):
     swaps = 0
+    streaming = ai.streamers(SEED, sorted(CPUS))
     for week in season:
         for event in (e for e in week.events if e.kind in ("add", "claim") and len(e.player_ids) == 2):
             new, old = (week.know.by_id[pid] for pid in event.player_ids)
             assert (new.position in ai.STREAMED) == (old.position in ai.STREAMED)
             if new.position in ai.STREAMED:
                 assert new.position == old.position and event.kind == "add"
-                assert old.projection == 0 or new.projection - old.projection >= ai.STREAM_EDGE
+                edge = ai.STREAMER_EDGE if event.team_id in streaming else ai.STREAM_EDGE
+                assert old.projection == 0 or new.projection - old.projection >= edge
                 swaps += 1
     assert swaps > 0
 
@@ -700,3 +704,24 @@ def test_the_protected_top_scales_with_league_size(teams, protected):
     ctx = ai._context(fakes.fake_knowledge(3, settings), settings)
 
     assert ai.protected_rank(settings) == protected and len(ctx.protected) == protected
+
+
+def test_some_cpus_stream_and_the_pick_is_fixed_for_the_game():
+    many = list(range(1, 201))
+
+    picked = ai.streamers(SEED, many)
+
+    assert picked == ai.streamers(SEED, many)                       # same game, same streamers every week
+    assert 0.25 < len(picked) / len(many) < 0.55                    # about STREAMER_SHARE of them
+    assert picked != ai.streamers(SEED + 1, many)
+
+
+def test_a_streamer_swaps_a_defense_for_a_smaller_edge():
+    state, knowledge = league(3), know(3)
+    ctx, roster = ai._context(knowledge, SETTINGS), values(state, CPUS[0], 3)
+    own = next(v for v in roster if v.position == "DST")
+    other = replay_waivers.available_players(state, knowledge, "DST")[0]
+    better = [replace(other, projection=own.projection + ai.STREAMER_EDGE)]
+
+    assert ai._stream(roster, better, ctx) is None                                     # a holder keeps his
+    assert ai._stream(roster, better, replace(ctx, stream_edge=ai.STREAMER_EDGE)) == (other.player_id, own.player_id)

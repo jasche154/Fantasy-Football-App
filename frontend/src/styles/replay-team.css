@@ -1,106 +1,97 @@
 /* Replay League: the My Team and Matchup screens. */
 
-.replay-team__controls { margin-bottom: var(--space-3); }
+.replay-team__controls { margin-bottom: var(--space-4); }
 
 /* ---------- My Team ---------- */
-.replay-lineup-status { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); margin-bottom: var(--space-3); }
+.replay-lineup-status { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); margin-bottom: var(--space-4); }
 .replay-lineup-status .hint { flex-basis: 100%; margin: 0; }
-.replay-lineup-warnings { margin: 0 0 var(--space-3); padding-inline-start: calc(var(--space-4) + 1.1rem); }
+.replay-lineup-warnings { margin: 0 0 var(--space-4); padding-inline-start: calc(var(--space-4) + 1.1rem); }
 
+.replay-roster__actions { white-space: nowrap; }
 .replay-roster__actions > * + * { margin-inline-start: var(--space-1); }
-
-/* Slot cards, still one table: each row is a panel with a gap above it. */
-.replay-roster { border-collapse: separate; border-spacing: 0 3px; }
-.replay-roster tbody > tr > * { background: var(--game-panel, var(--color-surface-1)); border-bottom: 0; }
-.replay-roster tbody > tr > :first-child { border-start-start-radius: var(--radius-sm); border-end-start-radius: var(--radius-sm); }
-.replay-roster tbody > tr > :last-child { border-start-end-radius: var(--radius-sm); border-end-end-radius: var(--radius-sm); }
-.replay-roster tbody + tbody > tr:first-child > * { border-top: 0; }
 .replay-roster__opp { white-space: nowrap; }
-.replay-roster__opp .game-chip { margin-inline-start: var(--space-1); }
+.replay-roster__opp .game-chip { margin-inline-start: var(--space-2); }
 
-/* The slot chip: the row's label, in the scoreboard face. */
-.replay-slot { display: inline-grid; place-items: center; min-width: 2.75rem; padding: 2px var(--space-1); border: 1px solid var(--game-line, var(--color-border));
-  border-radius: var(--radius-xs); background: var(--game-panel-2, var(--color-surface-2)); font-family: var(--font-display); font-weight: 700;
-  font-size: var(--text-2xs); letter-spacing: 0.06em; text-transform: uppercase; }
+/* The slot: the row's label, quiet text so the player leads. */
+.replay-slot { display: inline-block; min-width: 2.5rem; color: var(--color-text); font-size: var(--text-xs); font-weight: 700; }
 .replay-faceoff__bench .replay-slot,
-.replay-roster tbody + tbody .replay-slot { color: var(--game-ink-dim, var(--color-text-muted)); }
+.replay-roster tbody + tbody .replay-slot { color: var(--color-text-muted); font-weight: 600; }
+/* Bench and IR start below a stronger rule. */
+.replay-roster tbody + tbody > tr:first-child > * { border-top: 1px solid var(--color-border-strong); }
 
-/* Starters total band: the week's number in the score face. */
-.replay-roster__total th { text-align: start; }
-.replay-roster tbody > .replay-roster__total > * { background: var(--game-led-soft, var(--color-surface-2)); font-weight: 750; }
-.replay-roster__total th { font-family: var(--font-display); font-size: var(--text-2xs); letter-spacing: 0.12em; text-transform: uppercase; }
-.replay-roster__total .num { color: var(--game-led, var(--color-text)); font-family: var(--font-display); font-style: italic; font-weight: 700;
-  font-size: 1.125rem; font-variant-numeric: tabular-nums; }
-.replay-roster tbody > .replay-roster__total--bench > * { background: var(--game-panel-2, var(--color-surface-2)); }
-.replay-roster__total--bench .num { color: var(--game-ink-dim, var(--color-text-muted)); }
+/* Starters total: a tinted band, the number in the score face. */
+.replay-roster tbody > .replay-roster__total > * { background: var(--color-surface-2); font-weight: 650; }
+.replay-roster__total th { color: var(--color-text-muted); font-size: var(--text-xs); text-align: start; }
+.replay-roster__total .num { color: var(--color-text); font: 600 var(--text-lg) / 1 var(--font-display); font-variant-numeric: tabular-nums; }
+.replay-roster__total--bench .num { color: var(--color-text-muted); }
 
-.replay-roster__row--warn .td--pos { color: var(--color-warn); box-shadow: inset 2px 0 0 var(--color-warn); }
+.replay-roster__row--warn .td--pos { box-shadow: inset 2px 0 0 var(--color-warn); }
 
 /* A move in progress (Move button or drag): the player picked up, the spots he may go to, and the rest dimmed. */
 .replay-roster__row--grab { cursor: grab; }
 .replay-roster__row--grab:active { cursor: grabbing; }
 .replay-roster tbody > .replay-roster__row--moving > * { background: var(--color-accent-soft); }
 /* An outline, not a box-shadow: shadows on <tr> are drawn unreliably across browsers. */
-.replay-roster__row--moving { transform: scale(1.02); outline: 2px solid var(--color-accent); outline-offset: -2px; position: relative; z-index: 1; }
+.replay-roster__row--moving { outline: 2px solid var(--color-accent); outline-offset: -2px; position: relative; z-index: 1; }
 .replay-roster tbody > .replay-roster__row--target > * { background: var(--color-pos-soft); }
 .replay-roster__row--target > :first-child { box-shadow: inset 2px 0 0 var(--color-pos); }
 /* Nothing in a dimmed row can be pressed during a move: its buttons are gone and the name is plain text. */
-.replay-roster__row--dim { opacity: 0.6; }
+.replay-roster__row--dim { opacity: 0.5; }
 @media (prefers-reduced-motion: no-preference) {
-  .replay-roster tbody > tr { transition: opacity var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-out); }
+  .replay-roster tbody > tr { transition: opacity var(--duration-fast) var(--ease-out); }
 }
 
 /* ---------- Matchup ---------- */
 /* Takes focus when a scoreboard game is opened; it isn't a control. */
 .replay-matchup:focus { outline: none; box-shadow: none; }
 
-/* The hero band: a field at night (yard-line hairlines), each side edged in its team colour, the scores the biggest thing here. */
-.replay-hero { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: end; gap: var(--space-2) var(--space-3);
-  margin-bottom: var(--space-4); padding: var(--space-3) var(--space-4) var(--space-4); border-radius: var(--radius-md);
-  background-color: var(--game-field, var(--color-surface-1));
-  background-image: repeating-linear-gradient(90deg, var(--game-line, var(--color-border)) 0 1px, transparent 1px 4%); }
+/* The hero: both teams and their scores on one calm panel; the scores are the biggest thing on the screen. */
+.replay-hero { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: end; gap: var(--space-3) var(--space-5);
+  margin-bottom: var(--space-6); padding: var(--space-5); border: 1px solid var(--color-border); border-radius: var(--game-radius, var(--radius-md));
+  background: var(--color-surface-1); }
 .replay-hero p { margin: 0; }
-.replay-hero__label { grid-column: 1 / -1; color: var(--game-ink-dim, var(--color-text-muted)); }
-.replay-hero__side { display: grid; gap: 2px; min-width: 0; padding-top: var(--space-2);
-  box-shadow: inset 0 3px 0 var(--team, var(--color-border-strong)); }
+.replay-hero__label { grid-column: 1 / -1; }
+.replay-hero__side { display: grid; gap: var(--space-1); min-width: 0; }
 .replay-hero__side:last-of-type { text-align: end; justify-items: end; }
 .replay-hero__team { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); overflow-wrap: anywhere;
-  font-family: var(--font-display); font-weight: 700; font-size: 1.0625rem; }
+  font-size: var(--text-base); font-weight: 700; }
 .replay-hero__side:last-of-type .replay-hero__team { justify-content: flex-end; }
 .replay-hero__record,
-.replay-hero__sub { color: var(--game-ink-dim, var(--color-text-muted)); font-size: var(--text-sm); }
+.replay-hero__sub { color: var(--color-text-muted); font-size: var(--text-sm); }
 /* Capped so two six-character scores and "vs" fit side by side down to 480px; below that the sides stack. */
-.replay-hero .game-score { color: var(--game-led, var(--color-text)); font-size: clamp(1.75rem, 0.9rem + 6vw, 6.5rem); }
-.replay-hero__vs { align-self: center; color: var(--game-ink-dim, var(--color-text-subtle)); font-family: var(--font-display); font-style: italic;
-  font-weight: 700; text-transform: uppercase; }
+.replay-hero .game-score { margin-top: var(--space-2); font-size: clamp(2rem, 1rem + 5vw, 4.25rem); }
+/* Once played, the loser's number steps back (the winner also carries a "Winner" badge). */
+.replay-hero:has(.is-winner) .replay-hero__side:not(.is-winner) .game-score { color: var(--color-text-muted); }
+.replay-hero__vs { align-self: center; color: var(--color-text-muted); font-size: var(--text-sm); font-weight: 600; }
 @media (max-width: 479.98px) {
-  .replay-hero { grid-template-columns: minmax(0, 1fr); }
+  .replay-hero { grid-template-columns: minmax(0, 1fr); padding: var(--space-4); }
   .replay-hero__side:last-of-type { text-align: start; justify-items: start; }
   .replay-hero__side:last-of-type .replay-hero__team { justify-content: flex-start; }
 }
 
 /* Two tables: side by side only once both fit whole (each is about 370px at its narrowest), stacked otherwise. */
-.replay-faceoff { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr)); gap: var(--space-3); align-items: start; }
+.replay-faceoff { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr)); gap: var(--space-4); align-items: start; }
 .replay-faceoff > * { min-width: 0; }
 /* On a table cell `height` is a floor (a taller cell still grows its row): it keeps empty slots as tall as filled ones.
    Each row carries its own slot, so nothing relies on the two tables lining up. */
 .replay-faceoff__table tbody td { height: 3.4rem; }
-.replay-faceoff__bench td { background: var(--game-panel-2, var(--color-surface-2)); }
-.replay-faceoff__benchhead { padding-top: var(--space-3); text-align: start; }
-.replay-faceoff__benchhead .game-subhead { margin: 0; }
+.replay-faceoff__bench td { color: var(--color-text-muted); }
+.replay-faceoff__benchhead { padding-top: var(--space-4); text-align: start; }
+.replay-faceoff__benchhead .game-subhead { margin: 0; font-size: var(--text-sm); }
 .replay-faceoff__table tbody .replay-faceoff__total td { height: auto; }
-.replay-faceoff__total > * { font-weight: 750; }
-.replay-faceoff__total th { text-align: start; font-family: var(--font-display); font-size: var(--text-2xs); letter-spacing: 0.12em; text-transform: uppercase; }
+.replay-faceoff__total > * { background: var(--color-surface-2); font-weight: 650; }
+.replay-faceoff__total th { color: var(--color-text-muted); font-size: var(--text-xs); text-align: start; }
 
 .replay-scoreboard { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr));
-  gap: var(--space-2); }
-.replay-scoreboard__game { display: grid; gap: 2px; width: 100%; padding: var(--space-2) var(--space-3); border: 1px solid var(--game-line, var(--color-border));
-  border-radius: 0; background: var(--game-panel, var(--color-surface-1)); color: var(--color-text); font: inherit; font-size: var(--text-sm);
-  text-align: start; cursor: pointer; }
-.replay-scoreboard__game:hover { border-color: var(--color-accent); }
-.replay-scoreboard__game[aria-pressed='true'] { border-color: var(--color-accent); background: var(--color-accent-soft); }
-.replay-scoreboard__label { color: var(--color-text-subtle); font-size: var(--text-2xs); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+  gap: var(--space-3); }
+.replay-scoreboard__game { display: grid; gap: var(--space-1); width: 100%; padding: var(--space-3) var(--space-4); border: 1px solid var(--color-border);
+  border-radius: var(--radius-md); background: var(--color-surface-1); color: var(--color-text); font: inherit; font-size: var(--text-sm);
+  text-align: start; cursor: pointer; transition: border-color var(--duration-fast) var(--ease-out); }
+.replay-scoreboard__game:hover { border-color: var(--color-border-strong); }
+.replay-scoreboard__game[aria-pressed='true'] { border-color: var(--color-accent); box-shadow: inset 0 0 0 1px var(--color-accent); }
+.replay-scoreboard__label { color: var(--color-text-muted); font-size: var(--text-xs); font-weight: 600; }
 .replay-scoreboard__side { display: flex; justify-content: space-between; gap: var(--space-3); }
-.replay-scoreboard__side.is-winner { font-weight: 750; }
-.replay-scoreboard__score { color: var(--game-led, var(--color-text)); font-variant-numeric: tabular-nums; }
-.replay-scoreboard__side:not(.is-winner) .replay-scoreboard__score { color: inherit; }
+.replay-scoreboard__side.is-winner { font-weight: 700; }
+.replay-scoreboard__game:has(.is-winner) .replay-scoreboard__side:not(.is-winner) { color: var(--color-text-muted); }
+.replay-scoreboard__score { font-variant-numeric: tabular-nums; }
+.replay-scoreboard__score.game-score { color: inherit; font-size: var(--text-lg); }

@@ -6,7 +6,7 @@ import { json, mockFetch } from '../../test/mockFetch';
 import { META_ROUTE, renderWithProviders } from '../../test/render';
 import type { ReplayPlayerDetail } from '../../api/types';
 import { GAME_ID, MOSTERT, OPPONENT_TEAM_ID, playerDetail, tagged, teamRef, TUCKER, usage } from './fixtures';
-import { cardDetail } from './fixturesPlayers';
+import { advancedDetail, cardDetail } from './fixturesPlayers';
 import { PlayerDrawer } from './PlayerDrawer';
 
 const PLAYER = `/api/replay/games/${GAME_ID}/players/${MOSTERT.id}`;
@@ -19,7 +19,7 @@ function renderCard(detail: ReplayPlayerDetail) {
 const cellsOf = (row: HTMLElement) => within(row).getAllByRole('cell').map((cell) => cell.textContent);
 
 describe('PlayerDrawer card', () => {
-  it('shows the header, five stat tiles and his last 3 games', async () => {
+  it('shows the header and five stat tiles', async () => {
     renderCard(playerDetail(tagged(MOSTERT, 'Q'), { usage: usage(), news: { back: 6, text: 'Ankle: limited in practice, expected back week 6.' },
       owner: teamRef(OPPONENT_TEAM_ID), status: 'rostered' }));
     const dialog = within(await screen.findByRole('dialog', { name: 'Raheem Mostert details' }));
@@ -27,7 +27,6 @@ describe('PlayerDrawer card', () => {
     expect(dialog.getByText(/Rostered by Sunday Scaries/)).toBeInTheDocument();
     expect(dialog.getAllByRole('term').map((term) => term.textContent)).toEqual(['Games', 'Points', 'Per game', 'Rest of season', 'Trade value']);
     expect(dialog.getAllByRole('definition').map((value) => value.textContent)).toEqual(['4', '60.40', '15.10', '13.80', '31.5']);
-    expect(dialog.getByText('Last 3 games: 72% snaps, 6.3 targets (24% share), 0.7 carries a game')).toBeInTheDocument();
   });
 
   it('logs box scores for played weeks only, with @ for away games', async () => {
@@ -56,11 +55,35 @@ describe('PlayerDrawer card', () => {
       .toHaveTextContent('Matchup ratings: 4 weeks this season, blended with last season.');
   });
 
+  it('puts the game log and advanced stats in tabs that work with the arrow keys', async () => {
+    renderCard(advancedDetail(MOSTERT));
+    const log = await screen.findByRole('tab', { name: 'Game log' });
+    const advanced = screen.getByRole('tab', { name: 'Advanced' });
+    expect(screen.getByRole('tablist', { name: 'Raheem Mostert stats' })).toBeInTheDocument();
+    expect(log).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tabpanel', { name: 'Game log' })).toContainElement(screen.getByRole('table', { name: 'Raheem Mostert game log' }));
+    expect(screen.queryByRole('table', { name: 'Raheem Mostert usage by week' })).not.toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(log);
+    await user.keyboard('{ArrowRight}');
+    expect(advanced).toHaveFocus();
+    expect(advanced).toHaveAttribute('aria-selected', 'true');
+    expect(log).toHaveAttribute('tabindex', '-1');
+    expect(screen.getByRole('table', { name: 'Raheem Mostert usage by week' })).toBeInTheDocument();
+    expect(screen.queryByRole('table', { name: 'Raheem Mostert game log' })).not.toBeInTheDocument();
+    await user.keyboard('{ArrowRight}');
+    expect(log).toHaveFocus();
+    await user.keyboard('{End}');
+    expect(advanced).toHaveAttribute('aria-selected', 'true');
+  });
+
   it('leaves out Upcoming after the last week, and box columns for a kicker', async () => {
     renderCard({ ...playerDetail(TUCKER), upcoming: [] });
     const log = within(await screen.findByRole('table', { name: 'Justin Tucker game log' }));
     expect(log.getAllByRole('columnheader').map((header) => header.textContent)).toEqual(['Wk', 'Opp', 'Proj', 'Pts']);
     expect(screen.queryByRole('heading', { name: 'Upcoming' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();       // advanced stats are for skill players
   });
 
   it('says the season has not started during the draft', async () => {

@@ -1,6 +1,6 @@
 /** Players-screen and player-card fixtures (box lines, defense ratings, upcoming weeks) on top of fixtures.ts. */
 import type { ReplayBoxLine, ReplayDefenseRating, ReplayPlayerDetail, ReplayPlayerRef, ReplayUpcomingWeek } from '../../api/types';
-import { MOSTERT, playerDetail } from './fixtures';
+import { COLLINS, MOSTERT, playerDetail, usage } from './fixtures';
 
 /** A running back's game unless overridden. */
 export function boxLine(overrides: Partial<ReplayBoxLine> = {}): ReplayBoxLine {
@@ -32,5 +32,26 @@ export function cardDetail(player: ReplayPlayerRef = MOSTERT): ReplayPlayerDetai
       upcomingWeek(8, { opponent: 'KC', estimate: null, out_expected: true }),
     ],
     defense_basis: { weeks: 4, prior: true },
+  };
+}
+
+/** Five played games for the Advanced tab: week 3 a bye, week 7 still to play; snaps rising, target share falling. */
+const ADVANCED_GAMES: Record<number, [snap: number, share: number, targets: number, rec: number, recYds: number]> = {
+  1: [70, 0.25, 8, 6, 80], 2: [72, 0.25, 8, 5, 60], 4: [80, 0.2, 6, 4, 50], 5: [85, 0.18, 5, 4, 40], 6: [90, 0.16, 5, 3, 30],
+};
+
+export function advancedDetail(player: ReplayPlayerRef = COLLINS): ReplayPlayerDetail {
+  const detail = playerDetail(player);
+  const template = detail.weeks[0];
+  return {
+    ...detail,
+    weeks: [1, 2, 3, 4, 5, 6, 7].map((week) => {
+      const game = ADVANCED_GAMES[week];
+      return {
+        ...template, week, played: week < 7, bye: week === 3, opponent: week === 3 ? 'BYE' : 'DEN', points: game ? 10 + week : null,
+        usage: game ? usage({ games: 1, snap_pct: game[0], target_share: game[1], targets: game[2], carries: week === 1 ? 1 : 0 }) : null,
+        box: game ? boxLine({ carries: week === 1 ? 1 : 0, rush_yds: week === 1 ? 5 : 0, rush_td: 0, targets: game[2], rec: game[3], rec_yds: game[4] }) : null,
+      };
+    }),
   };
 }
