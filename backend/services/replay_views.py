@@ -19,7 +19,7 @@ Shared pieces
                     PlayerRow built for another week (team / matchup with ?week=) carries that week's tag. Always null
                     in the draft room. O, IR, PUP and SUS mean he does not play; O, IR and PUP may go on IR.
   PlayerRow  {player: PlayerRef, opponent, bye, out, projection, points, ros_ppg, value, rank, pos_rank, adp,
-              pre_rank, expert_rank, news: {back, text} | null, games, ppg, trade_locked}
+              pre_rank, expert_rank, news: {back, text} | null, games, ppg, trade_locked, defense}
       opponent      NFL team code, "BYE" or null (unknown team, or draft time)
       projection    that week's pre-game projection (0 on a bye or when out; at draft time the preseason rate)
       points        real points in that week; null when the week is unplayed or he did not play
@@ -34,6 +34,8 @@ Shared pieces
       out           no projection in his team's latest game week (this one, or the one before a bye), or an
                     O / IR / PUP / SUS tag this week
       trade_locked  traded in the last two weeks
+      defense       DefenseRating (services/replay_defense.py) of that week's opponent vs his position, as known
+                    before that week; null for K/DST, a bye, an unknown team or nothing known
   Side       TeamRef + {projected, points, record: Record}    projected: null for a week not reached yet
   Record     {wins, losses, ties, rank, points_for, points_against, place}    place: final finish, else null
   GameRow    {home: Side, away: Side, winner: team_id | null, label}
@@ -109,10 +111,13 @@ GET  .../draft?position=&search=&sort=&direction=&limit=&offset=
       roster: {position: PlayerRef[]}}     round / overall: the pick now on the clock, null when done
 GET  .../team?team_id=&week=      Team {team: TeamRef, week, played, manual_lineup, projected_total, actual_total,
                                         record: Record, results: [PlayerRow + {slot, starting}],
+                                        bench_total, bench_recorded,
                                         ir: [PlayerRow + {slot: "IR", starting: false}]}
       ir: the team's IR players, current week only (else []). results never holds an IR player.
-      slot: QB | RB | WR | TE | FLEX | K | DST | BN, starters first in slot order. A past week lists only what
-      was started (its bench is not kept). An empty starting slot has no row: compare with settings.starters.
+      slot: QB | RB | WR | TE | FLEX | K | DST | BN, starters first in slot order. A played week lists its bench as
+      saved: bench_recorded false (no BN rows, bench_total null) for weeks played before benches were saved.
+      bench_total: real points left on the bench, null unless played and recorded. An empty starting slot has
+      no row: compare with settings.starters.
 GET  .../matchup?week=&team_id=   {week, played, playoff, label, winner, home: Team, away: Team}
       without team_id: the user's game, else (a bye week) the week's first game; 422 when team_id has no game
 GET  .../scoreboard?week=         {week, played, playoff, results: GameRow[]}    any week of the season
@@ -127,19 +132,7 @@ GET  .../schedule?team_id=        {team: TeamRef, results: [{week, playoff, play
       idle          the week's games are known and the team has none (a playoff bye, or the odd team out of
                     a pool): opponent, opponent_points and result are null
 GET  .../activity?kind=&limit=&offset=     Page of Event, newest first; kind may list several ("add,drop,ir")
-GET  .../players?position=&search=&status=&sort=&limit=&offset=     Page of WireRow + {week}
-      WireRow = PlayerRow + {status: rostered | waivers | free_agent, owner: TeamRef | null, season_points,
-                last_points, usage: Usage | null}      season_points / last_points: real points in weeks already played
-      usage         his last 3 games BEFORE the current week (games 1-3); null for K, DST or before his first game
-      position: QB | RB | WR | TE | K | DST | FLEX. status: available (default) | waivers | free_agent |
-      rostered | all. sort: value (default) | projection | ros_ppg | adp | points | name.
-GET  .../players/{player_id}      {player: WireRow, weeks: [{week, played, team, opponent, bye, out, projection,
-                                   points, ros_ppg, value, rank, pos_rank, expert_rank, news,
-                                   injury: Injury | null,
-                                   usage: Usage | null}]}
-      injury: that week's tag (weeks 1..current). usage: that week's own game (games 1) once played, else null.
-      weeks from the first one he was in the pool (a late arrival has no rows before his first projection
-      or game) to the current one. points: null when the week is unplayed or he did not play.
+GET  .../players, .../players/{player_id}    the wire and a player's page: see services/replay_views_players.py
 GET  .../claims                   {phase, can_claim, priority, waiver_order: TeamRef[],
                                    results: [{id, order, add: PlayerRow, drop: PlayerRow | null, bid}],
                                    faab: {budget, left, teams: [{team: TeamRef, left}]} | null}
@@ -159,7 +152,8 @@ from dataclasses import dataclass
 from functools import cached_property
 
 from services import (
-    replay_draft, replay_ir, replay_personas, replay_season, replay_state as rs, replay_trades, replay_values as rv,
+    replay_defense, replay_draft, replay_ir, replay_personas, replay_season, replay_state as rs, replay_trades,
+    replay_values as rv,
 )
 from services.replay_pool import ALL_POSITIONS, SeasonData
 from services.replay_state import Event, Settings, State, Team, WeekResult
@@ -283,6 +277,7 @@ def player_row(game: Game, know: Knowledge, player_id: int) -> dict:
             "value": round(value.chart), "rank": value.rank, "pos_rank": value.pos_rank, "adp": value.adp,
             "pre_rank": value.pre_rank, "expert_rank": value.expert_rank, "news": news(value),
             "games": value.games, "ppg": value.ppg,
+            "defense": replay_defense.ratings(game.full_season.as_of(week)).rating(opponent, value.position),
             "trade_locked": week == game.state.week and rs.retrade_locked(game.state, player_id)}
 
 
@@ -313,15 +308,17 @@ def record(game: Game, team_id: int) -> dict:
 # ---------------- lineups and games ----------------
 
 def lineup_of(game: Game, owner: Team, week: int) -> tuple[Lineup, list[int]]:
-    """(starters by slot, bench) in a week: as played if it was, else what would start now. The bench is
-    only known for the current week."""
+    """(starters by slot, bench) in a week: as played if it was (the bench as saved, none in old saves), else
+    what would start now (a bench only for the current week)."""
     result = result_of(game.state, week)
     lineup = (result.starters[owner.id] if result is not None
               else replay_season.starters_for(game.state, game.settings, game.know_at(week), owner.id))
     started = {pid for ids in lineup.values() for pid in ids}
-    by_id = game.know.by_id
-    bench = sorted((pid for pid in owner.roster if pid not in started and week == game.state.week),
-                   key=lambda pid: (ALL_POSITIONS.index(by_id[pid].position), -by_id[pid].projection, pid))
+    # A played week's bench in that week's projection order; values known then (or now, for anyone not yet in the pool).
+    then, now = (game.know_at(week) if result is not None else game.know).by_id, game.know.by_id
+    held = result.bench.get(owner.id, ()) if result is not None else owner.roster if week == game.state.week else ()
+    bench = sorted((pid for pid in held if pid not in started),
+                   key=lambda pid: (ALL_POSITIONS.index((v := then.get(pid) or now[pid]).position), -v.projection, pid))
     return lineup, bench
 
 
@@ -373,12 +370,13 @@ def team(game: Game, team_id: int | None = None, week: int | None = None) -> dic
     rows = [{"slot": slot, "starting": True, **player_row(game, know, pid)}
             for slot, ids in lineup.items() for pid in ids]
     rows += [{"slot": BENCH, "starting": False, **player_row(game, know, pid)} for pid in bench]
-    injured = owner.ir if week == game.state.week else ()
+    injured, saved = owner.ir if week == game.state.week else (), result is not None and owner.id in result.bench
     return {"team": team_ref(game, owner), "week": week, "played": result is not None,
             "manual_lineup": owner.is_user and result is None and game.state.lineup is not None,
             "projected_total": rv.lineup_points(know, [pid for ids in lineup.values() for pid in ids]),
             "actual_total": result.scores[owner.id] if result else None, "record": record(game, owner.id),
-            "results": rows,
+            "results": rows, "bench_recorded": saved,
+            "bench_total": round(sum(game.data.points(pid, week) for pid in bench), 2) if saved else None,
             "ir": [{"slot": "IR", "starting": False, **player_row(game, know, pid)} for pid in injured]}
 
 

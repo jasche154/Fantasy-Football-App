@@ -987,10 +987,47 @@ league's seed, so reloading never re-rolls a pick or a trade. Response shapes ar
 of `services/replay_views.py` and mirrored in `frontend/src/api/types/replay.ts` and `replayLeague.ts`.
 
 The page is `frontend/src/pages/replay` (`#/replay` for the saved leagues and the new-league form,
-`#/replay?game=ID&view=team|matchup|players|trades|league` for a league). `GameHub` holds the game
+inside the dashboard; `#/play?game=ID&view=team|matchup|players|trades|league` for a league, full screen
+without the dashboard's bar or menu: an old `#/replay?game=` link is sent there). The game screen
+(`layout/GameShell.tsx` + `GameHub`) has a sticky scorebug (**Exit** back to `#/replay`, the league, the
+week, your score against your opponent, your record, a theme toggle and the one primary button; the
+score is the current week's projection, so once a week is played it shows the next week's, and the final
+is on the Matchup tab, until the season ends) and the five tabs (a bottom dock on phones). `GameHub` holds the game
 summary; every change goes through its `act`, which swaps in the new summary, reloads the open screen
 and lists what the action caused under "What just happened". The screens show only what the API sends,
-and the API sends no result of an unplayed week.
+and the API sends no result of an unplayed week. The look ("Game Night", `styles/game.css`, scoped to
+`.game`) is a stadium scoreboard: dark is a night game, light a day game; each fantasy team has a colour
+(`[data-team]`), never the only sign of who is who.
+- **Lineups:** on My Team, drag a player onto another spot (HTML5 drag and drop, desktop) or use **Move**
+  then a highlighted spot (touch and keyboard); both send the same lineup. Spots he can't go to are dimmed
+  while a move is in progress; Escape cancels. A played week lists its bench with real points and a
+  **Bench total** (weeks played before benches were saved say so instead).
+- **Matchup:** a hero band with both teams and their scores (the biggest numbers on screen), then both
+  lineups with their benches. Playing the week you are looking at keeps it on screen, after each week played
+  in a row (a week you picked yourself stays put): the final counts up (at once with reduced motion) and
+  is announced once to screen readers.
+- **Players:** pick the stat columns with **Stats**: Season (points, PPG, games, rest-of-season rate and
+  box-score totals), Last 4 avg (points and box score a game over his last 4 games, and snap share over
+  his last 3) or Week N (that week's pre-game projection and, once played, his points and box line). The
+  box-score columns follow the position tab (QB passing; RB carries and catches; WR/TE targets and
+  receiving; none for K/DST). Click a column header to sort on the server (again to flip); players
+  without the number come last either way.
+- **Player card:** his status, five stat tiles, a game log of played weeks (opponent, projection, points,
+  box line) and the weeks to come: opponent (@ when away), a **matchup chip** and an **Est.**, his
+  rest-of-season rate x the opponent's defense factor (not a site projection; none on a bye or while the
+  injury news has him out).
+- **Matchup ratings** (`services/replay_defense.py`): how many points each NFL defense gives up to a
+  position, solved from this season's played games only (`schedule_strength._solve`: opponent-adjusted,
+  shrunk toward average by games played), so a week's chip uses only the weeks before it. Last season's
+  factors, when that season is loaded, are blended in at half strength and fade as games arrive
+  (`factor = solved + (prior - 1) x 0.5 x 4 / (games + 4)`). Rank 1 gives up the most; the top quarter is
+  **Easy**, the bottom quarter **Tough**. No chip for K/DST, a bye, or week 1 without last season. A played
+  week's opponent in the game log is his real team's that week (a player traded mid-season shows his new
+  team's game).
+- **Standings** show each CPU's tendency under its name (never the hidden persona itself).
+- New modules: `replay_box.py` (a game's box line, totals and averages), `replay_defense.py` and
+  `replay_views_players.py` (the players list and player card; `replay_views_league` re-exports them).
+  Bad `sort`, `dir`, `stats` or `stat_week` values on the players endpoint answer 422.
 
 ## API reference
 
@@ -1063,8 +1100,8 @@ League parameters accepted by every valuation endpoint: `scoring=ppr|half|std`,
 | GET | `/api/replay/games/{id}/standings` | The table with seeds, the playoff weeks and byes, and the playoff bracket once known |
 | GET | `/api/replay/games/{id}/schedule?team_id=` | A team's opponents and results |
 | GET | `/api/replay/games/{id}/activity?kind=&limit=&offset=` | The league log (picks, moves, trades, results), newest first |
-| GET | `/api/replay/games/{id}/players?position=&search=&status=&sort=&limit=&offset=` | The player pool (default: unrostered) with status, projection, value, points so far and usage over his last 3 games |
-| GET | `/api/replay/games/{id}/players/{player_id}` | One player's weeks so far (projection, real points, usage, value by week; from the week he entered the pool) and who owns him |
+| GET | `/api/replay/games/{id}/players?position=&search=&status=&sort=&dir=&stats=&stat_week=&limit=&offset=` | The player pool (default: unrostered) with status, projection, value, points so far, usage over his last 3 games, the opponent's matchup rating and a stat line (`stats` `season`, `last4` or `week` with `stat_week` 1..current); `sort` any column (`value`, `projection`, `ros_ppg`, `adp`, `points`, `name`, `ppg`, `last`, `line_points`, `line_projection` or a box key such as `rec_yds`), `dir` `asc`/`desc`; 422 on a bad value |
+| GET | `/api/replay/games/{id}/players/{player_id}` | One player's weeks so far (projection, real points, box line, opponent and its rating, usage, value by week; from the week he entered the pool), the weeks to come with an estimate and rating, what the ratings rest on, and who owns him |
 | GET | `/api/replay/games/{id}/claims` | Your pending waiver claims in order (with their bids), the waiver priority, and in a FAAB league every team's budget left |
 | POST | `/api/replay/games/{id}/claims` | Body `{"add": id, "drop": id, "bid": 12}`; a waiver claim (before the week's waiver run). `bid` (whole dollars, 0 to your budget left) is required in a FAAB league and refused otherwise |
 | POST | `/api/replay/games/{id}/claims/{claim_id}/bid` | Body `{"bid": 20}`; change a pending claim's bid (FAAB, before the waiver run) |

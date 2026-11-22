@@ -6,6 +6,8 @@ import { navigate } from './router/useHashLocation';
 import { json, mockFetch } from './test/mockFetch';
 import { META_ROUTE, setHash } from './test/render';
 
+const user = () => userEvent.setup();
+
 function mockEverything() {
   return mockFetch([
     META_ROUTE,
@@ -52,18 +54,47 @@ describe('App routing and shell', () => {
     expect(await screen.findByRole('heading', { level: 1, name: 'Ask AI' })).toBeInTheDocument();
   });
 
-  it('moves focus to the heading when a replay league opens, though only the query changes', async () => {
+  it('plays a replay league full screen: no dashboard bar or menu, Exit goes back to the lobby', async () => {
     mockEverything();
     setHash('#/replay');
     render(<App />);
-    act(() => navigate('/replay', { game: 7 }));
-    // The home has the same heading text, so wait for something only the league shows (here: its load error).
-    const back = await screen.findByRole('link', { name: 'Back to your leagues' });
+    expect(screen.getByRole('navigation', { name: 'Main' })).toBeInTheDocument();
+    act(() => navigate('/play', { game: 7 }));
+    const exit = await screen.findByRole('link', { name: 'Exit to your leagues' });
+    expect(exit).toHaveAttribute('href', '#/replay');
+    expect(document.querySelector('.topbar')).toBeNull();
+    expect(document.querySelector('.main-nav')).toBeNull();
+    expect(screen.queryByRole('navigation', { name: 'Main' })).not.toBeInTheDocument();
+    expect(screen.getByRole('main')).toBeInTheDocument();
+    // Arriving from the dashboard, focus lands on the game's heading.
     expect(screen.getByRole('heading', { level: 1, name: 'Replay League' })).toHaveFocus();
-    act(() => back.focus());
-    act(() => navigate('/replay', { game: 7, view: 'league' }));        // a tab change leaves focus where it is
-    await waitFor(() => expect(window.location.hash).toContain('view=league'));
-    expect(back).toHaveFocus();
+    await user().click(exit);
+    expect(await screen.findByRole('navigation', { name: 'Main' })).toBeInTheDocument();
+    // Leaving the game, focus lands on the lobby's heading.
+    expect(screen.getByRole('heading', { level: 1, name: 'Replay League' })).toHaveFocus();
+  });
+
+  it('sends an old #/replay?game= link to #/play with the same query', async () => {
+    mockEverything();
+    setHash('#/replay?game=3&view=trades');
+    render(<App />);
+    await waitFor(() => expect(window.location.hash).toBe('#/play?game=3&view=trades'));
+    expect(await screen.findByRole('link', { name: 'Exit to your leagues' })).toBeInTheDocument();
+  });
+
+  it('moves focus to the new screen on a tab change, and to the heading for another league', async () => {
+    mockEverything();
+    setHash('#/play?game=7');
+    render(<App />);
+    await screen.findByRole('link', { name: 'Back to your leagues' });     // the league fails to load: the shell still works
+    const skip = screen.getByRole('link', { name: 'Skip to the game' });
+    await user().click(skip);
+    expect(screen.getByRole('main')).toHaveFocus();                          // no screen on show, so main itself
+    act(() => skip.focus());
+    act(() => navigate('/play', { game: 7, view: 'bogus' }));                 // an unknown view is still the team view
+    expect(skip).toHaveFocus();
+    act(() => navigate('/play', { game: 8 }));
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Replay League' })).toHaveFocus());
   });
 
   it('shows a not-found page for unknown routes', () => {

@@ -6,8 +6,9 @@ import { json, mockFetch, type MockReply, type MockRoute } from '../../test/mock
 import { META_ROUTE, renderWithProviders } from '../../test/render';
 import {
   actionResult, COLLINS, COOK, GAME_ID, HILL, MAHOMES, MOSTERT, nextAction, OLAVE, OPPONENT_TEAM_ID, playerRow, rosterRow,
-  summary, team, teamRef, TEAMS, usage, USER_TEAM_ID, useTestHub, viewProps, wireRow,
+  statLine, summary, team, teamRef, TEAMS, usage, USER_TEAM_ID, useTestHub, viewProps, wireRow,
 } from './fixtures';
+import { boxLine, defense } from './fixturesPlayers';
 import { PlayersView } from './PlayersView';
 
 const GAME_PATH = `/api/replay/games/${GAME_ID}`;
@@ -78,31 +79,127 @@ describe('PlayersView table', () => {
 
     const hill = await row('Tyreek Hill');
     expect(hill.getByText('Sunday Scaries')).toBeInTheDocument();
-    expect(hill.getByRole('link', { name: 'Trade for Tyreek Hill' })).toHaveAttribute('href', '#/replay?game=7&view=trades&with=9&want=104');
+    expect(hill.getByRole('link', { name: 'Trade for Tyreek Hill' })).toHaveAttribute('href', '#/play?game=7&view=trades&with=9&want=104');
     expect((await row('Patrick Mahomes')).getByText('Your player')).toBeInTheDocument();
 
-    expect(Object.fromEntries(lastQuery())).toEqual({ status: 'available', sort: 'value', limit: '25', offset: '0' });
+    expect(Object.fromEntries(lastQuery())).toEqual({ status: 'available', sort: 'value', dir: 'desc', stats: 'season', limit: '25', offset: '0' });
     expect(screen.getByText(/Week 5’s waivers have run, so every player still unrostered is a free agent/)).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Waiver claims' })).not.toBeInTheDocument();
     expect(api.callsTo(CLAIMS)).toHaveLength(0);
   });
 
   it('never shows points that were not scored', async () => {
-    renderPlayers(summary(), [{ path: PLAYERS, reply: json(wire([wireRow(MOSTERT, { last_points: null, games: 0, ppg: 0, season_points: 0 })])) }]);
+    renderPlayers(summary(), [{ path: PLAYERS, reply: json(wire([wireRow(MOSTERT, { games: 0, ppg: 0, line: statLine({ games: 0, points: 0 }) })])) }]);
     const cells = (await row('Raheem Mostert')).getAllByRole('cell').map((cell) => cell.textContent);
-    expect(cells.slice(2, 9)).toEqual(['DEN', '14.20', '—', '0.00', '—', '13.80', '31.5']);
+    // Opp, Pts, PPG, GP, ROS, five box columns (no box yet), Value.
+    expect(cells.slice(2, 13)).toEqual(['DEN', '0.00', '—', '0', '13.80', '—', '—', '—', '—', '—', '31.5']);
   });
 
-  it('shows each player\'s usage over his last 3 games, and a dash where there is none', async () => {
-    renderPlayers(summary(), [{ path: PLAYERS, reply: json(wire([
-      wireRow(MOSTERT, { usage: usage() }), wireRow(COLLINS, { usage: usage({ snap_pct: null, target_share: null }) }), wireRow(HILL),
+  it('shows the box columns that fit the position, and the matchup in words as well as colour', async () => {
+    const { user } = renderPlayers(summary(), [{ path: PLAYERS, reply: json(wire([
+      wireRow(MOSTERT, { line: statLine({ box: boxLine() }), defense: defense('easy', 3) }), wireRow(COLLINS, { defense: defense('tough', 29) }),
     ])) }]);
-    const usageCells = async (name: string) => (await row(name)).getAllByRole('cell').slice(9, 13).map((cell) => cell.textContent);
-    expect(await usageCells('Raheem Mostert')).toEqual(['72%', '6.3', '24%', '0.7']);
-    expect(await usageCells('Nico Collins')).toEqual(['—', '6.3', '—', '0.7']);            // no snap counts that season
-    expect(await usageCells('Tyreek Hill')).toEqual(['—', '—', '—', '—']);
-    expect(screen.getByRole('columnheader', { name: 'Snap %' }).querySelector('abbr')).toHaveAttribute('title', 'Share of offensive snaps, last 3 games');
-    expect(screen.getByTitle('Carries per game, last 3 games')).toHaveTextContent('Car');
+    const mostert = await row('Raheem Mostert');
+    expect(mostert.getAllByRole('cell').slice(7, 12).map((cell) => cell.textContent)).toEqual(['15', '72', '4', '3', '21']);
+    expect(mostert.getByText('Easy · 3rd')).toHaveClass('game-chip--easy');
+    expect((await row('Nico Collins')).getByText('Tough · 29th')).toHaveClass('game-chip--tough');
+    expect(screen.getByRole('columnheader', { name: /RuYd/ })).toHaveAttribute('title', 'Rushing yards, this season');
+
+    await user.click(within(screen.getByRole('group', { name: 'Filter by position' })).getByRole('button', { name: 'QB' }));
+    expect(await screen.findByRole('columnheader', { name: /PaYd/ })).toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: /Car/ })).not.toBeInTheDocument();
+  });
+
+  it('keeps the old headers over the old rows until the new tab rows arrive', async () => {
+    let finish: (reply: MockReply) => void = () => {};
+    const { user } = renderPlayers(summary(), [{
+      path: PLAYERS,
+      reply: ({ url }) => (url.searchParams.get('position') === 'QB'
+        ? new Promise<MockReply>((resolve) => { finish = resolve; })
+        : json(wire([wireRow(MOSTERT)]))),
+    }]);
+    await row('Raheem Mostert');
+    await user.click(within(screen.getByRole('group', { name: 'Filter by position' })).getByRole('button', { name: 'QB' }));
+    expect(screen.getByRole('columnheader', { name: /RuYd/ })).toBeInTheDocument();      // still the ALL page's rows
+    expect(screen.queryByRole('columnheader', { name: /PaYd/ })).not.toBeInTheDocument();
+    finish(json(wire([wireRow(MAHOMES)])));
+    expect(await screen.findByRole('columnheader', { name: /PaYd/ })).toBeInTheDocument();
+    expect(await row('Patrick Mahomes')).toBeTruthy();
+  });
+
+  it('drops a sort whose column went away, so going back does not re-sort', async () => {
+    const { user, lastQuery } = renderPlayers(summary());
+    const tabs = within(await screen.findByRole('group', { name: 'Filter by position' }));
+    await user.click(tabs.getByRole('button', { name: 'WR' }));
+    await user.click(await screen.findByRole('button', { name: /^Tgt/ }));
+    await waitFor(() => expect(lastQuery().get('sort')).toBe('targets'));
+    await user.click(tabs.getByRole('button', { name: 'QB' }));
+    await waitFor(() => expect(lastQuery().get('position')).toBe('QB'));
+    expect(lastQuery().get('sort')).toBe('value');
+    await user.click(tabs.getByRole('button', { name: 'WR' }));
+    await waitFor(() => expect(lastQuery().get('position')).toBe('WR'));
+    expect(lastQuery().get('sort')).toBe('value');
+  });
+
+  it('shows injury news even for a player without an injury tag', async () => {
+    renderPlayers(summary(), [{ path: PLAYERS, reply: json(wire([wireRow(MOSTERT, { news: { back: 7, text: 'Expected back in week 7.' } })])) }]);
+    expect((await row('Raheem Mostert')).getByText('Expected back in week 7.')).toBeInTheDocument();
+  });
+
+  it('sorts on the server when a header is clicked, and a second click flips it', async () => {
+    const { user, lastQuery } = renderPlayers(summary(), [{ path: PLAYERS, reply: json(wire([wireRow(MOSTERT)], 60)) }]);
+    await user.click(await screen.findByRole('button', { name: 'Next' }));
+    await waitFor(() => expect(lastQuery().get('offset')).toBe('25'));
+    expect(screen.getByRole('columnheader', { name: /Value/ })).toHaveAttribute('aria-sort', 'descending');
+
+    await user.click(screen.getByRole('button', { name: /^RuYd/ }));
+    await waitFor(() => expect(lastQuery().get('sort')).toBe('rush_yds'));
+    expect(lastQuery().get('dir')).toBe('desc');
+    expect(lastQuery().get('offset')).toBe('0');                       // a new sort starts on page 1
+    expect(screen.getByRole('columnheader', { name: /RuYd/ })).toHaveAttribute('aria-sort', 'descending');
+    expect(screen.getByRole('columnheader', { name: /Value/ })).toHaveAttribute('aria-sort', 'none');
+
+    await user.click(screen.getByRole('button', { name: /^RuYd/ }));
+    await waitFor(() => expect(lastQuery().get('dir')).toBe('asc'));
+    expect(screen.getByRole('columnheader', { name: /RuYd/ })).toHaveAttribute('aria-sort', 'ascending');
+
+    await user.click(screen.getByRole('button', { name: /^Player/ }));
+    await waitFor(() => expect(lastQuery().get('sort')).toBe('name'));
+    expect(lastQuery().get('dir')).toBe('asc');
+    expect(screen.queryByLabelText('Sort by')).not.toBeInTheDocument();
+  });
+
+  it('switches the stat columns and the request with the Stats picker', async () => {
+    const { user, lastQuery } = renderPlayers(summary(), [{
+      path: PLAYERS,
+      reply: ({ url }) => json(wire([wireRow(MOSTERT, {
+        usage: usage(),
+        line: url.searchParams.get('stats') === 'week'
+          ? statLine({ span: 'week', week: 5, points: null, projection: 14.2, box: null })
+          : statLine({ span: 'last4', points: 15.1, box: boxLine({ rush_yds: 64.25 }) }),
+      })])),
+    }]);
+    const picker = await screen.findByLabelText('Stats');
+    expect(within(picker).getAllByRole('option').map((option) => option.textContent)).toEqual(
+      ['Season totals', 'Last 4 games (avg)', 'Week 1', 'Week 2', 'Week 3', 'Week 4', 'Week 5 (proj)']);
+
+    await user.click(await screen.findByRole('button', { name: /^Pts/ }));
+    await waitFor(() => expect(lastQuery().get('sort')).toBe('line_points'));
+    await user.selectOptions(picker, 'Last 4 games (avg)');
+    await waitFor(() => expect(lastQuery().get('stats')).toBe('last4'));
+    expect(lastQuery().get('sort')).toBe('line_points');               // Pts/G is the same server column
+    expect(await screen.findByRole('columnheader', { name: /Pts\/G/ })).toHaveAttribute('aria-sort', 'descending');
+    const last4 = await row('Raheem Mostert');
+    expect(last4.getAllByRole('cell').slice(3, 5).map((cell) => cell.textContent)).toEqual(['15.10', '72%']);
+    expect(last4.getByText('64.3')).toBeInTheDocument();
+
+    await user.selectOptions(picker, 'Week 5 (proj)');
+    await waitFor(() => expect(lastQuery().get('stat_week')).toBe('5'));
+    expect(lastQuery().get('stats')).toBe('week');
+    await screen.findByRole('columnheader', { name: /Proj/ });
+    // Week 5 hasn't been played: its projection, and a dash for points.
+    await waitFor(async () => expect((await row('Raheem Mostert')).getAllByRole('cell').slice(3, 5).map((cell) => cell.textContent))
+      .toEqual(['14.20', '—']));
   });
 
   it('sends the filters, the debounced search and the page to the API', async () => {
@@ -117,10 +214,9 @@ describe('PlayersView table', () => {
     expect(screen.getByRole('button', { name: 'FLEX' })).toHaveAttribute('aria-pressed', 'true');
 
     await user.selectOptions(screen.getByLabelText('Show'), 'Rostered');
-    await user.selectOptions(screen.getByLabelText('Sort by'), 'Season points');
     await user.type(screen.getByLabelText('Search'), ' mos');
     await waitFor(() => expect(lastQuery().get('search')).toBe('mos'));
-    expect(Object.fromEntries(lastQuery())).toEqual({ position: 'FLEX', search: 'mos', status: 'rostered', sort: 'points', limit: '25', offset: '0' });
+    expect(Object.fromEntries(lastQuery())).toEqual({ position: 'FLEX', search: 'mos', status: 'rostered', sort: 'value', dir: 'desc', stats: 'season', limit: '25', offset: '0' });
   });
 
   it('caps the search at the backend\'s 60 characters', async () => {
@@ -161,8 +257,8 @@ describe('PlayersView table', () => {
     expect(api.callsTo(TEAM)).toHaveLength(0);
   });
 
-  it('offers no trade link once the trade deadline has passed', async () => {
-    renderPlayers(summary({ week: 12 }));
+  it('offers no trade link once trades are closed', async () => {
+    renderPlayers(summary({ week: 12, trades_open: false }));
     expect((await row('Tyreek Hill')).getByText('Sunday Scaries')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /Trade/ })).not.toBeInTheDocument();
     expect(await ready('Add Raheem Mostert')).toBeInTheDocument();

@@ -2,12 +2,13 @@ import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { ReplayMatchup, ReplayScoreboard } from '../../api/types';
-import { json, mockFetch, type MockRoute } from '../../test/mockFetch';
+import { json, mockFetch, type MockRequest, type MockRoute } from '../../test/mockFetch';
 import { AppProviders } from '../../App';
 import { META_ROUTE, renderWithProviders } from '../../test/render';
 import {
   COLLINS, GAME_ID, KELCE, MAHOMES, MOSTERT, OPPONENT_TEAM_ID, record, rosterRow, side, summary, team, teamRef, USER_TEAM_ID, viewProps,
 } from './fixtures';
+import { playedTeam } from './fixturesTeam';
 import { MatchupView } from './MatchupView';
 import type { ReplayViewProps } from './shared';
 
@@ -44,12 +45,13 @@ describe('MatchupView', () => {
     expect(api.callsTo(MATCHUP_PATH)[0].url.search).toBe('?week=5');
     expect(mine).toHaveAccessibleName('Your Team lineup, week 5');
     expect(theirs).toHaveAccessibleName('Sunday Scaries lineup, week 5');
-    expect(faceOff()).toHaveTextContent('Regular season · Week 5 · Not played yet');
-    expect(faceOff()).toHaveTextContent('Your Team (you)3-1 · 2nd118.40Projected');
-    expect(faceOff()).toHaveTextContent('Sunday Scaries2-2 · 6th104.75Projected');
+    expect(faceOff()).toHaveTextContent('Regular season · Week 5 · Projected');
+    // The score is read once (label and value) and drawn once (the digits), hence the number twice.
+    expect(faceOff()).toHaveTextContent('Your Team (you)3-1 · 2ndYour score: 118.40118.40Projected');
+    expect(faceOff()).toHaveTextContent('Sunday Scaries2-2 · 6thSunday Scaries score: 104.75104.75Projected');
     expect(within(faceOff()).queryByText('Winner')).not.toBeInTheDocument();
 
-    const headers = (table: HTMLElement) => within(table).getAllByRole('columnheader').map((cell) => cell.textContent);
+    const headers = (table: HTMLElement) => within(within(table).getAllByRole('row')[0]).getAllByRole('columnheader').map((cell) => cell.textContent);
     // Same column order on both sides, so a stacked phone layout reads the same way twice.
     expect(headers(mine)).toEqual(['Slot', 'Player', 'Proj', 'Pts']);
     expect(headers(theirs)).toEqual(['Slot', 'Player', 'Proj', 'Pts']);
@@ -59,8 +61,11 @@ describe('MatchupView', () => {
     expect(cells(mine, 1).slice(2)).toEqual(['21.30', '—']);
     expect(cells(theirs, 1)).toEqual(['QB', 'Empty', '—', '—']);                        // an empty slot still gets its row
     expect(cells(theirs, 2)[0]).toBe('RB');
-    expect(within(mine).getAllByRole('row')).toHaveLength(12);                         // header, 9 starters, 2 on the bench
-    expect(within(theirs).getAllByRole('row')).toHaveLength(11);
+    expect(within(mine).getAllByRole('row')).toHaveLength(13);                         // header, 9 starters, Bench, 2 on the bench
+    expect(within(theirs).getAllByRole('row')).toHaveLength(12);
+    expect(within(mine).getByRole('rowheader', { name: 'Bench' })).toBeInTheDocument();
+    expect(within(mine).queryByRole('rowheader', { name: 'Bench total' })).not.toBeInTheDocument();     // nothing scored yet
+    expect(screen.queryByText(/bench wasn.t saved/)).not.toBeInTheDocument();
 
     await user.click(within(mine).getByRole('button', { name: 'Patrick Mahomes' }));
     expect(openPlayer).toHaveBeenCalledWith(MAHOMES.id);
@@ -73,10 +78,31 @@ describe('MatchupView', () => {
     renderMatchup([{ path: MATCHUP_PATH, reply: json(played) }]);
     await screen.findAllByRole('table');
     expect(faceOff()).toHaveTextContent('Semi-final · Week 5 · Final');
-    expect(faceOff()).toHaveTextContent('Your Team (you)Winner3-1 · 2nd121.46Projected 118.40');
-    expect(faceOff()).toHaveTextContent('Sunday Scaries2-2 · 6th98.20Projected 104.75');
+    expect(faceOff()).toHaveTextContent('Your Team (you)Winner3-1 · 2ndYour score: 121.46121.46Projected 118.40');
+    expect(faceOff()).toHaveTextContent('Sunday Scaries2-2 · 6thSunday Scaries score: 98.2098.20Projected 104.75');
     expect(within(faceOff()).getAllByText('Winner')).toHaveLength(1);
     expect(screen.getByRole('row', { name: /Travis Kelce/ })).toHaveTextContent('17.40');
+  });
+
+  it("shows a played week's bench with its real points and total", async () => {
+    const home = playedTeam({ team: teamRef(OPPONENT_TEAM_ID), results: [rosterRow(MOSTERT, 'RB', { points: 9.9 }), rosterRow(COLLINS, 'BN', { points: 21.3 })],
+      bench_total: 21.3 });
+    renderMatchup([{ path: MATCHUP_PATH, reply: json(matchup({ week: 3, played: true, winner: USER_TEAM_ID, home, away: playedTeam() })) }]);
+    const [mine, theirs] = await screen.findAllByRole('table');
+    expect(within(mine).getByRole('row', { name: /James Cook/ })).toHaveTextContent('14.20');
+    expect(within(mine).getByRole('row', { name: /Chris Olave/ })).toHaveTextContent('4.80');
+    expect(within(mine).getByRole('row', { name: /Bench total/ })).toHaveTextContent('Bench total19.00');
+    expect(within(theirs).getByRole('row', { name: /Nico Collins/ })).toHaveTextContent('21.30');
+    expect(within(theirs).getByRole('row', { name: /Bench total/ })).toHaveTextContent('21.30');
+    expect(screen.queryByText(/bench wasn.t saved/)).not.toBeInTheDocument();
+  });
+
+  it('says the bench was not saved for a week played before the update', async () => {
+    const old = (side: ReplayMatchup['home']) => ({ ...side, results: side.results.filter((row) => row.starting), bench_total: null, bench_recorded: false });
+    renderMatchup([{ path: MATCHUP_PATH, reply: json(matchup({ week: 3, played: true, home: old(playedTeam({ team: teamRef(OPPONENT_TEAM_ID) })), away: old(playedTeam()) })) }]);
+    const [mine] = await screen.findAllByRole('table');
+    expect(within(mine).queryByRole('columnheader', { name: 'Bench' })).not.toBeInTheDocument();
+    expect(screen.getByText('The bench wasn’t saved for weeks played before this update.')).toBeInTheDocument();
   });
 
   it('calls a played game without a winner a tie', async () => {
@@ -107,7 +133,7 @@ describe('MatchupView', () => {
     expect(api.callsTo(MATCHUP_PATH).at(-1)!.url.search).toBe(`?week=5&team_id=${OPPONENT_TEAM_ID}`);
   });
 
-  it('goes back to the user\'s game when the week moves on', async () => {
+  it('stays on the week just played, back on the user\'s game, when the week moves on', async () => {
     const api = mockFetch([META_ROUTE, { path: MATCHUP_PATH, reply: json(matchup()) }, { path: SCOREBOARD_PATH, reply: json(scoreboard()) }]);
     const user = userEvent.setup();
     const { rerender } = renderWithProviders(<MatchupView {...viewProps()} />);
@@ -115,8 +141,57 @@ describe('MatchupView', () => {
     await user.click(within(board).getAllByRole('button')[1]);
     await vi.waitFor(() => expect(api.callsTo(MATCHUP_PATH).at(-1)!.url.search).toBe('?week=5&team_id=1'));
 
-    rerender(<AppProviders><MatchupView {...viewProps({ game: summary({ week: 6 }) })} /></AppProviders>);
-    await vi.waitFor(() => expect(api.callsTo(MATCHUP_PATH).at(-1)!.url.search).toBe('?week=6'));
+    rerender(<AppProviders><MatchupView {...viewProps({ game: summary({ week: 6 }), version: 2 })} /></AppProviders>);
+    await vi.waitFor(() => expect(api.callsTo(MATCHUP_PATH).at(-1)!.url.search).toBe('?week=5'));
+    expect(screen.getByLabelText('Week')).toHaveValue('5');
+    await user.selectOptions(screen.getByLabelText('Week'), '6');
+    expect(api.callsTo(MATCHUP_PATH).at(-1)!.url.search).toBe('?week=6');
+  });
+
+  it('counts the final up and announces it once when the week on screen is played', async () => {
+    let isPlayed = false;
+    const final = () => matchup({ played: true, winner: USER_TEAM_ID, away: team({ actual_total: 121.46 }),
+      home: { ...matchup().home, actual_total: 98.2 } });
+    mockFetch([META_ROUTE, { path: MATCHUP_PATH, reply: () => json(isPlayed ? final() : matchup()) },
+      { path: SCOREBOARD_PATH, reply: json(scoreboard()) }]);
+    const { rerender } = renderWithProviders(<MatchupView {...viewProps()} />);
+    await screen.findAllByRole('table');
+    const live = faceOff().querySelector('[aria-live="polite"]');
+    expect(live).toHaveTextContent('');
+
+    isPlayed = true;
+    rerender(<AppProviders><MatchupView {...viewProps({ game: summary({ week: 6 }), version: 2 })} /></AppProviders>);
+    await vi.waitFor(() => expect(live).toHaveTextContent('Final: Your Team 121.46, Sunday Scaries 98.20.'));
+    expect(faceOff()).toHaveTextContent('Regular season · Week 5 · Final');
+  });
+
+  it('follows each played week in a row to its final, but keeps a week the user picked', async () => {
+    let current = 5;
+    const forWeek = (request: MockRequest) => {
+      const week = Number(request.url.searchParams.get('week'));
+      return json(week < current
+        ? matchup({ week, played: true, winner: USER_TEAM_ID, away: team({ actual_total: 100 + week }), home: { ...matchup().home, actual_total: 90 } })
+        : matchup({ week }));
+    };
+    const api = mockFetch([META_ROUTE, { path: MATCHUP_PATH, reply: forWeek }, { path: SCOREBOARD_PATH, reply: json(scoreboard()) }]);
+    const { rerender } = renderWithProviders(<MatchupView {...viewProps()} />);
+    await screen.findAllByRole('table');
+    const play = () => {
+      current += 1;
+      rerender(<AppProviders><MatchupView {...viewProps({ game: summary({ week: current }), version: current })} /></AppProviders>);
+    };
+
+    play();
+    await vi.waitFor(() => expect(faceOff()).toHaveTextContent('Week 5 · Final'));
+    play();
+    await vi.waitFor(() => expect(faceOff()).toHaveTextContent('Week 6 · Final'));
+    expect(faceOff()).toHaveTextContent('Your score: 106.00');
+    expect(screen.getByLabelText('Week')).toHaveValue('6');
+
+    await userEvent.setup().selectOptions(screen.getByLabelText('Week'), '3');
+    play();
+    await vi.waitFor(() => expect(api.callsTo(MATCHUP_PATH).at(-1)!.url.search).toBe('?week=3'));
+    expect(screen.getByLabelText('Week')).toHaveValue('3');
   });
 
   it('shows final scores and the winner on a played scoreboard', async () => {
@@ -145,7 +220,7 @@ describe('MatchupView', () => {
     const quarter = matchup({ playoff: true, label: 'Quarter-final', home: team({ team: teamRef(3) }), away: team({ team: teamRef(6) }) });
     renderMatchup([{ path: MATCHUP_PATH, reply: json(quarter) }]);
     expect(await screen.findByText(/No game this week for your team\./)).toBeInTheDocument();
-    expect(faceOff()).toHaveTextContent('Quarter-final · Week 5 · Not played yet');
+    expect(faceOff()).toHaveTextContent('Quarter-final · Week 5 · Projected');
   });
 
   it("does not call another week's game the user's bye while this week loads", async () => {

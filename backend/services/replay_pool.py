@@ -7,7 +7,8 @@ point-in-time friendly: `actual` holds what really happened (used to score a wee
 whole season's pool; `as_of(week)` narrows it to those known by then (an ADP, a projection or a game), so
 a player who only turns up in week 9 is not on the draft board or the wire before week 9. `injuries` holds
 each week's tag (that week's final report or roster status, known before its games); none at draft time.
-`usage` holds each skill game's snap share, targets, target share and carries (a result, like `actual`).
+`usage` holds each skill game's snap share, targets, target share and carries, `box` its box score (results,
+like `actual`); `defense_prior` is last season's defense factors (replay_defense.load_prior, not a result).
 `expert_ranks` / `expert_age` are FantasyPros position ranks as of each week (services/replay_experts.py) and
 `returns` says when each hard-tag streak really ended (`hard_tag_returns`).
 """
@@ -28,10 +29,11 @@ from database.models import (
     TeamGameStats,
 )
 from integrations.adp_history import TWO_WAY
-from services import kdst_model
+from services import kdst_model, replay_box, replay_defense
 from services.build_locks import key_lock
 from services.kdst_rankings import DST_PREFIX
 from services.projections import REGULAR_SEASON, load_game_lines
+from services.replay_box import BoxLine
 from services.schedule_strength import Schedule, load_schedule
 from services.scoring import scoring_for
 from services.valuation import NoDataError
@@ -102,6 +104,8 @@ class SeasonData:
     # (player, first week of a hard-tag streak) -> first later week with a real game, 0 = never. The one
     # sanctioned leak: replay_news turns it into a noisy report.
     returns: Mapping[PlayerWeek, int] = field(default_factory=lambda: MappingProxyType({}))
+    box: Mapping[PlayerWeek, BoxLine] = field(default_factory=lambda: MappingProxyType({}))     # skill games only
+    defense_prior: Mapping[tuple[str, str], float] = field(default_factory=lambda: MappingProxyType({}))  # last season
 
     def as_of(self, week: int) -> "SeasonData":
         """A copy holding only what was known before `week` was played (0 = draft time); cached.
@@ -163,6 +167,7 @@ def _as_of(data: SeasonData, week: int) -> SeasonData:
         injuries=MappingProxyType({key: v for key, v in data.injuries.items()
                                    if key[1] <= week and key[0] in players}),
         usage=MappingProxyType({key: v for key, v in data.usage.items() if key[1] < week and key[0] in players}),
+        box=MappingProxyType({key: v for key, v in data.box.items() if key[1] < week and key[0] in players}),
         expert_ranks=MappingProxyType({key: v for key, v in data.expert_ranks.items() if key[1] <= week}),
         expert_age=MappingProxyType({w: v for w, v in data.expert_age.items() if w <= week}),
         returns=MappingProxyType({key: v for key, v in data.returns.items() if key[1] <= week}))
@@ -179,6 +184,7 @@ def clear_cache() -> None:
     with _cache_lock:
         _cache.clear()
     _as_of.cache_clear()
+    replay_defense.ratings.cache_clear()
 
 
 def load_season_data(session: Session, season: int, scoring: str) -> SeasonData:
@@ -265,8 +271,8 @@ def _two_way(session: Session) -> dict[int, tuple[str, str]]:
 
 def _skill_games(session: Session, season: int, scoring: str, schedule: Schedule, last_week: int,
                  two_way: Mapping[int, tuple[str, str]]) -> tuple[dict[PlayerWeek, float], dict[PlayerWeek, str],
-                                                                  dict[PlayerWeek, Usage]]:
-    actual, teams, usage = {}, {}, {}
+                                                                  dict[PlayerWeek, Usage], dict[PlayerWeek, BoxLine]]:
+    actual, teams, usage, box = {}, {}, {}, {}
     lines = load_game_lines(session, season, scoring_for(scoring))
     if two_way:                                       # the skill-position load leaves them out
         lines.update(load_game_lines(session, season, scoring_for(scoring), list(two_way),
@@ -278,10 +284,11 @@ def _skill_games(session: Session, season: int, scoring: str, schedule: Schedule
             key = (player_id, game.week)
             actual[key] = game.fantasy_points
             usage[key] = Usage(game.snap_pct, game.targets, game.target_share, game.carries)
+            box[key] = replay_box.line(game)
             team = schedule.opponent(game.opponent, game.week)      # the opponent's opponent that week
             if team:
                 teams[key] = team
-    return actual, teams, usage
+    return actual, teams, usage, box
 
 
 def _kicker_games(session: Session, season: int,
@@ -396,7 +403,7 @@ def _build(session: Session, season: int, scoring: str) -> SeasonData:
     schedule = replace(loaded, games=tuple(replace(g, home_score=None, away_score=None) for g in loaded.games))
     last_week = max(game.week for game in schedule.games)
     two_way = _two_way(session)
-    skill_points, skill_teams, usage = _skill_games(session, season, scoring, schedule, last_week, two_way)
+    skill_points, skill_teams, usage, box = _skill_games(session, season, scoring, schedule, last_week, two_way)
     parts = ((skill_points, skill_teams),
              _kicker_games(session, season, last_week),
              _defense_games(session, season, last_week, schedule, _defense_ids(session)))
@@ -405,8 +412,8 @@ def _build(session: Session, season: int, scoring: str) -> SeasonData:
     projected = _projections(session, season, scoring, last_week)
     players = _pool(session, season, {pid for pid, _ in (*actual, *projected)}, two_way,
                     {team for team, _ in schedule.opponents})
-    actual, projected, teams, usage = ({key: value for key, value in table.items() if key[0] in players}
-                                       for table in (actual, projected, teams, usage))
+    actual, projected, teams, usage, box = ({key: value for key, value in table.items() if key[0] in players}
+                                            for table in (actual, projected, teams, usage, box))
     injuries = {(row.player_id, row.week): Injury(row.tag, row.practice, row.injury)
                 for row in session.scalars(select(ReplayInjury).where(
                     ReplayInjury.season == season, ReplayInjury.week.between(1, last_week)))
@@ -421,4 +428,6 @@ def _build(session: Session, season: int, scoring: str) -> SeasonData:
                       team_by_week=MappingProxyType(_by_player(teams)), last_week=last_week,
                       injuries=MappingProxyType(injuries), usage=MappingProxyType(usage),
                       expert_ranks=MappingProxyType(expert_ranks), expert_age=MappingProxyType(expert_age),
-                      returns=MappingProxyType(hard_tag_returns(injuries, actual, last_week)))
+                      returns=MappingProxyType(hard_tag_returns(injuries, actual, last_week)),
+                      box=MappingProxyType(box),
+                      defense_prior=MappingProxyType(replay_defense.load_prior(session, season, scoring)))

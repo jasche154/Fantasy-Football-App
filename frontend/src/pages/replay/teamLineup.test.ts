@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ReplayRosterRow } from '../../api/types';
 import { COOK, ETIENNE, HILL, KELCE, MAHOMES, MCCAFFREY, NACUA, PACHECO, rosterRow, summary, tagged, team, TUCKER } from './fixtures';
-import { canSwap, lineupSpots, lineupWarnings, slotAccepts, swappedLineup, weekOptions } from './teamLineup';
+import { canSwap, lineupSpots, lineupWarnings, slotAccepts, spotState, swappedLineup, weekOptions } from './teamLineup';
 
 const STARTERS = summary().settings.starters;
 const spots = lineupSpots(team().results, STARTERS);
@@ -34,6 +34,15 @@ describe('lineup helpers', () => {
     expect(targets('Isiah Pacheco')).toEqual(['Christian McCaffrey', 'Travis Etienne', 'James Cook', 'Chris Olave']);
     // A WR: only the bench WR. Not FLEX, because the RB there can't take his WR slot.
     expect(targets('Puka Nacua')).toEqual(['Chris Olave']);
+  });
+
+  it('marks the picked spot, the legal places for him and dims the rest while a move is on', () => {
+    expect(spots.map((item) => spotState(null, item)).every((state) => state === null)).toBe(true);
+    const states = spots.map((item) => spotState(spot('James Cook'), item));
+    expect(states.filter((state) => state === 'moving')).toHaveLength(1);
+    expect(spots.filter((_, index) => states[index] === 'target').map((item) => item.row?.player.name))
+      .toEqual(['Christian McCaffrey', 'Travis Etienne', 'Isiah Pacheco']);
+    expect(spotState(spot('James Cook'), spot('Patrick Mahomes'))).toBe('dim');
   });
 
   it('builds the whole lineup after a swap, into a filled or an empty slot', () => {

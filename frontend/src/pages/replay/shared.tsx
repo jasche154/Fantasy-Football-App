@@ -18,10 +18,10 @@
  * POSTs that answer something else (evaluateReplayTrade) are called directly, not through `act`.
  *
  * Pieces: ReplayPlayerCell, ReplayInjuryBadge (+ isHardTag, canGoOnIr, injuryLabel), ReplayIrBlockedNotice, ReplayPositionChip, PositionTabs (+ positionParam), TeamSelect, ConfirmButton,
- * useKeyedAct (act with a pending state and a refusal per button), ReplayDrawer (the dialog frame),
- * EventList (+ groupEvents), formatPoints, formatRecord, ordinal, goToView, REPLAY_VIEWS.
+ * useKeyedAct (act with a pending state and a refusal per button), ReplayDrawer (the dialog frame, in ReplayDrawer.tsx),
+ * EventList (+ groupEvents), formatPoints, formatRecord, ordinal, viewHash, REPLAY_VIEWS.
  */
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import { errorMessage } from '../../api/client';
 import type {
   ReplayActionResult,
@@ -37,11 +37,9 @@ import type {
   ReplayRecord,
   ReplaySummary,
 } from '../../api/types';
-import { Icon } from '../../components/Icon';
 import { SelectField } from '../../components/SelectField';
 import { formatNumber } from '../../lib/format';
-import { paths } from '../../router/routes';
-import { navigate } from '../../router/useHashLocation';
+import { buildHash, paths } from '../../router/routes';
 
 export type ReplayAct = <T extends ReplayActionResult>(run: () => Promise<T>) => Promise<T | undefined>;
 
@@ -66,9 +64,9 @@ export const REPLAY_VIEWS: readonly { value: ReplayView; label: string }[] = [
   { value: 'league', label: 'League' },
 ];
 
-/** Switches the hub's tab (#/replay?game=ID&view=...). */
-export function goToView(gameId: number, view: ReplayView): void {
-  navigate(paths.replay, { game: gameId, view });
+/** The game screen's URL for a tab (#/play?game=ID&view=...). */
+export function viewHash(gameId: number, view: ReplayView): string {
+  return buildHash(paths.play, { game: gameId, view });
 }
 
 // ---------------- formatting ----------------
@@ -293,49 +291,7 @@ export function useKeyedAct(act: ReplayAct, isBusy: boolean): KeyedAct {
   return { send, pendingKey, failure, isBusy: isBusy || pendingKey !== null, errorFor: (key) => (failure?.key === key ? failure.message : null) };
 }
 
-interface ReplayDrawerProps {
-  eyebrow: string;
-  title: string;
-  /** The dialog's accessible name when it should say more than the title. */
-  label?: string;
-  closeLabel?: string;
-  onClose: () => void;
-  children: ReactNode;
-}
-
-/** A right-hand dialog on the house .news-panel frame: focus moves in, Escape closes, focus goes back to the opener. */
-export function ReplayDrawer({ eyebrow, title, label, closeLabel = 'Close', onClose, children }: ReplayDrawerProps) {
-  const titleId = useId();
-  const closeRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    const opener = document.activeElement;
-    closeRef.current?.focus();
-    return () => { if (opener instanceof HTMLElement) opener.focus(); };
-  }, []);
-  useEffect(() => {
-    // Capture phase and preventDefault: Escape closes only the drawer, not also what is behind it (a lineup move).
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') { event.preventDefault(); onClose(); } };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [onClose]);
-  return (
-    <>
-      <div className="news-panel__backdrop" onClick={onClose} aria-hidden="true" />
-      <aside className="news-panel" role="dialog" aria-modal="true" aria-label={label} aria-labelledby={label ? undefined : titleId}>
-        <header className="news-panel__head">
-          <div>
-            <p className="news-panel__eyebrow">{eyebrow}</p>
-            <h2 id={titleId} className="news-panel__title">{title}</h2>
-          </div>
-          <button ref={closeRef} type="button" className="btn btn--ghost btn--sm" aria-label={closeLabel} onClick={onClose}>
-            <Icon name="close" size={16} />
-          </button>
-        </header>
-        {children}
-      </aside>
-    </>
-  );
-}
+export { ReplayDrawer } from './ReplayDrawer';
 
 // ---------------- events ----------------
 

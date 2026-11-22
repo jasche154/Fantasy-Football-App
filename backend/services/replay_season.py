@@ -189,9 +189,9 @@ def play_week(state: State, settings: Settings, data: SeasonData, know: rv.Knowl
     """Play `state.week` (phase "open" only): every team's starters, scored with the season's real points.
 
     `data` is the FULL season, read only for this week's points; `know` is the Knowledge for this week and
-    makes every choice. Appends the WeekResult and its events, expires pending offers, then either crowns
-    the champion (phase "complete") or moves to the next week with the lineup cleared: phase "waivers" in
-    wednesday and faab mode, still "open" with free agency only. `seed` is unused: nothing here is random."""
+    makes every choice. Appends the WeekResult (every team's bench too) and its events, expires pending offers,
+    then either crowns the champion (phase "complete") or moves to the next week with the lineup cleared: phase
+    "waivers" in wednesday and faab mode, still "open" with free agency only. `seed` is unused: nothing here is random."""
     _check_playable(state, settings, data, know)
     week = state.week
     matchups = matchups_for_week(state, settings, week)
@@ -202,7 +202,9 @@ def play_week(state: State, settings: Settings, data: SeasonData, know: rv.Knowl
               for lineup in starters.values() for ids in lineup.values() for pid in ids}
     scores = {team_id: round(sum(points[pid] for ids in lineup.values() for pid in ids), 2)
               for team_id, lineup in starters.items()}
-    result = WeekResult(week, matchups, scores, starters, points, is_playoff_week(settings, week))
+    started = {pid for lineup in starters.values() for ids in lineup.values() for pid in ids}
+    bench = {team.id: tuple(pid for pid in team.roster if pid not in started) for team in state.teams}
+    result = WeekResult(week, matchups, scores, starters, points, is_playoff_week(settings, week), bench)
     offers = tuple(replace(o, status="expired") if o.status == "pending" else o for o in state.offers)
     played = _log_results(replace(state, results=(*state.results, result), offers=offers), result)
     if week == settings.end_week:

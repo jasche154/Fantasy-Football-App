@@ -9,6 +9,9 @@ type StartingSlot = Exclude<ReplaySlot, 'BN'>;
 const STARTING_SLOTS: readonly StartingSlot[] = ['QB', 'RB', 'WR', 'TE', 'FLEX', 'K', 'DST'];
 const FLEX_POSITIONS: readonly ReplayPosition[] = ['RB', 'WR', 'TE'];
 
+/** A played week from a save made before the bench was stored has only its starters. */
+export const BENCH_NOT_SAVED = 'The bench wasn’t saved for weeks played before this update.';
+
 /** One line of a roster table: a slot and who is in it (null: a starting slot left empty). */
 export interface LineupSpot {
   key: string;
@@ -42,6 +45,13 @@ export function lineupSpots(rows: readonly ReplayRosterRow[], starters: ReplaySe
 export function canSwap(from: LineupSpot, to: LineupSpot): boolean {
   if (!from.row || from.slot === to.slot) return false;
   return slotAccepts(to.slot, from.row.player.position) && (!to.row || slotAccepts(from.slot, to.row.player.position));
+}
+
+/** How a spot looks while `source` is being moved: the one picked up, a legal place for him, or dimmed (null: no move). */
+export function spotState(source: LineupSpot | null, spot: LineupSpot): 'moving' | 'target' | 'dim' | null {
+  if (!source) return null;
+  if (spot.key === source.key) return 'moving';
+  return canSwap(source, spot) ? 'target' : 'dim';
 }
 
 /** The whole lineup to POST once `from` and `to` have traded places. */

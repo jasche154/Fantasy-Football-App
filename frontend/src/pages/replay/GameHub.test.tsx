@@ -41,36 +41,57 @@ const WAIVERS = summary({ phase: 'waivers', next_action: nextAction('wednesday')
 
 function renderHub(game: ReplaySummary, routes: MockRoute[] = [], view: ReplayView = 'team') {
   const api = mockFetch([META_ROUTE, ...routes, { path: GAME_PATH, reply: json(game) }]);
-  renderWithProviders(<GameHub gameId={GAME_ID} view={view} />, { hash: `#/replay?game=${GAME_ID}` });
+  renderWithProviders(<GameHub gameId={GAME_ID} view={view} />, { hash: `#/play?game=${GAME_ID}` });
   return { api, user: userEvent.setup() };
 }
 
-describe('GameHub header', () => {
-  it('shows the league, the record and this week\'s game with both projections', async () => {
+describe('GameHub scorebug', () => {
+  function scorebug() {
+    return screen.getByRole('heading', { level: 1 }).closest('.scorebug') as HTMLElement;
+  }
+
+  it('shows the league, the week, this week\'s projected score, the record and Exit', async () => {
     renderHub(summary());
     expect(await screen.findByRole('heading', { level: 1, name: 'Sunday Replay' })).toBeInTheDocument();
-    expect(screen.getByText('2023 season · Week 5 · 12 teams · Half PPR')).toBeInTheDocument();
-    const line = screen.getByText(/2nd of 12/).closest('p');
-    expect(line).toHaveTextContent('Your Team 3-1 · 2nd of 12');
-    expect(line).toHaveTextContent('Week 5 vs Sunday Scaries (2-2) · projected 118.40 – 104.75');
-    expect(screen.getByRole('link', { name: 'All leagues' })).toHaveAttribute('href', '#/replay');
+    const bug = within(scorebug());
+    expect(bug.getByText('2023 season · 12 teams · Half PPR')).toBeInTheDocument();
+    expect(bug.getByText('Week 5', { selector: '.scorebug__week' })).toBeInTheDocument();
+    expect(bug.getByText('Week 5 · Projected')).toBeInTheDocument();
+    expect(bug.getByText('You, projected: 118.40')).toBeInTheDocument();
+    expect(bug.getByText('Sunday Scaries, projected: 104.75')).toBeInTheDocument();
+    expect(bug.getByText('vs Sunday Scaries (2-2)')).toBeInTheDocument();
+    expect(bug.getByText('3-1 · 2nd of 12')).toBeInTheDocument();
+    expect(bug.getByRole('link', { name: 'Exit to your leagues' })).toHaveAttribute('href', '#/replay');
+    expect(bug.getByRole('button', { name: /Switch to (light|dark) theme/ })).toBeInTheDocument();
   });
 
-  it('says when the user has no game this week, and names a quarter-final', async () => {
+  it('shows the final score once the week is played', async () => {
+    const game = summary();
+    renderHub(summary({ matchup: { ...game.matchup!, you: { ...game.matchup!.you, points: 121.46 },
+      opponent: { ...game.matchup!.opponent, points: 98.2 } } }));
+    await screen.findByRole('heading', { level: 1, name: 'Sunday Replay' });
+    expect(within(scorebug()).getByText('Week 5 · Final')).toBeInTheDocument();
+    expect(within(scorebug()).getByText('Your score: 121.46')).toBeInTheDocument();
+  });
+
+  it('says when the user has no game this week', async () => {
     renderHub(summary({ matchup: null }));
-    expect((await screen.findByText(/2nd of 12/)).closest('p')).toHaveTextContent('No game this week');
+    await screen.findByRole('heading', { level: 1, name: 'Sunday Replay' });
+    expect(within(scorebug()).getByText('No game this week')).toBeInTheDocument();
   });
 
-  it('names a quarter-final in the header', async () => {
+  it('names a quarter-final', async () => {
     const game = summary();
     renderHub(summary({ matchup: { ...game.matchup!, playoff: true, label: 'Quarter-final' } }));
-    expect((await screen.findByText(/2nd of 12/)).closest('p')).toHaveTextContent('Quarter-final vs Sunday Scaries');
+    await screen.findByRole('heading', { level: 1, name: 'Sunday Replay' });
+    expect(within(scorebug()).getByText('Quarter-final · Projected')).toBeInTheDocument();
   });
 
   it('says so when the league cannot be opened', async () => {
     mockFetch([META_ROUTE, { path: GAME_PATH, reply: json({ detail: 'There is no league 7.' }, 404) }]);
     renderWithProviders(<GameHub gameId={GAME_ID} view="team" />);
     expect(await screen.findByRole('alert')).toHaveTextContent('There is no league 7.');
+    expect(screen.getByRole('link', { name: 'Exit to your leagues' })).toHaveAttribute('href', '#/replay');
     expect(screen.getByRole('link', { name: 'Back to your leagues' })).toHaveAttribute('href', '#/replay');
   });
 });
@@ -142,7 +163,8 @@ describe('GameHub primary button', () => {
     await user.click(await screen.findByRole('button', { name: 'Make your pick' }));
     expect(screen.getByRole('region', { name: 'Draft' })).toHaveFocus();
     expect(screen.getByText('draft screen, version 0')).toBeInTheDocument();
-    expect(screen.getByText('2023 season · Draft · 12 teams · Half PPR')).toBeInTheDocument();
+    expect(screen.getByText('Draft', { selector: '.scorebug__week' })).toBeInTheDocument();
+    expect(screen.queryByText(/2nd of 12/)).not.toBeInTheDocument();
     expect(screen.queryByRole('navigation', { name: 'League sections' })).not.toBeInTheDocument();
     expect(api.calls.filter((call) => call.method === 'POST')).toHaveLength(0);
   });
@@ -208,7 +230,7 @@ describe('GameHub act', () => {
   it('clears a refusal when the user moves to another tab', async () => {
     mockFetch([META_ROUTE, { method: 'POST', path: `${GAME_PATH}/add-drop`, reply: json({ detail: 'Roster full.' }, 422) },
       { path: GAME_PATH, reply: json(summary()) }]);
-    const { rerender } = renderWithProviders(<GameHub gameId={GAME_ID} view="team" />, { hash: `#/replay?game=${GAME_ID}` });
+    const { rerender } = renderWithProviders(<GameHub gameId={GAME_ID} view="team" />, { hash: `#/play?game=${GAME_ID}` });
     await userEvent.setup().click(await screen.findByRole('button', { name: 'Add Mostert' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Roster full.');
     rerender(<AppProviders><GameHub gameId={GAME_ID} view="players" /></AppProviders>);
@@ -244,19 +266,20 @@ describe('GameHub tabs', () => {
   it('marks the current tab, shows pending counts and writes the tab to the URL', async () => {
     const { user } = renderHub(summary({ pending: { claims: 2, offers: 1 } }), [], 'matchup');
     const tabs = within(await screen.findByRole('navigation', { name: 'League sections' }));
-    expect(tabs.getAllByRole('button').map((tab) => tab.textContent)).toEqual(
+    expect(tabs.getAllByRole('link').map((tab) => tab.textContent)).toEqual(
       ['My Team', 'Matchup', 'Players2 pending claims', 'Trades1 offers to answer', 'League']);
-    expect(tabs.getByRole('button', { name: 'Matchup' })).toHaveAttribute('aria-current', 'page');
-    expect(tabs.getByRole('button', { name: 'My Team' })).not.toHaveAttribute('aria-current');
+    expect(tabs.getByRole('link', { name: 'Matchup' })).toHaveAttribute('aria-current', 'page');
+    expect(tabs.getByRole('link', { name: 'My Team' })).not.toHaveAttribute('aria-current');
+    expect(tabs.getByRole('link', { name: /Players/ })).toHaveAttribute('href', `#/play?game=${GAME_ID}&view=players`);
     expect(screen.getByRole('region', { name: 'Matchup' })).toHaveTextContent('matchup screen');
 
-    await user.click(tabs.getByRole('button', { name: /Players/ }));
-    expect(window.location.hash).toBe(`#/replay?game=${GAME_ID}&view=players`);
+    await user.click(tabs.getByRole('link', { name: /Players/ }));
+    expect(window.location.hash).toBe(`#/play?game=${GAME_ID}&view=players`);
   });
 });
 
 describe('GameHub player drawer', () => {
-  it('opens with focus inside, shows played weeks only, and gives focus back on Escape', async () => {
+  it('opens with focus inside, shows the game log of played weeks only, and gives focus back on Escape', async () => {
     const { user } = renderHub(summary(), [{ path: `${GAME_PATH}/players/${MOSTERT.id}`, reply: json(playerDetail()) }]);
     const opener = await screen.findByRole('button', { name: 'Open Mostert' });
     await user.click(opener);
@@ -264,10 +287,10 @@ describe('GameHub player drawer', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Raheem Mostert details' });
     expect(within(dialog).getByRole('button', { name: 'Close player details' })).toHaveFocus();
     expect(within(dialog).getByText(/Free agent/)).toBeInTheDocument();
-    const rows = within(within(dialog).getByRole('table', { name: 'Raheem Mostert week by week' })).getAllByRole('row');
+    const rows = within(within(dialog).getByRole('table', { name: 'Raheem Mostert game log' })).getAllByRole('row');
     expect(rows.map((row) => row.textContent)).toEqual([
-      'WkOppProjPtsValueSnap %TgtTgt %Car', '1DEN12.5011.0031.561%1.05%10.0', '2DEN12.5012.0031.562%2.010%10.0',
-      '3BYE0.00—31.5————', '4DEN12.5014.0031.564%4.020%10.0', '5DEN12.50—31.5————',
+      'WkOppProjPtsCarRuYdTgtRecReYd', '1DEN12.5011.00—————', '2DEN12.5012.00—————',
+      '3BYE0.00——————', '4DEN12.5014.00—————', '5DEN12.50——————',
     ]);
 
     await user.keyboard('{Escape}');

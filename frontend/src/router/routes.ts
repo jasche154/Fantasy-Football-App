@@ -15,6 +15,7 @@ export type StaticRouteName =
   | 'odds'
   | 'ask'
   | 'replay'
+  | 'play'
   | 'settings';
 
 export type Route =
@@ -43,6 +44,7 @@ const STATIC_ROUTES: Readonly<Record<string, StaticRouteName>> = {
   odds: 'odds',
   ask: 'ask',
   replay: 'replay',
+  play: 'play',
   settings: 'settings',
 };
 
@@ -61,6 +63,7 @@ export const paths = {
   odds: '/odds',
   ask: '/ask',
   replay: '/replay',
+  play: '/play',
   settings: '/settings',
   player: (id: number): string => `/player/${id}`,
 } as const;

@@ -288,12 +288,14 @@ describe('TradesView injuries and IR', () => {
       + 'Values are on a 0-1000 trade chart; an injured player counts for the games he is expected to play.')).toBeInTheDocument();
   });
 
-  it('shows the injury news under a tagged player in the builder', async () => {
+  it('shows the injury news under a player in the builder, tagged or not', async () => {
     const news = { back: 8, text: 'Expected back in week 8.' };
-    const roster = team({ results: [rosterRow(tagged(ETIENNE, 'O', 'DNP', 'Ankle'), 'RB', { out: true, news })] });
+    const roster = team({ results: [rosterRow(tagged(ETIENNE, 'O', 'DNP', 'Ankle'), 'RB', { out: true, news }),
+      rosterRow(MOSTERT, 'RB', { news: { back: 6, text: 'Expected back in week 6.' } })] });
     mockFetch([META_ROUTE, { path: TRADES_PATH, reply: json(trades()) }, { path: `${PATH}/team`, reply: json(roster) }]);
     renderWithProviders(<TradesView {...viewProps()} />);
     expect(await screen.findAllByText('Expected back in week 8.')).not.toHaveLength(0);
+    expect(screen.getAllByText('Expected back in week 6.')).not.toHaveLength(0);
   });
 
   it('shows the IR banner while blocked, and leaves the offer answerable', async () => {

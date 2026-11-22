@@ -68,7 +68,7 @@ function RosterPicker({ title, caption, verb, rows, selected, max, onToggle, ope
                   <td className="td--player">
                     <ReplayPlayerCell player={player} info={{ out: row.out, trade_locked: row.trade_locked }} onOpen={openPlayer} />
                     {row.slot === 'IR' && <span className="status-badge status-badge--missing">On IR</span>}
-                    {row.player.injury && row.news && <p className="hint">{row.news.text}</p>}
+                    {row.news && <p className="hint">{row.news.text}</p>}
                   </td>
                   <td className="num">{formatNumber(row.value)}</td>
                 </tr>

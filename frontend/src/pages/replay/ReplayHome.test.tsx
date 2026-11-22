@@ -28,7 +28,7 @@ describe('ReplayHome', () => {
     expect(current).toHaveTextContent('Sunday Replay12 teams · Half PPR2023Week 5—');
     expect(finished).toHaveTextContent('Class of 201910 teams · PPR2019Season completeHail Marys');
     expect(drafting).toHaveTextContent('Drafting');
-    expect(within(current).getByRole('link', { name: 'Resume Sunday Replay' })).toHaveAttribute('href', '#/replay?game=7');
+    expect(within(current).getByRole('link', { name: 'Play Sunday Replay' })).toHaveAttribute('href', '#/play?game=7');
     expect(screen.getByRole('heading', { level: 2, name: 'New league' })).toBeInTheDocument();
   });
 
@@ -93,6 +93,6 @@ describe('ReplayHome', () => {
     ]);
     expect(await screen.findByText('No leagues yet.')).toBeInTheDocument();
     await user.click(await screen.findByRole('button', { name: 'Create league and draft' }));
-    await expect.poll(() => window.location.hash).toBe('#/replay?game=12');
+    await expect.poll(() => window.location.hash).toBe('#/play?game=12');
   });
 });

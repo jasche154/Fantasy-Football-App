@@ -53,8 +53,8 @@ function SavedGames({ games, isDeleting, onDelete }: SavedGamesProps) {
               <td>{game.champion ?? EMPTY_VALUE}</td>
               <td>
                 <span className="replay-saved__actions">
-                  <a className="btn btn--primary btn--sm" href={buildHash(paths.replay, { game: game.id })} aria-label={`Resume ${game.name}`}>
-                    Resume
+                  <a className="btn btn--primary replay-saved__play" href={buildHash(paths.play, { game: game.id })} aria-label={`Play ${game.name}`}>
+                    Play
                   </a>
                   <ConfirmButton label="Delete" confirmLabel="Yes, delete" subject={game.name} disabled={isDeleting} onConfirm={() => onDelete(game)} />
                 </span>
@@ -67,7 +67,7 @@ function SavedGames({ games, isDeleting, onDelete }: SavedGamesProps) {
   );
 }
 
-/** #/replay: the saved leagues (resume, delete) and the new-league form. */
+/** #/replay: the saved leagues (play, delete) and the new-league form. Play opens the full-screen game at #/play. */
 export function ReplayHome() {
   useDocumentTitle('Replay League');
   const games = useAsync((signal) => getReplayGames(signal), []);
@@ -99,7 +99,7 @@ export function ReplayHome() {
         </AsyncView>
       </Card>
       <Card title="New league">
-        <SetupForm onCreated={(game) => navigate(paths.replay, { game: game.id })} />
+        <SetupForm onCreated={(game) => navigate(paths.play, { game: game.id })} />
       </Card>
     </>
   );

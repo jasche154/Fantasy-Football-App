@@ -3,8 +3,9 @@ import { getReplayScoreboard } from '../../api/replay';
 import type { ReplayScoreboard, ReplaySide } from '../../api/types';
 import { AsyncView } from '../../components/AsyncView';
 import { SelectField } from '../../components/SelectField';
-import { EmptyState, TableSkeleton } from '../../components/StatusViews';
+import { EmptyState, Skeleton } from '../../components/StatusViews';
 import { useAsync } from '../../hooks/useAsync';
+import { TeamBadge } from './gameUi';
 import { formatPoints, type ReplayViewProps } from './shared';
 
 /** What a week can show: results once played, pre-game projections once reached, else the pairings only. */
@@ -21,47 +22,31 @@ const SCORE_NOTES: Readonly<Record<Scores, string>> = {
   none: 'Not played yet: the pairings only.',
 };
 
-function TeamCells({ side, scores, isWinner }: { side: ReplaySide; scores: Scores; isWinner: boolean }) {
+const STATUS: Readonly<Record<Scores, string>> = { final: 'Final', projected: 'Projected', none: 'Upcoming' };
+
+function TileSide({ side, scores, isWinner }: { side: ReplaySide; scores: Scores; isWinner: boolean }) {
   return (
-    <>
-      <td>
-        {isWinner ? <strong>{side.name}</strong> : side.name}
-        {isWinner && <span className="status-badge status-badge--ok replay-league__badge">Won</span>}
-      </td>
-      {scores !== 'none' && <td className="num">{formatPoints(scores === 'final' ? side.points : side.projected)}</td>}
-    </>
+    <p className={isWinner ? 'game-tile__side is-winner' : 'game-tile__side'}>
+      <TeamBadge team={side} />
+      {isWinner && <span className="game-tile__won">Won</span>}
+      {scores !== 'none' && <span className="game-tile__score">{formatPoints(scores === 'final' ? side.points : side.projected)}</span>}
+    </p>
   );
 }
 
-/** One week's games. Never shows a number the API did not send for that week. */
-export function GameTable({ board, caption }: { board: ReplayScoreboard; caption: string }) {
+/** One week's games as scoreboard tiles. Never shows a number the API did not send for that week. */
+export function GameTiles({ board, caption }: { board: ReplayScoreboard; caption: string }) {
   const scores = scoresOf(board);
-  const hasLabels = board.results.some((game) => game.label !== null);
-  const scoreHead = scores === 'final' ? 'Pts' : 'Proj';
   return (
-    <div className="table-wrap">
-      <table className="data-table data-table--compact">
-        <caption className="sr-only">{caption}</caption>
-        <thead>
-          <tr>
-            {hasLabels && <th scope="col">Game</th>}
-            <th scope="col">Team</th>
-            {scores !== 'none' && <th scope="col" className="num">{scoreHead}</th>}
-            <th scope="col">Opponent</th>
-            {scores !== 'none' && <th scope="col" className="num">{scoreHead}</th>}
-          </tr>
-        </thead>
-        <tbody>
-          {board.results.map((game) => (
-            <tr key={game.home.team_id} className={game.home.is_user || game.away.is_user ? 'row--mine' : undefined}>
-              {hasLabels && <td>{game.label}</td>}
-              <TeamCells side={game.home} scores={scores} isWinner={game.winner === game.home.team_id} />
-              <TeamCells side={game.away} scores={scores} isWinner={game.winner === game.away.team_id} />
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <ul className="game-tiles" aria-label={caption}>
+      {board.results.map((game) => (
+        <li key={game.home.team_id} className={game.home.is_user || game.away.is_user ? 'game-tile game-tile--mine' : 'game-tile'}>
+          <p className="game-label game-tile__head">{game.label ? `${game.label} · ` : ''}{STATUS[scores]}</p>
+          <TileSide side={game.home} scores={scores} isWinner={game.winner === game.home.team_id} />
+          <TileSide side={game.away} scores={scores} isWinner={game.winner === game.away.team_id} />
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -76,13 +61,13 @@ export function LeagueScoreboard({ game, version }: ReplayViewProps) {
       <div className="weekly-controls">
         <SelectField label="Week" isInline value={week} options={options} onChange={(value) => setWeek(Number(value))} />
       </div>
-      <AsyncView state={board} loading={<TableSkeleton rows={6} columns={4} label="Loading the scoreboard…" />}
+      <AsyncView state={board} loading={<Skeleton lines={6} label="Loading the scoreboard…" />}
         errorTitle="Couldn't load the scoreboard" isEmpty={(data) => data.results.length === 0}
         empty={<EmptyState title="No games set yet">The pairings for week {week} depend on results still to come.</EmptyState>}>
         {(data) => (
           <>
             <p className="hint">Week {data.week}. {SCORE_NOTES[scoresOf(data)]}</p>
-            <GameTable board={data} caption={`Week ${data.week} scoreboard`} />
+            <GameTiles board={data} caption={`Week ${data.week} scoreboard`} />
           </>
         )}
       </AsyncView>

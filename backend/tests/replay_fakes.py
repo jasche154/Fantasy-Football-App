@@ -9,7 +9,8 @@ Player ids are fixed by position and preseason rank (`player_id("RB", 3)`), so t
 are the same players for every seed. `drafted_state` is a league just after its draft (no replay_draft
 import). `seed_db` writes a season into the real tables in a form `replay_pool.load_season_data` reads
 back to the same data. Every skill game has a `Usage` (snap %, targets, target share, carries) worked out
-from the player's position and that game's points (`_usage`). Expert ranks (`_expert_ranks`) are a noisy
+from the player's position and that game's points (`_usage`) and a `BoxLine` matching seed_db's stat row
+(`_box`: catches, rushing yards, targets, carries). Expert ranks (`_expert_ranks`) are a noisy
 order of what the market believes each week (week 0 = preseason, then a Friday snapshot before every week's
 Sunday); `returns` comes from the tags and games through replay_pool.hard_tag_returns. Games are dated on
 Sundays (`sunday`) so seed_db's expert rows load back to the same weeks.
@@ -30,6 +31,7 @@ from database.models import (
     ReplayProjection, TeamGameStats,
 )
 from services import replay_values
+from services.replay_box import BoxLine
 from services.kdst_rankings import DST_PREFIX, TEAM_NAMES
 from services.replay_pool import (  # noqa: F401 (Injury re-exported)
     ALL_POSITIONS, SKILL, Injury, PoolPlayer, SeasonData, Usage, hard_tag_returns,
@@ -212,6 +214,18 @@ def _points(spec: _Spec, luck: float, bounce: float) -> float:
     return float(max(-4, round(spec.talent + 5.5 * bounce)))
 
 
+def _catches_and_yards(position: str, points: float, scoring: str) -> tuple[int, int]:
+    """A skill game's receptions and rushing yards, worth exactly `points` in `scoring` (seed_db writes them)."""
+    receptions = 2 if position != "QB" and points >= 3 else 0
+    return receptions, round((points - receptions * POINTS_PER_RECEPTION[scoring]) * 10)
+
+
+def _box(position: str, points: float, usage: Usage, scoring: str) -> BoxLine:
+    """The box line seed_db's stat row loads back as: catches, rushing yards, targets and carries."""
+    receptions, yards = _catches_and_yards(position, points, scoring)
+    return BoxLine(carries=usage.carries, rush_yds=yards, targets=usage.targets, rec=receptions)
+
+
 def _usage(position: str, points: float) -> Usage:
     """A skill game's role, rising with its points (every field set; snap % to one decimal)."""
     points = max(0.0, points)
@@ -233,7 +247,7 @@ def _season(season: int, scoring: str, seed: int, weeks: int) -> SeasonData:
     shape = (len(specs), weeks)
     noise, luck = rng.lognormal(0.0, 0.10, shape), rng.gamma(4.0, 0.25, shape)
     bounce, missed = rng.standard_normal(shape), rng.random(shape) < MISS_RATE
-    players, actual, projected, team_by_week, usage = {}, {}, {}, {}, {}
+    players, actual, projected, team_by_week, usage, box = {}, {}, {}, {}, {}, {}
     for row, spec in enumerate(specs):
         games = _games(spec, schedule, weeks, missed[row])
         if not games and spec.player_id not in adp:
@@ -247,6 +261,8 @@ def _season(season: int, scoring: str, seed: int, weeks: int) -> SeasonData:
             actual[(spec.player_id, week)] = _points(spec, luck[row, week - 1], bounce[row, week - 1])
             if spec.position in SKILL:
                 usage[(spec.player_id, week)] = _usage(spec.position, actual[(spec.player_id, week)])
+                box[(spec.player_id, week)] = _box(spec.position, actual[(spec.player_id, week)],
+                                                   usage[(spec.player_id, week)], scoring)
     injuries = {key: tag for key, tag in _story_tags(weeks).items() if key[1] <= weeks and key[0] in players}
     ranks = _expert_ranks([spec for spec in specs if spec.player_id in players], players, projected, weeks,
                           np.random.default_rng([season, seed, 99]))     # own stream: the rest stays as it was
@@ -254,7 +270,7 @@ def _season(season: int, scoring: str, seed: int, weeks: int) -> SeasonData:
                       actual=MappingProxyType(actual), projected=MappingProxyType(projected),
                       team_by_week=MappingProxyType(team_by_week), last_week=weeks,
                       injuries=MappingProxyType(injuries), usage=MappingProxyType(usage),
-                      expert_ranks=MappingProxyType(ranks),
+                      box=MappingProxyType(box), expert_ranks=MappingProxyType(ranks),
                       expert_age=MappingProxyType({0: EXPERT_AGE["pre"],
                                                    **dict.fromkeys(range(1, weeks + 1), EXPERT_AGE["ros"])}),
                       returns=MappingProxyType(hard_tag_returns(injuries, actual, weeks)))
@@ -353,7 +369,7 @@ def tagged(data: SeasonData, injuries: Mapping[tuple[int, int], Injury | None]) 
 
 
 def future_changed(data: SeasonData, after_week: int, seed: int = 1) -> SeasonData:
-    """A copy whose real points, usage, projections and injury tags for every week after `after_week` are
+    """A copy whose real points, usage, box lines, projections and injury tags for every week after `after_week` are
     different (about one projection in ten disappears; every later tag is removed and BREAKOUT_ID and BUST_ID
     are on IR), and identical up to it: the no-hindsight probe."""
     rng = np.random.default_rng(seed)
@@ -367,11 +383,14 @@ def future_changed(data: SeasonData, after_week: int, seed: int = 1) -> SeasonDa
             **{(pid, week): Injury("IR") for pid in (BREAKOUT_ID, BUST_ID) for week in later}}
     usage = {key: Usage(round((u.snap_pct or 0.0) / 2 + 1, 1), u.targets + 3, 0.5, u.carries + 2) if key[1] > after_week
              else u for key, u in data.usage.items()}
+    box = {key: replace(b, carries=b.carries + 2, rush_yds=b.rush_yds + 25, rec_td=b.rec_td + 1)
+           if key[1] > after_week else b for key, b in data.box.items()}
     changed = patched(data, projected=shaken(data.projected, 0.1), actual=shaken(data.actual, 0.0))
     ranks = {(pid, week): rank if week <= after_week else rank + 1 + int(rng.integers(0, 60))   # always worse than before
              for (pid, week), rank in data.expert_ranks.items()}
     # returns stay the original's on purpose: they are the one sanctioned leak (see returns_changed)
-    return tagged(replace(changed, usage=MappingProxyType(usage), expert_ranks=MappingProxyType(ranks)), tags)
+    return tagged(replace(changed, usage=MappingProxyType(usage), box=MappingProxyType(box),
+                          expert_ranks=MappingProxyType(ranks)), tags)
 
 
 def returns_changed(data: SeasonData) -> SeasonData:
@@ -414,8 +433,7 @@ def _expert_rows(data: SeasonData) -> list[dict]:
 def _skill_row(data: SeasonData, pid: int, week: int, points: float, opponent: str | None) -> dict:
     """A stat line worth exactly `points` in data.scoring (and one point more per step toward full PPR), with
     the game's usage (targets and carries score nothing)."""
-    receptions = 2 if data.players[pid].position != "QB" and points >= 3 else 0
-    yards = round((points - receptions * POINTS_PER_RECEPTION[data.scoring]) * 10)
+    receptions, yards = _catches_and_yards(data.players[pid].position, points, data.scoring)
     usage = data.usage.get((pid, week))
     return {"player_id": pid, "season": data.season, "week": week, "season_type": "REG",
             "opponent_team": opponent, "receptions": receptions, "rushing_yards": yards,

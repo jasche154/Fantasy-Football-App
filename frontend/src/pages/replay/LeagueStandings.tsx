@@ -4,7 +4,8 @@ import { AsyncView } from '../../components/AsyncView';
 import { Icon } from '../../components/Icon';
 import { TableSkeleton } from '../../components/StatusViews';
 import { useAsync } from '../../hooks/useAsync';
-import { GameTable } from './LeagueScoreboard';
+import { TeamBadge } from './gameUi';
+import { GameTiles } from './LeagueScoreboard';
 import { formatPoints, formatRecord, type ReplayViewProps } from './shared';
 
 function StandingsTable({ standings }: { standings: ReplayStandings }) {
@@ -31,7 +32,7 @@ function StandingsTable({ standings }: { standings: ReplayStandings }) {
                 <tr key={row.team_id} className={classes || undefined}>
                   <td className="num">{row.place ?? row.seed}</td>
                   <td>
-                    {row.name}{row.is_user && <span className="source-rank">you</span>}
+                    <TeamBadge team={row} showTendency />
                     {/* Only once the regular season is over is a top seed really in. */}
                     {seedsFinal && row.in_playoffs && <span className="status-badge status-badge--ok replay-league__badge">In playoffs</span>}
                   </td>
@@ -63,7 +64,7 @@ function PlayoffWeeks({ bracket, isTitle, kind }: { bracket: ReplayStandings['br
     return (
       <div key={board.week}>
         <h3 className="replay-bracket__week">Week {board.week}</h3>
-        <GameTable caption={`Week ${board.week} ${kind} games`} board={{ ...board, results }} />
+        <GameTiles caption={`Week ${board.week} ${kind} games`} board={{ ...board, results }} />
       </div>
     );
   });

@@ -151,7 +151,10 @@ def _snapshot(client: TestClient, game: str) -> dict[str, dict]:
     pool = [row for offset in (0, 200) for row in
             get(client, game + "/players", status="all", limit=200, offset=offset)["results"]]
     ids = [*_ids(teams["team 1"]["results"], "BN"), *_ids(teams["team 7"]["results"], "RB"), *fakes.STORY_IDS]
-    return {**teams, "players": {"results": pool}, "matchup": get(client, game + "/matchup"),
+    lines = {f"players {stats} {sort}": get(client, game + "/players", status="all", stats=stats, sort=sort, dir="asc",
+                                            limit=200, **({"stat_week": LEAK_WEEK - 1} if stats == "week" else {}))
+             for stats in ("season", "last4", "week") for sort in ("line_points", "rush_yds", "line_projection")}
+    return {**teams, **lines, "players": {"results": pool}, "matchup": get(client, game + "/matchup"),
             **{f"player {pid}": get(client, f"{game}/players/{pid}") for pid in sorted(ids)}}
 
 
@@ -470,6 +473,29 @@ def test_unknown_games_players_and_teams_are_reported(client, story):
         assert refused(client, game + "/players", method="GET", **query)[0] == 422, query
     assert refused(client, game + "/activity", method="GET", kind="gossip")[0] == 422
     assert refused(client, game + "/drop", {"player_id": 0})[0] == 422
+
+
+def test_the_wire_sorts_any_column_either_way_and_shows_the_chosen_stats(client, story):
+    game = story["path"]
+
+    def listed(**query) -> dict:
+        return get(client, game + "/players", status="all", limit=200, **query)
+
+    week = listed(stats="week", stat_week=2, sort="line_points", dir="desc")
+    asc = listed(sort="name", dir="asc")["results"]
+
+    assert (week["stats"], week["stat_week"]) == ("week", 2) and week["results"][0]["line"]["week"] == 2
+    points = [row["line"]["points"] for row in week["results"]]
+    known = [p for p in points if p is not None]
+    assert known == sorted(known, reverse=True) and points == known + [None] * (len(points) - len(known))
+    assert [row["player"]["name"].lower() for row in asc] == sorted(row["player"]["name"].lower() for row in asc)
+    assert listed(sort="rec", dir="asc")["total"] == listed()["total"]
+    assert listed(stats="last4")["results"][0]["line"]["span"] == "last4"
+    for query in ({"dir": "up"}, {"stats": "career"}, {"stats": "week", "stat_week": 0},
+                  {"stats": "week", "stat_week": 23}, {"sort": "luck"}):
+        assert refused(client, game + "/players", method="GET", **query)[0] == 422, query
+    detail = get(client, game + "/players/%d" % asc[0]["player"]["id"])
+    assert {"upcoming", "defense_basis"} <= set(detail) and set(detail["defense_basis"]) == {"weeks", "prior"}
 
 
 def test_a_game_id_beyond_sqlite_integers_is_a_422_not_a_500(client):

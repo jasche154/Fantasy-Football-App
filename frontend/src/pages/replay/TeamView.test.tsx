@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { ReplayIrRow, ReplayTeam } from '../../api/types';
@@ -8,6 +8,7 @@ import {
   actionResult, COOK, ETIENNE, GAME_ID, KELCE, MAHOMES, MOSTERT, nextAction, OLAVE, OPPONENT_TEAM_ID, PACHECO, playerRow, rosterRow, summary,
   tagged, team, teamRef, viewProps,
 } from './fixtures';
+import { defenseRating, playedTeam } from './fixturesTeam';
 import type { ReplayViewProps } from './shared';
 import { TeamView } from './TeamView';
 
@@ -86,6 +87,106 @@ describe('TeamView roster', () => {
     renderWithProviders(<TeamView {...viewProps()} />);
     expect(await screen.findByRole('alert')).toHaveTextContent('Week 9 can\'t be shown: this league is in week 5.');
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+  });
+});
+
+describe('TeamView matchups and played weeks', () => {
+  it("shows how the opponent's defense rates against the player, in words", async () => {
+    const results = team().results.map((row) => (row.player.id === MAHOMES.id ? { ...row, defense: defenseRating() } : row));
+    renderTeam(team({ results }));
+    await table();
+    const opp = within(rowOf('Patrick Mahomes')).getAllByRole('cell')[2];
+    expect(opp).toHaveTextContent(/^MIN Easy · 3rd/);
+    expect(within(opp).getByText('Easy · 3rd', { exact: false })).toHaveAttribute('title', expect.stringContaining('3rd of 32 in points allowed to QBs'));
+  });
+
+  it("shows a played week's bench with its points and total", async () => {
+    renderTeam(playedTeam());
+    await screen.findByRole('table', { name: 'Your Team roster, week 3' });
+    expect(rowOf('James Cook')).toHaveTextContent('14.20');
+    expect(rowOf('Bench total')).toHaveTextContent('Bench total19.00');
+    expect(screen.queryByText(/bench wasn.t saved/)).not.toBeInTheDocument();
+  });
+
+  it('says the bench was not saved for a week played before the update', async () => {
+    const old = playedTeam();
+    renderTeam({ ...old, results: old.results.filter((row) => row.starting), bench_total: null, bench_recorded: false });
+    await screen.findByRole('table', { name: 'Your Team roster, week 3' });
+    expect(screen.queryByRole('row', { name: /Bench total/ })).not.toBeInTheDocument();
+    expect(screen.getByText(/The bench wasn’t saved for weeks played before this update\./)).toBeInTheDocument();
+  });
+});
+
+describe('TeamView drag and drop', () => {
+  it('drags a bench player onto a legal starter and posts the same lineup as the Move buttons', async () => {
+    const { api } = renderTeam(team(), {}, [{ method: 'POST', path: LINEUP_PATH, reply: lineupReply() }]);
+    await table();
+    const cook = rowOf('James Cook');
+    expect(cook).toHaveAttribute('draggable', 'true');
+    fireEvent.dragStart(cook);
+    expect(cook).not.toHaveClass('replay-roster__row--moving');                     // the pick waits a frame (Chrome drag)
+    await waitFor(() => expect(cook).toHaveClass('replay-roster__row--moving'));
+    expect(rowOf('Isiah Pacheco')).toHaveClass('replay-roster__row--target');
+    expect(rowOf('Patrick Mahomes')).toHaveClass('replay-roster__row--dim');          // illegal spots dim while dragging
+    expect(rowOf('Chris Olave')).toHaveClass('replay-roster__row--dim');
+    expect(screen.getByRole('status')).toHaveTextContent('Moving James Cook: choose a highlighted spot');
+
+    const target = rowOf('Isiah Pacheco');
+    expect(fireEvent.dragOver(target)).toBe(false);                                   // default prevented: a drop is allowed here
+    fireEvent.drop(target);
+    fireEvent.dragEnd(cook);
+    await waitFor(() => expect(api.callsTo(LINEUP_PATH, 'POST')).toHaveLength(1));
+    expect(api.callsTo(LINEUP_PATH, 'POST')[0].body).toEqual({
+      starters: { QB: [101], RB: [102, 103], WR: [104, 105], TE: [106], FLEX: [COOK.id], K: [108], DST: [109] },
+    });
+    expect(rowOf('Patrick Mahomes')).not.toHaveClass('replay-roster__row--dim');
+  });
+
+  it('refuses a drop on an illegal spot and posts nothing', async () => {
+    const { api } = renderTeam();
+    await table();
+    const cook = rowOf('James Cook');
+    fireEvent.dragStart(cook);
+    const mahomes = rowOf('Patrick Mahomes');
+    expect(fireEvent.dragOver(mahomes)).toBe(true);                                   // not cancelled: the browser shows "no drop"
+    fireEvent.drop(mahomes);
+    fireEvent.dragEnd(cook);
+    expect(api.callsTo(LINEUP_PATH, 'POST')).toHaveLength(0);
+    expect(rowOf('Patrick Mahomes')).not.toHaveClass('replay-roster__row--dim');
+    expect(screen.getByRole('button', { name: 'Move James Cook' })).toBeInTheDocument();
+  });
+
+  it('dims illegal spots in tap mode too, and Escape cancels a drag', async () => {
+    const { user } = renderTeam();
+    await table();
+    await user.click(screen.getByRole('button', { name: 'Move James Cook' }));
+    expect(rowOf('Patrick Mahomes')).toHaveClass('replay-roster__row--dim');
+    await user.keyboard('{Escape}');
+    expect(rowOf('Patrick Mahomes')).not.toHaveClass('replay-roster__row--dim');
+
+    fireEvent.dragStart(rowOf('James Cook'));
+    await waitFor(() => expect(rowOf('James Cook')).toHaveClass('replay-roster__row--moving'));
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('button', { name: /^Swap/ })).not.toBeInTheDocument();
+    expect(rowOf('Isiah Pacheco')).not.toHaveClass('replay-roster__row--target');
+  });
+
+  it('keeps a tap-Move selection when a drag ends before its frame', async () => {
+    const { user } = renderTeam();
+    await table();
+    await user.click(screen.getByRole('button', { name: 'Move James Cook' }));
+    expect(rowOf('Patrick Mahomes')).toHaveClass('replay-roster__row--dim');
+    fireEvent.dragStart(rowOf('Chris Olave'));
+    fireEvent.dragEnd(rowOf('Chris Olave'));                                          // cancelled: the pick never ran
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    expect(rowOf('James Cook')).toHaveClass('replay-roster__row--moving');
+    expect(rowOf('Patrick Mahomes')).toHaveClass('replay-roster__row--dim');
+  });
+
+  it("cannot drag on a roster the user can't change", async () => {
+    renderTeam(team({ team: teamRef(OPPONENT_TEAM_ID) }));
+    await screen.findByRole('table', { name: 'Sunday Scaries roster, week 5' });
+    expect(rowOf('James Cook')).not.toHaveAttribute('draggable');
   });
 });
 
