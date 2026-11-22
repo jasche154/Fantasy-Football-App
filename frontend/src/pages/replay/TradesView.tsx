@@ -55,9 +55,9 @@ function TradeHistory({ offers, openPlayer }: { offers: readonly ReplayOffer[]; 
             <tr key={offer.id} className={offer.from_team.is_user || offer.to_team.is_user ? 'row--mine' : undefined}>
               <td className="num">{offer.week}</td>
               <td>{offer.from_team.name}</td>
-              <td><PlayerNames players={offer.give} onOpen={openPlayer} /></td>
+              <td className="replay-trade__names"><PlayerNames players={offer.give} onOpen={openPlayer} /></td>
               <td>{offer.to_team.name}</td>
-              <td><PlayerNames players={offer.get} onOpen={openPlayer} /></td>
+              <td className="replay-trade__names"><PlayerNames players={offer.get} onOpen={openPlayer} /></td>
               <td><span className={`status-badge status-badge--${STATUS[offer.status].tone}`}>{STATUS[offer.status].label}</span></td>
             </tr>
           ))}

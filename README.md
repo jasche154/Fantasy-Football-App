@@ -900,7 +900,8 @@ that week's games on; only scoring a week reads its real points.
   slot is taken, and the player is on IR or PUP and outside that top group; he then goes
   for a free agent who plays. It streams kickers and defenses: a unit that plays is swapped only for one
   projected `replay_waiver_ai.STREAM_EDGE` (4) points better; one on a bye or without a projection is
-  always replaced.
+  always replaced. About 40% of CPU managers (`STREAMER_SHARE`, picked once per game from its seed) are
+  streamers who chase the matchup: they swap for `STREAMER_EDGE` (1.5) points.
 - **Values:** `ros_ppg` is the weighted mean (4, 3, 2, 1) of a player's last four pre-game projections,
   with a preseason rate (the ADP order mapped onto the week-1 projection curve) filling the slots that
   do not exist yet. Waivers still use points over replacement (`trade_value`). Trades and the Value
@@ -939,14 +940,21 @@ that week's games on; only scoring a week reads its real points.
   recent mean, half `ros_ppg`) for the weeks after this one and claims him with half the usual bar (half a
   lineup point a week), so a breakout is claimed soon after his big game rather than once his projections
   catch up.
-- **Usage:** the Players screen and a player's page show snap %, targets, target share and carries,
-  averaged over his last 3 games before this week (a player's page: each played week's own game). Only
+- **Usage:** the Players screen shows snap %, targets, target share and carries, averaged over his last 3
+  games before this week. A skill player's card has two tabs: **Game log** and **Advanced** (season
+  averages of snap %, target share, targets and carries a game, catch %, yards per target and per carry;
+  snap % and target share over his last 3 games against the season as Up / Down / Steady; and a weekly
+  table of the same, computed from each played week's usage and box score). Only
   weeks already played; snap % only where snap counts are loaded; no red-zone numbers (not in the data).
 - **Trades:** a CPU scores a deal on the chart (`services/replay_trade_value.py`): what it receives and
   keeps, minus its forced drops, plus a premium for getting the best player in the deal, a little for
   roster spots, half its lineup gain or its whole lineup loss, against what it sends plus a 3% margin (and
-  8% more from you on hard). It also refuses a deal
-  that loses it 20% of market value. Declines come with the reasons. A player on IR can't be traded; a CPU
+  8% more from you on hard). Up to 6 players a side, but depth is worth less than quality: when a CPU
+  keeps more players than it sends pieces that matter (a junk throw-in asked of it doesn't count), its
+  smallest pieces past the first extra one count at
+  `replay_trade_value.DEPTH_SHARE` (35%), so five bench players worth twice a starter on the chart still
+  don't buy him, while a fair 2-for-1 is unchanged. It also refuses a deal
+  that loses it 20% of market value (counted with the same depth discount). Declines come with the reasons. A player on IR can't be traded; a CPU
   sells you an out player only for at least half his healthy chart value. After a deal each starting slot
   the CPU can no longer fill needs a player it can add (unrostered, not out, not on waivers; in the waiver
   phase, when everyone unrostered is on waivers, anyone you haven't claimed), and it adds him

@@ -9,7 +9,9 @@ numbers for the current week), so no CPU ever sees a result or a projection from
 - `cpu_free_agency` (after the run), free agents only: first cover every starting slot (kicker and
   defense included) that nobody on the roster can fill with a projection this week (bye or out), whatever
   that costs later. Then, up to MAX_FREE_AGENT_MOVES moves in all: fill an empty roster spot, get back
-  under a positional limit, and swap a kicker or defense who does play only for STREAM_EDGE projected points.
+  under a positional limit, and swap a kicker or defense who does play only for STREAM_EDGE projected points
+  (a streamer, about STREAMER_SHARE of CPUs picked once from the game's seed by `streamers`, for
+  STREAMER_EDGE: it chases a matchup most weeks).
 - A CPU never drops a top-PROTECTED_RANK player (by HEALTHY value; per 12 teams, scaled by league size) or an injured player who was above
   replacement (except, to cover a slot nobody plays in while its IR slot is taken, one tagged IR or PUP
   outside the top PROTECTED_RANK), and never into a roster that can't field a lineup. For a claim or an
@@ -22,7 +24,8 @@ numbers for the current week), so no CPU ever sees a result or a projection from
   best eligible player worth keeping on IR. Size and this week's lineup read the active roster only; season
   points and positional limits also count the IR player (`_Context.stash`): he is coming back.
 
-There is no dice roll: ties go to the better-ranked player, so the same state gives the same moves.
+The only dice roll is `streamers`, once per game; ties go to the better-ranked player, so the same state
+gives the same moves.
 """
 from collections import Counter
 from collections.abc import Iterable, Sequence
@@ -47,6 +50,8 @@ MIN_FILL_GAIN = 0.0               # a player for an open roster spot must add mo
 STREAM_EDGE = 4.0                 # projected points a free-agent K / DST must beat the team's own by (real
                                   # seasons: a league's CPUs make about 56 such swaps a season at 2.0, nearly
                                   # all of them defenses chasing a matchup, 28 at 3.0 and 12 at 4.0)
+STREAMER_EDGE = 1.5               # a streamer's edge: it plays the matchup at K and DST
+STREAMER_SHARE = 0.4              # about this share of CPU managers stream
 STREAMED = ("K", "DST")
 LONG_TAGS = ("IR", "PUP")         # out for most of what is left (replay_values.IR_OUT_SHARE)
 
@@ -64,6 +69,7 @@ class _Context:
     stash: tuple[ReplayValue, ...] = ()     # the IR players of the team being planned for
     hot: frozenset[int] = frozenset()       # claims only: hot players, who need just `hot_gain`
     hot_gain: float = 0.0
+    stream_edge: float = STREAM_EDGE        # free agency only: this team's K / DST swap edge
 
 
 def _for_team(ctx: _Context, team: rs.Team) -> _Context:
@@ -340,7 +346,7 @@ def _trim(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: _Cont
 
 def _stream(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: _Context) -> Move | None:
     """Swap a kicker for a kicker or a defense for a defense when the free agent beats the team's own by
-    STREAM_EDGE this week (one who does not play at all is `_cover`'s job). The bigger edge wins."""
+    `ctx.stream_edge` this week (one who does not play at all is `_cover`'s job). The bigger edge wins."""
     best: tuple[float, Move] | None = None
     for position in STREAMED:
         add = _top(v for v in free if v.position == position and v.projection > 0)
@@ -348,9 +354,14 @@ def _stream(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: _Co
         if own is None:
             continue
         edge = add.projection - _top(v for v in roster if v.position == position).projection
-        if edge >= STREAM_EDGE and (best is None or edge > best[0]):
+        if edge >= ctx.stream_edge and (best is None or edge > best[0]):
             best = (edge, (add.player_id, own.player_id))
     return best[1] if best else None
+
+
+def streamers(seed: int, cpu_ids: Sequence[int]) -> frozenset[int]:
+    """The CPUs that stream K and DST: each one with chance STREAMER_SHARE, fixed for the whole game."""
+    return frozenset(team_id for team_id in cpu_ids if rs.rng(seed, "streamer", team_id).random() < STREAMER_SHARE)
 
 
 def _next_move(state: State, team_id: int, ctx: _Context, made: int) -> Move | None:
@@ -365,12 +376,14 @@ def cpu_free_agency(state: State, settings: Settings, know: Knowledge, seed: int
     """Every CPU's free-agent moves for this week, in waiver-priority order (which they do not use up):
     never a player in `state.locked`, and at most MAX_FREE_AGENT_MOVES each unless a starting slot still
     has nobody who plays. Works in any phase; the dropped players go on waivers through
-    `replay_state.release`. `seed` is unused (no randomness)."""
-    ctx = _context(know, settings)
+    `replay_state.release`. `seed` (the game's) only picks the `streamers`."""
+    base = _context(know, settings)
     cpus = [team_id for team_id in state.waiver_order if not rs.team(state, team_id).is_user]
+    streaming = streamers(seed, sorted(cpus))
     for team_id in cpus:
         if replay_ir.blocked_reason(state, know, team_id):            # execute_move would refuse every add
             continue
+        ctx = replace(base, stream_edge=STREAMER_EDGE if team_id in streaming else STREAM_EDGE)
         for made in range(sum(settings.starters.values())):           # one per starting slot at the very most
             move = _next_move(state, team_id, ctx, made)
             if move is None:

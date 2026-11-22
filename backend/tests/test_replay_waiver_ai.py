@@ -5,6 +5,7 @@ module; the behaviour tests read that log, the unit tests use one week of a fres
 """
 import time
 from dataclasses import dataclass, replace
+from types import MappingProxyType
 
 import pytest
 
@@ -345,9 +346,11 @@ def test_free_agency_works_in_either_phase_and_gives_the_same_moves_every_time()
     state, knowledge = league(9, "open"), know(9)
 
     first = ai.cpu_free_agency(state, SETTINGS, knowledge, SEED)
-    again = ai.cpu_free_agency(replace(state, phase="waivers"), SETTINGS, knowledge, SEED + 1)
+    again = ai.cpu_free_agency(state, SETTINGS, knowledge, SEED)
+    waivers = ai.cpu_free_agency(replace(state, phase="waivers"), SETTINGS, knowledge, SEED)
 
     assert first.events and first.teams == again.teams and first.events == again.events
+    assert waivers.events and waivers.phase == "waivers"     # a dropped K / DST is claimable later there
     assert first.waiver_order == state.waiver_order and first.phase == "open"
 
 
@@ -400,13 +403,15 @@ def test_no_cpu_adds_to_a_position_it_is_full_at_while_one_of_its_own_plays_ther
 
 def test_kickers_and_defenses_are_only_swapped_like_for_like_and_for_a_clear_edge(season):
     swaps = 0
+    streaming = ai.streamers(SEED, sorted(CPUS))
     for week in season:
         for event in (e for e in week.events if e.kind in ("add", "claim") and len(e.player_ids) == 2):
             new, old = (week.know.by_id[pid] for pid in event.player_ids)
             assert (new.position in ai.STREAMED) == (old.position in ai.STREAMED)
             if new.position in ai.STREAMED:
                 assert new.position == old.position and event.kind == "add"
-                assert old.projection == 0 or new.projection - old.projection >= ai.STREAM_EDGE
+                edge = ai.STREAMER_EDGE if event.team_id in streaming else ai.STREAM_EDGE
+                assert old.projection == 0 or new.projection - old.projection >= edge
                 swaps += 1
     assert swaps > 0
 
@@ -700,3 +705,47 @@ def test_the_protected_top_scales_with_league_size(teams, protected):
     ctx = ai._context(fakes.fake_knowledge(3, settings), settings)
 
     assert ai.protected_rank(settings) == protected and len(ctx.protected) == protected
+
+
+def test_some_cpus_stream_and_the_pick_is_fixed_for_the_game():
+    many = list(range(1, 201))
+
+    picked = ai.streamers(SEED, many)
+
+    assert picked == ai.streamers(SEED, many)                       # same game, same streamers every week
+    assert 0.25 < len(picked) / len(many) < 0.55                    # about STREAMER_SHARE of them
+    assert picked != ai.streamers(SEED + 1, many)
+
+
+def test_a_streamer_swaps_a_defense_for_a_smaller_edge():
+    state, knowledge = league(3), know(3)
+    ctx, roster = ai._context(knowledge, SETTINGS), values(state, CPUS[0], 3)
+    own = next(v for v in roster if v.position == "DST")
+    other = replay_waivers.available_players(state, knowledge, "DST")[0]
+    better = [replace(other, projection=own.projection + ai.STREAMER_EDGE)]
+
+    assert ai._stream(roster, better, ctx) is None                                     # a holder keeps his
+    assert ai._stream(roster, better, replace(ctx, stream_edge=ai.STREAMER_EDGE)) == (other.player_id, own.player_id)
+
+
+@pytest.mark.parametrize("streams", [True, False])
+def test_free_agency_gives_streamers_their_smaller_edge(monkeypatch, streams):
+    """Every rostered defense projects 5, one free defense 7.5 (an edge between the two bars), the rest 0."""
+    state, knowledge = league(3, "open"), know(3)
+    rostered = rs.rostered(state)
+    free = next(v.player_id for v in knowledge.values if v.position == "DST" and v.player_id not in rostered)
+    assert ai.STREAMER_EDGE <= 2.5 < ai.STREAM_EDGE
+
+    def projected(v: ReplayValue) -> ReplayValue:
+        if v.position != "DST":
+            return v
+        return replace(v, projection=5.0 if v.player_id in rostered else 7.5 if v.player_id == free else 0.0)
+
+    changed = tuple(projected(v) for v in knowledge.values)
+    knowledge = replace(knowledge, values=changed, by_id=MappingProxyType({v.player_id: v for v in changed}))
+    monkeypatch.setattr(ai, "streamers", lambda seed, cpu_ids: frozenset({CPUS[0]} if streams else ()))
+
+    after = ai.cpu_free_agency(state, SETTINGS, knowledge, SEED)
+
+    added = [e.team_id for e in after.events if e.kind == "add" and e.player_ids[0] == free]
+    assert added == ([CPUS[0]] if streams else [])

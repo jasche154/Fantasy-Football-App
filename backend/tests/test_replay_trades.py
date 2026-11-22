@@ -5,6 +5,7 @@ chart built here from each week's healthy values, so these tests do not depend o
 - CPU 9 starts RB36 and RB32 but owns three good tight ends: it needs a back.
 - CPU 5 owns seven receivers; its only tight end, TE25, is its worst player.
 """
+import itertools
 import math
 import time
 from collections.abc import Mapping
@@ -339,7 +340,7 @@ def test_trades_close_after_the_deadline_weeks_waivers():
 
 
 @pytest.mark.parametrize("to_team, give, get, message", [
-    (NEEDS_RB, (RB14, SCRUB, SCRUB2, SCRUB3), (TE7,), "at most 3 players on each side"),
+    (NEEDS_RB, (RB14, SCRUB, SCRUB2, SCRUB3, P("WR", 41), P("WR", 40), P("WR", 39)), (TE7,), "at most 6 players on each side"),
     (NEEDS_RB, (), (TE7,), "Both sides of a trade need at least one player."),
     (NEEDS_RB, (RB14, RB14), (TE7,), "listed more than once"),
     (NEEDS_RB, (TE7,), (RB14,), "Not on You's roster: Replay TE7."),
@@ -584,3 +585,64 @@ def test_a_cpu_blocked_by_its_ir_declines_every_trade():
 
     assert not verdict.accepted and any(B1 in r and "CPU 9" in r for r in verdict.reasons)
     assert not said(rt.evaluate(blocked, SETTINGS, hurt(1, healthy), USER, *FAIR), B1)
+
+
+# ---------------- many-for-few: depth is worth less than quality ----------------
+
+def test_pieces_past_the_first_extra_one_count_at_the_depth_share():
+    assert tv.depth_counted([100.0], [90.0]) == 100.0
+    assert tv.depth_counted([300.0, 200.0], [450.0]) == 500.0                     # a plain 2-for-1 is untouched
+    assert tv.depth_counted([50.0, 300.0, 200.0], [450.0]) == pytest.approx(500.0 + tv.DEPTH_SHARE * 50.0)
+    assert tv.depth_counted([50.0, 300.0, 200.0], [450.0, 20.0]) == tv.depth_counted([50.0, 300.0, 200.0], [450.0])
+    assert tv.depth_counted([50.0, 300.0, 200.0], [450.0, 200.0]) == 550.0        # a real second piece counts
+
+
+@pytest.mark.parametrize("persona", PERSONAS)
+def test_a_pile_of_depth_does_not_buy_a_starter_but_a_fair_two_for_one_still_does(persona):
+    """Five bench pieces worth almost twice WR11 on the chart are declined; RB14 + WR31 for him is accepted."""
+    state, know = league()
+    state = with_persona(state, RICH, persona)
+    pile = (P("QB", 8), P("WR", 31), RB23, P("RB", 31), SCRUB3)
+    assert sum(know.by_id[pid].chart for pid in pile) > 1.8 * know.by_id[P("WR", 11)].chart
+
+    many = rt.evaluate(state, SETTINGS, know, USER, RICH, pile, [P("WR", 11)])
+    pair = rt.evaluate(state, SETTINGS, know, USER, RICH, (RB14, P("WR", 31)), [P("WR", 11)])
+
+    assert not many.accepted and said(many, rt.VALUE_REASON), many.reasons
+    assert many.suggestion == rt.DEPTH_HINT
+    assert pair.accepted and pair.suggestion is None, (pair.reasons, pair.suggestion)
+
+
+@pytest.mark.parametrize("persona", PERSONAS)
+def test_asking_for_a_junk_throw_in_does_not_switch_the_depth_discount_off(persona):
+    state, know = league()
+    state = with_persona(state, RICH, persona)
+    pile = (P("QB", 8), P("WR", 31), RB23, P("RB", 31), SCRUB3)
+
+    for junk in ([P("WR", 59)], [P("WR", 59), P("RB", 44)], [P("WR", 59), P("RB", 44), P("RB", 40)]):
+        verdict = rt.evaluate(state, SETTINGS, know, USER, RICH, pile, [P("WR", 11), *junk])
+        assert not verdict.accepted, (junk, verdict.reasons)
+
+
+def test_the_market_guard_counts_depth_at_the_discount():
+    know = values(p1=star(500.0), p2=star(150.0), p3=star(150.0), p4=star(150.0), p5=star(150.0))
+
+    assert tv.market_ok(know, [1], [2, 3, 4], []) is False         # 450 raw would pass at 80% of 500
+    assert tv.market_ok(know, [1], [2, 3], []) is False and tv.market_ok(know, [2, 3], [1], []) is True
+
+
+def test_a_suggested_player_really_makes_the_deal_go_through():
+    """Even with a junk throw-in in what the CPU sends (no discount yet) and its own cuts to make room."""
+    state, know = league()
+    mine = [pid for pid in rs.team(state, USER).roster if know.by_id[pid].position in SKILL]
+    names = {know.by_id[pid].name: pid for pid in mine}
+    followed = 0
+    for give in itertools.combinations(mine, 2):
+        verdict = rt.evaluate(state, SETTINGS, know, USER, RICH, give, (P("WR", 11), P("RB", 44)))
+        named = (verdict.suggestion or "").removeprefix("Add ").removesuffix(" to make this fair.")
+        if verdict.accepted or named not in names:
+            continue
+        after = rt.evaluate(state, SETTINGS, know, USER, RICH, (*give, names[named]), (P("WR", 11), P("RB", 44)))
+        assert after.accepted, (named, after.reasons)
+        followed += 1
+    assert followed >= 5
