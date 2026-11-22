@@ -298,12 +298,12 @@ def _suggestion(state: State, settings: Settings, know: Knowledge, mine: _Side, 
     if counted is None or not mine.team.is_user:
         return None
     sent = _chart(know, theirs.sends)
-    if len(theirs.kept) > len(theirs.sends):        # more pieces are discounted depth: ask for fewer, better ones
-        return DEPTH_HINT
     got = tv.depth_counted([know.by_id[pid].chart for pid in theirs.kept], [know.by_id[pid].chart for pid in theirs.sends])
     missing = max(-counted.score, tv.MARKET_GUARD * sent - got)
     if missing <= 0:
         return None
+    if got < _chart(know, theirs.kept):             # the depth discount bit: more pieces count little, ask for better ones
+        return DEPTH_HINT
     if len(mine.sends) >= MAX_PLAYERS_PER_SIDE:
         return _points_text(missing)
     spare = [know.by_id[pid] for pid in mine.team.roster if pid not in mine.sends and pid not in (mine.drops or ())

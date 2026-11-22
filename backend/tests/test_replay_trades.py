@@ -609,7 +609,7 @@ def test_a_pile_of_depth_does_not_buy_a_starter_but_a_fair_two_for_one_still_doe
 
     assert not many.accepted and said(many, rt.VALUE_REASON), many.reasons
     assert many.suggestion == rt.DEPTH_HINT
-    assert pair.accepted, pair.reasons
+    assert pair.accepted and pair.suggestion is None, (pair.reasons, pair.suggestion)
 
 
 @pytest.mark.parametrize("persona", PERSONAS)
