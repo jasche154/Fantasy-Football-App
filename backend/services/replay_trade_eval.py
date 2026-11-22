@@ -288,11 +288,6 @@ def run(cases: list[dict], data_for, seeds=SEEDS) -> list[Result]:
     return [r for case in cases for seed in seeds for r in judge(data_for(case["season"], case["scoring"]), case, seed)]
 
 
-def _seasons(text: str) -> list[int]:
-    first, _, last = text.partition("-")
-    return list(range(int(first), int(last or first) + 1))
-
-
 def main() -> None:
     from services import replay_pool, replay_value_eval    # database only here
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -304,7 +299,7 @@ def main() -> None:
     parser.add_argument("--slices-only", action="store_true")
     args = parser.parse_args()
     cases, seeds = load_cases(), tuple(int(s) for s in args.seeds.split(","))
-    seasons = _seasons(args.seasons) if args.capture else sorted({c["season"] for c in cases})
+    seasons = replay_value_eval.parse_seasons(args.seasons) if args.capture else sorted({c["season"] for c in cases})
     if args.capture or not args.slices_only:
         session = replay_value_eval.read_only_copy(args.db)
         replay_value_eval.add_expert_rows(session, seasons)

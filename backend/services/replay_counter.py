@@ -5,9 +5,11 @@ re-proposing can't reroll it), and searches at most once per week (`State.counte
 counter a week and repeated declines never rerun the search. Candidates: add one of the user's players, swap a
 requested player for a lesser one at his position, or drop one requested player; it picks the one it accepts
 that costs the user least (never a "big_loss" for the user, never one needing a user drop) and stores it as a
-pending Offer(counter_to=declined.id). It never counters a counter of its own counter.
+pending Offer(counter_to=declined.id). The declined deal is re-checked with the user's own drops. It never
+counters a counter of its own counter: the user can only answer a counter in the week it was made, and a CPU
+counters at most once a week.
 """
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import replace
 
 from services import replay_personas, replay_state as rs, replay_trades as rt
@@ -31,25 +33,21 @@ def _candidates(state: State, know: Knowledge, give: tuple[int, ...], get: tuple
             yield give, tuple(p for p in get if p != asked)
 
 
-def _own_counter_answered(state: State, declined: Offer) -> bool:
-    """Is `declined` the user's counter to an offer that was itself this CPU's counter?"""
-    answered = next((o for o in state.offers if o.id == declined.counter_to), None)
-    return answered is not None and answered.from_team == declined.to_team and answered.counter_to is not None
-
-
 def _countered_this_week(state: State, cpu_id: int) -> bool:
     return (state.counter_searched.get(cpu_id) == state.week
             or any(o.from_team == cpu_id and o.week == state.week and o.counter_to is not None for o in state.offers))
 
 
-def counter_offer(state: State, settings: Settings, know: Knowledge, declined: Offer, seed: int) -> State:
+def counter_offer(state: State, settings: Settings, know: Knowledge, declined: Offer, seed: int,
+                  user_drops: Sequence[int] = ()) -> State:
     """The state with the CPU's counter to the user's declined proposal added as a pending Offer, or unchanged."""
     cpu = rs.team(state, declined.to_team)
     if (declined.status != "declined" or cpu.is_user or declined.from_team != rs.user_team(state).id
-            or _own_counter_answered(state, declined) or _countered_this_week(state, cpu.id)):
+            or _countered_this_week(state, cpu.id)):
         return state
     try:
-        verdict = rt.evaluate(state, settings, know, declined.from_team, cpu.id, declined.give, declined.get)
+        verdict = rt.evaluate(state, settings, know, declined.from_team, cpu.id, declined.give, declined.get,
+                              user_drops)
     except ValueError:
         return state
     if verdict.accepted or not all(reason.startswith(rt.VALUE_REASON) for reason in verdict.reasons):

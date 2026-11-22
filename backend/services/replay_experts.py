@@ -155,8 +155,9 @@ def expert_rows(season: int, raw: list[dict], matcher: SeasonMatcher, fp_to_gsis
 
 def _ranks(pages: Mapping[tuple[str, str], Mapping[str, list[dict]]], kind: str,
            before: date) -> tuple[dict[int, int], date | None]:
-    """Per position, the latest `kind` snapshot scraped before `before`: ({player: pos_rank}, newest date)."""
-    ranks: dict[int, int] = {}
+    """Per position, the latest `kind` snapshot scraped before `before`: ({player: pos_rank}, newest date).
+    A player on two pages keeps his newer line, then his better rank (never the pages' row order)."""
+    best: dict[int, tuple[str, int]] = {}
     newest: date | None = None
     for (page_kind, _), by_date in pages.items():
         dates = [d for d in by_date if page_kind == kind and date.fromisoformat(d) < before]
@@ -165,19 +166,29 @@ def _ranks(pages: Mapping[tuple[str, str], Mapping[str, list[dict]]], kind: str,
         chosen = max(dates)
         newest = max(newest or date.min, date.fromisoformat(chosen))
         for row in by_date[chosen]:
-            ranks.setdefault(row["player_id"], row["pos_rank"])
-    return ranks, newest
+            line = (chosen, -row["pos_rank"])
+            if line > best.get(row["player_id"], ("", 0)):
+                best[row["player_id"]] = line
+    return {pid: -neg_rank for pid, (_, neg_rank) in best.items()}, newest
 
 
-def week_ranks(rows: list[dict], kickoffs: Mapping[int, date]) -> tuple[dict[PlayerWeek, int], dict[int, int]]:
+def week_ranks(rows: list[dict], kickoffs: Mapping[int, date],
+               positions: Mapping[int, str] | None = None) -> tuple[dict[PlayerWeek, int], dict[int, int]]:
     """({(player_id, week): position rank}, {week: snapshot age in days}). Week 0 = preseason.
+
+    A player with rows on his own page (`positions`: his pool position) uses only those; otherwise `_ranks`
+    picks among his pages by newest date, then best rank.
 
     `kickoffs` maps each week to its first game date. Week 0 (the draft) holds the last cheatsheet scraped
     before week 1's first kickoff, so nothing from the opener leaks in; week W the latest ROS page per
     position scraped before week W's Sunday (its first date moved to that Sunday), and only when there is one.
     The age is counted from that cutoff to the newest page used."""
+    positions = positions or {}
+    own = {row["player_id"] for row in rows if positions.get(row["player_id"]) == row["position"]}
     pages: dict[tuple[str, str], dict[str, list[dict]]] = defaultdict(lambda: defaultdict(list))
     for row in rows:
+        if row["player_id"] in own and positions[row["player_id"]] != row["position"]:
+            continue
         pages[(row["kind"], row["position"])][row["scrape_date"]].append(row)
     sundays = {week: _sunday(day) for week, day in kickoffs.items()}
     ranks: dict[PlayerWeek, int] = {}

@@ -13,12 +13,12 @@ from services.replay_values import Knowledge, ReplayValue
 Move = tuple[int, int | None]     # (player id to add, player id to drop)
 
 
-def cpu_cover(state: State, settings: Settings, know: Knowledge, seed: int, team_ids: Iterable[int]) -> State:
+def cpu_cover(state: State, settings: Settings, know: Knowledge, team_ids: Iterable[int]) -> State:
     """After a trade: each of those CPUs adds a free agent for every starting slot its roster can no longer
     fill (`replay_values.missing_slots`): the most valuable unlocked free agent who isn't out and can play
     there, dropping its lowest healthy-chart skill player that no starting slot needs when the roster is
     full. In the waivers phase every unrostered player is on waivers, so nothing happens: `start_week` covers
-    every CPU once they clear. `seed` is unused."""
+    every CPU once they clear."""
     if state.phase == "waivers":
         return state
     for team_id in team_ids:

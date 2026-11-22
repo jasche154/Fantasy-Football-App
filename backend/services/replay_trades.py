@@ -90,7 +90,7 @@ def needed_multiple(settings: Settings, other: Team) -> float:
     return rs.USER_TRADE_MULTIPLE[settings.difficulty] if other.is_user else CPU_TRADE_MULTIPLE
 
 
-def fair_label(know: Knowledge, value_give: float, value_get: float) -> str:
+def fair_label(value_give: float, value_get: float) -> str:
     """trade.verdict_for on chart values for the team that sends `value_give`: "fair", "slight_win"..."""
     return trade.verdict_for(trade.percent_difference(value_give, value_get))
 
@@ -333,7 +333,7 @@ def evaluate(state: State, settings: Settings, know: Knowledge, from_team: int, 
     return Verdict(
         accepted=not reasons, reasons=tuple(reasons), value_give=value_give, value_get=value_get,
         percent=trade.percent_difference(value_give, value_get), their_gain=theirs.gain, your_gain=mine.gain,
-        their_drops=theirs.drops or (), fair_label=fair_label(know, value_give, value_get),
+        their_drops=theirs.drops or (), fair_label=fair_label(value_give, value_get),
         your_drops=mine.drops or (),
         give_values=tuple((pid, know.by_id[pid].chart) for pid in give),
         get_values=tuple((pid, know.by_id[pid].chart) for pid in get),

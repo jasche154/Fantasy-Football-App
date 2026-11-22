@@ -44,7 +44,7 @@ def _text(tag: str, since: int, back: int | None) -> str:
     return f"{verb} since week {since}; expected back week {back}."
 
 
-def report(seed: int, player_id: int, since: int, true_return: int, week: int, end_week: int, tag: str) -> Report:
+def report(seed: int, player_id: int, since: int, true_return: int, week: int, tag: str) -> Report:
     """What the news says before `week` about a player out since `since` who really returns at
     `true_return` (0 = never). Never names a week <= `week`."""
     rng = replay_state.rng(seed, "news", player_id, since)
@@ -100,12 +100,3 @@ def open_streak(data: SeasonData, player_id: int, week: int) -> tuple[int, int, 
     open_ = [(since, back) for since, back in _streaks(data).get(player_id, ())
              if since <= week and (back == 0 or back > week)]
     return (*open_[-1], tag.tag) if open_ else None
-
-
-def current(data: SeasonData, player_id: int, week: int, end_week: int, seed: int) -> Report | None:
-    """The report on a player with an `open_streak` this week, else None."""
-    streak = open_streak(data, player_id, week)
-    if streak is None:
-        return None
-    since, back, tag = streak
-    return report(seed, player_id, since, back, week, end_week, tag)

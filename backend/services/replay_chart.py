@@ -248,7 +248,7 @@ def with_news(data: SeasonData, rows: Mapping[int, dict], fields: Mapping[int, d
     """{id: fields} for the players in `parts` only: their seeded news report and the chart it gives."""
     out: dict[int, dict] = {}
     for pid, (expert, model_part, (since, back, tag)) in parts.items():
-        news = replay_news.report(seed, pid, since, back, week, end_week, tag)
+        news = replay_news.report(seed, pid, since, back, week, tag)
         chart, extra = _injured(data, rows[pid], news, week, end_week, expert, model_part)
         out[pid] = {**fields[pid], **extra, "chart": round(chart, 1), "news": news}
     return out

@@ -184,8 +184,8 @@ def _bot_trades(state: rs.State, settings: rs.Settings, data, dice, seed: int) -
         get = _some(dice, partner.roster, 1, 2)
         give = _some(dice, mine, 1, 2)
         if _chance(dice, 0.5):                       # an offer a CPU might like: a bit more value than asked
-            asked = rv.market_value(know, get[0])
-            richer = sorted((know.by_id[pid].market_value, pid) for pid in mine)
+            asked = know.by_id[get[0]].chart
+            richer = sorted((know.by_id[pid].chart, pid) for pid in mine)
             give, get = [next((pid for worth, pid in richer if worth >= asked * 1.1), richer[-1][1])], get[:1]
         drops = _overflow_drops(state, settings, dice, give, get)
         state, _, _ = rg.propose_trade(state, settings, data, seed, partner.id, give, get, drops)
@@ -387,7 +387,7 @@ def test_an_accepted_offer_lets_the_cpu_cover_its_lineup(monkeypatch):
     settings, state, offer = _with_offer()
     covered = []
     monkeypatch.setattr(rg.replay_waiver_ai, "cpu_cover",
-                        lambda state, settings, know, seed, team_ids: covered.append(list(team_ids)) or state)
+                        lambda state, settings, know, team_ids: covered.append(list(team_ids)) or state)
 
     rg.respond_offer(state, settings, DATA, offer.id, False, seed=11)
     rg.respond_offer(state, settings, DATA, offer.id, True, seed=11)
@@ -402,20 +402,20 @@ def test_cpus_cover_their_trades_once_waivers_clear(monkeypatch):
     waivers = next(step.state for step in simulate(*IDLE[0]).steps if step.state.phase == "waivers")
     calls = []
     cover = rg.replay_waiver_ai.cpu_cover
-    monkeypatch.setattr(rg.replay_waiver_ai, "cpu_cover", lambda state, settings, know, seed, team_ids: calls.append(
-        (state.phase, state.locked, list(team_ids))) or cover(state, settings, know, seed, team_ids))
+    monkeypatch.setattr(rg.replay_waiver_ai, "cpu_cover", lambda state, settings, know, team_ids: calls.append(
+        (state.phase, state.locked, list(team_ids))) or cover(state, settings, know, team_ids))
 
     rg.advance(waivers, settings, DATA, 11, rg.WEDNESDAY)
 
     assert calls == [("open", (), [team.id for team in waivers.teams])]
-    assert cover(waivers, settings, rg.knowledge(waivers, settings, DATA, seed=11), 11, [1, 2, 3]) is waivers
+    assert cover(waivers, settings, rg.knowledge(waivers, settings, DATA, seed=11), [1, 2, 3]) is waivers
 
 
 def _countering(monkeypatch) -> list[rs.Offer]:
     """replay_counter.counter_offer stubbed: the CPU always answers a decline with the mirrored deal."""
     seen = []
 
-    def counter(state, settings, know, declined, seed):
+    def counter(state, settings, know, declined, seed, user_drops=()):
         seen.append(declined)
         reply = rs.Offer(state.next_id, state.week, declined.to_team, declined.from_team, declined.get[:1],
                          declined.give, "pending", counter_to=declined.id)

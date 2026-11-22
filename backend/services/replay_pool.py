@@ -377,7 +377,7 @@ def _expert_ranks(session: Session, season: int, schedule: Schedule,
     rows = [dict(row._mapping) for row in session.execute(select(
         ReplayExpertRank.kind, ReplayExpertRank.scrape_date, ReplayExpertRank.player_id, ReplayExpertRank.position,
         ReplayExpertRank.pos_rank).where(ReplayExpertRank.season == season))]
-    ranks, age = week_ranks(rows, kickoffs) if rows and kickoffs else ({}, {})
+    ranks, age = week_ranks(rows, kickoffs, {pid: p.position for pid, p in players.items()}) if rows and kickoffs else ({}, {})
     return {key: rank for key, rank in ranks.items() if key[0] in players}, age
 
 

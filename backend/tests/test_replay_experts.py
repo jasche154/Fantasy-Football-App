@@ -130,6 +130,21 @@ def test_each_week_uses_the_latest_snapshot_before_its_sunday():
     assert age == {0: 1, 2: 2, 3: 2, 4: 7}
 
 
+def test_a_player_on_two_pages_with_different_dates_gets_one_rank_whatever_the_row_order():
+    def row(scraped, position, rank):
+        return {"kind": "ros", "scrape_date": scraped, "player_id": 1, "position": position, "pos_rank": rank}
+
+    rows = [row("2023-09-08", "TE", 3), row("2023-09-01", "QB", 20), row("2023-09-08", "QB", 9),
+            row("2023-09-01", "WR", 1)]
+    kickoffs = {1: date(2023, 9, 7), 2: date(2023, 9, 14)}
+
+    for order in (rows, rows[::-1]):
+        assert week_ranks(order, kickoffs, {1: "QB"})[0][(1, 2)] == 9         # his own (QB) page only
+        assert week_ranks(order, kickoffs, {1: "TE"})[0][(1, 2)] == 3
+        assert week_ranks(order, kickoffs, {1: "RB"})[0][(1, 2)] == 3         # no own page: newest, then best
+        assert week_ranks([r for r in order if r["position"] != "TE"], kickoffs, {1: "RB"})[0][(1, 2)] == 9
+
+
 def test_no_rows_means_no_ranks():
     assert week_ranks([], {1: date(2023, 9, 7)}) == ({}, {})
 

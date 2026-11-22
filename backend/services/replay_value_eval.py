@@ -27,6 +27,7 @@ from integrations.adp_history import SeasonMatcher
 from services import replay_chart, replay_experts, replay_pool, replay_state, replay_values as rv
 from services.replacement_eval import spearman
 from services.replay_pool import SKILL, SeasonData
+from services.replay_trade_value import STAR_PREMIUM
 
 DEFAULT_DB = Path(__file__).resolve().parents[1] / "database" / "fantasy.db"
 WEEKS = range(2, 12)
@@ -58,12 +59,9 @@ def add_expert_rows(session: Session, seasons: list[int]) -> None:
     for season in missing:
         dates = replay_experts._season_dates(session, season)
         rows = replay_experts.expert_rows(season, raw, SeasonMatcher(session, season), crosswalk, *dates) if dates else []
-        unique = {(r["kind"], r["scrape_date"], r["player_id"]): r for r in reversed(rows)}   # first line wins
-        if len(unique) < len(rows):
-            print(f"{season}: dropped {len(rows) - len(unique)} rows naming a player twice in one snapshot")
-        if unique:
-            session.execute(insert(ReplayExpertRank), list(unique.values()))
-        print(f"{season}: {len(unique)} expert rows in memory")
+        if rows:                                 # expert_rows already keeps one line per player and snapshot
+            session.execute(insert(ReplayExpertRank), rows)
+        print(f"{season}: {len(rows)} expert rows in memory")
 
 
 @contextmanager
@@ -150,7 +148,7 @@ def sanity(by_week: dict[int, Week]) -> None:
     print("Chase Brown by week: " + ", ".join(f"{w}:{show(w, 'Chase Brown'):.0f}" for w in sorted(by_week)))
     if 1 in by_week:
         star, pair = show(1, "Amon-Ra St. Brown"), [show(1, "Tetairoa McMillan"), show(1, "Jordan Mason")]
-        premium = 0.12 * star * (1 - max(pair) / star)
+        premium = STAR_PREMIUM * star * (1 - max(pair) / star)
         print(f"Week 1: St. Brown {star:.0f} (+{premium:.0f} star premium) vs McMillan {pair[0]:.0f} + Mason "
               f"{pair[1]:.0f} = {sum(pair):.0f}")
     for w in (4, 8):
@@ -162,7 +160,7 @@ def sanity(by_week: dict[int, Week]) -> None:
         print(f"wk{w:>2} top 12: " + "; ".join(f"{by_week[w].names[p]} {charts[w][p]['chart']:.0f}" for p in top))
 
 
-def _seasons(text: str) -> list[int]:
+def parse_seasons(text: str) -> list[int]:
     first, _, last = text.partition("-")
     return list(range(int(first), int(last or first) + 1))
 
@@ -173,7 +171,7 @@ def main() -> None:
     parser.add_argument("--db", type=Path, default=DEFAULT_DB)
     parser.add_argument("--scoring", default="half")
     args = parser.parse_args()
-    seasons = _seasons(args.seasons)
+    seasons = parse_seasons(args.seasons)
     session = read_only_copy(args.db)
     add_expert_rows(session, seasons)
     weeks: dict[int, list[Week]] = {}

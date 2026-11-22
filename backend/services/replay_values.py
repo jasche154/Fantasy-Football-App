@@ -17,7 +17,7 @@ results are used only for weeks already played: the `games` / `ppg` display fiel
 - healthy_value = max(0, ros_ppg - replacement) x his team's games left; trade_value = healthy_value x
   availability. Kickers and defenses have neither. These drive waivers and lineups.
 - Trade chart (services/replay_chart.py): `chart` on a 0-1000 rank-based scale from expert ranks and the
-  model, after injury news (services/replay_news.py); `market_value` is the chart. rank / pos_rank sort by it.
+  model, after injury news (services/replay_news.py). rank / pos_rank sort by it.
   A hard-tagged player with a `returns` entry gets a news report; his availability comes from it.
 - Injury tags (week >= 1): a hard tag (O, IR, PUP, SUS) means out, and that week's projection counts as 0.
   Tagged IR or PUP, he is expected to miss at least IR_OUT_SHARE of his remaining games. Q and D change nothing.
@@ -68,7 +68,6 @@ class ReplayValue:
     out: bool = False              # no projection this week and not on a bye
     healthy_value: float = 0.0     # vorp_per_game x games_left, no injury discount
     games_left: int = 0            # his team's games from this week to the league's last week
-    market_value: float = 0.0      # what he counts for in a trade package: his chart value
     last_projection: float = 0.0   # his most recent non-zero pre-game projection
     injury: Injury | None = None   # this week's tag; always None at week 0
     recent_points: tuple[float, ...] = ()   # real points of his last RECENT_GAMES games before this week, newest first
@@ -180,11 +179,11 @@ def _row(data: SeasonData, player: PoolPlayer, prior: float, week: int, team: st
 def _valued(row: dict, replacement: Mapping[str, float]) -> dict:
     """Adds the values over replacement (skill only; K and DST have none) and the trade chart value."""
     if row["position"] not in SKILL:
-        return {**row, "vorp_per_game": 0.0, "healthy_value": 0.0, "trade_value": 0.0, "market_value": row["chart"]}
+        return {**row, "vorp_per_game": 0.0, "healthy_value": 0.0, "trade_value": 0.0}
     over = max(0.0, row["ros_ppg"] - replacement[row["position"]])
     healthy = over * row["games_left"]
     return {**row, "vorp_per_game": round(over, 2), "healthy_value": round(healthy, 1),
-            "trade_value": round(healthy * row["availability"], 1), "market_value": row["chart"]}
+            "trade_value": round(healthy * row["availability"], 1)}
 
 
 def _ranked(rows: Iterable[dict]) -> tuple[ReplayValue, ...]:
@@ -281,11 +280,6 @@ def projector(know: Knowledge) -> lineup_gain.Projector:
 def horizon(know: Knowledge, settings: "replay_state.Settings") -> lineup_gain.Horizon:
     playoffs = range(settings.regular_season_weeks + 1, settings.end_week + 1)
     return lineup_gain.horizon(max(1, know.week), settings.end_week, playoffs, None)
-
-
-def market_value(know: Knowledge, player_id: int) -> float:
-    """What a player counts for in a trade package: his chart value (0-1000, replay_chart)."""
-    return _values(know, [player_id])[0].market_value
 
 
 def lineup_holes(positions: Sequence[str], settings) -> int:

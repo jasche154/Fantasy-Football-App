@@ -12,7 +12,7 @@ SEEDS = range(400)
 
 
 def reports(since: int, true_return: int, week: int, tag: str = "O") -> list[Report]:
-    return [news.report(seed, 7, since, true_return, week, END, tag) for seed in SEEDS]
+    return [news.report(seed, 7, since, true_return, week, tag) for seed in SEEDS]
 
 
 @pytest.mark.parametrize("since, true_return", [(3, 4), (3, 5), (5, 9), (2, 14), (6, 0), (16, 17)])
@@ -43,8 +43,8 @@ def test_a_long_absence_is_sometimes_first_called_season_ending_then_corrected()
 
     assert 0.05 < len(called_off) / len(SEEDS) < 0.16
     for seed in called_off:
-        assert news.report(seed, 7, 3, 11, 8, END, "IR").back is None              # still wrong 3 weeks out
-        corrected = news.report(seed, 7, 3, 11, 9, END, "IR")                       # 2 weeks before he returns
+        assert news.report(seed, 7, 3, 11, 8, "IR").back is None              # still wrong 3 weeks out
+        corrected = news.report(seed, 7, 3, 11, 9, "IR")                       # 2 weeks before he returns
         assert corrected.back is not None and corrected.back >= 10 and "expected back" in corrected.text
 
 
@@ -58,7 +58,7 @@ def test_a_season_ending_injury_sometimes_first_names_a_return_then_is_revised()
 
     assert 0.25 < len(hopeful) / len(SEEDS) < 0.45
     assert all(9 <= r.back <= 13 for _, r in hopeful)                              # 4-8 weeks out
-    assert all(news.report(seed, 7, 5, 0, 8, END, "IR").back is None for seed, _ in hopeful)   # revised by 3 weeks
+    assert all(news.report(seed, 7, 5, 0, 8, "IR").back is None for seed, _ in hopeful)   # revised by 3 weeks
     assert all(r.back is None and "season" in r.text for r in reports(5, 0, 8))
 
 
@@ -70,9 +70,9 @@ def test_a_suspension_is_reported_exactly():
 
 
 def test_the_same_seed_gives_the_same_report_and_seeds_differ():
-    assert news.report(3, 7, 4, 10, 5, END, "O") == news.report(3, 7, 4, 10, 5, END, "O")
+    assert news.report(3, 7, 4, 10, 5, "O") == news.report(3, 7, 4, 10, 5, "O")
     assert len({r.back for r in reports(4, 10, 4)}) > 1
-    assert news.report(3, 7, 4, 10, 4, END, "O").back == news.report(3, 7, 4, 10, 4, END, "IR").back
+    assert news.report(3, 7, 4, 10, 4, "O").back == news.report(3, 7, 4, 10, 4, "IR").back
 
 
 def test_share_played_counts_his_teams_games_from_the_reported_week():
@@ -85,13 +85,13 @@ def test_share_played_counts_his_teams_games_from_the_reported_week():
     assert news.share_played(Report(4, 8, ""), []) == 1.0
 
 
-def test_current_finds_the_report_for_a_hard_tagged_player_only():
+def test_open_streak_finds_the_streak_of_a_hard_tagged_player_only():
     data = fakes.fake_season()
     star = fakes.INJURED_STAR_ID
 
-    assert news.current(data, star, 5, END, 0) is None                       # not out yet
-    assert news.current(data, star, 7, END, 0).since == fakes.INJURED_WEEKS[0]
-    assert news.current(data, star, fakes.STAR_BACK_WEEK, END, 0) is None    # tagged Q: plays
-    assert news.current(data, fakes.BREAKOUT_ID, 7, END, 0) is None          # never tagged
+    assert news.open_streak(data, star, 5) is None                           # not out yet
+    assert news.open_streak(data, star, 7)[0] == fakes.INJURED_WEEKS[0]
+    assert news.open_streak(data, star, fakes.STAR_BACK_WEEK) is None        # tagged Q: plays
+    assert news.open_streak(data, fakes.BREAKOUT_ID, 7) is None              # never tagged
     untold = fakes.tagged(data, {(fakes.BREAKOUT_ID, 7): fakes.Injury("O")})
-    assert news.current(untold, fakes.BREAKOUT_ID, 7, END, 0) is None        # no returns entry: no news
+    assert news.open_streak(untold, fakes.BREAKOUT_ID, 7) is None            # no returns entry: no news

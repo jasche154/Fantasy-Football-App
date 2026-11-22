@@ -120,7 +120,7 @@ def start_week(state: State, settings: Settings, data: SeasonData, seed: int) ->
     state = replay_waiver_ai.cpu_free_agency(state, settings, know, seed)
     state = replay_trade_ai.cpu_trades(state, settings, know, seed)
     state = replace(state, locked=(), phase="open")
-    return replay_waiver_ai.cpu_cover(state, settings, know, seed, [team.id for team in state.teams])
+    return replay_waiver_ai.cpu_cover(state, settings, know, [team.id for team in state.teams])
 
 
 def _wednesday(state: State, settings: Settings, data: SeasonData, seed: int) -> State:
@@ -226,11 +226,11 @@ def _propose(state: State, settings: Settings, data: SeasonData, seed: int, to_t
     state, verdict = replay_trades.propose(state, settings, know, to_team, give, get, user_drops,
                                            counter_to=counter_to)
     if verdict.accepted:            # the CPU fills any starting slot the deal emptied (waivers phase: at start_week)
-        return replay_waiver_ai.cpu_cover(state, settings, know, seed, [to_team]), verdict, None
+        return replay_waiver_ai.cpu_cover(state, settings, know, [to_team]), verdict, None
     if len(state.offers) == before:                 # the same proposal was already declined this week
         return state, verdict, None
     declined = state.offers[-1]
-    countered = replay_counter.counter_offer(state, settings, know, declined, seed)
+    countered = replay_counter.counter_offer(state, settings, know, declined, seed, user_drops)
     answer = next((o for o in countered.offers[len(state.offers):] if o.counter_to == declined.id), None)
     return countered, verdict, answer
 
@@ -260,4 +260,4 @@ def respond_offer(state: State, settings: Settings, data: SeasonData, offer_id: 
     know = knowledge(state, settings, data, seed=seed)
     state = replay_trades.respond(state, settings, know, offer_id, accept, user_drops)
     offer = next(o for o in state.offers if o.id == offer_id)
-    return replay_waiver_ai.cpu_cover(state, settings, know, seed, [offer.from_team]) if accept else state
+    return replay_waiver_ai.cpu_cover(state, settings, know, [offer.from_team]) if accept else state

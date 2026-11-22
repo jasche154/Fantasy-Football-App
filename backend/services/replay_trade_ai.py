@@ -65,7 +65,7 @@ def fair_for_user(settings: Settings, know: Knowledge, value_give: float, value_
     """Is a CPU's offer fair for the user, who sends `value_give`? Yes when trade.verdict_for calls it fair
     or better once the premium a CPU asks of the user (none on normal, 8% on hard) is set aside."""
     asked = rs.USER_TRADE_MULTIPLE[settings.difficulty]
-    return not rt.fair_label(know, value_give, value_get * asked).endswith("loss")
+    return not rt.fair_label(value_give, value_get * asked).endswith("loss")
 
 
 def _candidates(state: State, settings: Settings, know: Knowledge, sender: Team, receiver: Team) -> list[Deal]:

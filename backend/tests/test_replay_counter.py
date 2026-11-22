@@ -5,13 +5,14 @@ import pytest
 
 from services import replay_counter as rc, replay_state as rs, replay_trades as rt
 from tests import replay_fakes as fakes
-from tests.test_replay_trades import league
+from tests.test_replay_trades import chart_knowledge, league, star, with_persona
 
 P = fakes.player_id
 SETTINGS = fakes.fake_settings()
 USER, CPU, NEEDS_RB = 1, 3, 9
 SCRUB = P("WR", 54)
-SHORT = (CPU, [P("RB", 14)], [P("RB", 17)])     # a little too little for CPU 3's back
+RB14, RB17, RB28, RB31, WR42 = P("RB", 14), P("RB", 17), P("RB", 28), P("RB", 31), P("WR", 42)
+SHORT = (CPU, [RB14], [RB17])     # a little too little for CPU 3's back
 
 
 @pytest.fixture
@@ -19,11 +20,18 @@ def always(monkeypatch):
     monkeypatch.setattr(rc.replay_personas, "counter_rate", lambda persona: 1.0)
 
 
-def declined(state=None, deal=SHORT, counter_to=None):
-    base, know = league()
-    after, verdict = rt.propose(state or base, SETTINGS, know, *deal, counter_to=counter_to)
+def declined(state=None, deal=SHORT, counter_to=None, changes=None, settings=SETTINGS, drops=()):
+    base, know = league(settings=settings, changes=changes)
+    after, verdict = rt.propose(state or base, settings, know, *deal, drops, counter_to=counter_to)
     assert not verdict.accepted
     return after, know, after.offers[-1]
+
+
+def countered(changes=None, deal=SHORT, settings=SETTINGS, drops=(), state=None):
+    """(user sends, user gets) in the CPU's counter to `deal`, or None."""
+    after, know, mine = declined(state, deal, changes=changes, settings=settings, drops=drops)
+    answer = rc.counter_offer(after, settings, know, mine, 0, drops)
+    return (answer.offers[-1].get, answer.offers[-1].give) if len(answer.offers) > len(after.offers) else None
 
 
 def test_a_value_decline_gets_the_cheapest_counter_the_cpu_would_take(always):
@@ -111,3 +119,63 @@ def test_a_search_that_finds_nothing_is_not_rerun_that_week(always, monkeypatch)
     assert rs.state_from_json(rs.to_json(first)) == first
     next_week = replace(again, week=state.week + 1)
     assert rc._countered_this_week(next_week, CPU) is False
+
+
+# ---------------- which counter: each generator, the cheapest, difficulty, the market guard ----------------
+
+def test_the_add_generator_asks_for_the_users_cheapest_extra_player(always):
+    assert countered() == ((RB14, WR42), (RB17,))
+
+
+def test_the_swap_generator_offers_a_lesser_back_and_beats_a_dearer_add(always):
+    """Two counters qualify: RB14 + WR42 for RB17 (costs the user ~26) and RB14 for RB28 (~18). max() would
+    pick the first."""
+    changes = {RB28: star(380.0)}
+    state, know, mine = declined(changes=changes)
+    for give, get in (((RB14, WR42), (RB17,)), ((RB14,), (RB28,))):
+        assert rt.evaluate(state, SETTINGS, know, USER, CPU, give, get).accepted
+
+    assert countered(changes) == ((RB14,), (RB28,))
+
+
+def test_the_drop_generator_drops_a_requested_player_and_the_users_drops_count(always):
+    """RB14 for RB17 + RB28 leaves the user one over the limit: the decline is re-checked with his drop."""
+    changes, deal = {RB14: star(450.0)}, (CPU, [RB14], [RB17, RB28])
+    state, know, mine = declined(deal=deal, changes=changes, drops=(SCRUB,))
+    assert rt.evaluate(state, SETTINGS, know, USER, CPU, (RB14, RB31), (RB17, RB28)).accepted    # dearer for him
+
+    assert countered(changes, deal, drops=(SCRUB,)) == ((RB14,), (RB17,))
+    assert rc.counter_offer(state, SETTINGS, know, mine, 0) is state            # without his drop: no counter
+
+
+def test_on_hard_the_cpu_wants_more_so_the_counter_changes(always):
+    changes, hard = {RB28: star(345.0)}, replace(SETTINGS, difficulty="hard")
+
+    assert countered(changes) == ((RB14, WR42), (RB17,))
+    assert countered(changes, settings=hard) == ((RB14,), (RB28,))
+    assert countered(settings=hard) is None                                      # nothing it takes is cheap enough
+
+
+def test_a_decline_by_the_market_guard_alone_gets_a_counter_that_passes_it(always):
+    """A steady CPU rates the user's back (drafted high) above its own bench back, but 330 for 430 is
+    under 80% back on the chart."""
+    changes = {RB14: star(330.0, star=1.0, pre_chart=900.0), RB28: star(430.0, star=1.0, pre_chart=0.0)}
+    base = with_persona(league(changes=changes)[0], CPU, "steady")
+    state, know, mine = declined(base, (CPU, [RB14], [RB28]), changes=changes)
+    reasons = rt.evaluate(state, SETTINGS, know, USER, CPU, mine.give, mine.get).reasons
+
+    assert reasons == ("Value is too far apart: CPU 3 won't take back less than 80% of what it gives.",)
+    assert countered(changes, (CPU, [RB14], [RB28]), state=base) == ((RB14, SCRUB), (RB28,))
+
+
+@pytest.mark.parametrize("week", [1, 9])
+def test_the_counter_does_not_change_when_the_future_does(always, week):
+    base = replace(fakes.drafted_state(), week=week)
+    real = chart_knowledge(week)
+    changed = chart_knowledge(week, data=fakes.future_changed(fakes.fake_season(), after_week=week))
+    state, _ = rt.propose(base, SETTINGS, real, *SHORT)
+    mine = state.offers[-1]
+
+    answer = rc.counter_offer(state, SETTINGS, real, mine, seed=0)
+    assert len(answer.offers) == len(state.offers) + 1
+    assert rc.counter_offer(state, SETTINGS, changed, mine, seed=0) == answer

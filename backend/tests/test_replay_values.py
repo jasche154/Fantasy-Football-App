@@ -498,19 +498,16 @@ def test_evaluate_trade_judges_replay_values():
 
 # ---------------- what a player counts for in a trade package ----------------
 
-def test_market_value_is_the_chart_value():
+def test_a_trade_package_counts_the_chart_value():
     know = know_at(6)
     star, scrub = roster_of(know, "RB3", "RB80")
     out = know.by_id[fakes.INJURED_STAR_ID]
 
-    assert rv.market_value(know, star.player_id) == star.market_value == star.chart > 700
-    assert scrub.trade_value == 0.0 and 0 < scrub.market_value == scrub.chart < 30
-    assert rv.market_value(know, out.player_id) == out.chart < out.healthy_chart             # discounted, not zero
+    assert star.chart > 700 and scrub.trade_value == 0.0 and 0 < scrub.chart < 30
+    assert 0 < out.chart < out.healthy_chart                                         # discounted, not zero
     discount = out.availability * rv.replay_chart.AVAILABILITY_SHARE                # his first week out
     assert out.chart == pytest.approx(out.healthy_chart * discount, abs=0.2) and out.chart > 0
     assert all(0 <= v.chart <= rv.replay_chart.CHART_MAX * rv.replay_chart.BYE_BUMP for v in know.values)
-    with pytest.raises(ValueError):
-        rv.market_value(know, 999_999)
 
 
 @pytest.mark.parametrize("position", ["K", "DST"])
@@ -677,7 +674,7 @@ def test_the_ir_kicker_who_never_returns_is_reported_out_for_the_season():
         tagged, plain = know_at(week).by_id[kicker], know_at(week, untagged).by_id[kicker]
         assert tagged.news.since == fakes.IR_KICKER_WEEK and plain.news is None
         assert tagged.availability == 0.0 and tagged.healthy_chart == plain.healthy_chart   # no game left for him
-        ignored = {"availability": 0, "expected_missed": 0, "chart": 0, "market_value": 0, "rank": 0, "pos_rank": "",
+        ignored = {"availability": 0, "expected_missed": 0, "chart": 0, "rank": 0, "pos_rank": "",
                    "news": None, "trade_value": 0}
         assert replace(tagged, injury=None, **ignored) == replace(plain, **ignored)
     assert know_at(fakes.IR_KICKER_WEEK + 3).by_id[kicker].news.back is None
@@ -709,7 +706,7 @@ def test_a_hard_tag_alone_makes_a_player_without_a_prior_out():
 
 # ---------------- the trade chart ----------------
 
-NEWS_FIELDS = {"news": None, "availability": 0, "expected_missed": 0, "chart": 0, "market_value": 0,
+NEWS_FIELDS = {"news": None, "availability": 0, "expected_missed": 0, "chart": 0,
                "trade_value": 0, "rank": 0, "pos_rank": ""}
 
 
@@ -752,7 +749,6 @@ def test_chart_fields_come_from_the_expert_ranks_and_the_preseason():
     firsts = sorted((v for v in know.values if v.pre_rank is not None), key=lambda v: v.pre_rank)[:12]
     assert all(v.star == 1.0 for v in firsts) and know.by_id[fakes.BREAKOUT_ID].star < 0.5
     assert [v.chart for v in know.values] == sorted((v.chart for v in know.values), reverse=True)
-    assert all(v.market_value == v.chart for v in know.values)
 
 
 def test_without_expert_ranks_the_chart_is_the_models():

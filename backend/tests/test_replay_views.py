@@ -459,7 +459,7 @@ def _swap(state: rs.State, partner: int) -> tuple[list[int], list[int]]:
 
     def best_back(team_id: int) -> int:
         return max((pid for pid in rs.team(state, team_id).roster if know.by_id[pid].position == "RB"),
-                   key=lambda pid: know.by_id[pid].market_value)
+                   key=lambda pid: know.by_id[pid].chart)
 
     return [best_back(USER)], [best_back(partner)]
 

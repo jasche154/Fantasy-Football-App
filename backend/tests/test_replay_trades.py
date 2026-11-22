@@ -39,7 +39,7 @@ def charted(know, changes: Mapping[int, dict] | None = None):
         healthy = round(1000 * math.exp(-rank[v.player_id] / CHART_TAU), 1) if v.player_id in rank else 15.0
         chart = round(healthy * v.availability, 1)
         fields = {"healthy_chart": healthy, "chart": chart, "pre_chart": healthy, "star": 0.0, "form_chart": 0.0,
-                  "market_value": chart, **(changes or {}).get(v.player_id, {})}
+                  **(changes or {}).get(v.player_id, {})}
         return replace(v, **fields)
 
     values = tuple(one(v) for v in know.values)
@@ -79,7 +79,7 @@ def lock_free_agents(state: rs.State, know, position: str) -> rs.State:
 
 
 def star(chart: float, **more) -> dict:
-    return {"chart": chart, "healthy_chart": chart, "pre_chart": chart, "market_value": chart, **more}
+    return {"chart": chart, "healthy_chart": chart, "pre_chart": chart, **more}
 
 
 # ---------------- the two deals the owner named ----------------
