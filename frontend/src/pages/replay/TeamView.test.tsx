@@ -171,6 +171,18 @@ describe('TeamView drag and drop', () => {
     expect(rowOf('Isiah Pacheco')).not.toHaveClass('replay-roster__row--target');
   });
 
+  it('keeps a tap-Move selection when a drag ends before its frame', async () => {
+    const { user } = renderTeam();
+    await table();
+    await user.click(screen.getByRole('button', { name: 'Move James Cook' }));
+    expect(rowOf('Patrick Mahomes')).toHaveClass('replay-roster__row--dim');
+    fireEvent.dragStart(rowOf('Chris Olave'));
+    fireEvent.dragEnd(rowOf('Chris Olave'));                                          // cancelled: the pick never ran
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    expect(rowOf('James Cook')).toHaveClass('replay-roster__row--moving');
+    expect(rowOf('Patrick Mahomes')).toHaveClass('replay-roster__row--dim');
+  });
+
   it("cannot drag on a roster the user can't change", async () => {
     renderTeam(team({ team: teamRef(OPPONENT_TEAM_ID) }));
     await screen.findByRole('table', { name: 'Sunday Scaries roster, week 5' });

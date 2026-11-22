@@ -90,6 +90,9 @@ describe('App routing and shell', () => {
     const skip = screen.getByRole('link', { name: 'Skip to the game' });
     await user().click(skip);
     expect(screen.getByRole('main')).toHaveFocus();                          // no screen on show, so main itself
+    act(() => skip.focus());
+    act(() => navigate('/play', { game: 7, view: 'bogus' }));                 // an unknown view is still the team view
+    expect(skip).toHaveFocus();
     act(() => navigate('/play', { game: 8 }));
     await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Replay League' })).toHaveFocus());
   });

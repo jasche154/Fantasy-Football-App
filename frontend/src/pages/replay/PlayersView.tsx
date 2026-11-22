@@ -69,6 +69,7 @@ export function PlayersView({ game, version, act, isBusy, openPlayer }: ReplayVi
   const shown = stats.span === 'week' && (stats.week ?? 0) > game.week ? SEASON_STATS : stats;
   const columns = statColumns(shown.span, shown.week, tab);
   const sort = visibleSort(chosenSort, columns);       // a hidden column never sorts the table
+  if (sort !== chosenSort) setSort(sort);              // ...nor comes back when its column does
   const filterKey = [tab, status, sort.key, sort.direction, shown.span, shown.week, query].join('|');
   const [page, setPage] = useState({ filterKey, offset: 0 });
   const offset = page.filterKey === filterKey ? page.offset : 0;      // a new filter starts on its first page
@@ -84,7 +85,7 @@ export function PlayersView({ game, version, act, isBusy, openPlayer }: ReplayVi
     (signal) => getReplayPlayers(game.id, {
       position: positionParam(tab), search: query, status, sort: sort.key, dir: sort.direction, stats: shown.span,
       stat_week: shown.week ?? undefined, limit: PAGE_SIZE, offset,
-    }, signal),
+    }, signal).then((data) => ({ ...data, columns })),  // headers come with their rows, never over a stale page
     [game.id, version, filterKey, offset],
   );
   const claims = useAsync(showClaims ? (signal) => getReplayClaims(game.id, signal) : null, [game.id, version]);
@@ -143,7 +144,7 @@ export function PlayersView({ game, version, act, isBusy, openPlayer }: ReplayVi
             {data.results.length === 0
               ? <EmptyState title="No players match">Try another position, status or name.</EmptyState>
               : (
-                <PlayersTable game={game} week={data.week} rows={data.results} columns={columns} sort={sort}
+                <PlayersTable game={game} week={data.week} rows={data.results} columns={data.columns} sort={sort}
                   onSort={(key) => setSort(nextSort(sort, key, sortDirection))} claimedIds={claimedIds} moves={moves}
                   onAdd={add} onClaim={(row) => setTarget({ row, kind: 'claim' })} openPlayer={openPlayer} />
               )}

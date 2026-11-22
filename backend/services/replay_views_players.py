@@ -152,10 +152,6 @@ def _sort_key(game: Game, sort: str, totals: dict[int, float], lines: dict[int, 
 def _sorted(game: Game, values: list[ReplayValue], sort: str, direction: str | None, totals: dict[int, float],
             lines: dict[int, dict]) -> list[ReplayValue]:
     """`values` arrive best value first, so every sort breaks its ties that way; unknowns always last."""
-    if sort not in SORTS:
-        raise ValueError(f"Unknown sort '{sort}'. Valid: {list(SORTS)}")
-    if direction is not None and direction not in DIRECTIONS:
-        raise ValueError(f"Unknown dir '{direction}'. Valid: {list(DIRECTIONS)}")
     descending = (direction or ("asc" if sort in ASCENDING else "desc")) == "desc"
     key = _sort_key(game, sort, totals, lines, {v.player_id: n for n, v in enumerate(values)})
     keyed = [(key(v), v) for v in values]
@@ -186,6 +182,10 @@ def players(game: Game, position: str | None = None, search: str | None = None, 
     status = status or AVAILABLE
     if status not in STATUSES:
         raise ValueError(f"Unknown status '{status}'. Valid: {list(STATUSES)}")
+    if sort not in SORTS:
+        raise ValueError(f"Unknown sort '{sort}'. Valid: {list(SORTS)}")
+    if direction is not None and direction not in DIRECTIONS:
+        raise ValueError(f"Unknown dir '{direction}'. Valid: {list(DIRECTIONS)}")
     stats, stat_week = _span(game, stats, stat_week)
     wanted, totals, owners, usage = positions_for(position), _season_points(game), _owners(game), _recent_usage(game)
     found = replay_waivers.available_players(game.state, game.know, None, search,

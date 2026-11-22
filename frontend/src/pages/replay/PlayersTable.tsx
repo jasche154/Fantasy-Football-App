@@ -38,7 +38,7 @@ function RowAction({ game, row, hasClaim, moves, onAdd, onClaim }: RowActionProp
   if (owner?.is_user) return <span className="muted">Your player</span>;
   if (game.phase !== 'open' && game.phase !== 'waivers') return null;
   if (owner) {
-    if (game.week > game.settings.trade_deadline_week) return null;
+    if (!game.trades_open) return null;
     // The Trades tab reads `with` (team id) and `want` (player id) from the query.
     return <a href={buildHash(paths.play, { game: game.id, view: 'trades', with: owner.team_id, want: player.id })}>Trade{' '}<span className="sr-only">for {player.name}</span></a>;
   }
@@ -104,7 +104,7 @@ export function PlayersTable({ game, week, rows, columns, sort, onSort, claimedI
               <tr key={row.player.id} className={row.owner?.is_user ? 'row--mine' : undefined}>
                 <td className="td--player">
                   <ReplayPlayerCell player={row.player} info={{ out: row.out, trade_locked: row.trade_locked }} onOpen={openPlayer} />
-                  {row.player.injury && row.news && <p className="hint">{row.news.text}</p>}
+                  {row.news && <p className="hint">{row.news.text}</p>}
                 </td>
                 <td><StatusCell row={row} /></td>
                 <td className="replay-players__opp">

@@ -7,7 +7,7 @@ import { REPLAY_VIEWS, type ReplayView } from './shared';
 
 type Query = Readonly<Record<string, string>>;
 
-function toView(value: string | undefined): ReplayView {
+export function toView(value: string | undefined): ReplayView {
   return REPLAY_VIEWS.find((tab) => tab.value === value)?.value ?? 'team';
 }
 

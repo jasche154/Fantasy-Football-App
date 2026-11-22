@@ -8,7 +8,7 @@ import { OddsPage } from './pages/odds/OddsPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { PlayerPage } from './pages/player/PlayerPage';
 import { RankingsPage } from './pages/rankings/RankingsPage';
-import { PlayPage, ReplayPage } from './pages/replay/ReplayPage';
+import { PlayPage, ReplayPage, toView } from './pages/replay/ReplayPage';
 import { SettingsPage } from './pages/settings/SettingsPage';
 import { StatsPage } from './pages/stats/StatsPage';
 import { TradePage } from './pages/trade/TradePage';
@@ -69,9 +69,9 @@ function renderRoute(location: HashLocation): ReactNode {
 function Routes() {
   const location = useHashLocation();
   if (location.route.name === 'play') {
-    // The game is full screen: its own shell, with Exit back to the dashboard's #/replay. No view is the team view.
+    // The game is full screen: its own shell, with Exit back to the dashboard's #/replay. An unknown view is the team view, as in PlayPage.
     return (
-      <GameShell gameKey={location.query.game ?? ''} viewKey={location.query.view || 'team'}>
+      <GameShell gameKey={location.query.game ?? ''} viewKey={toView(location.query.view)}>
         {renderRoute(location)}
       </GameShell>
     );

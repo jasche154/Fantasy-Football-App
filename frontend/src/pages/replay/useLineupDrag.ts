@@ -16,8 +16,9 @@ export interface LineupDragHandlers {
   onMove: (spot: LineupSpot) => void;
 }
 
-// One drag at a time on the page: the pick waiting for the next frame, if any.
+// One drag at a time on the page: the pick waiting for the next frame, if any, and whether it has happened.
 let pendingPick = 0;
+let hasPicked = false;
 
 /** The drag attributes for one roster row; none when the lineup can't be changed. */
 export function lineupDragProps(spot: LineupSpot, editing: LineupDragHandlers | undefined): HTMLAttributes<HTMLTableRowElement> {
@@ -32,7 +33,11 @@ export function lineupDragProps(spot: LineupSpot, editing: LineupDragHandlers | 
       if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
       // Next frame: Chrome aborts a drag whose source changes in the dragstart handler itself (the dim/target classes).
       cancelAnimationFrame(pendingPick);
-      pendingPick = requestAnimationFrame(() => editing.onPick(spot));
+      hasPicked = false;
+      pendingPick = requestAnimationFrame(() => {
+        hasPicked = true;
+        editing.onPick(spot);
+      });
     },
     onDragOver: (event: DragEvent) => {
       if (!isLegal) return;            // not cancelling dragover is what tells the browser "no drop here"
@@ -45,7 +50,9 @@ export function lineupDragProps(spot: LineupSpot, editing: LineupDragHandlers | 
     },
     onDragEnd: () => {
       cancelAnimationFrame(pendingPick);
-      editing.onPick(null);
+      // Only put down what this drag picked up: a drag aborted before its frame keeps a tap-Move selection.
+      if (hasPicked) editing.onPick(null);
+      hasPicked = false;
     },
   };
 }
