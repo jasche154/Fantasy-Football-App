@@ -3,6 +3,8 @@ known, round one projected from the current seeds, byes, the consolation pools, 
 from dataclasses import replace
 from functools import lru_cache
 
+import pytest
+
 from services import replay_game as rg, replay_state as rs, replay_views as views, replay_views_league as league
 from tests import replay_fakes as fakes
 from tests.test_replay_views import DATA, SEED, SETTINGS, at, finished, game
@@ -80,3 +82,48 @@ def test_a_three_round_bracket_has_byes_a_losers_pool_and_tbd_slots_until_decide
 def test_the_bracket_never_shows_a_week_not_played_yet():
     state = at(15)
     assert league.playoffs(game(state)) == league.playoffs(game(state, fakes.future_changed(DATA, state.week)))
+
+
+SHORT = replace(SETTINGS, regular_season_weeks=4, trade_deadline_week=2)     # a short season keeps these fast
+
+
+@lru_cache(maxsize=None)
+def short_at(settings: rs.Settings, week: int) -> rs.State:
+    """`settings`' league just before `week` is played (week > end_week: the season is over)."""
+    if week == 1:
+        return rg.auto_draft(rg.create_game(settings, DATA, SEED), settings, DATA, SEED)
+    played = rg.advance(short_at(settings, week - 1), settings, DATA, SEED, "play")
+    return played if week > settings.end_week else rg.advance(played, settings, DATA, SEED, "wednesday")
+
+
+def _places(pool: dict) -> list[int]:
+    return list(range(pool["places"][0], pool["places"][1] + 1))
+
+
+@pytest.mark.parametrize(("teams", "playoff_teams"), [(12, 5), (12, 8), (8, 8), (4, 4)])
+def test_every_bracket_size_fills_its_slots_and_its_pools_cover_every_place_below_the_title_games(
+        teams, playoff_teams):
+    settings = replace(SHORT, teams=teams, playoff_teams=playoff_teams, draft_slot=1)
+    rounds, first = rs.playoff_rounds(playoff_teams), settings.regular_season_weeks + 1
+    bye = 2 ** rounds - playoff_teams
+
+    def show(state: rs.State) -> dict:
+        return league.playoffs(views.Game(1, "Sized", settings, state, DATA, "2026-01-01T00:00:00", SEED))
+
+    start = show(short_at(settings, first))
+    opening = start["title"][0]
+    assert [r["week"] for r in start["title"]] == list(range(first, first + rounds)) and start["seeds_final"]
+    assert [b["seed"] for b in opening["byes"]] == list(range(1, bye + 1))
+    assert sorted(s for g in opening["games"] for s in (g["home"]["seed"], g["away"]["seed"])) == list(
+        range(bye + 1, playoff_teams + 1))
+    places = [p for pool in start["pools"] for p in _places(pool)]
+    assert places == list(range(5, teams + 1))             # the final and third-place game decide 1-4
+    assert all(pool["size"] == len(_places(pool)) for pool in start["pools"])
+
+    over = show(short_at(settings, settings.end_week + 1))
+    assert all(g["home"] and g["away"] and g["winner"] for r in over["title"] for g in r["games"])
+    assert over["champion"]["team_id"] == over["title"][-1]["games"][0]["winner"]
+    for pool in over["pools"]:
+        inside = {t["team_id"] for t in pool["teams"]}
+        assert len(inside) == pool["size"] and all(w["known"] for w in pool["weeks"])
+        assert all({g["home"]["team_id"], g["away"]["team_id"]} <= inside for w in pool["weeks"] for g in w["games"])

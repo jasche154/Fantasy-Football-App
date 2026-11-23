@@ -126,11 +126,12 @@ def _ffc_entry(row: dict) -> AdpEntry | None:
 
 def parse_ffc(payload: Any, adp_format: str = "ppr") -> list[AdpEntry]:
     """FFC answers HTTP 200 with status "Error", or "Success" with no players, when it has no data. A list of
-    another format (FFC's meta "type") is refused rather than stored under the wrong one."""
+    another format (FFC's meta "type") is refused rather than stored under the wrong one; so is a list without
+    a type for any format but PPR (FFC's default list, which a meta-less answer may be)."""
     ok = isinstance(payload, dict) and payload.get("status") == "Success" and isinstance(payload.get("players"), list)
     meta = payload.get("meta") if isinstance(payload, dict) else None
     kind = meta.get("type") if isinstance(meta, dict) else None
-    if ok and kind is not None and kind != FFC_FORMATS[adp_format][1]:
+    if ok and (kind is not None or adp_format != "ppr") and kind != FFC_FORMATS[adp_format][1]:
         raise HistoryError("Fantasy Football Calculator returned ADP for another format.")
     entries = parse_rows("Fantasy Football Calculator ADP", payload["players"], _ffc_entry) if ok else []
     if not entries:                     # an empty list too: a forced load would replace the season with MFL alone

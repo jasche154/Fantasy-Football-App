@@ -31,6 +31,12 @@ def superflex(starters: Mapping[str, int]) -> int:
     return starters.get("SUPERFLEX", 0)
 
 
+def two_qb(starters: Mapping[str, int] | None) -> bool:
+    """A league that starts two QBs (a SUPERFLEX slot, or 2+ QB slots): it drafts and ranks QBs as superflex
+    leagues do (the 2-QB ADP list, else replay_chart.superflex_view)."""
+    return bool(starters) and (superflex(starters) > 0 or starters.get("QB", 0) >= 2)
+
+
 def problem(starters: Mapping[str, int]) -> str | None:
     """Why a starting lineup is not allowed, or None when it is."""
     unknown = sorted(set(starters) - set(SLOTS))

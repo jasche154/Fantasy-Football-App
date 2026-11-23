@@ -4,7 +4,7 @@ from collections import Counter
 
 import pytest
 
-from services import replay_chart, replay_draft as rd, replay_season, replay_slots, replay_state as rs
+from services import replay_adp_format as af, replay_chart, replay_draft as rd, replay_season, replay_slots, replay_state as rs
 from services import replay_values as rv
 from tests import replay_fakes as fakes
 from tests.test_replay_draft import play_out
@@ -185,3 +185,49 @@ def test_a_whole_season_plays_cleanly_in_other_formats(settings):
     if settings is SUPERFLEX:
         assert sum(DATA.players[pid].position == "QB" for lineup in lineups for pid in lineup["SUPERFLEX"]) \
             > len(lineups) * 0.7                                   # most teams start a QB there
+
+
+TWO_QB = fakes.fake_settings(starters={**replay_slots.STANDARD, "QB": 2})
+
+
+def test_two_quarterback_slots_count_as_superflex_everywhere():
+    assert [replay_slots.two_qb(s.starters) for s in (SUPERFLEX, TWO_QB, STANDARD, DOUBLE_FLEX)] == [
+        True, True, False, False]
+    assert af.wanted("half", None, TWO_QB.starters) == "2qb"
+
+
+@pytest.mark.parametrize("seed", [0, 1])
+def test_a_two_qb_league_without_a_2qb_list_drafts_quarterbacks_from_the_boosted_view(seed, monkeypatch):
+    assert DATA.adp_format != "2qb"
+    seen: list = []
+    view = replay_chart.superflex_view
+
+    def spy(data):
+        seen.append(data)
+        return view(data)
+    spy.cache_clear = view.cache_clear                       # the cache teardown still clears the real one
+    monkeypatch.setattr(replay_chart, "superflex_view", spy)
+
+    rd.cpu_pick(rd.new_game(TWO_QB, seed), TWO_QB, DATA, seed)
+
+    assert seen, "a 2-QB league must draft through superflex_view when the season has no 2-QB list"
+
+
+def test_a_two_qb_league_ranks_quarterbacks_by_the_superflex_view():
+    standard, two_qb = fakes.fake_knowledge(1, STANDARD), fakes.fake_knowledge(1, TWO_QB)
+    qb = fakes.player_id("QB", 6)
+
+    assert two_qb.by_id[qb].pre_rank < standard.by_id[qb].pre_rank
+    assert not rv.league_settings(TWO_QB).superflex      # its 2 QB slots set replacement levels, no extra slot
+
+
+@pytest.mark.parametrize("settings", [SUPERFLEX, TWO_QB])
+def test_the_draft_board_ranks_quarterbacks_where_cpus_draft_them(settings):
+    from services.replay_views import sorted_board
+    know = fakes.fake_knowledge(0, settings)
+    board = sorted_board([know.by_id[p.player_id] for p in rd.available(rd.new_game(settings, 0), DATA)], "rank", None)
+    cpu_view = rd._board(replay_chart.superflex_view(DATA.as_of(0)))
+
+    def quarterbacks(order) -> list[int]:
+        return [i for i, player in enumerate(order) if player.position == "QB"][:8]
+    assert quarterbacks(board) == quarterbacks(cpu_view)

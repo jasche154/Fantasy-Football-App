@@ -11,9 +11,9 @@ Hard rules sit on top: a roster must always be able to end legal (every starting
 included), position caps, kickers and defenses only in the last rounds, no backup QB or TE before round
 10 of 15, never a reach of more than a round of picks in rounds 1-4, a round and a half in rounds 5-9 and
 25 picks later (never more than 25), and at least two bench backs and two bench receivers.
-In a superflex league a CPU drafts from the 2-QB ADP list (replay_adp_format), else through
-replay_chart.superflex_view (QB ADP x SUPERFLEX_QB_ADP), and counts the SUPERFLEX slots as QB starters (so it
-drafts two QBs early and may back them up).
+In a superflex league (replay_slots.two_qb: a SUPERFLEX slot or 2+ QB slots) a CPU drafts from the 2-QB ADP
+list (replay_adp_format), else through replay_chart.superflex_view (QB ADP x SUPERFLEX_QB_ADP), and counts the
+SUPERFLEX slots as QB starters (so it drafts two QBs early and may back them up).
 The user may pick anyone as long as the roster can still end legal. Players without an ADP come after
 everyone who has one, by their own week-1 projection.
 
@@ -234,7 +234,7 @@ def cpu_pick(state: State, settings: Settings, data: SeasonData, seed: int) -> i
     if team_id is None:
         raise ValueError("The draft is over.")
     team, known, overall = rs.team(state, team_id), data.as_of(0), len(state.picks) + 1
-    if replay_slots.superflex(settings.starters):
+    if replay_slots.two_qb(settings.starters):
         known = replay_chart.superflex_view(known)
     round_ = _slot(state, overall)[0]
     mine = [known.players[pid].position for pid in team.roster]

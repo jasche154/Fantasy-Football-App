@@ -220,7 +220,7 @@ def _base(data: SeasonData, league: LeagueSettings, week: int, end_week: int) ->
     teams = {pid: data.team_at(pid, week) for pid in data.players}
     rows = [_row(data, player, priors[pid], week, teams[pid], games_left(teams[pid]))
             for pid, player in data.players.items()]
-    chart_data = replay_chart.superflex_view(data) if league.superflex else data     # QBs drafted earlier
+    chart_data = replay_chart.superflex_view(data) if replay_slots.two_qb(league.starters) else data  # QBs go earlier
     charts, parts, source = replay_chart.base_charts(chart_data, rows, priors, week, end_week)
     rows = [{**row, **charts[row["player_id"]]} for row in rows]
     replacement = replacement_levels(((r["position"], r["ros_ppg"]) for r in rows if r["position"] in SKILL), league)

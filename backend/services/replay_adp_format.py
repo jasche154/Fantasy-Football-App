@@ -1,6 +1,6 @@
 """Replay League: which preseason ADP list (replay_adp.format) a league drafts from.
 
-- `wanted`: a superflex league (a SUPERFLEX slot, or 2+ QB slots) drafts from the 2-QB list; any other
+- `wanted`: a superflex league (replay_slots.two_qb: a SUPERFLEX slot, or 2+ QB slots) drafts from the 2-QB list; any other
   league from its scoring's list: ppr / half / std, and custom rules from the preset nearest their points
   per reception (a tie goes to the bigger one: 0.75 -> ppr, 0.25 -> half).
 - `choose`: the wanted list if that season has it, else the nearest one it has (2qb -> the scoring's list,
@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from database.models import ReplayAdp
+from services import replay_slots
 from services.replay_scoring import ScoringRules
 from services.scoring import POINTS_PER_RECEPTION
 
@@ -34,12 +35,8 @@ def scoring_format(scoring: str, rules: ScoringRules | None = None) -> str:
     return min(PRESETS, key=lambda p: (abs(POINTS_PER_RECEPTION[p] - rules.reception), -POINTS_PER_RECEPTION[p]))
 
 
-def is_superflex(starters: Mapping[str, int] | None) -> bool:
-    return bool(starters) and (starters.get("SUPERFLEX", 0) > 0 or starters.get("QB", 0) >= 2)
-
-
 def wanted(scoring: str, rules: ScoringRules | None = None, starters: Mapping[str, int] | None = None) -> str:
-    return TWO_QB if is_superflex(starters) else scoring_format(scoring, rules)
+    return TWO_QB if replay_slots.two_qb(starters) else scoring_format(scoring, rules)
 
 
 def choose(want: str, scoring: str, available: Collection[str]) -> str | None:
