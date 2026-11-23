@@ -117,12 +117,16 @@ describe('LeaguePlayoffs before the seeds lock', () => {
 
   it('explains pools whose teams or pairs aren\'t known yet', async () => {
     renderPlayoffs(json(PROJECTED));
-    const losers = await screen.findByRole('region', { name: 'Round-one losers, 5th–6th place' });
+    const title = await screen.findByRole('list', { name: 'Title bracket' });
+    expect(title).toHaveAttribute('tabindex', '0');                         // three columns can overflow
+    expect(screen.getByRole('list', { name: 'Consolation weeks' })).toHaveAttribute('tabindex', '0');
+    expect(screen.getByRole('list', { name: 'Round-one losers weeks' })).not.toHaveAttribute('tabindex');
+    const losers = await screen.findByRole('region', { name: '5th–6th place Round-one losers' });
     expect(within(losers).getByText('The 2 teams that lose in round one play on here from week 16.')).toBeInTheDocument();
     expect(within(column(/^Week 16$/, losers)).getByText('Paired once the teams are known.')).toBeInTheDocument();
     expect(within(column(/^Week 17$/, losers)).getByText('Paired from the pool’s results after week 16.')).toBeInTheDocument();
 
-    const consolation = screen.getByRole('region', { name: 'Consolation, 7th–12th place' });
+    const consolation = screen.getByRole('region', { name: '7th–12th place Consolation' });
     expect(within(consolation).getByText(/^Teams:/)).toHaveTextContent('Teams: Fourth and Long, Red Zone Rebels, Sunday Scaries, Goal Line Gang, Two Minute Drill, Waiver Wizards');
     expect(within(consolation).getAllByText(/^Paired/)).toHaveLength(3);
     expect(within(consolation).queryByRole('heading', { name: /^Week 14$/ })).not.toBeInTheDocument();
@@ -159,7 +163,8 @@ describe('LeaguePlayoffs once the season is over', () => {
 
   it('shows each consolation week\'s games with their winners', async () => {
     renderPlayoffs(json(finished()), summary({ phase: 'complete', week: 16 }));
-    const pool = await screen.findByRole('region', { name: 'Consolation, 5th–12th place' });
+    const pool = await screen.findByRole('region', { name: '5th–12th place Consolation' });
+    expect(screen.getByRole('list', { name: 'Title bracket' })).not.toHaveAttribute('tabindex');      // two rounds fit
     expect(within(pool).queryByText(/^Paired/)).not.toBeInTheDocument();
     expect(cards(column(/^Week 15$/, pool))).toHaveLength(2);
     const [late] = cards(column(/^Week 16$/, pool));

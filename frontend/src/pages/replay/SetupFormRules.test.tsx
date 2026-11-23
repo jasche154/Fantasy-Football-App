@@ -47,7 +47,7 @@ describe('SetupForm league format and scoring', () => {
     const { user } = renderForm();
     await screen.findByLabelText('Season');
     const fewerQb = screen.getByRole('button', { name: 'Fewer QB starters' });
-    expect(fewerQb).toBeDisabled();                                    // a lineup needs a QB or a superflex
+    expect(fewerQb).toHaveAttribute('aria-disabled', 'true');                                    // a lineup needs a QB or a superflex
     await user.click(screen.getByRole('button', { name: 'More superflex starters' }));
     await user.click(fewerQb);
     expect([count('QB'), count('superflex')]).toEqual(['0', '1']);
@@ -55,11 +55,26 @@ describe('SetupForm league format and scoring', () => {
     const moreWr = screen.getByRole('button', { name: 'More WR starters' });
     await user.click(moreWr);
     expect(count('WR')).toBe('3');
-    expect(moreWr).toBeDisabled();                                     // at most 3 per slot
+    expect(moreWr).toHaveAttribute('aria-disabled', 'true');                                     // at most 3 per slot
     await user.click(screen.getByRole('button', { name: 'More RB starters' }));
     await user.click(screen.getByRole('button', { name: 'More TE starters' }));
     expect(screen.getByText(/12 starters \+ 6 bench/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'More K starters' })).toBeDisabled();     // 12 starters in all
+    expect(screen.getByRole('button', { name: 'More K starters' })).toHaveAttribute('aria-disabled', 'true');     // 12 starters in all
+  });
+
+  it('keeps keyboard focus on a stepper button that reaches a limit, and ignores clicks there', async () => {
+    const { user } = renderForm();
+    await screen.findByLabelText('Season');
+    const more = screen.getByRole('button', { name: 'More TE starters' });
+    more.focus();
+    await user.keyboard('{Enter}{Enter}');                               // TE 1 -> 3, the most per slot
+
+    expect(count('TE')).toBe('3');
+    expect(more).toHaveAttribute('aria-disabled', 'true');
+    expect(more).toHaveFocus();
+    await user.keyboard('{Enter}');
+    expect(count('TE')).toBe('3');
+    expect(screen.getByRole('button', { name: 'Fewer TE starters' })).toHaveAttribute('aria-disabled', 'false');
   });
 
   it('sends the lineup and the custom rules only when they differ from the defaults', async () => {

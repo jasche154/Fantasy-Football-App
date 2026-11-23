@@ -48,7 +48,23 @@ interface FormatProps {
   onChange: (starters: Record<StartingSlot, number>) => void;
 }
 
-/** Preset buttons, then a stepper per slot; a step that would leave the bounds is disabled. */
+interface StepProps {
+  label: string;
+  next: Readonly<Record<StartingSlot, number>>;
+  onChange: (starters: Record<StartingSlot, number>) => void;
+  children: string;
+}
+
+/** A step that would leave the bounds is aria-disabled, not disabled, so focus stays on it at a limit. */
+function StepButton({ label, next, onChange, children }: StepProps) {
+  const allowed = isLegal(next);
+  return (
+    <button type="button" className="btn btn--ghost btn--sm replay-stepper__btn" aria-label={label}
+      aria-disabled={!allowed} onClick={() => { if (allowed) onChange({ ...next }); }}>{children}</button>
+  );
+}
+
+/** Preset buttons, then a stepper per slot; a step that would leave the bounds does nothing. */
 export function LeagueFormatFields({ starters, bench, onChange }: FormatProps) {
   const total = STARTING_SLOTS.reduce((sum, slot) => sum + starters[slot], 0);
   const stepped = (slot: StartingSlot, delta: number) => ({ ...starters, [slot]: starters[slot] + delta });
@@ -72,11 +88,9 @@ export function LeagueFormatFields({ starters, bench, onChange }: FormatProps) {
           return (
             <div key={slot} className="replay-stepper" role="group" aria-label={`${name} starters`}>
               <span className="replay-stepper__label" aria-hidden="true">{slotLabel(slot)}</span>
-              <button type="button" className="btn btn--ghost btn--sm replay-stepper__btn" aria-label={`Fewer ${name} starters`}
-                disabled={!isLegal(stepped(slot, -1))} onClick={() => onChange(stepped(slot, -1))}>−</button>
+              <StepButton label={`Fewer ${name} starters`} next={stepped(slot, -1)} onChange={onChange}>−</StepButton>
               <span className="replay-stepper__value" aria-live="polite">{starters[slot]}</span>
-              <button type="button" className="btn btn--ghost btn--sm replay-stepper__btn" aria-label={`More ${name} starters`}
-                disabled={!isLegal(stepped(slot, 1))} onClick={() => onChange(stepped(slot, 1))}>+</button>
+              <StepButton label={`More ${name} starters`} next={stepped(slot, 1)} onChange={onChange}>+</StepButton>
             </div>
           );
         })}

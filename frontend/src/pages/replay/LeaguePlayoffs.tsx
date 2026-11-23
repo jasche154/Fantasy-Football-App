@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import { getReplayPlayoffs } from '../../api/replay';
 import type { ReplayBracketGame, ReplayBracketPool, ReplayBracketRound, ReplayBracketSide, ReplayPlayoffs, ReplaySeed } from '../../api/types';
 import { AsyncView } from '../../components/AsyncView';
@@ -83,16 +84,20 @@ function placesText([first, last]: [number, number]): string {
   return first === last ? `${ordinal(first)} place` : `${ordinal(first)}–${ordinal(last)} place`;
 }
 
+/** Three week columns can overflow the page (two always fit), so only then can the keyboard focus it to scroll. */
+const scrollable = (columns: number) => (columns >= 3 ? 0 : undefined);
+
 function Pool({ pool }: { pool: ReplayBracketPool }) {
+  const headingId = useId();
   return (
-    <section className="bracket-pool" aria-label={`${pool.name}, ${placesText(pool.places)}`}>
-      <h3 className="bracket-pool__head">{placesText(pool.places)} <span className="bracket__week">{pool.name}</span></h3>
+    <section className="bracket-pool" aria-labelledby={headingId}>
+      <h3 id={headingId} className="bracket-pool__head">{placesText(pool.places)} <span className="bracket__week">{pool.name}</span></h3>
       <p className="hint">
         {pool.teams
           ? <>Teams: {pool.teams.map((team, index) => <span key={team.team_id}>{index > 0 && ', '}{team.is_user ? `${team.name} (you)` : team.name}</span>)}</>
           : `The ${pool.size} teams that lose in round one play on here from week ${pool.first_week}.`}
       </p>
-      <ol className="bracket">
+      <ol className="bracket" aria-label={`${pool.name} weeks`} tabIndex={scrollable(pool.weeks.length)}>
         {pool.weeks.map((week, index) => (
           <li key={week.week} className="bracket__round">
             <h4 className="bracket__head">Week {week.week}</h4>
@@ -127,7 +132,7 @@ export function LeaguePlayoffs({ game, version }: ReplayViewProps) {
                 <p className={`replay-playoffs__champion${data.champion.is_user ? ' replay-playoffs__champion--mine' : ''}`}><Icon name="trophy" size={18} /> Champion: <strong>{data.champion.is_user ? `${data.champion.name} (you)` : data.champion.name}</strong></p>
               )}
               {status && <p className="hint">{status}</p>}
-              <ol className="bracket bracket--title" aria-label="Title bracket">
+              <ol className="bracket bracket--title" aria-label="Title bracket" tabIndex={scrollable(data.title.length)}>
                 {data.title.map((round, index) => <Round key={round.week} round={round} isLast={index === data.title.length - 1} />)}
               </ol>
             </section>
