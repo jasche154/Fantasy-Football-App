@@ -125,3 +125,20 @@ def test_the_replay_engine_plays_a_simulated_season_to_a_champion(simulated):
         for team, score in result.scores.items():
             scores[team] += score
     assert all(score > 0 for score in scores.values())
+
+
+def test_a_league_that_jumps_in_drafts_on_a_board_whose_order_agrees_with_its_adp(data):
+    """The draft room's default order (pre_rank: the week's expert snapshot, which the simulation draws) and the
+    market ADP come from one belief, injured starters included."""
+    from services import replay_chart, sim_metrics, sim_setup
+
+    known = data.as_of(FROM)                        # as the live season loads: nothing from week FROM on
+    base = replace(known, schedule=data.schedule, known_before=None, expert_ranks=MappingProxyType(
+        {k: v for k, v in known.expert_ranks.items() if k[1] < FROM}))
+    settings = replay_state.Settings(season=data.season, start_week=FROM, sim_from=FROM)
+    drafted = sim_setup._market_adp(sim_season.simulate(base, SEED, FROM), settings)
+    ranks = replay_chart.pre_ranks(replay_chart.pre_picks(drafted, replay_state.draft_week(settings)))
+    top = sorted(ranks, key=ranks.get)[:60]
+    adp = [drafted.players[pid].adp or 1000.0 for pid in top]
+    assert sim_metrics.spearman([ranks[pid] for pid in top], adp) > 0.85
+    assert max(adp[:12]) <= 48                      # nobody the market takes past round 4 is a first-rounder

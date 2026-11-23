@@ -90,9 +90,10 @@ def test_rookie_roles_fall_with_the_pick_and_are_not_extrapolated_above_the_floo
     assert receiver.ypc == pytest.approx(params()["positions"]["WR"]["ypc"] * team.passer)
 
 
-def test_a_rookie_qb_starts_only_where_the_job_is_open():
-    rookie = Rookie("Franchise Passer", "QB", "PIT", 2, "Penn State")
-    rid = ny.ROOKIE_ID_BASE + 2027 * ny.ROOKIE_ID_SEASON + 2
+def test_a_rookie_qb_starts_only_where_the_job_is_open_or_he_went_very_high():
+    rookie = Rookie("First Round Passer", "QB", "PIT", 10, "Penn State")
+    rid = ny.ROOKIE_ID_BASE + 2027 * ny.ROOKIE_ID_SEASON + 10
+    assert ny.ROOKIE_QB_NAMED <= ny._line("QB", "week1", 10) < ny.ROOKIE_QB_FRANCHISE
     behind, _ = _next(rookies=(rookie,))                                   # above-average incumbent keeps it
     assert behind.players[pid("PIT", "QB1")].starts > behind.players[rid].starts >= sim_talent.ROOKIE_HOPEFUL
     open_job, _ = _next(moves={pid("PIT", "QB1"): None}, rookies=(rookie,))
@@ -100,6 +101,9 @@ def test_a_rookie_qb_starts_only_where_the_job_is_open():
     weak = _world((_player("PIT", "QB1", 0.92),))                          # a below-average incumbent
     named, _ = _next(weak, rookies=(rookie,))
     assert named.players[rid].starts == 1.0 > named.players[pid("PIT", "QB1")].starts
+    first_pick = Rookie("Franchise Passer", "QB", "PIT", 1, "Ohio State")
+    franchise, _ = _next(rookies=(first_pick,))                            # the top picks start anyway
+    assert franchise.players[ny.ROOKIE_ID_BASE + 2027 * ny.ROOKIE_ID_SEASON + 1].starts == 1.0
 
 
 def test_the_healthy_incumbent_gets_his_job_back():
@@ -132,7 +136,7 @@ def test_the_season_base_holds_every_player_who_dresses_before_anything_happened
 
     assert not base.actual and not base.team_by_week and not base.injuries and base.last_week == 17
     known = base.as_of(1).players
-    depth = [i for i, p in pool.items() if p.adp is None and (i, 1) in base.projected]
+    depth = [i for i, p in base.players.items() if p.adp is None and (i, 1) in base.projected]
     assert depth and set(depth) <= set(known)                      # depth players exist from week 1
     for position in ("K", "DST", "QB"):
         assert {belief.players[i].team for i in known if pool[i].position == position} == set(TEAMS)

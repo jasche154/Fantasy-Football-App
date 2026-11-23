@@ -18,7 +18,7 @@ import services
 from config import get_settings
 from database.db import get_session
 from database.models import Base, NflGame, PlayerStatsWeekly, ReplaySeasonData
-from services import replay_blob, replay_live, replay_pool, sim_setup
+from services import replay_blob, replay_live, replay_pool, sim_next_year, sim_setup
 from services.replay_pool import SeasonData
 from tests import replay_fakes as fakes
 from tests.test_replay_routes import _snapshot, get, post, refused
@@ -64,9 +64,9 @@ def fake_market(world: SeasonData) -> dict[int, tuple[float, float]]:
 @pytest.fixture(autouse=True)
 def engine_stand_in(monkeypatch):
     monkeypatch.setattr(services, "sim_season", SimpleNamespace(simulate=fake_simulate), raising=False)
-    monkeypatch.setattr(services, "sim_world", SimpleNamespace(estimate=lambda data, week, prior=None: data),
+    monkeypatch.setattr(services, "sim_world", SimpleNamespace(estimate=lambda data, week, prior=None: data.as_of(week)),
                         raising=False)
-    monkeypatch.setattr(services, "sim_market", SimpleNamespace(adp=fake_market), raising=False)
+    monkeypatch.setattr(sim_next_year, "sim_market", SimpleNamespace(adp=lambda world, *format: fake_market(world)))
 
 
 def _app(url: str) -> Iterator[tuple[TestClient, Engine]]:

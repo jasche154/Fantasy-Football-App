@@ -169,11 +169,11 @@ def _market(tables: _Tables, base: SeasonData, belief: World, truth: World, seed
         if not any(w == rank_week for _, w in tables.expert_ranks):
             ids = known.players if rank_week else base.as_of(0).players
             tables.expert_ranks.update(sim_market.expert_ranks(
-                belief, ids, rank_week, replay_state.rng(seed, "sim", "experts", rank_week), scoring, out,
+                belief, ids, rank_week, replay_state.rng(seed, "sim", "experts", rank_week), scoring,
                 last - max(1, rank_week) + 1))
             tables.expert_age[rank_week] = sim_market.EXPERT_AGE["ros" if rank_week else "pre"]
     tables.notes.update(sim_market.buzz(truth.changes, belief, week, replay_state.rng(seed, "sim", "buzz", week),
-                                        false_rate))
+                                        false_rate, out))
 
 
 def simulate(base: SeasonData, seed: int, from_week: int, prior: World | None = None) -> SeasonData:

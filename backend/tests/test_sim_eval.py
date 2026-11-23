@@ -66,3 +66,15 @@ def test_rookie_and_market_metrics(data):
     found = sim_metrics.rookies(data, rookies)
     assert found["rookie top-24 finishes"] > 0 and found["rookie QB wk1 starters"] in (0.0, 1.0)
     assert sim_metrics.adp_agreement(data, data)["ADP vs real ADP r (top-150)"] == pytest.approx(1.0)
+
+
+def test_the_leaderboard_and_big_games_need_no_adp(data):
+    board = sim_metrics.leaderboard(data)
+    for position in sim_metrics.SKILL:
+        ppg = [board[f"{position} top-{n} ppg"] for n in sim_metrics.LEADERS]
+        assert ppg == sorted(ppg, reverse=True) and ppg[-1] > 0
+    no_adp = replace(data, players=MappingProxyType({pid: replace(p, adp=None) for pid, p in data.players.items()}))
+    assert sim_metrics.leaderboard(no_adp) == board
+    weekly = sim_metrics.weekly(data, range(1, 18))
+    assert weekly["25+ games"] >= weekly["30+ games"] >= weekly["35+ games"]
+    assert sim_metrics.leaderboard(data, range(10, 18)) != board

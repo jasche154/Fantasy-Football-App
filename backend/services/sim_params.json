@@ -1197,7 +1197,18 @@
   "talent": {
    "role_sd": 0.4,
    "evidence": 2,
-   "floor": 0.2
+   "floor": 0.2,
+   "season_spread": 2.0
+  },
+  "market": {
+   "two_qb_replacement": 30,
+   "record_weight": 0.4,
+   "replacement": {
+    "QB": 12,
+    "RB": 32,
+    "WR": 40,
+    "TE": 8
+   }
   }
  }
 }

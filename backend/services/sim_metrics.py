@@ -7,10 +7,13 @@ Tiers are preseason ADP position ranks (QB / TE: 1-12, 13-24; RB / WR: 1-12, 13-
   points, pre-game projection vs actual (RMSE and Spearman rank correlation over skill games projected
   PROJECTED_MIN or more), the same-team QB-WR and QB-TE correlation of (actual - projection), tiered players
   sitting out per week by position (team plays, no game), and team skill points per game (mean, spread
-  across games, spread of season means), K and D/ST points per game.
+  across games, spread of season means), K and D/ST points per game, and the count of skill games of 25+ /
+  30+ / 35+ points (BIG_GAMES; ADP-free).
 - season(data): ADP position rank vs final position rank (Spearman), breakouts (top-12 finishers drafted
-  outside the top 24 or undrafted), busts (top-12 ADP finishing outside the top 24), and games missed per
-  top-150 ADP player.
+  outside the top 24 or undrafted), busts (top-12 ADP finishing outside the top 24), games missed per
+  top-150 ADP player, and the leaderboard.
+- leaderboard(data, weeks): ADP-free: mean points per game played of the top 1 / 6 / 12 / 24 finishers by
+  position (LEADERS), so a flat simulated season shows whether or not our ADP is right.
 """
 from collections import defaultdict
 from collections.abc import Iterable
@@ -25,6 +28,8 @@ PROJECTED_MIN = 5.0
 SKILL = ("QB", "RB", "WR", "TE")
 TOP_FINISH, BREAKOUT_ADP, BUST_FINISH = 12, 24, 24
 TOP_ADP_FOR_MISSED = 150
+BIG_GAMES = (25, 30, 35)         # skill games of this many points or more, counted
+LEADERS = (1, 6, 12, 24)         # leaderboard: mean points per game of the top N finishers at a position
 
 
 def spearman(a: Iterable[float], b: Iterable[float]) -> float:
@@ -88,6 +93,9 @@ def weekly(data: SeasonData, weeks: Iterable[int]) -> dict[str, float]:
     tiered = [p for values in by_tier.values() for p in values]
     out["25+ share %"] = 100 * float(np.mean([p >= 25 for p in tiered]))
     out["30+ share %"] = 100 * float(np.mean([p >= 30 for p in tiered]))
+    skill = [points for (pid, week), points in data.actual.items() if week in weeks and data.players[pid].position in SKILL]
+    for line in BIG_GAMES:
+        out[f"{line}+ games"] = float(sum(1 for p in skill if p >= line))
     for position in (*SKILL, "all"):
         pairs = [(data.projected[k], v) for k, v in data.actual.items() if k[1] in weeks
                  and data.projected.get(k, 0) >= PROJECTED_MIN and data.players[k[0]].position in SKILL
@@ -142,6 +150,7 @@ def season(data: SeasonData) -> dict[str, float]:
         breakouts += sum(1 for pid in finish[:TOP_FINISH] if ranks.get(pid, 10 ** 6) > BREAKOUT_ADP)
         busts += sum(1 for pid in drafted if ranks[pid] <= TOP_FINISH and place[pid] > BUST_FINISH)
     out["breakouts"], out["busts"] = float(breakouts), float(busts)
+    out.update(leaderboard(data))
     top = sorted((p.adp, p.player_id) for p in data.players.values() if p.adp and p.position in SKILL)[:TOP_ADP_FOR_MISSED]
     missed = []
     for _, pid in top:
@@ -149,6 +158,24 @@ def season(data: SeasonData) -> dict[str, float]:
         games = [w for w in range(1, data.last_week + 1) if data.schedule.opponent(team, w)]
         missed.append(sum(1 for w in games if (pid, w) not in data.actual))
     out["games missed / top-150"] = float(np.mean(missed))
+    return out
+
+
+def leaderboard(data: SeasonData, weeks: Iterable[int] | None = None) -> dict[str, float]:
+    """ADP-free: mean points per game played of the top N finishers (points over `weeks`, default all) at
+    each position."""
+    weeks = set(weeks) if weeks is not None else None
+    totals: dict[int, float] = defaultdict(float)
+    games: dict[int, int] = defaultdict(int)
+    for (pid, week), points in data.actual.items():
+        if weeks is None or week in weeks:
+            totals[pid] += points
+            games[pid] += 1
+    out = {}
+    for position in SKILL:
+        finish = sorted((pid for pid in totals if data.players[pid].position == position), key=lambda pid: (-totals[pid], pid))
+        for n in LEADERS:
+            out[f"{position} top-{n} ppg"] = float(np.mean([totals[pid] / games[pid] for pid in finish[:n]]))
     return out
 
 
