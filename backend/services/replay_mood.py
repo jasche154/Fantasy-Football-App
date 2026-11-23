@@ -1,0 +1,151 @@
+"""Replay League: how CPU managers feel about their players, and the worried ones shopping a player to the user.
+
+Feelings come from the same numbers `replay_personas.private_value` prices with, so what a manager says never
+contradicts what he accepts:
+
+- signal = form_chart (his recent real games) + hype x shock_chart (an opportunity shock, `Team.hype` for an
+  emotional manager), each side scaled by the persona's EMOTION: a panicky manager feels a slump hard, a
+  gambler a hot streak, a steady one shrugs bad weeks off (and stays high on a slumping star, his
+  STEADY_STAR x star x (pre_chart - chart) belief in draft day).
+- strength = signal / max(chart, CHART_FLOOR): worried at <= -WORRY, high at >= HIGH. Only his own healthy
+  skill players worth FEEL_MIN_CHART or more: an injured player is never something to be "worried" about.
+- `mood_line`: "Worried about X. High on Y." from his strongest feeling each way (None without one). Views
+  show it from replay_personas.TENDENCY_WEEKS weeks played; the persona's name stays hidden.
+
+Shopping (`refresh_shops`, once a week after the games): a CPU worried at >= SHOP_WORRY about one of his
+SHOP_TOP most valuable skill players, whose last game fell short of his rate, shops him to the user with
+probability SHOP_RATE (panicky most; steady and shark never). At most one shop per CPU and MAX_SHOPS in the
+league. A shop holds a seeded `discount` (DISCOUNT_BASE by persona + worry, +- jitter, within
+DISCOUNT_RANGE) that `replay_trade_value.tally` takes off his price for the user only, via
+`replay_state.markdowns`. It stays open week to week while he stays that worried and the player is his; a good
+game, a trade or the deadline closes it. Nothing here posts chat: replay_game does, with replay_chat.
+Pure: a Knowledge and the state in, new data out.
+"""
+from collections.abc import Sequence
+from dataclasses import dataclass, replace
+
+from services import replay_personas, replay_state as rs
+from services.replay_pool import SKILL
+from services.replay_state import Settings, Shop, State, Team
+from services.replay_values import Knowledge, ReplayValue
+
+FEEL_MIN_CHART = 150.0          # a player worth less than this isn't worth a feeling
+CHART_FLOOR = 250.0             # strength divides by at least this, so a cheap player's wobble stays small
+WORRY = 0.08                    # strength at or below -WORRY: worried
+HIGH = 0.08                     # at or above HIGH: high on him
+EMOTION = {                     # persona -> (multiple on a bad signal, on a good one)
+    "balanced": (1.0, 1.0),
+    "panicky": (1.8, 1.0),
+    "shark": (1.0, 1.0),
+    "steady": (0.3, 1.0),
+    "gambler": (1.0, 1.8),
+}
+SHOP_WORRY = 0.15               # worry that makes him shop a player
+SHOP_TOP = 6                    # only one of his SHOP_TOP most valuable skill players
+SHOP_RATE = {"balanced": 0.25, "panicky": 0.75, "gambler": 0.35, "steady": 0.0, "shark": 0.0}
+MAX_SHOPS = 2                   # open in the whole league at once
+DISCOUNT_BASE = {"balanced": 0.06, "panicky": 0.09, "gambler": 0.07}
+DISCOUNT_PER_WORRY = 0.20       # extra discount per unit of worry beyond SHOP_WORRY
+DISCOUNT_JITTER = 0.02
+DISCOUNT_RANGE = (0.05, 0.15)
+
+
+@dataclass(frozen=True)
+class Feeling:
+    player_id: int
+    kind: str                   # "worried" | "high"
+    strength: float             # signed, as above
+
+
+def strength(value: ReplayValue, persona: str, hype: float = 1.0) -> float:
+    """How a manager with this persona feels about the player: signed, a share of his chart."""
+    down, up = EMOTION.get(persona, EMOTION["balanced"])
+    signal = value.form_chart + hype * value.shock_chart
+    signal *= down if signal < 0 else up
+    if persona == "steady":
+        signal += replay_personas.STEADY_STAR * value.star * max(0.0, value.pre_chart - value.chart)
+    return signal / max(value.chart, CHART_FLOOR)
+
+
+def feeling(value: ReplayValue, persona: str, hype: float = 1.0) -> Feeling | None:
+    """His feeling about one player, or None when he feels nothing much (or the player is hurt or cheap)."""
+    if value.position not in SKILL or value.out or value.injury is not None or value.healthy_chart < FEEL_MIN_CHART:
+        return None
+    felt = strength(value, persona, hype)
+    kind = "worried" if felt <= -WORRY else "high" if felt >= HIGH else None
+    return None if kind is None else Feeling(value.player_id, kind, round(felt, 3))
+
+
+def feelings(know: Knowledge, team: Team) -> tuple[Feeling, ...]:
+    """A CPU's feelings about his own roster, strongest first."""
+    found = [felt for pid in team.roster if pid in know.by_id
+             if (felt := feeling(know.by_id[pid], team.persona, team.hype)) is not None]
+    return tuple(sorted(found, key=lambda f: (-abs(f.strength), f.player_id)))
+
+
+def mood_line(know: Knowledge, team: Team) -> str | None:
+    """"Worried about X. High on Y." from his strongest feeling each way; None when he has none."""
+    felt = feelings(know, team)
+    worried = next((f for f in felt if f.kind == "worried"), None)
+    high = next((f for f in felt if f.kind == "high"), None)
+    parts = [f"{label} {know.by_id[f.player_id].name}." for label, f in (("Worried about", worried),
+                                                                         ("High on", high)) if f is not None]
+    return " ".join(parts) or None
+
+
+# ---------------- shopping a player to the user ----------------
+
+def _slumping(value: ReplayValue) -> bool:
+    """His last game fell short of his expected rate (a good game closes a shop)."""
+    return bool(value.recent_points) and value.recent_points[0] < value.ros_ppg
+
+
+def _shop_pick(state: State, know: Knowledge, team: Team) -> tuple[int, float] | None:
+    """(player id, worry) he would shop: his most worrying slumping player among his SHOP_TOP, if any."""
+    top = sorted((know.by_id[pid] for pid in team.roster if pid in know.by_id and know.by_id[pid].position in SKILL),
+                 key=lambda v: (-v.chart, v.player_id))[:SHOP_TOP]
+    worries = [(felt.strength, value.player_id) for value in top
+               if (felt := feeling(value, team.persona, team.hype)) is not None
+               and felt.strength <= -SHOP_WORRY and _slumping(value) and not rs.retrade_locked(state, value.player_id)]
+    return None if not worries else (min(worries)[1], -min(worries)[0])
+
+
+def discount(seed: int, week: int, team: Team, worry: float) -> float:
+    """The share off his price for the user, seeded so a reload never re-rolls it."""
+    jitter = rs.rng(seed, "shop-discount", week, team.id).uniform(-DISCOUNT_JITTER, DISCOUNT_JITTER)
+    raw = DISCOUNT_BASE.get(team.persona, DISCOUNT_RANGE[0]) + DISCOUNT_PER_WORRY * (worry - SHOP_WORRY) + jitter
+    return round(min(max(raw, DISCOUNT_RANGE[0]), DISCOUNT_RANGE[1]), 3)
+
+
+def _still_open(state: State, know: Knowledge, shop: Shop) -> bool:
+    team = rs.team(state, shop.team_id)
+    value = know.by_id.get(shop.player_id)
+    if value is None or shop.player_id not in team.roster:
+        return False
+    felt = feeling(value, team.persona, team.hype)
+    return felt is not None and felt.strength <= -SHOP_WORRY and _slumping(value)
+
+
+def refresh_shops(state: State, settings: Settings, know: Knowledge, seed: int,
+                  weeks_played: int) -> tuple[State, tuple[Shop, ...]]:
+    """(the state with this week's shops, the ones newly opened). Closes the shops that no longer hold, renews
+    the rest for `state.week`, then lets worried CPUs (in seeded order, each rolling SHOP_RATE) open new ones
+    up to MAX_SHOPS. No shops before TENDENCY_WEEKS weeks are played or once trades have closed."""
+    trading = state.phase in ("waivers", "open") and rs.trades_open(state, settings)
+    if not trading or weeks_played < replay_personas.TENDENCY_WEEKS:
+        return replace(state, shops=()), ()
+    kept = tuple(replace(shop, week=state.week) for shop in state.shops if _still_open(state, know, shop))
+    shopping = {shop.team_id for shop in kept}
+    cpus: Sequence[Team] = [team for team in state.teams if not team.is_user and team.id not in shopping]
+    order = rs.rng(seed, "shops", state.week).permutation(len(cpus))
+    opened: list[Shop] = []
+    for index in order:
+        if len(kept) + len(opened) >= MAX_SHOPS:
+            break
+        team = cpus[int(index)]
+        if rs.rng(seed, "shop", state.week, team.id).random() >= SHOP_RATE.get(team.persona, 0.0):
+            continue
+        pick = _shop_pick(state, know, team)
+        if pick is not None:
+            opened.append(Shop(team.id, pick[0], state.week, discount(seed, state.week, team, pick[1])))
+    return replace(state, shops=(*kept, *opened)), tuple(opened)

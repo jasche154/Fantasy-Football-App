@@ -1,0 +1,210 @@
+"""Replay League: CPU feelings and shops (services/replay_mood.py), and the shop discount in trades."""
+from dataclasses import replace
+from types import MappingProxyType
+
+import pytest
+
+from services import replay_mood as rm, replay_personas, replay_state as rs, replay_trades as rt, replay_values as rv
+from services.replay_pool import SKILL
+from tests import replay_fakes as fakes
+
+SETTINGS = fakes.fake_settings(waiver_mode="none")
+WEEK = 6
+PLAYED = WEEK - 1
+
+
+def knowledge(week: int = WEEK, data=None) -> rv.Knowledge:
+    return fakes.fake_knowledge(week, SETTINGS, data)
+
+
+def league(personas: dict[int, str] | None = None, week: int = WEEK) -> rs.State:
+    """The drafted league in `week`, every CPU balanced unless `personas` says otherwise."""
+    state = fakes.drafted_state(SETTINGS)
+    chosen = personas or {}
+    teams = tuple(replace(t, persona=chosen.get(t.id, "balanced"),
+                          hype=replay_personas.hype_for(chosen.get(t.id, "balanced"))) for t in state.teams)
+    return replace(state, teams=teams, week=week)
+
+
+def best_skill(know: rv.Knowledge, team: rs.Team) -> rv.ReplayValue:
+    return max((know.by_id[pid] for pid in team.roster if know.by_id[pid].position in SKILL),
+               key=lambda v: (v.chart, -v.player_id))
+
+
+def with_values(know: rv.Knowledge, *values: rv.ReplayValue) -> rv.Knowledge:
+    by_id = {**know.by_id, **{v.player_id: v for v in values}}
+    return replace(know, by_id=MappingProxyType(by_id),
+                   values=tuple(by_id[v.player_id] for v in know.values))
+
+
+def slumping(value: rv.ReplayValue, share: float = 0.3) -> rv.ReplayValue:
+    """The same player after bad games: form well below his chart and a last game under his rate."""
+    return replace(value, form_chart=-share * value.chart, shock_chart=0.0, recent_points=(1.0, 3.0),
+                   ros_ppg=max(value.ros_ppg, 10.0), out=False, injury=None)
+
+
+def test_a_slump_worries_a_panicky_manager_most_and_a_steady_one_least():
+    value = slumping(best_skill(knowledge(), league().teams[1]), 0.08)
+    felt = {persona: rm.strength(value, persona) for persona in replay_personas.PERSONAS}
+
+    assert felt["panicky"] < felt["balanced"] == felt["shark"] < 0
+    assert felt["steady"] > felt["balanced"]                # shrugs it off (and still believes in a star)
+    assert rm.feeling(value, "panicky").kind == "worried"
+
+
+def test_a_hot_streak_lifts_a_gambler_most_and_a_hurt_player_has_no_feeling():
+    value = replace(best_skill(knowledge(), league().teams[1]), form_chart=40.0, shock_chart=0.0)
+    hurt = replace(value, out=True)
+
+    assert rm.strength(value, "gambler") > rm.strength(value, "balanced") > 0
+    assert rm.feeling(hurt, "panicky") is None and rm.feeling(replace(value, injury=fakes.Injury("Q")), "gambler") is None
+
+
+def test_mood_line_names_his_strongest_worry_and_high():
+    state, know = league(), knowledge()
+    cpu = state.teams[1]
+    ids = [pid for pid in cpu.roster if know.by_id[pid].position in SKILL]
+    worried = slumping(know.by_id[ids[0]])
+    hot = replace(know.by_id[ids[1]], form_chart=0.4 * know.by_id[ids[1]].chart, shock_chart=0.0, out=False,
+                  injury=None, healthy_chart=max(know.by_id[ids[1]].healthy_chart, rm.FEEL_MIN_CHART))
+    calm = [replace(know.by_id[pid], form_chart=0.0, shock_chart=0.0) for pid in ids[2:]]
+    mood = rm.mood_line(with_values(know, worried, hot, *calm), cpu)
+
+    assert mood == f"Worried about {worried.name}. High on {hot.name}."
+    assert rm.mood_line(with_values(know, *[replace(know.by_id[pid], form_chart=0.0, shock_chart=0.0)
+                                           for pid in cpu.roster]), cpu) is None
+
+
+def shop_league(persona: str = "panicky") -> tuple[rs.State, rv.Knowledge, rs.Team, rv.ReplayValue]:
+    """Team 2 (a `persona`) whose most valuable skill player is in a deep slump; every other CPU is steady
+    (never shops)."""
+    state = league({team_id: persona if team_id == 2 else "steady" for team_id in range(2, SETTINGS.teams + 1)})
+    know = knowledge()
+    cpu = rs.team(state, 2)
+    star = slumping(best_skill(know, cpu), 0.1)            # worry 0.18 for a panicky manager: shops, not capped
+    return state, with_values(know, star), cpu, star
+
+
+def open_shops(state: rs.State, know: rv.Knowledge, seeds=range(40), played: int = PLAYED):
+    return [(seed, *rm.refresh_shops(state, SETTINGS, know, seed, played)) for seed in seeds]
+
+
+def test_a_panicky_manager_shops_his_slumping_star_with_a_bounded_discount():
+    state, know, cpu, star = shop_league()
+    runs = open_shops(state, know)
+    opened = [shops[0] for _, _, shops in runs if shops]
+
+    assert len(opened) > len(runs) / 2                      # SHOP_RATE 0.75
+    assert {(s.team_id, s.player_id, s.week) for s in opened} == {(cpu.id, star.player_id, WEEK)}
+    assert all(rm.DISCOUNT_RANGE[0] <= s.discount <= rm.DISCOUNT_RANGE[1] for s in opened)
+    assert len({s.discount for s in opened}) > 1            # seeded jitter
+    assert open_shops(state, know)[:5] == runs[:5]          # a reload never re-rolls
+
+
+@pytest.mark.parametrize("persona", ["steady", "shark"])
+def test_steady_and_shark_managers_never_shop(persona):
+    state, know, _, _ = shop_league(persona)
+    assert not any(shops for _, _, shops in open_shops(state, know))
+
+
+def test_no_shops_before_tendency_weeks_or_after_the_deadline():
+    state, know, _, _ = shop_league()
+
+    assert not any(shops for _, _, shops in open_shops(state, know, played=replay_personas.TENDENCY_WEEKS - 1))
+    late = replace(state, week=SETTINGS.trade_deadline_week + 1)
+    assert not any(after.shops for _, after, _ in open_shops(late, know))
+
+
+def test_at_most_max_shops_in_the_league_and_one_per_manager():
+    state = league(dict.fromkeys(range(2, 13), "panicky"))
+    know = knowledge()
+    stars = [slumping(best_skill(know, t)) for t in state.teams if not t.is_user]
+    know = with_values(know, *stars)
+    for _, after, _ in open_shops(state, know, range(10)):
+        assert len(after.shops) <= rm.MAX_SHOPS
+        assert len({s.team_id for s in after.shops}) == len(after.shops)
+
+
+def test_a_shop_closes_after_a_good_game_or_when_he_leaves_and_renews_otherwise():
+    state, know, cpu, star = shop_league()
+    seed, after, opened = next(run for run in open_shops(state, know) if run[2])
+    nxt = replace(after, week=WEEK + 1)
+
+    renewed, _ = rm.refresh_shops(nxt, SETTINGS, know, seed, PLAYED + 1)
+    good = with_values(know, replace(star, recent_points=(star.ros_ppg + 10.0, 1.0)))
+    closed, _ = rm.refresh_shops(nxt, SETTINGS, good, seed, PLAYED + 1)
+    gone = rs.with_team(nxt, replace(cpu, roster=tuple(p for p in cpu.roster if p != star.player_id)))
+
+    assert [(s.player_id, s.week, s.discount) for s in renewed.shops] == [(star.player_id, WEEK + 1, opened[0].discount)]
+    assert all(s.player_id != star.player_id for s in closed.shops)
+    assert rs.markdowns(gone, cpu.id) == {}
+
+
+# ---------------- the discount in trades ----------------
+
+def _deal(state: rs.State, know: rv.Knowledge, star: rv.ReplayValue) -> tuple[int, ...]:
+    """The user's skill players closest in total chart to the star (what the user offers for him)."""
+    mine = sorted((know.by_id[pid] for pid in rs.user_team(state).roster if know.by_id[pid].position in SKILL),
+                  key=lambda v: abs(v.chart - star.chart))
+    return (mine[0].player_id,)
+
+
+def test_the_discount_moves_his_price_for_the_user_by_exactly_the_discount():
+    state, know, cpu, star = shop_league()
+    give = _deal(state, know, star)
+    shop = rs.Shop(cpu.id, star.player_id, WEEK, 0.10)
+    user = rs.user_team(state).id
+
+    plain = rt.evaluate(state, SETTINGS, know, user, cpu.id, give, (star.player_id,))
+    shopped = rt.evaluate(replace(state, shops=(shop,)), SETTINGS, know, user, cpu.id, give, (star.player_id,))
+    price = replay_personas.private_value(star, cpu.persona, cpu.hype)
+    bar = rs.USER_TRADE_MULTIPLE[SETTINGS.difficulty] * rt.tv.OUT_MARGIN
+
+    assert shopped.score - plain.score == pytest.approx(0.10 * price * bar, abs=0.05)
+    assert shopped.value_give == plain.value_give and shopped.value_get == plain.value_get   # the chart never moves
+
+
+def test_the_discount_is_for_the_user_only_and_only_while_he_holds_the_player():
+    state, know, cpu, star = shop_league()
+    shop = rs.Shop(cpu.id, star.player_id, WEEK, 0.15)
+    other = next(t for t in state.teams if not t.is_user and t.id != cpu.id)
+    pid = best_skill(know, other).player_id
+    plain = rt.evaluate(state, SETTINGS, know, other.id, cpu.id, (pid,), (star.player_id,))
+    shopped = rt.evaluate(replace(state, shops=(shop,)), SETTINGS, know, other.id, cpu.id, (pid,), (star.player_id,))
+    stale = replace(state, shops=(replace(shop, week=WEEK - 1),))
+
+    assert shopped.score == plain.score
+    assert rs.markdowns(stale, cpu.id) == {}
+
+
+def test_buying_the_shopped_player_closes_the_shop_and_locks_him_from_a_flip():
+    state, know, cpu, star = shop_league()
+    state = replace(state, shops=(rs.Shop(cpu.id, star.player_id, WEEK, 0.15),))
+    user = rs.user_team(state)
+    mine = sorted((know.by_id[pid] for pid in user.roster if know.by_id[pid].position in SKILL),
+                  key=lambda v: -v.chart)
+    give = next(((v.player_id,) for v in reversed(mine)
+                 if rt.evaluate(state, SETTINGS, know, user.id, cpu.id, (v.player_id,), (star.player_id,)).accepted),
+                (mine[0].player_id,))
+    after, verdict = rt.propose(state, SETTINGS, know, cpu.id, give, (star.player_id,))
+    assert verdict.accepted
+
+    other = next(t for t in after.teams if not t.is_user and t.id != cpu.id)
+    flip = rt.evaluate(after, SETTINGS, know, user.id, other.id, (star.player_id,), (best_skill(know, other).player_id,))
+    assert rs.markdowns(after, cpu.id) == {}
+    assert not flip.accepted and any("Traded in the last" in reason for reason in flip.reasons)
+
+
+# ---------------- no hindsight ----------------
+
+def test_feelings_and_shops_never_see_the_future():
+    state = league({2: "panicky", 3: "gambler", 4: "balanced", 5: "steady"})
+    changed = fakes.future_changed(fakes.fake_season(), after_week=WEEK)
+    now, later = knowledge(), knowledge(data=changed)
+
+    for team in state.teams[1:]:
+        assert rm.feelings(now, team) == rm.feelings(later, team)
+        assert rm.mood_line(now, team) == rm.mood_line(later, team)
+    for seed in range(5):
+        assert rs.to_json(rm.refresh_shops(state, SETTINGS, now, seed, PLAYED)[0]) == rs.to_json(
+            rm.refresh_shops(state, SETTINGS, later, seed, PLAYED)[0])

@@ -16,6 +16,8 @@ than one attempt; the re-trade lock keeps it from moving the same players again.
    chart gap and take the accepted one with the best `Verdict.score` (the lowest CPU net in the deal); two
    CPUs only make a deal that nets both at least SEEK_SCORE.
 
+A CPU shopping a player to the user (`State.shops`, replay_mood) offers first: the best deal that includes
+that player, at his shop discount (no roll). Otherwise the persona rolls above decide.
 An offer to the user is stored as a pending Offer; nothing changes hands until `replay_trades.respond`.
 """
 from collections.abc import Sequence
@@ -92,10 +94,12 @@ def _candidates(state: State, settings: Settings, know: Knowledge, sender: Team,
 
 
 def _best_deal(state: State, settings: Settings, know: Knowledge, sender: Team, receiver: Team,
-               scored: int = MAX_SCORED) -> Deal | None:
-    """The accepted deal with the best score among the `scored` candidates with the smallest gap."""
+               scored: int = MAX_SCORED, need: int | None = None) -> Deal | None:
+    """The accepted deal with the best score among the `scored` candidates with the smallest gap (only those
+    where the receiver sends `need`, when given)."""
     best: tuple[float, Deal] | None = None
-    for give, get in _candidates(state, settings, know, sender, receiver)[:scored]:
+    found = _candidates(state, settings, know, sender, receiver)
+    for give, get in [deal for deal in found if need is None or need in deal[1]][:scored]:
         verdict = rt.evaluate(state, settings, know, sender.id, receiver.id, give, get)
         if not verdict.accepted or (not sender.is_user and verdict.score < SEEK_SCORE):
             continue
@@ -128,6 +132,11 @@ def _user_offer(state: State, settings: Settings, know: Knowledge, dice: np.rand
     user, free = next((team for team in state.teams if team.is_user), None), _free_cpus(state)
     if user is None or any(offer.week == state.week and offer.to_team == user.id for offer in state.offers):
         return state
+    for team in free:                               # a shopping CPU offers his player first
+        for pid in rs.markdowns(state, team.id):
+            deal = _best_deal(state, settings, know, user, team, need=pid)
+            if deal is not None:
+                return rt.record_offer(state, team.id, user.id, deal[1], deal[0], "pending")
     rolls = dice.random(len(free))
     order = dice.permutation(len(free))
     partner = next((free[int(i)] for i in order if rolls[int(i)] < replay_personas.offer_rate(free[int(i)].persona)),

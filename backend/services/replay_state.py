@@ -179,6 +179,7 @@ class Offer(_Record):                         # every executed trade (CPU-CPU to
     get: tuple[int, ...]
     status: str                               # "pending" | "accepted" | "declined" | "expired" | "countered"
     counter_to: int | None = None             # the Offer id this one answers with a counter
+    message: str = ""                         # a CPU's one line to the user about it (replay_chat); "" = none
 
 
 @dataclass(frozen=True)
@@ -189,6 +190,26 @@ class Event(_Record):
     team_id: int | None
     text: str
     player_ids: tuple[int, ...] = ()
+
+
+@dataclass(frozen=True)
+class Shop(_Record):                          # a worried CPU shopping one of his players to the user (replay_mood)
+    team_id: int
+    player_id: int
+    week: int                                 # the week it is open for; renewed while he stays worried
+    discount: float                           # share off his usual price for the user (0.05-0.15); never shown
+
+
+@dataclass(frozen=True)
+class Chat(_Record):                          # one line in the league chat (replay_chat); the text is kept as posted
+    id: int
+    week: int
+    team_id: int
+    to_team: int | None                       # None: to the league; else addressed to that team
+    kind: str
+    text: str
+    player_ids: tuple[int, ...] = ()
+    line: int = -1                            # its index in the bank bucket, so a game uses each line once a round
 
 
 @dataclass(frozen=True)
@@ -211,6 +232,8 @@ class State(_Record):
     next_id: int = 1                          # the next Claim / Offer / Event id
     faab_spent: Mapping[int, int] = field(default_factory=dict, hash=False)   # team id -> FAAB dollars spent
     counter_searched: Mapping[int, int] = field(default_factory=dict, hash=False)  # CPU id -> week it last looked
+    shops: tuple[Shop, ...] = ()              # players CPUs are shopping to the user (replay_mood); old saves: none
+    chat: tuple[Chat, ...] = ()               # the league chat, oldest first (replay_chat); old saves: empty
 
 
 # ---------------- JSON ----------------
@@ -340,6 +363,13 @@ def trades_open(state: State, settings: Settings) -> bool:
     deadline = settings.trade_deadline_week
     return state.week <= deadline or (state.week == deadline + 1 and state.phase == "waivers"
                                       and settings.waiver_mode != "none")
+
+
+def markdowns(state: State, team_id: int) -> dict[int, float]:
+    """{player id: discount} for the players this CPU is shopping to the user this week (and still holds)."""
+    owner = team(state, team_id)
+    return {shop.player_id: shop.discount for shop in state.shops
+            if shop.team_id == team_id and shop.week == state.week and shop.player_id in held(owner)}
 
 
 def faab_left(state: State, team_id: int) -> int:
