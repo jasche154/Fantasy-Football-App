@@ -270,6 +270,19 @@ def test_an_emotional_cpu_pays_more_for_a_hyped_player_and_asks_more_for_its_own
     assert score([1], [2], rp.HYPE) == pytest.approx(score([1], [2], 1.0) - extra * tv.OUT_MARGIN, abs=0.01)  # holding
 
 
+def test_evaluate_prices_a_hyped_player_with_the_receiving_cpus_hype_not_the_senders():
+    to_team, give, get = FAIR
+    state, know = league(changes={give[0]: {"shock_chart": 30.0}})        # the CPU receives a hyped back
+
+    def score(team_id, hype):
+        hyped = rs.with_team(state, replace(rs.team(state, team_id), hype=hype))
+        return rt.evaluate(hyped, SETTINGS, know, USER, to_team, give, get).score
+
+    calm = score(to_team, 1.0)
+    assert score(to_team, rp.HYPE) == pytest.approx(calm + (rp.HYPE - 1) * 30.0, abs=0.05)
+    assert score(USER, rp.HYPE) == pytest.approx(calm, abs=0.05)          # the user's own hype changes nothing
+
+
 def test_the_market_guard_stops_a_persona_whose_private_values_say_yes():
     """A steady CPU marks down two players it never rated and up one it drafted high: never below 80% back."""
     know = values(p1=star(700.0, star=1.0, pre_chart=900.0), p2=star(500.0, star=1.0, pre_chart=100.0),

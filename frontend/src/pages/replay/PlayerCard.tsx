@@ -24,7 +24,7 @@ function Header({ row }: { row: ReplayWireRow }) {
       </p>
       {/* Hover isn't there on touch or for the keyboard: the full label in plain text. */}
       {injury && <p className="replay-card__injury">{injuryLabel(injury)}</p>}
-      {row.player.hype && <p className="replay-card__injury" aria-hidden="true">{hypeLabel(row.player)}</p>}
+      {row.player.hype && <p className="replay-card__hype" aria-hidden="true">{hypeLabel(row.player)}</p>}
       {row.news && <p className="replay-card__news">{row.news.text}</p>}
     </header>
   );

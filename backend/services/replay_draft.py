@@ -26,7 +26,7 @@ from collections.abc import Sequence
 from dataclasses import replace
 from functools import lru_cache
 
-from services import replay_chart, replay_personas, replay_slots, replay_state as rs
+from services import replay_chart, replay_personas, replay_pool, replay_slots, replay_state as rs
 from services.replay_pool import ALL_POSITIONS, PoolPlayer, SeasonData
 from services.replay_state import Pick, Settings, State, Team
 from services.replay_values import lineup_holes, missing_slots, position_cap
@@ -122,6 +122,9 @@ def _board(known: SeasonData) -> tuple[PoolPlayer, ...]:
             return False, player.adp, 0.0, player.player_id
         return True, 0.0, -known.projection(player.player_id, 1), player.player_id
     return tuple(sorted(known.players.values(), key=key))
+
+
+replay_pool.EVICT_HOOKS.append(_board.cache_clear)
 
 
 def available(state: State, data: SeasonData) -> list[PoolPlayer]:

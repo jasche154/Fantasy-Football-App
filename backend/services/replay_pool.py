@@ -225,6 +225,7 @@ def load_season_data(session: Session, season: int, scoring: str, rules: Scoring
                     _cache.popitem(last=False)
             if evicted:                               # other caches would keep the dropped season alive
                 _as_of.cache_clear()
+                replay_defense.ratings.cache_clear()
                 for hook in EVICT_HOOKS:
                     hook()
     return cached

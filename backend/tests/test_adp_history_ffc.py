@@ -43,3 +43,12 @@ def test_a_payload_without_meta_still_parses_as_ppr():
 def test_another_formats_real_list_is_refused(adp_format):
     with pytest.raises(adp_history.HistoryError, match="another format"):
         adp_history.parse_ffc(real("2qb"), adp_format)
+
+
+@pytest.mark.parametrize("adp_format", ["half", "std", "2qb"])
+@pytest.mark.parametrize("payload", [{"status": "Success", "players": []}, {"status": "Success"},
+                                     {"status": "Success", "players": None},
+                                     {"status": "Error", "errors": "No ADP data found."}])
+def test_ffcs_own_no_data_answers_are_no_data_in_every_format(payload, adp_format):
+    with pytest.raises(adp_history.FfcNoDataError):
+        adp_history.parse_ffc(payload, adp_format)

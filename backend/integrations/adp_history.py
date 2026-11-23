@@ -146,10 +146,10 @@ def parse_ffc(payload: Any, adp_format: str = "ppr") -> list[AdpEntry]:
     ok = isinstance(payload, dict) and payload.get("status") == "Success" and isinstance(payload.get("players"), list)
     meta = payload.get("meta") if isinstance(payload, dict) else None
     kind = meta.get("type") if isinstance(meta, dict) else None
+    if _ffc_says_no_data(payload):                 # before the format guard: an empty answer carries no meta
+        raise FfcNoDataError("Fantasy Football Calculator has no ADP for that season.")
     if ok and (kind is not None or adp_format != "ppr") and kind != FFC_FORMATS[adp_format][1]:
         raise HistoryError("Fantasy Football Calculator returned ADP for another format.")
-    if _ffc_says_no_data(payload):
-        raise FfcNoDataError("Fantasy Football Calculator has no ADP for that season.")
     entries = parse_rows("Fantasy Football Calculator ADP", payload["players"], _ffc_entry) if ok else []
     if not entries:                     # an empty list too: a forced load would replace the season with MFL alone
         raise HistoryError("Fantasy Football Calculator returned no usable ADP rows.")
