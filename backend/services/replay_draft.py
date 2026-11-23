@@ -1,7 +1,10 @@
 """Replay League: the snake draft and its CPU managers.
 
-A CPU knows only that season's preseason ADP (`data.as_of(0)`): never a result, never an in-season
-projection. Its pick is the lowest `(adp + noise) x need x lean` among the best available players by ADP:
+The draft is held in `state.week` (replay_state.draft_week): week 0, preseason, for a league that plays from
+week 1, or week K for one that jumps in at week K. A CPU knows only `data.as_of(state.week)`: at week 0 the
+preseason ADP, never a result or an in-season projection; at week K the results of weeks before K and the
+tags and projections through K (a jump-in league's pool carries a current-market ADP, see replay_pool).
+Its pick is the lowest `(adp + noise) x need x lean` among the best available players by ADP:
 
 - noise: Normal(0, sigma x the team's chaos), sigma = the ADP's own spread (or 2 + 0.11 x adp);
 - need: below 1 pulls a position earlier (an open starting spot), above 1 pushes it back (depth, backups);
@@ -15,7 +18,7 @@ In a superflex league (replay_slots.two_qb: a SUPERFLEX slot or 2+ QB slots) a C
 list (replay_adp_format), else through replay_chart.superflex_view (QB ADP x SUPERFLEX_QB_ADP), and counts the
 SUPERFLEX slots as QB starters (so it drafts two QBs early and may back them up).
 The user may pick anyone as long as the roster can still end legal. Players without an ADP come after
-everyone who has one, by their own week-1 projection.
+everyone who has one, by their own projection for the first week played (0 when a hard tag rules him out).
 
 Every function takes a `State` and returns a new one. Randomness: `rng(seed, "teams")` for the managers,
 `rng(seed, "draft", overall pick)` for each pick, so a reload can never re-roll a pick.
@@ -90,7 +93,8 @@ def new_game(settings: Settings, seed: int, team_names: Sequence[str] | None = N
                           persona=personas.get(index + 1, "balanced"),
                           hype=replay_personas.hype_for(personas.get(index + 1, "balanced"))))
     ids = tuple(team.id for team in teams)
-    return State(phase="draft", week=0, teams=tuple(teams), draft_order=ids, picks=(), schedule=(), results=(),
+    return State(phase="draft", week=rs.draft_week(settings), teams=tuple(teams), draft_order=ids, picks=(),
+                 schedule=(), results=(),
                  waiver_order=(), claims=(), locked=(), lineup=None, offers=(), events=(), traded={})
 
 
@@ -116,11 +120,18 @@ def on_the_clock(state: State, settings: Settings) -> int | None:
 
 @lru_cache(maxsize=8)
 def _board(known: SeasonData) -> tuple[PoolPlayer, ...]:
-    """The whole pool in draft order: by ADP, then players without one by their own week-1 projection."""
+    """The whole pool in draft order: by ADP, then players without one by their own projection for the first
+    week played (week 1 at a preseason draft, week K at a week-K one; 0 under a hard tag)."""
+    week = max(1, known.known_before or 0)
+
+    def projected(player_id: int) -> float:
+        tag = known.injuries.get((player_id, week))
+        return 0.0 if tag is not None and tag.hard else known.projection(player_id, week)
+
     def key(player: PoolPlayer) -> tuple:
         if player.adp is not None:
             return False, player.adp, 0.0, player.player_id
-        return True, 0.0, -known.projection(player.player_id, 1), player.player_id
+        return True, 0.0, -projected(player.player_id), player.player_id
     return tuple(sorted(known.players.values(), key=key))
 
 
@@ -128,9 +139,9 @@ replay_pool.EVICT_HOOKS.append(_board.cache_clear)
 
 
 def available(state: State, data: SeasonData) -> list[PoolPlayer]:
-    """Undrafted players, best ADP first; those without an ADP last, by preseason projection."""
+    """Undrafted players, best ADP first; those without an ADP last, by projection (as known at the draft)."""
     taken = rs.rostered(state)
-    return [player for player in _board(data.as_of(0)) if player.player_id not in taken]
+    return [player for player in _board(data.as_of(state.week)) if player.player_id not in taken]
 
 
 # ---------------- what a CPU wants ----------------
@@ -233,11 +244,11 @@ def _scores(team: Team, players: Sequence[PoolPlayer], counts: Counter, round_: 
 
 def cpu_pick(state: State, settings: Settings, data: SeasonData, seed: int) -> int:
     """The player id the team on the clock takes with CPU logic (the user's team: no noise, no lean).
-    Reads only `data.as_of(0)`."""
+    Reads only `data.as_of(state.week)` (the draft's week)."""
     team_id = on_the_clock(state, settings)
     if team_id is None:
         raise ValueError("The draft is over.")
-    team, known, overall = rs.team(state, team_id), data.as_of(0), len(state.picks) + 1
+    team, known, overall = rs.team(state, team_id), data.as_of(state.week), len(state.picks) + 1
     if replay_slots.two_qb(settings.starters):
         known = replay_chart.superflex_view(known)
     round_ = _slot(state, overall)[0]
@@ -292,13 +303,16 @@ def make_pick(state: State, settings: Settings, data: SeasonData, player_id: int
 
 
 def finish_draft(state: State, settings: Settings, data: SeasonData, seed: int) -> State:
-    """After the last pick: the regular-season schedule, waiver priority in reverse draft order, phase
-    "open", week 1. (`data` is not read; it is in the signature every draft step shares.)"""
+    """After the last pick: the regular-season schedule (weeks start_week..regular_season_weeks), waiver
+    priority in reverse draft order, phase "open", week start_week. (`data` is not read; it is in the
+    signature every draft step shares.)"""
     if state.phase != "draft" or len(state.picks) < _total_picks(state, settings):
         raise ValueError("The draft can only be finished once, after its last pick.")
-    schedule = rs.round_robin(state.draft_order, settings.regular_season_weeks, seed)
+    weeks = settings.regular_season_weeks - settings.start_week + 1
+    schedule = rs.round_robin(state.draft_order, weeks, seed)
     log.info("Replay draft finished: %d picks, %d weeks scheduled", len(state.picks), len(schedule))
-    return replace(state, schedule=schedule, waiver_order=state.draft_order[::-1], phase="open", week=1)
+    return replace(state, schedule=schedule, waiver_order=state.draft_order[::-1], phase="open",
+                   week=settings.start_week)
 
 
 def _finished(state: State, settings: Settings, data: SeasonData, seed: int) -> State:

@@ -10,6 +10,8 @@
 - Playoffs are the `rs.playoff_rounds` weeks after the regular season: the title bracket (byes in round one,
   reseeded every round, a third-place game), the round-one losers' pool and the consolation pool, all built
   in `replay_bracket` (re-exported here) along with the final places.
+- Weeks are NFL weeks: a league that jumped in at `settings.start_week` K plays (and schedules) weeks K on,
+  `state.schedule[0]` being week K; results, standings and the bracket only ever hold its own weeks.
 """
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
@@ -112,17 +114,19 @@ def matchups_for_week(state: State, settings: Settings, week: int) -> Matchups:
 
     In playoff weeks the title bracket's games come first (higher seed home; the final week's first game is
     the final), then the losers' pool, then the consolation pool. Empty while a playoff week's teams are not
-    known yet. A team with no game that week (a bye, an odd one out in a pool) is in none of them."""
-    if not 1 <= week <= settings.end_week:
-        raise ValueError(f"This league plays weeks 1 to {settings.end_week}, not week {week}.")
+    known yet. A team with no game that week (a bye, an odd one out in a pool) is in none of them. A league
+    that jumped in at start_week has no week before it (ValueError)."""
+    first = settings.start_week
+    if not first <= week <= settings.end_week:
+        raise ValueError(f"This league plays weeks {first} to {settings.end_week}, not week {week}.")
     played = _result(state, week)
     if played is not None:
         return played.matchups
     if is_playoff_week(settings, week):
         return playoff_matchups(state, settings, week)
-    if week > len(state.schedule):
+    if week - first >= len(state.schedule):
         raise ValueError(f"This league has no schedule for week {week}.")
-    return state.schedule[week - 1]
+    return state.schedule[week - first]
 
 
 def matchup_for(state: State, settings: Settings, team_id: int, week: int | None = None) -> tuple[int, int] | None:
