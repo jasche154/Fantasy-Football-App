@@ -10,7 +10,7 @@ from tests import replay_fakes as fakes
 from tests.test_replay_views import DATA, SEED, SETTINGS, at, finished, game
 
 SIX = replace(SETTINGS, playoff_teams=6)          # a three-round bracket: weeks 15-17, two byes
-SEED_KEYS = {"team_id", "name", "is_user", "tendency", "seed"}
+SEED_KEYS = {"team_id", "name", "is_user", "tendency", "mood", "seed"}
 SIDE_KEYS = SEED_KEYS | {"points", "projected"}
 
 

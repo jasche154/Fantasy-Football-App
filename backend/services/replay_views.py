@@ -9,9 +9,11 @@ pre-game projection or null, never a result. Paths below are under /api/replay; 
 pydantic models in api/replay_routes.py (create) and api/replay_action_routes.py.
 
 Shared pieces
-  TeamRef    {team_id, name, is_user, tendency: string | null}
+  TeamRef    {team_id, name, is_user, tendency: string | null, mood: string | null}
       tendency      a one-line hint at how a CPU trades, from its hidden persona; null for the user and
                     before 3 weeks are played (the persona's name is never shown)
+      mood          who a CPU is down on and high on right now, e.g. "Worried about X. High on Y."
+                    (services/replay_mood.py); null for the user, before 3 weeks are played, or with no feelings
   Injury     {tag: Q | D | O | IR | PUP | SUS, practice: DNP | LP | FP | null, injury: string | null}
   PlayerRef  {id, name, position, team, injury: Injury | null, hype: {reason} | null}
       team          his NFL team as known before the week shown, or null
@@ -78,7 +80,9 @@ GET  /games/{id}                  Summary
                next_action: {step: pick | wednesday | play | done, label},
                record: Record, matchup: {week, playoff, label, you: Side, opponent: Side} | null,
                pending: {claims, offers}, champion: TeamRef | null, updated_at,
-               ir_blocked: PlayerRef[], has_injuries: bool, trades_open: bool, rank_source: experts | model}
+               ir_blocked: PlayerRef[], has_injuries: bool, trades_open: bool, rank_source: experts | model,
+               chat: int}
+      chat          lines in the league chat so far (GET .../chat total), for an unread dot
       ir_blocked    the USER's IR players who lost their tag (non-empty = adds, claims and trades refused)
       has_injuries  injury tags are loaded for this season
       trades_open   trades can be made now: through the deadline week, and its waiver phase (the deadline
@@ -135,6 +139,11 @@ GET  .../schedule?team_id=        {team: TeamRef, results: [{week, playoff, play
       idle          the week's games are known and the team has none (a playoff bye, or the odd team out of
                     a pool): opponent, opponent_points and result are null
 GET  .../activity?kind=&limit=&offset=     Page of Event, newest first; kind may list several ("add,drop,ir")
+GET  .../chat?limit=&offset=      Page of Chat, newest first (services/replay_chat.py: the CPUs talk, the user reads)
+      Chat {id, week, team: TeamRef, to_user: bool, kind, text, players: PlayerRef[]}
+      kind          blowout_win | close_win | close_loss | blowout_loss | boom | bust | streak_win | streak_loss |
+                    upset | clinch | eliminated | champion | runner_up | trade_reaction | shop
+      to_user       addressed to the user (his opponent's line, a manager shopping him a player)
 GET  .../players, .../players/{player_id}    the wire and a player's page: see services/replay_views_players.py
 GET  .../claims                   {phase, can_claim, priority, waiver_order: TeamRef[],
                                    results: [{id, order, add: PlayerRow, drop: PlayerRow | null, bid}],
@@ -142,11 +151,15 @@ GET  .../claims                   {phase, can_claim, priority, waiver_order: Tea
       bid: the claim's whole-dollar bid (0 outside FAAB). faab: null unless waiver_mode is faab; left is the
       user's budget left, teams every team's (current waiver order). Other teams' pending bids are never shown.
 GET  .../trades                   {open, deadline_week, max_players, offers: [Offer + {verdict, note}],
-                                   results: Offer[]}
+                                   results: Offer[], shops: [{team: TeamRef, player: PlayerRef, message}]}
       open          Summary.trades_open
       Offer {id, week, status: pending | accepted | declined | expired | countered, from_team: TeamRef,
-             to_team: TeamRef, give: PlayerRef[] (what from_team sends), get: PlayerRef[], counter_to: id | null}
+             to_team: TeamRef, give: PlayerRef[] (what from_team sends), get: PlayerRef[], counter_to: id | null,
+             message: string | null}
       counter_to    the offer this one answers (a counter), else null
+      message       a CPU offer's one line to the user in his voice (why he offers it); null otherwise
+      shops         players a worried CPU is shopping to the user this week (a little under his usual price; the
+                    discount is never shown), with his message; empty once trades close
       offers: CPU offers the user can answer, each with a preview Verdict from the user's side (or null
       and a note saying why it cannot be accepted as is). results: every other offer and trade, newest first.
 """
@@ -155,8 +168,8 @@ from dataclasses import asdict, dataclass
 from functools import cached_property
 
 from services import (
-    replay_defense, replay_draft, replay_ir, replay_personas, replay_season, replay_state as rs, replay_trades,
-    replay_values as rv,
+    replay_chat, replay_defense, replay_draft, replay_ir, replay_mood, replay_personas, replay_season,
+    replay_state as rs, replay_trades, replay_values as rv,
 )
 from services.replay_pool import ALL_POSITIONS, SeasonData
 from services.replay_state import Event, Settings, State, Team, WeekResult
@@ -221,9 +234,10 @@ class Game:
 # ---------------- shared pieces ----------------
 
 def team_ref(game: Game, team: Team) -> dict:
-    """tendency: a hint at a CPU's (hidden) trading persona, once it has played enough weeks."""
+    """tendency and mood: hints at a CPU's (hidden) persona and feelings, once it has played enough weeks."""
     tendency = None if team.is_user else replay_personas.tendency(team.persona, game.played)
-    return {"team_id": team.id, "name": team.name, "is_user": team.is_user, "tendency": tendency}
+    mood = None if tendency is None else replay_mood.mood_line(game.know, team)
+    return {"team_id": team.id, "name": team.name, "is_user": team.is_user, "tendency": tendency, "mood": mood}
 
 
 def player_ref(value: ReplayValue) -> dict:
@@ -442,7 +456,7 @@ def summary(game: Game) -> dict:
         "ir_blocked": refs(game, replay_ir.ineligible(state, game.know, game.user.id)),
         "has_injuries": game.has_injuries,
         "trades_open": state.phase in replay_trades.TRADE_PHASES and rs.trades_open(state, settings),
-        "rank_source": game.know.rank_source,
+        "rank_source": game.know.rank_source, "chat": len(replay_chat.chat_for(state)),
     }
 
 

@@ -6,8 +6,8 @@ documented at the top of services/replay_views.py; the same no-hindsight rule ho
 import json
 
 from database.models import ReplayLeague
-from services import replay_season, replay_state as rs, replay_trades
-from services.replay_state import Offer, Team
+from services import replay_chat, replay_season, replay_state as rs, replay_trades
+from services.replay_state import Chat, Offer, Team
 from services.replay_trades import Verdict
 from services.replay_views import (
     DEFAULT_PAGE, Game, event_row, page, player_ref, player_row, record, refs, result_of, team_ref,
@@ -77,6 +77,17 @@ def activity(game: Game, kind: str | None = None, limit: int = DEFAULT_PAGE, off
     return page(events, limit, offset, lambda event: event_row(game, event))
 
 
+def chat_row(game: Game, line: Chat) -> dict:
+    return {"id": line.id, "week": line.week, "team": team_ref(game, rs.team(game.state, line.team_id)),
+            "to_user": line.to_team == game.user.id, "kind": line.kind, "text": line.text,
+            "players": refs(game, line.player_ids)}
+
+
+def chat(game: Game, limit: int = DEFAULT_PAGE, offset: int = 0) -> dict:
+    """The league chat, newest first (offer messages show on their offers instead)."""
+    return page(list(reversed(replay_chat.chat_for(game.state))), limit, offset, lambda line: chat_row(game, line))
+
+
 # ---------------- claims and trades ----------------
 
 def claims(game: Game) -> dict:
@@ -118,7 +129,8 @@ def offer_row(game: Game, offer: Offer) -> dict:
     return {"id": offer.id, "week": offer.week, "status": offer.status,
             "from_team": team_ref(game, rs.team(state, offer.from_team)),
             "to_team": team_ref(game, rs.team(state, offer.to_team)),
-            "give": refs(game, offer.give), "get": refs(game, offer.get), "counter_to": offer.counter_to}
+            "give": refs(game, offer.give), "get": refs(game, offer.get), "counter_to": offer.counter_to,
+            "message": offer.message or None}
 
 
 def _preview(game: Game, offer: Offer) -> dict:
@@ -139,4 +151,19 @@ def trades(game: Game) -> dict:
     return {"open": state.phase in replay_trades.TRADE_PHASES and rs.trades_open(state, settings),
             "deadline_week": settings.trade_deadline_week, "max_players": replay_trades.MAX_PLAYERS_PER_SIDE,
             "offers": [{**offer_row(game, offer), **_preview(game, offer)} for offer in pending],
-            "results": [offer_row(game, offer) for offer in reversed(state.offers) if offer.id not in waiting]}
+            "results": [offer_row(game, offer) for offer in reversed(state.offers) if offer.id not in waiting],
+            "shops": _shops(game)}
+
+
+def _shops(game: Game) -> list[dict]:
+    """Players CPUs are shopping to the user now, with the message each sent (never the discount)."""
+    state = game.state
+    if not (state.phase in replay_trades.TRADE_PHASES and rs.trades_open(state, game.settings)):
+        return []
+    rows = []
+    for team in (t for t in state.teams if not t.is_user):
+        for pid in rs.markdowns(state, team.id):
+            said = next((c.text for c in reversed(state.chat)
+                         if c.kind == "shop" and c.team_id == team.id and pid in c.player_ids), None)
+            rows.append({"team": team_ref(game, team), "player": player_ref(game.know.by_id[pid]), "message": said})
+    return rows
