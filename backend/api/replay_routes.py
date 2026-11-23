@@ -20,8 +20,8 @@ from api.deps import Scoring
 from database.db import get_session
 from database.models import ReplayLeague
 from services import (
-    replay_adp_format, replay_data, replay_game as rg, replay_pool, replay_scoring, replay_slots, replay_state as rs,
-    replay_views as views, replay_views_league as league_views,
+    replay_adp_format, replay_blob, replay_data, replay_game as rg, replay_pool, replay_scoring, replay_slots,
+    replay_state as rs, replay_views as views, replay_views_league as league_views, sim_setup,
 )
 from services.replay_pool import SeasonData
 from services.replay_state import Settings, State
@@ -59,8 +59,11 @@ def errors() -> Iterator[None]:
         raise HTTPException(422, str(exc)) from exc
 
 
-def _season_data(session: Session, settings: Settings) -> SeasonData:
-    """The season as this league sees it (its scoring and its ADP list, replay_adp_format)."""
+def _season_data(session: Session, settings: Settings, league_id: int) -> SeasonData:
+    """The season as this league sees it: a simulated league's frozen season (replay_blob), else the past season
+    with its scoring and its ADP list (replay_adp_format)."""
+    if settings.sim_from is not None:
+        return replay_blob.load(session, league_id)
     return replay_pool.load_season_data(session, settings.season, settings.scoring, settings.scoring_rules,
                                         settings.adp_format)
 
@@ -71,7 +74,7 @@ def _game(row: ReplayLeague, settings: Settings, state: State, data: SeasonData)
 
 def open_game(session: Session, game_id: int) -> views.Game:
     row, settings, state = rs.load(session, game_id)
-    return _game(row, settings, state, _season_data(session, settings))
+    return _game(row, settings, state, _season_data(session, settings, row.id))
 
 
 def show(session: Session, game_id: int, build: Callable[[views.Game], dict]) -> dict:
@@ -115,7 +118,7 @@ def turn(session: Session, game_id: int, week: int | None = None, overall: int |
             raise HTTPException(409, f"This league is in week {state.week}, not week {week}. Reload it.")
         if overall is not None and overall != len(state.picks) + 1:
             raise HTTPException(409, f"The draft is at pick {len(state.picks) + 1}, not pick {overall}. Reload it.")
-        data = _season_data(session, settings)
+        data = _season_data(session, settings, row.id)
         yield Turn(session, row, settings, state, data)
 
 
@@ -123,9 +126,9 @@ def turn(session: Session, game_id: int, week: int | None = None, overall: int |
 
 @router.get("/seasons")
 def seasons(session: Session = Depends(get_session)) -> dict:
-    """Which past seasons can be played, and the season import that is running (if any)."""
+    """Which past seasons can be played, the simulated ones (live, future), and the season import that is running."""
     return {"results": [replay_pool.readiness(session, season) for season in replay_pool.SUPPORTED_SEASONS],
-            "prepare": replay_data.status(session)}
+            "simulated": sim_setup.simulated(session), "prepare": replay_data.status(session)}
 
 
 @router.post("/seasons/{season}/prepare")
@@ -162,6 +165,7 @@ class CreateBody(BaseModel):
     seed: int | None = Field(None, ge=0, le=MAX_SEED)
     starters: dict[str, int] | None = Field(None, max_length=len(replay_slots.SLOTS))   # slot -> count; None: standard
     scoring_rules: RulesBody | None = None              # None: the `scoring` preset as is
+    start: Literal["full", "now"] = "full"              # "now": the live season, drafted today, from the next week
 
 
 def _lineup_and_scoring(body: CreateBody) -> tuple[dict[str, int], str, replay_scoring.ScoringRules | None]:
@@ -177,19 +181,32 @@ def _lineup_and_scoring(body: CreateBody) -> tuple[dict[str, int], str, replay_s
     return (starters, *replay_scoring.normalize(body.scoring, rules))
 
 
-def _season(session: Session, wanted: int | str, seed: int, end_week: int) -> int:
+def _season(session: Session, wanted: int | str, seed: int, end_week: int) -> tuple[int, str, int]:
+    """(season, kind, last real week) as sim_setup.kind_of; "random" picks a ready complete past season."""
     if wanted != "random":
-        if wanted not in replay_pool.SUPPORTED_SEASONS:
-            seasons_ = replay_pool.SUPPORTED_SEASONS
-            raise ValueError(f"Replay seasons run from {seasons_[0]} to {seasons_[-1]}, not {wanted}.")
-        return int(wanted)
+        return (int(wanted), *sim_setup.kind_of(session, int(wanted)))
     ready = replay_pool.ready_last_weeks(session)
     if not ready:
         raise NoDataError("No season is ready to play yet: prepare one first.")
     fits = [season for season, last in ready.items() if last >= end_week]
     if not fits:
         raise ValueError(f"No prepared season has a week {end_week}: pick an earlier championship week.")
-    return int(rs.rng(seed, "season").choice(fits))
+    return int(rs.rng(seed, "season").choice(fits)), sim_setup.REPLAY, 0
+
+
+def _window(body: CreateBody, kind: str, through: int) -> dict:
+    """Settings for when the league plays: a league starting now (the live season only) drafts today and plays
+    from week through + 1, by default with a 4-team bracket, the deadline inside its shorter season."""
+    now = body.start == "now"
+    if now and kind != sim_setup.LIVE:
+        raise ValueError("Only the season in progress can start now: other leagues start with a preseason draft.")
+    playoff_teams = body.playoff_teams or (sim_setup.NOW_PLAYOFF_TEAMS if now else rs.default_playoff_teams(body.teams))
+    window = {"playoff_teams": playoff_teams, "sim_from": None if kind == sim_setup.REPLAY else through + 1,
+              "regular_season_weeks": body.playoff_end_week - rs.playoff_rounds(playoff_teams)}
+    if now:
+        regular, deadline = sim_setup.now_window(through, body.playoff_end_week, playoff_teams)
+        window.update(start_week=through + 1, regular_season_weeks=regular, trade_deadline_week=deadline)
+    return window
 
 
 @router.get("/games")
@@ -199,22 +216,27 @@ def games(session: Session = Depends(get_session)) -> dict:
 
 @router.post("/games")
 def create_game(body: CreateBody, session: Session = Depends(get_session)) -> dict:
-    """A new league, drafted up to the user's first pick. Season "random": a seeded choice of a ready one."""
+    """A new league, drafted up to the user's first pick. Season "random": a seeded choice of a ready one. A live
+    or future season is built from the seed and frozen with the league, in the same transaction."""
     seed = body.seed if body.seed is not None else secrets.randbelow(MAX_SEED + 1)
     with errors():
         starters, scoring, rules = _lineup_and_scoring(body)        # 422 before any season lookup
-        season = _season(session, body.season, seed, body.playoff_end_week)
+        season, kind, through = _season(session, body.season, seed, body.playoff_end_week)
         slot = body.draft_slot or int(rs.rng(seed, "slot").integers(1, body.teams + 1))
-        playoff_teams = body.playoff_teams or rs.default_playoff_teams(body.teams)
         settings = Settings(season=season, teams=body.teams, scoring=scoring, draft_slot=slot,
-                            waiver_mode=body.waiver_mode, difficulty=body.difficulty, playoff_teams=playoff_teams,
-                            regular_season_weeks=body.playoff_end_week - rs.playoff_rounds(playoff_teams),
-                            starters=starters, scoring_rules=rules,
-                            adp_format=replay_adp_format.wanted(scoring, rules, starters))
-        data = replay_pool.load_season_data(session, season, scoring, rules, settings.adp_format)
+                            waiver_mode=body.waiver_mode, difficulty=body.difficulty, starters=starters,
+                            scoring_rules=rules, adp_format=replay_adp_format.wanted(scoring, rules, starters),
+                            **_window(body, kind, through))
+        simulated = settings.sim_from is not None
+        data = (sim_setup.build(session, settings, seed) if simulated
+                else replay_pool.load_season_data(session, season, scoring, rules, settings.adp_format))
         state = rg.create_game(settings, data, seed)
-        name = (body.name or "").strip() or f"{season} Replay"
-        game = _game(rs.create(session, name, settings, state, seed), settings, state, data)
+        name = (body.name or "").strip() or f"{season} {'Sim' if simulated else 'Replay'}"
+        row = rs.create(session, name, settings, state, seed, commit=not simulated)
+        if simulated:                               # never a league without its season
+            data = replay_blob.store(session, row.id, kind, through, data)
+            session.commit()
+        game = _game(row, settings, state, data)
         return {"game": views.summary(game), "events": views.new_events(game, None)}
 
 
@@ -227,6 +249,7 @@ def game_summary(game_id: GameId, session: Session = Depends(get_session)) -> di
 def delete_game(game_id: GameId, session: Session = Depends(get_session)) -> dict:
     with errors(), game_lock(game_id):
         rs.delete(session, game_id)
+        replay_blob.forget(session, game_id)
     return {"deleted": game_id}
 
 

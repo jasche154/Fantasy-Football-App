@@ -149,7 +149,7 @@ export function TeamView({ game, version, ...rest }: ReplayViewProps) {
     <>
       <div className="weekly-controls replay-team__controls">
         <TeamSelect game={game} value={teamId} onChange={setTeamId} />
-        <SelectField label="Week" isInline value={week} options={weekOptions(game.week)}
+        <SelectField label="Week" isInline value={week} options={weekOptions(game.week, game.start_week)}
           onChange={(value) => setPickedWeek(Number(value) === game.week ? null : Number(value))} />
       </div>
       <AsyncView state={roster} loading={<TableSkeleton rows={12} columns={8} label="Loading the roster…" />} errorTitle="Couldn't load this roster">

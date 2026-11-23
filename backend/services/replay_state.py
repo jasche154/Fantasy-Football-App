@@ -4,6 +4,11 @@ Everything here is immutable. Engine modules take a `State` and return a new one
 mappings are read-only (`MappingProxyType`) and lists become tuples when a record is built, so a state can
 be shared and cached safely. `to_json` / `state_from_json` round-trip exactly (tuples, int keys, None);
 because the mappings are proxies, use them rather than `dataclasses.asdict`, `copy.deepcopy` or pickle.
+A key missing from saved JSON takes its default, so leagues saved before a field existed still load.
+
+Weeks are always real NFL weeks. A league with `start_week` K > 1 ("jump in now") drafts in week K on what
+was known before it (`draft_week`), schedules weeks K..regular_season_weeks only and has results from week
+K on; the NFL weeks before K are history, not league weeks.
 """
 import json
 import types
@@ -16,10 +21,10 @@ from numbers import Integral, Real
 from types import MappingProxyType
 
 import numpy as np
-from sqlalchemy import select
+from sqlalchemy import delete as sql_delete, select
 from sqlalchemy.orm import Session
 
-from database.models import ReplayLeague
+from database.models import ReplayLeague, ReplaySeasonData
 from database.models.base import utc_now
 from services import replay_adp_format, replay_scoring
 from services.replay_scoring import ScoringRules
@@ -77,6 +82,8 @@ class Settings(_Record):
     scoring_rules: ScoringRules | None = None   # custom key settings on top of `scoring`; None = the preset as is
     adp_format: str = "ppr"                  # the ADP list it drafts from, fixed at creation (replay_adp_format.wanted);
                                              # leagues saved before there were several lists read "ppr"
+    start_week: int = 1                      # the first week this league plays; > 1 = it was drafted mid-season
+    sim_from: int | None = None              # the first simulated NFL week of its season (None: all real)
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -91,6 +98,12 @@ class Settings(_Record):
     @property
     def end_week(self) -> int:
         return self.regular_season_weeks + playoff_rounds(self.playoff_teams)
+
+
+def draft_week(settings: Settings) -> int:
+    """The week a league drafts in (`State.week` during its draft): 0, preseason, for a league that plays from
+    week 1; `start_week` for one that jumps in mid-season, drafting on everything known before that week."""
+    return 0 if settings.start_week == 1 else settings.start_week
 
 
 def playoff_rounds(playoff_teams: int) -> int:
@@ -122,6 +135,13 @@ def _validate(s: Settings) -> None:
         (s.regular_season_weeks >= 1, "The regular season needs at least one week."),
         (s.trade_deadline_week <= s.regular_season_weeks,
          f"The trade deadline (week {s.trade_deadline_week}) must be in the {s.regular_season_weeks}-week regular season."),
+        (s.start_week >= 1, "The first week can't be before week 1."),
+        (s.start_week == 1 or s.start_week <= s.regular_season_weeks - 1,
+         f"A league starting in week {s.start_week} needs at least 2 regular-season weeks "
+         f"(the regular season ends in week {s.regular_season_weeks})."),
+        (s.start_week == 1 or s.trade_deadline_week >= s.start_week,
+         f"The trade deadline (week {s.trade_deadline_week}) can't be before the first week ({s.start_week})."),
+        (s.sim_from is None or s.sim_from >= 1, "The first simulated week can't be before week 1."),
     )
     for passed, message in checks:
         if not passed:
@@ -215,11 +235,11 @@ class Chat(_Record):                          # one line in the league chat (rep
 @dataclass(frozen=True)
 class State(_Record):
     phase: str                                # "draft" | "waivers" | "open" | "complete"
-    week: int                                 # the next week to be played; 0 during the draft
+    week: int                                 # the next (real NFL) week to be played; draft_week() during the draft
     teams: tuple[Team, ...]
     draft_order: tuple[int, ...]              # team ids in round-1 order (snake reverses on even rounds)
     picks: tuple[Pick, ...]
-    schedule: tuple[Matchups, ...]            # regular season, index 0 = week 1
+    schedule: tuple[Matchups, ...]            # regular season, index 0 = settings.start_week (week 1 in most leagues)
     results: tuple[WeekResult, ...]
     waiver_order: tuple[int, ...]             # rolling priority, first = next claim wins
     claims: tuple[Claim, ...]                 # the user's pending claims, in preference order
@@ -446,10 +466,12 @@ class ReplayNotFound(LookupError):
     pass
 
 
-def create(session: Session, name: str, settings: Settings, state: State, seed: int) -> ReplayLeague:
+def create(session: Session, name: str, settings: Settings, state: State, seed: int,
+           commit: bool = True) -> ReplayLeague:
+    """commit=False: only flushed (the row has its id), for a caller that adds more to the same transaction."""
     row = ReplayLeague(name=name, season=settings.season, seed=seed, settings=to_json(settings), state=to_json(state))
     session.add(row)
-    session.commit()
+    session.commit() if commit else session.flush()
     return row
 
 
@@ -477,5 +499,7 @@ def list_leagues(session: Session) -> list[ReplayLeague]:
 
 
 def delete(session: Session, league_id: int) -> None:
-    session.delete(_row(session, league_id))
+    row = _row(session, league_id)
+    session.execute(sql_delete(ReplaySeasonData).where(ReplaySeasonData.league_id == league_id))  # a simulated season
+    session.delete(row)
     session.commit()

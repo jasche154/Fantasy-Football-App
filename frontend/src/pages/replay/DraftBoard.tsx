@@ -80,7 +80,7 @@ export function DraftBoard({
                   <tr key={row.player.id}>
                     <td className="num">{formatInteger(row.pre_rank)}</td>
                     <td className="num">{formatInteger(row.round)}</td>
-                    <td className="td--player"><ReplayPlayerCell player={row.player} onOpen={openPlayer} /></td>
+                    <td className="td--player"><ReplayPlayerCell player={row.player} info={{ buzz: row.buzz }} onOpen={openPlayer} /></td>
                     <td>{row.pos_rank}</td>
                     <td className="num">{formatNumber(row.adp)}</td>
                     <td className="num">{formatPoints(row.projection)}</td>

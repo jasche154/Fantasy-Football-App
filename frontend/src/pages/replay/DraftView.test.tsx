@@ -17,7 +17,7 @@ const PICK_PATH = `${DRAFT_PATH}/pick`;
 const AUTO_PATH = `${DRAFT_PATH}/auto`;
 
 function boardRow(player: ReplayPlayerRef, overrides: Partial<ReplayDraftRow> = {}): ReplayDraftRow {
-  return { player, adp: 21.4, pos_rank: `${player.position}3`, rank: 18, pre_rank: 20, round: 2, projection: 17.25, ...overrides };
+  return { player, adp: 21.4, pos_rank: `${player.position}3`, rank: 18, pre_rank: 20, round: 2, projection: 17.25, buzz: null, ...overrides };
 }
 
 /** GET draft in round 2 of a 12-team draft: the user (slot 4) is up at 2.09 with McCaffrey already on the roster. */

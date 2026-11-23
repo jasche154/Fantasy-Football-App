@@ -23,6 +23,20 @@ class ReplayLeague(Base):
     updated_at: Mapped[datetime] = mapped_column(default=utc_now)
 
 
+class ReplaySeasonData(Base):
+    """A simulated league's whole season (real weeks + its own simulated future), frozen when it was created
+    (services/replay_blob.py), so new real data never changes a saved game. Its own table: listing games
+    never loads a blob."""
+
+    __tablename__ = "replay_season_data"
+
+    league_id: Mapped[int] = mapped_column(ForeignKey("replay_leagues.id", ondelete="CASCADE"), primary_key=True)
+    kind: Mapped[str]                          # "live" | "future"
+    known_through: Mapped[int]                 # the last real week in it (0: a future season)
+    blob: Mapped[bytes]                        # replay_blob.dumps
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)
+
+
 class ReplayAdp(Base):
     """Preseason average draft position for a past season (12 teams) in one draft format, as drafted before week 1."""
 

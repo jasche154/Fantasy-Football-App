@@ -138,6 +138,8 @@ export interface ReplayPlayerRow {
   expert_rank: number | null;
   /** The injury report while he is out; it can be wrong. */
   news: ReplayNews | null;
+  /** A simulated season's news line about his role this week or last: a rumour, right only some of the time. */
+  buzz: string | null;
   /** Real games and points a game BEFORE that week. */
   games: number;
   ppg: number;
@@ -265,8 +267,25 @@ export interface ReplayPrepareStatus {
   updated_at?: string;
 }
 
+/** replay: a past season as it was; live: the season in progress, simulated from `sim_from`; future: all simulated. */
+export type ReplayLeagueKind = 'replay' | 'live' | 'future';
+
+/** A season a league can be simulated on: the one in progress (real through `through`) or the next one. */
+export interface ReplaySimulatedSeason {
+  season: number;
+  kind: Exclude<ReplayLeagueKind, 'replay'>;
+  /** The last real week (0 for a future season). */
+  through: number;
+  ready: boolean;
+  /** A league may use start "now": draft today, play from week through + 1. */
+  can_start_now: boolean;
+  /** Why it is not ready, else null. */
+  reason: string | null;
+}
+
 export interface ReplaySeasons {
   results: ReplayReadiness[];
+  simulated: ReplaySimulatedSeason[];
   prepare: ReplayPrepareStatus | null;
 }
 
@@ -280,6 +299,7 @@ export interface ReplayGameListing {
   scoring: Scoring;
   /** The champion's team name. */
   champion: string | null;
+  kind: ReplayLeagueKind;
   created_at: string;
   updated_at: string;
 }
@@ -306,7 +326,11 @@ export interface ReplayCreateBody {
   starters?: ReplayStarters;
   /** Left out: the scoring preset as is. */
   scoring_rules?: ReplayScoringRules;
+  /** The live season only: "now" drafts today and plays from the next week. Default "full". */
+  start?: ReplayStart;
 }
+
+export type ReplayStart = 'full' | 'now';
 
 export type ReplayPlayoffEndWeek = 16 | 17 | 18;
 
@@ -375,6 +399,11 @@ export interface ReplaySummary {
   trades_open: boolean;
   /** What this week's chart values lean on: expert ranks, or the app's model when none are loaded. */
   rank_source: 'experts' | 'model';
+  kind: ReplayLeagueKind;
+  /** The first simulated NFL week; null for a real replay. */
+  sim_from: number | null;
+  /** The first week the league plays (later than 1 for a live league started "now"); earlier weeks are not league weeks. */
+  start_week: number;
   /** Lines in the league chat so far (GET chat total), for the unread dot. */
   chat: number;
 }
@@ -402,6 +431,7 @@ export interface ReplayDraftRow {
   round: number | null;
   /** Raw preseason points a game. */
   projection: number;
+  buzz: string | null;
 }
 
 export interface ReplayDraftPick {

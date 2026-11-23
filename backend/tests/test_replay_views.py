@@ -22,14 +22,14 @@ SETTINGS = fakes.fake_settings(draft_slot=4)
 SEED = 7
 USER = SETTINGS.draft_slot
 PLAYER_ROW = {"player", "opponent", "bye", "out", "projection", "points", "ros_ppg", "value", "rank", "pos_rank",
-              "adp", "pre_rank", "expert_rank", "news", "games", "ppg", "trade_locked", "defense"}
+              "adp", "pre_rank", "expert_rank", "news", "buzz", "games", "ppg", "trade_locked", "defense"}
 WIRE_ROW = PLAYER_ROW | {"status", "owner", "season_points", "last_points", "usage", "line"}
 SIDE = {"team_id", "name", "is_user", "tendency", "mood", "projected", "points", "record"}
 RECORD = {"wins", "losses", "ties", "rank", "points_for", "points_against", "place"}
 PLAYER_REF = {"id", "name", "position", "team", "injury", "hype"}
 SUMMARY = {"id", "name", "season", "phase", "week", "end_week", "user_team_id", "settings", "teams", "on_the_clock",
            "next_action", "record", "matchup", "pending", "champion", "updated_at", "ir_blocked", "has_injuries",
-           "trades_open", "rank_source", "chat"}
+           "trades_open", "rank_source", "kind", "sim_from", "start_week", "chat"}
 SETTING_KEYS = {"teams", "scoring", "starters", "bench", "roster_size", "draft_slot", "waiver_mode", "difficulty",
                 "regular_season_weeks", "playoff_teams", "trade_deadline_week", "scoring_rules", "ir_slots"}
 PAGE = {"total", "limit", "offset", "results"}
@@ -201,7 +201,7 @@ def test_draft_board_lists_who_is_left_in_rank_order_with_filters_and_paging():
                                  "total_picks", "order", "picks", "roster"}
     assert None not in ranks and ranks == sorted(ranks) and board["is_user_turn"] and (board["round"], board["overall"]) == (1, USER)
     assert board["total"] == len(DATA.as_of(0).players) - len(board["picks"]) and len(board["picks"]) == USER - 1
-    assert set(board["results"][0]) == {"player", "adp", "pos_rank", "rank", "pre_rank", "round", "projection"}
+    assert set(board["results"][0]) == {"player", "adp", "pos_rank", "rank", "pre_rank", "round", "projection", "buzz"}
     assert [row["round"] for row in board["results"]] == [-(-rank // 12) for rank in ranks]
     assert {row["player"]["position"] for row in backs["results"]} == {"RB"}
     assert {row["player"]["position"] for row in flex["results"]} == {"RB", "WR", "TE"}
@@ -478,7 +478,7 @@ def test_player_page_has_his_weeks_so_far_and_who_owns_him():
     detail, never = league.player(game(state), owned), league.player(game(state), fakes.NEVER_PLAYED_ID)
 
     weeks = detail["weeks"]
-    assert set(detail) == {"player", "weeks", "upcoming", "defense_basis"} and set(detail["player"]) == WIRE_ROW
+    assert set(detail) == {"player", "weeks", "upcoming", "defense_basis", "buzz"} and set(detail["player"]) == WIRE_ROW
     assert detail["player"]["owner"]["team_id"] == USER and detail["player"]["status"] == "rostered"
     assert [row["week"] for row in weeks] == [1, 2, 3, 4, 5, 6]
     assert set(weeks[0]) == {"week", "played", "team", "opponent", "bye", "out", "projection", "points", "ros_ppg",

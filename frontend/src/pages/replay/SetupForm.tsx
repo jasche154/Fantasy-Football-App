@@ -1,9 +1,9 @@
-import { useEffect, useId, useState, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { errorMessage } from '../../api/client';
 import { createReplayGame, getReplaySeasons, prepareReplaySeason } from '../../api/replay';
 import type {
-  ReplayDifficulty, ReplayPlayoffEndWeek, ReplayPrepareStatus, ReplayReadiness, ReplayScoringRules, ReplaySeasons, ReplaySummary,
-  ReplayWaiverMode, Scoring,
+  ReplayDifficulty, ReplayPlayoffEndWeek, ReplayPrepareStatus, ReplayReadiness, ReplayScoringRules, ReplaySeasons, ReplayStart,
+  ReplaySummary, ReplayWaiverMode, Scoring,
 } from '../../api/types';
 import { AsyncView } from '../../components/AsyncView';
 import { SelectField } from '../../components/SelectField';
@@ -11,6 +11,7 @@ import { Skeleton } from '../../components/StatusViews';
 import { useAction } from '../../hooks/useAction';
 import { useAsync, type AsyncResult } from '../../hooks/useAsync';
 import { LeagueFormatFields, presetRules, sameStarters, ScoringFields, STANDARD_STARTERS, startersBody } from './LeagueRulesFields';
+import { NOW_PLAYOFF_TEAMS, nowSummary, PAST, RadioCards, SeasonKind, StartChoice } from './SeasonChoice';
 
 const POLL_MS = 3000;
 const RANDOM = 'random';
@@ -62,33 +63,10 @@ function prepareText(prepare: ReplayPrepareStatus): string {
   return prepare.error ? `${prepare.season} was prepared, with problems: ${prepare.error}.` : `${prepare.season} is prepared.`;
 }
 
-interface RadioCardsProps<T extends string> {
-  legend: string;
-  options: readonly { value: T; title: string; text: string }[];
-  value: T;
-  onChange: (value: T) => void;
-}
-
-function RadioCards<T extends string>({ legend, options, value, onChange }: RadioCardsProps<T>) {
-  const name = useId();
-  return (
-    <fieldset className="fieldset">
-      <legend className="field__label">{legend}</legend>
-      <div className="radio-cards">
-        {options.map((option) => (
-          <label key={option.value} className="radio-card">
-            <input type="radio" name={name} value={option.value} checked={option.value === value} onChange={() => onChange(option.value)} />
-            <span className="radio-card__title">{option.title}</span>
-            <span className="radio-card__text">{option.text}</span>
-          </label>
-        ))}
-      </div>
-    </fieldset>
-  );
-}
-
 interface SeasonsProps {
   seasons: readonly ReplayReadiness[];
+  /** The live season, when it needs (re)importing: real weeks finished since its last prepare. */
+  live: number | null;
   prepare: ReplayPrepareStatus | null;
   isStarting: boolean;
   /** An import was started from this form, so its clean finish is worth saying. */
@@ -97,9 +75,9 @@ interface SeasonsProps {
 }
 
 /** Seasons that can't be played yet, each with its Prepare button, and the import's progress. */
-function UnpreparedSeasons({ seasons, prepare, isStarting, wasStartedHere, onPrepare }: SeasonsProps) {
+function UnpreparedSeasons({ seasons, live, prepare, isStarting, wasStartedHere, onPrepare }: SeasonsProps) {
   const isRunning = prepare?.status === 'running';
-  const waiting = seasons.filter((season) => !season.ready);
+  const waiting = [...seasons.filter((season) => !season.ready).map(({ season }) => season), ...(live === null ? [] : [live])];
   // Prepared before injury reports existed: playable, but without tags or the IR slot.
   const untagged = seasons.filter((season) => season.ready && season.injury_weeks === 0);
   const isDisabled = isRunning || isStarting;
@@ -114,7 +92,7 @@ function UnpreparedSeasons({ seasons, prepare, isStarting, wasStartedHere, onPre
             Not ready yet. Preparing a season downloads its results, ADP and projections, which takes about a minute.
           </p>
           <ul className="replay-prepare__list">
-            {waiting.map(({ season }) => (
+            {waiting.map((season) => (
               <li key={season}>
                 <button type="button" className="btn btn--ghost btn--sm" disabled={isDisabled} onClick={() => onPrepare(season)}>
                   Prepare {season} data
@@ -149,6 +127,9 @@ export function SetupForm({ onCreated }: { onCreated: (game: ReplaySummary) => v
   const prepare = useAction(prepareReplaySeason);
   const create = useAction(createReplayGame);
   const [season, setSeason] = useState('');
+  const [kind, setKind] = useState(PAST);                  // PAST, or a simulated season's number
+  const [start, setStart] = useState<ReplayStart>('full');
+  const isSubmitting = useRef(false);                      // a second press before the first re-render sends nothing
   const [name, setName] = useState('');
   const [teams, setTeams] = useState(12);
   const [playoffEnd, setPlayoffEnd] = useState<ReplayPlayoffEndWeek>(DEFAULT_PLAYOFF_END);
@@ -180,21 +161,30 @@ export function SetupForm({ onCreated }: { onCreated: (game: ReplaySummary) => v
     <AsyncView state={shown} loading={<Skeleton lines={4} label="Loading seasons…" />} errorTitle="Couldn't load the seasons">
       {(data) => {
         const ready = data.results.filter((row) => row.ready).map((row) => String(row.season));
+        // A simulated season counts only while it is ready (an import can make it stale again).
+        const sim = data.simulated.find((row) => String(row.season) === kind && row.ready) ?? null;
+        const isLive = sim?.kind === 'live';
+        const isNow = isLive && start === 'now' && sim.can_start_now;
+        const liveWaiting = data.simulated.find((row) => row.kind === 'live' && !row.ready)?.season ?? null;
         // Until the user picks one, the newest ready season.
         const chosen = season === RANDOM || ready.includes(season) ? season : (ready[ready.length - 1] ?? '');
         const chosenSlot = slot !== RANDOM && Number(slot) > teams ? RANDOM : slot;
         const lastWeek = data.results.find((row) => String(row.season) === chosen)?.last_week ?? 0;
-        // Every season has a week 17, so a random one can end there at the latest.
-        const endWeeks = PLAYOFF_END_WEEKS.filter((end) => end < 18 || (chosen !== RANDOM && lastWeek >= 18));
+        // Every season has a week 17, so a random one can end there at the latest; simulated seasons run 18 weeks.
+        const endWeeks = PLAYOFF_END_WEEKS.filter((end) => end < 18 || sim !== null || (chosen !== RANDOM && lastWeek >= 18));
         const chosenEnd = endWeeks.includes(playoffEnd) ? playoffEnd : DEFAULT_PLAYOFF_END;
-        const chosenPlayoffTeams = playoffTeams ?? defaultPlayoffTeams(teams);
+        const chosenPlayoffTeams = playoffTeams ?? (isNow ? NOW_PLAYOFF_TEAMS : defaultPlayoffTeams(teams));
+        const canCreate = sim !== null || ready.length > 0;
+        const isCreating = create.status === 'pending';
         const playoffCounts = Array.from({ length: Math.min(MAX_PLAYOFF_TEAMS, teams) - MIN_PLAYOFF_TEAMS + 1 }, (_, index) => MIN_PLAYOFF_TEAMS + index);
         const preset = presetRules(scoring);
         const isCustom = (Object.keys(preset) as (keyof ReplayScoringRules)[]).some((key) => preset[key] !== rules[key]);
         const submit = async (event: FormEvent) => {
           event.preventDefault();
+          if (isSubmitting.current) return;
+          isSubmitting.current = true;
           const result = await create.run({
-            season: chosen === RANDOM ? RANDOM : Number(chosen),
+            season: sim ? sim.season : chosen === RANDOM ? RANDOM : Number(chosen),
             name: name.trim() || undefined,
             teams,
             scoring,
@@ -206,43 +196,56 @@ export function SetupForm({ onCreated }: { onCreated: (game: ReplaySummary) => v
             // Left out when standard / equal to the preset: the server's defaults.
             starters: sameStarters(starters, STANDARD_STARTERS) ? undefined : startersBody(starters),
             scoring_rules: isCustom ? rules : undefined,
+            start: isLive ? (isNow ? 'now' : 'full') : undefined,
           });
+          isSubmitting.current = false;
           if (result) onCreated(result.game);
         };
         return (
-          <form className="settings-form" onSubmit={submit}>
-            {ready.length === 0 && (
-              <p className="notice" role="status">No season is ready to play yet. Prepare one with a button below, then set up your league.</p>
-            )}
-            <div className="replay-setup__grid">
-              <SelectField label="Season" value={chosen} disabled={ready.length === 0} onChange={setSeason}
-                options={[...ready.map((year) => ({ value: year, label: year })), { value: RANDOM, label: 'Random season' }]} />
-              <div className="field">
-                <label className="field__label" htmlFor={nameId}>League name</label>
-                <input id={nameId} className="input" value={name} maxLength={MAX_NAME_LENGTH} placeholder="e.g. Sunday Replay"
-                  onChange={(event) => setName(event.target.value)} />
+          <form className="settings-form" onSubmit={submit} aria-busy={isCreating}>
+            {/* Everything is off while the league is built (a simulated one takes about 10 seconds). */}
+            <fieldset className="replay-setup__all" disabled={isCreating}>
+              {!canCreate && (
+                <p className="notice" role="status">No season is ready to play yet. Prepare one with a button below, then set up your league.</p>
+              )}
+              {data.simulated.length > 0 && <SeasonKind simulated={data.simulated} value={sim ? kind : PAST} onChange={setKind} />}
+              {isLive && <StartChoice live={sim} value={start} onChange={setStart} />}
+              {isNow && <p className="hint replay-setup__now" role="status">{nowSummary(sim.through, chosenEnd, chosenPlayoffTeams)}</p>}
+              <div className="replay-setup__grid">
+                {!sim && (
+                  <SelectField label="Season" value={chosen} disabled={ready.length === 0} onChange={setSeason}
+                    options={[...ready.map((year) => ({ value: year, label: year })), { value: RANDOM, label: 'Random season' }]} />
+                )}
+                <div className="field">
+                  <label className="field__label" htmlFor={nameId}>League name</label>
+                  <input id={nameId} className="input" value={name} maxLength={MAX_NAME_LENGTH} placeholder="e.g. Sunday Replay"
+                    onChange={(event) => setName(event.target.value)} />
+                </div>
+                <SelectField label="Teams" value={teams} onChange={(value) => { setTeams(Number(value)); setPlayoffTeams(null); }}
+                  options={TEAM_COUNTS.map((count) => ({ value: count, label: `${count} teams` }))} />
+                <SelectField label="Draft slot" value={chosenSlot} onChange={setSlot}
+                  options={[{ value: RANDOM, label: 'Random' }, ...Array.from({ length: teams }, (_, index) => ({ value: String(index + 1), label: `Pick ${index + 1}` }))]} />
+                <SelectField label="Playoffs" value={chosenEnd} onChange={(value) => setPlayoffEnd(Number(value) as ReplayPlayoffEndWeek)}
+                  options={endWeeks.map((end) => ({ value: end, label: playoffWindowLabel(end, chosenPlayoffTeams) }))} />
+                <SelectField label="Playoff teams" value={chosenPlayoffTeams} onChange={(value) => setPlayoffTeams(Number(value))}
+                  options={playoffCounts.map((count) => ({ value: count, label: playoffTeamsLabel(count) }))} />
               </div>
-              <SelectField label="Teams" value={teams} onChange={(value) => { setTeams(Number(value)); setPlayoffTeams(null); }}
-                options={TEAM_COUNTS.map((count) => ({ value: count, label: `${count} teams` }))} />
-              <SelectField label="Draft slot" value={chosenSlot} onChange={setSlot}
-                options={[{ value: RANDOM, label: 'Random' }, ...Array.from({ length: teams }, (_, index) => ({ value: String(index + 1), label: `Pick ${index + 1}` }))]} />
-              <SelectField label="Playoffs" value={chosenEnd} onChange={(value) => setPlayoffEnd(Number(value) as ReplayPlayoffEndWeek)}
-                options={endWeeks.map((end) => ({ value: end, label: playoffWindowLabel(end, chosenPlayoffTeams) }))} />
-              <SelectField label="Playoff teams" value={chosenPlayoffTeams} onChange={(value) => setPlayoffTeams(Number(value))}
-                options={playoffCounts.map((count) => ({ value: count, label: playoffTeamsLabel(count) }))} />
-            </div>
-            <UnpreparedSeasons seasons={data.results} prepare={data.prepare} isStarting={prepare.status === 'pending'}
-              wasStartedHere={prepare.status === 'success'} onPrepare={startPrepare} />
-            {isPollFailure && <p className="hint" role="status">Couldn't check the progress just now. Trying again…</p>}
-            {prepare.status === 'error' && <p className="error-text" role="alert">{errorMessage(prepare.error)}</p>}
-            <LeagueFormatFields starters={starters} bench={BENCH} onChange={setStarters} />
-            <ScoringFields scoring={scoring} rules={rules} onScoring={setScoring} onRules={setRules} />
-            <RadioCards legend="Waivers" options={WAIVER_MODES} value={waiverMode} onChange={setWaiverMode} />
-            <RadioCards legend="Difficulty" options={DIFFICULTIES} value={difficulty} onChange={setDifficulty} />
+              <UnpreparedSeasons seasons={data.results} live={liveWaiting} prepare={data.prepare} isStarting={prepare.status === 'pending'}
+                wasStartedHere={prepare.status === 'success'} onPrepare={startPrepare} />
+              {isPollFailure && <p className="hint" role="status">Couldn't check the progress just now. Trying again…</p>}
+              {prepare.status === 'error' && <p className="error-text" role="alert">{errorMessage(prepare.error)}</p>}
+              <LeagueFormatFields starters={starters} bench={BENCH} onChange={setStarters} />
+              <ScoringFields scoring={scoring} rules={rules} onScoring={setScoring} onRules={setRules} />
+              <RadioCards legend="Waivers" options={WAIVER_MODES} value={waiverMode} onChange={setWaiverMode} />
+              <RadioCards legend="Difficulty" options={DIFFICULTIES} value={difficulty} onChange={setDifficulty} />
+            </fieldset>
             <div className="settings-form__footer">
-              <button type="submit" className="btn btn--primary" disabled={ready.length === 0 || create.status === 'pending'}>
-                {create.status === 'pending' ? 'Creating your league…' : 'Create league and draft'}
+              <button type="submit" className="btn btn--primary" disabled={!canCreate || isCreating}>
+                {isCreating ? (sim ? 'Simulating the season…' : 'Creating your league…') : 'Create league and draft'}
               </button>
+              {isCreating && sim && (
+                <p className="hint" role="status">Simulating the {sim.season} season for your league. This takes about 10 seconds.</p>
+              )}
               {create.status === 'error' && <p className="error-text" role="alert">{errorMessage(create.error)}</p>}
             </div>
             <p className="hint attribution">ADP: Fantasy Football Calculator</p>

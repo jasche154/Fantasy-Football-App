@@ -21,6 +21,7 @@ import type {
   ReplayRosterRow,
   ReplaySeasons,
   ReplaySide,
+  ReplaySimulatedSeason,
   ReplaySlot,
   ReplayStatLine,
   ReplaySummary,
@@ -85,7 +86,7 @@ export function side(teamId: number, overrides: Partial<ReplaySide> = {}): Repla
 export function playerRow(player: ReplayPlayerRef, overrides: Partial<ReplayPlayerRow> = {}): ReplayPlayerRow {
   return {
     player, opponent: 'DEN', bye: false, out: false, projection: 14.2, points: null, ros_ppg: 13.8, value: 31.5,
-    rank: 20, pos_rank: `${player.position}8`, adp: 24.5, pre_rank: 22, expert_rank: 8, news: null, games: 4, ppg: 15.1,
+    rank: 20, pos_rank: `${player.position}8`, adp: 24.5, pre_rank: 22, expert_rank: 8, news: null, buzz: null, games: 4, ppg: 15.1,
     trade_locked: false, defense: null,
     ...overrides,
   };
@@ -149,7 +150,8 @@ export function summary(overrides: Partial<ReplaySummary> = {}): ReplaySummary {
       opponent: side(OPPONENT_TEAM_ID, { projected: 104.75, record: record({ wins: 2, losses: 2, rank: 6 }) }),
     },
     pending: { claims: 0, offers: 0 }, champion: null, updated_at: '2026-11-20T12:00:00',
-    ir_blocked: [], has_injuries: true, trades_open: true, rank_source: 'experts', chat: 0,
+    ir_blocked: [], has_injuries: true, trades_open: true, rank_source: 'experts', kind: 'replay', sim_from: null, start_week: 1,
+    chat: 0,
     ...overrides,
   };
 }
@@ -224,11 +226,12 @@ export function playerDetail(player: ReplayPlayerRef = MOSTERT, overrides: Parti
     })),
     upcoming: [],
     defense_basis: { weeks: 4, prior: false },
+    buzz: [],
   };
 }
 
 export function gameListing(overrides: Partial<ReplayGameListing> = {}): ReplayGameListing {
-  return { id: GAME_ID, name: 'Sunday Replay', season: 2023, phase: 'open', week: 5, teams: 12, scoring: 'half', champion: null,
+  return { id: GAME_ID, name: 'Sunday Replay', season: 2023, phase: 'open', week: 5, teams: 12, scoring: 'half', champion: null, kind: 'replay',
     created_at: '2026-11-01T09:00:00', updated_at: '2026-11-20T12:00:00', ...overrides };
 }
 
@@ -238,7 +241,13 @@ export function readiness(season: number, ready = true): ReplayReadiness {
     last_week: 18 };
 }
 
+/** GET /seasons' simulated rows: the live 2026 season, real through week 9, ready to start either way; and 2027. */
+export function simulatedSeason(kind: ReplaySimulatedSeason['kind'], overrides: Partial<ReplaySimulatedSeason> = {}): ReplaySimulatedSeason {
+  const isLive = kind === 'live';
+  return { season: isLive ? 2026 : 2027, kind, through: isLive ? 9 : 0, ready: true, can_start_now: isLive, reason: null, ...overrides };
+}
+
 /** GET /seasons: 2022 and 2023 ready, 2024 not, nothing importing. */
 export function seasons(overrides: Partial<ReplaySeasons> = {}): ReplaySeasons {
-  return { results: [readiness(2022), readiness(2023), readiness(2024, false)], prepare: null, ...overrides };
+  return { results: [readiness(2022), readiness(2023), readiness(2024, false)], simulated: [], prepare: null, ...overrides };
 }

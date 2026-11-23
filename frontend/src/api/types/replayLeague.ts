@@ -228,6 +228,8 @@ export interface ReplayPlayerDetail {
   upcoming: ReplayUpcomingWeek[];
   /** What the matchup ratings rest on: weeks of this season and whether last season is blended in. */
   defense_basis: { weeks: number; prior: boolean };
+  /** Every news line (rumour) about him known so far, newest first; [] in a real replay. */
+  buzz: { week: number; text: string }[];
 }
 
 export interface ReplayClaim {

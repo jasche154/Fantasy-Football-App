@@ -10,7 +10,7 @@ from services import replay_chat, replay_season, replay_state as rs, replay_trad
 from services.replay_state import Chat, Offer, Team
 from services.replay_trades import Verdict
 from services.replay_views import (
-    DEFAULT_PAGE, Game, event_row, page, player_ref, player_row, record, refs, result_of, team_ref,
+    DEFAULT_PAGE, Game, event_row, league_kind, page, player_ref, player_row, record, refs, result_of, team_ref,
     winner,
 )
 from services.replay_views_players import (  # noqa: F401 - re-exported: the wire and a player's page live there
@@ -22,11 +22,13 @@ EVENT_KINDS = ("draft", "add", "drop", "claim", "trade", "ir", "result", "playof
 
 
 def listing(row: ReplayLeague) -> dict:
-    """A saved game for the list of games, read from the stored JSON without rebuilding the state."""
+    """A saved game for the list of games, read from the stored JSON without rebuilding the state. kind: as in
+    Summary (replay | live | future)."""
     state, settings = json.loads(row.state), json.loads(row.settings)
     champion = next((t["name"] for t in state["teams"] if t["id"] == state.get("champion")), None)
     return {"id": row.id, "name": row.name, "season": row.season, "phase": state["phase"], "week": state["week"],
             "teams": settings["teams"], "scoring": settings["scoring"], "champion": champion,
+            "kind": league_kind(settings.get("sim_from")),
             "created_at": row.created_at.isoformat(), "updated_at": row.updated_at.isoformat()}
 
 
@@ -61,9 +63,10 @@ def _schedule_row(game: Game, owner: Team, week: int) -> dict:
 
 def schedule(game: Game, team_id: int | None = None) -> dict:
     """A team's season (default: the user's): every week's opponent, and the score once played. A playoff
-    opponent is null until it is known; empty during the draft."""
+    opponent is null until it is known; empty during the draft. A jump-in league's season starts at start_week."""
     owner = rs.team(game.state, game.user.id if team_id is None else team_id)
-    weeks = range(1, game.settings.end_week + 1) if game.state.phase != "draft" else ()
+    first = game.settings.start_week
+    weeks = range(first, game.settings.end_week + 1) if game.state.phase != "draft" else ()
     return {"team": team_ref(game, owner), "results": [_schedule_row(game, owner, week) for week in weeks]}
 
 

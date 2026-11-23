@@ -96,3 +96,17 @@ describe('ReplayHome', () => {
     await expect.poll(() => window.location.hash).toBe('#/play?game=12');
   });
 });
+
+describe('ReplayHome simulated leagues', () => {
+  it('says which saved leagues are simulated, in words', async () => {
+    renderHome([{ path: GAMES_PATH, reply: json({ results: [
+      gameListing({ id: 8, name: 'Now League', season: 2026, kind: 'live' }),
+      gameListing({ id: 9, name: 'Next Year', season: 2027, kind: 'future' }),
+      gameListing(),
+    ] }) }]);
+    const [live, future, replay] = within(await screen.findByRole('table', { name: 'Your saved leagues' })).getAllByRole('row').slice(1);
+    expect(within(live).getByText('Live 2026')).toHaveClass('replay-kind-chip');
+    expect(within(future).getByText('Simulated')).toHaveClass('replay-kind-chip');
+    expect(replay.querySelector('.replay-kind-chip')).toBeNull();
+  });
+});

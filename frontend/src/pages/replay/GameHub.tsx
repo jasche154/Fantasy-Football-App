@@ -119,7 +119,7 @@ export function GameHub({ gameId, view }: GameHubProps) {
           <View game={game} version={version} act={act} isBusy={isBusy} actError={actError} openPlayer={setPlayerId} />
         </section>
       </main>
-      {playerId !== null && <PlayerDrawer key={playerId} gameId={game.id} playerId={playerId} version={version} onClose={closePlayer} />}
+      {playerId !== null && <PlayerDrawer key={playerId} gameId={game.id} playerId={playerId} version={version} simFrom={game.sim_from} onClose={closePlayer} />}
     </>
   );
 }

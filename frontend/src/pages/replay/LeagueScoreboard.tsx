@@ -52,9 +52,11 @@ export function GameTiles({ board, caption }: { board: ReplayScoreboard; caption
 
 /** Any week of the season: results, projections for the current week, pairings for the weeks ahead. */
 export function LeagueScoreboard({ game, version }: ReplayViewProps) {
-  const [week, setWeek] = useState(Math.min(Math.max(game.week, 1), game.end_week));
+  // A league that jumped in (start_week > 1) has no league weeks before it.
+  const [week, setWeek] = useState(Math.min(Math.max(game.week, game.start_week, 1), game.end_week));
   const board = useAsync((signal) => getReplayScoreboard(game.id, week, signal), [game.id, week, version]);
-  const weeks = Array.from({ length: game.end_week }, (_, index) => index + 1);
+  const first = Math.max(game.start_week, 1);
+  const weeks = Array.from({ length: game.end_week - first + 1 }, (_, index) => first + index);
   const options = weeks.map((value) => ({ value, label: `Week ${value}${value > game.settings.regular_season_weeks ? ' (playoffs)' : ''}` }));
   return (
     <>

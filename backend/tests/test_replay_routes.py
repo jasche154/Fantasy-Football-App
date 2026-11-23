@@ -207,6 +207,7 @@ def test_create_starts_the_draft_at_the_users_first_pick(story):
     assert set(created) == {"game", "events"} and set(game) == SUMMARY
     assert (game["name"], game["season"], game["phase"], game["week"]) == ("Route league", SEASON, "draft", 0)
     assert game["user_team_id"] == game["on_the_clock"] == SLOT and game["next_action"]["step"] == "pick"
+    assert (game["kind"], game["sim_from"], game["start_week"]) == ("replay", None, 1)     # a past season, as it was
     assert [event["kind"] for event in created["events"]] == ["draft"] * (SLOT - 1)
     assert story["board"]["is_user_turn"] and len(story["board"]["picks"]) == SLOT - 1
 
@@ -362,7 +363,7 @@ def test_games_are_listed_and_can_be_deleted(client, story):
 
     finished = next(row for row in listed if f"/games/{row['id']}" == story["path"])
     assert set(finished) == {"id", "name", "season", "phase", "week", "teams", "scoring", "champion", "created_at",
-                             "updated_at"}
+                             "updated_at", "kind"}
     assert (finished["phase"], finished["champion"]) == ("complete", story["final"]["summary"]["champion"]["name"])
     assert listed[0]["id"] == extra and listed[0]["phase"] == "draft"          # most recently played first
     assert deleted == {"deleted": extra} and refused(client, f"/games/{extra}", method="GET")[0] == 404
@@ -384,10 +385,10 @@ def test_a_random_season_and_draft_slot_come_from_the_seed(client):
 def test_a_random_season_only_comes_from_seasons_long_enough_for_the_window(client, monkeypatch):
     ready = {SEASON + 1: 18, SEASON + 2: 18, SEASON: 17}         # season -> last week
     monkeypatch.setattr(replay_pool, "ready_last_weeks", lambda session: ready)
-    picked = {seed: replay_routes._season(None, "random", seed, 18) for seed in range(20)}
+    picked = {seed: replay_routes._season(None, "random", seed, 18)[0] for seed in range(20)}
 
     assert set(picked.values()) == {SEASON + 1, SEASON + 2}      # never the 17-week season
-    assert picked == {seed: replay_routes._season(None, "random", seed, 18) for seed in range(20)}   # by seed
+    assert picked == {seed: replay_routes._season(None, "random", seed, 18)[0] for seed in range(20)}   # by seed
     ready = {SEASON: 17}
     assert refused(client, "/games", {"season": "random", "playoff_end_week": 18}) == (
         422, "No prepared season has a week 18: pick an earlier championship week.")
@@ -398,7 +399,7 @@ def test_create_says_what_is_wrong_with_a_league(client, monkeypatch):
     def create(**body) -> tuple[int, str]:
         return refused(client, "/games", {"season": SEASON, **body})
 
-    assert create(season=2010) == (422, "Replay seasons run from 2018 to 2025, not 2010.")
+    assert create(season=2010) == (422, "Replay seasons run from 2018 to 2025, plus 2026 simulated; not 2010.")
     assert create(teams=9)[0] == 422 and "A league has 4, 6, 8, 10, 12, 14 or 16 teams" in create(teams=9)[1]
     assert create(teams=8, draft_slot=9) == (422, "Draft slot must be between 1 and 8.")
     assert create(teams=99)[0] == create(scoring="superflex")[0] == create(season="soon")[0] == 422
