@@ -9,7 +9,8 @@ from types import MappingProxyType
 
 import pytest
 
-from services import lineup_gain, replay_state as rs, replay_values as rv, replay_waiver_ai as ai, replay_waivers
+from services import lineup_gain, replay_slots, replay_state as rs, replay_values as rv, replay_waiver_ai as ai
+from services import replay_waivers
 from services.replay_pool import SKILL
 from services.replay_state import Claim, Event, State
 from services.replay_values import Knowledge, ReplayValue
@@ -676,6 +677,27 @@ def test_a_cpu_with_its_ir_slot_taken_may_drop_a_long_term_injured_player_to_cov
     assert cover(protected=others | set(tight_ends))[3] is None          # never a top player
     assert cover(tag="O")[3] is None                                    # an O tag may be back soon
     assert cover(ir=())[3] is None                                      # he could go on IR instead
+
+
+def test_a_superflex_cpu_never_stashes_a_back_it_needs_to_fill_its_lineup():
+    settings = fakes.fake_settings(starters=replay_slots.PRESETS["superflex"])
+    week, team_id = 3, 6
+    state = replace(fakes.drafted_state(settings), phase="waivers", week=week)
+    plain = fakes.fake_knowledge(week, settings)
+    roster = [plain.by_id[pid] for pid in rs.team(state, team_id).roster]
+    backs = sorted((v for v in roster if v.position == "RB"), key=lambda v: -v.healthy_value)
+    spare_qbs = iter(replay_waivers.available_players(state, plain, "QB"))
+    qb_heavy = tuple(next(spare_qbs).player_id if v in backs[2:] else v.player_id for v in roster)
+    state = edited(state, team_id, qb_heavy)                     # exactly the two backs the RB slots need
+    star = backs[0]
+    hurt = fakes.fake_knowledge(week, settings, fakes.tagged(fakes.fake_season(), {(star.player_id, week): fakes.Injury("O")}))
+    ctx = ai._context(hurt, settings)
+
+    after = ai.cpu_ir(state, settings, hurt, SEED)
+
+    assert len(backs) > 2 and (star.player_id in ctx.protected or star.last_projection > hurt.replacement["RB"])
+    assert rs.team(after, team_id).ir == () and star.player_id in rs.team(after, team_id).roster
+    assert rv.can_field_lineup([hurt.by_id[pid].position for pid in rs.team(after, team_id).roster], settings)
 
 
 # ---------------- no hindsight ----------------

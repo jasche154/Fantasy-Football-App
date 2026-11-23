@@ -45,6 +45,7 @@ from services.replay_injuries import load_injuries
 log = logging.getLogger(__name__)
 
 STATUS_KEY = "replay_prepare"
+ADP_NO_DATA_KEY = "replay_adp_no_data"          # {season: [ADP formats FFC answered without a list]}
 RESULT_TABLES = {"player_stats_weekly": PlayerStatsWeekly, "nfl_games": NflGame,
                  "kicker_games": KickerGame, "team_game_stats": TeamGameStats}
 SOURCES = ((espn_history.SOURCE, espn_history.week_projections),
@@ -208,34 +209,60 @@ def adp_rows(season: int, ffc: Sequence[tuple[AdpEntry, int | None]],
     return rows
 
 
-def _ffc_lists(client: HistoryClient, season: int) -> tuple[dict[str, list[AdpEntry]], dict[str, str]]:
-    """({format: FFC's list}, errors). PPR is required (HistoryError); another format FFC cannot give is
-    reported and left out, so whatever is stored for it stays (replay_pool reads the nearest format)."""
-    lists = {"ppr": adp_history.fetch_ffc(client, season)}
+def _ffc_lists(client: HistoryClient, season: int, formats: Iterable[str]
+               ) -> tuple[dict[str, list[AdpEntry]], dict[str, str], set[str]]:
+    """({format: FFC's list}, errors, formats FFC answered with no list). PPR is required (HistoryError); another
+    format FFC cannot give is reported and left out, so whatever is stored for it stays (replay_pool reads the
+    nearest format). A failed request is retried next run; an answer without data is not (see load_adp)."""
+    lists: dict[str, list[AdpEntry]] = {}
     errors: dict[str, str] = {}
-    for adp_format in adp_history.FFC_FORMATS:
-        if adp_format != "ppr":
-            try:
-                lists[adp_format] = adp_history.fetch_ffc(client, season, adp_format)
-            except HistoryError as exc:
-                errors[f"adp ffc {adp_format}"] = type(exc).__name__
-    return lists, errors
+    no_data: set[str] = set()
+    for adp_format in formats:
+        if adp_format == "ppr":
+            lists["ppr"] = adp_history.fetch_ffc(client, season)
+            continue
+        try:
+            lists[adp_format] = adp_history.fetch_ffc(client, season, adp_format)
+        except HistoryError as exc:
+            errors[f"adp ffc {adp_format}"] = type(exc).__name__
+            log.warning("ADP %s: no %s list from FFC (%s)", season, adp_format, type(exc).__name__)
+            if exc.__cause__ is None:                   # FFC answered, without a list (not a network failure)
+                no_data.add(adp_format)
+    return lists, errors, no_data
+
+
+def _no_ffc_data(session: Session, season: int) -> set[str]:
+    return set((system_status.read(session, ADP_NO_DATA_KEY) or {}).get(str(season), ()))
+
+
+def _record_no_ffc_data(session: Session, season: int, formats: set[str]) -> None:
+    known = system_status.read(session, ADP_NO_DATA_KEY) or {}
+    system_status.record(session, ADP_NO_DATA_KEY, {**known, str(season): sorted(formats)})
 
 
 def load_adp(session: Session, season: int, client: HistoryClient, force: bool = False) -> dict:
     """Step 3. One list per format in adp_history.FFC_FORMATS (see _ffc_lists), each followed by MFL's tail.
-    A format is complete once it has MFL rows; until every one is, every run fetches again. If MFL or the id
-    crosswalk fails, a stored season is left exactly as it is (never shrunk) and the error reported; with
-    nothing stored, FFC alone is stored for now. The summary's counts are the PPR list's, plus rows per format.
+    A format is complete once it has MFL rows; a run fetches only the incomplete ones (all of them when forced),
+    and a format FFC answered without a list is remembered (ADP_NO_DATA_KEY) and not asked for again until a
+    forced run. If MFL or the id crosswalk fails, every stored format is left exactly as it is (never shrunk) and
+    the error reported; a format with nothing stored gets FFC alone for now. The summary's counts are the PPR list's
+    (when this run fetched it), plus rows per format.
     shortcut: MFL's PPR real-draft list fills every format's tail (past FFC's last pick the order barely
     differs); fetch MFL per format (IS_PPR=0, 2-QB leagues) if the tail ever matters."""
     stored = {(fmt, source): rows for fmt, source, rows in session.execute(
         select(ReplayAdp.format, ReplayAdp.source, func.count()).where(ReplayAdp.season == season)
         .group_by(ReplayAdp.format, ReplayAdp.source))}
     ppr_stored = sum(rows for (fmt, _), rows in stored.items() if fmt == "ppr")
-    if {fmt for fmt, source in stored if source == adp_history.MFL} >= set(adp_history.FFC_FORMATS) and not force:
+    complete = {fmt for fmt, source in stored if source == adp_history.MFL}
+    no_data = set() if force else _no_ffc_data(session, season)
+    wanted = [fmt for fmt in adp_history.FFC_FORMATS if force or fmt not in complete | no_data]
+    if not wanted:
         return {"rows": ppr_stored, "skipped": True}
-    lists, errors = _ffc_lists(client, season)
+    lists, errors, missing = _ffc_lists(client, season, wanted)
+    if force or missing:
+        _record_no_ffc_data(session, season, no_data | missing)
+    if not lists:                                       # nothing new from FFC: MFL alone changes nothing
+        return {"rows": ppr_stored, "kept": True, "errors": errors}
     mfl: list[AdpEntry] = []
     crosswalk: dict[str, str] = {}
     try:
@@ -244,8 +271,12 @@ def load_adp(session: Session, season: int, client: HistoryClient, force: bool =
     except HistoryError as exc:                         # MFL rows without ids would be matched by name alone
         errors["adp crosswalk" if mfl else "adp mfl"] = type(exc).__name__
         mfl = []
-    if not mfl and stored:
-        return {"rows": ppr_stored, "kept": True, "errors": errors}
+    if not mfl and stored:                             # keep what is stored; add only formats it lacks, FFC alone
+        lists = {fmt: entries for fmt, entries in lists.items() if fmt not in {f for f, _ in stored}}
+        if not lists:
+            return {"rows": ppr_stored, "kept": True, "errors": errors}
+        log.warning("ADP %s: no MFL tail (%s); %s stored from FFC alone, the stored formats kept as they are",
+                    season, ", ".join(errors), ", ".join(lists))
     created = create_drafted_players(session, mfl, crosswalk)
     matcher = SeasonMatcher(session, season)
     mfl_pairs = [(e, _adp_player(matcher, e, crosswalk, {})) for e in mfl]
@@ -261,15 +292,19 @@ def load_adp(session: Session, season: int, client: HistoryClient, force: bool =
     for e, pid in (*(pair for fmt_pairs in pairs.values() for pair in fmt_pairs), *mfl_pairs):
         if pid is None:
             missed.setdefault((e.name, e.position), f"{e.name} ({e.position}, {e.source} {e.adp})")
+    absent = sorted(set(adp_history.FFC_FORMATS) - {f for f, _ in stored} - set(by_format))
+    if absent:
+        log.warning("ADP %s: no list stored for %s (replay_pool reads the nearest format)", season, ", ".join(absent))
     unmatched = list(missed.values())
     if unmatched:
         log.info("ADP %s: %d unmatched: %s", season, len(unmatched), "; ".join(unmatched))
-    by_source = Counter(row["source"] for row in by_format["ppr"])
+    by_source = Counter(row["source"] for row in by_format.get("ppr", ()))
     positions = dict(session.execute(select(Player.position, func.count()).join(
         ReplayAdp, ReplayAdp.player_id == Player.id).where(ReplayAdp.season == season, ReplayAdp.format == "ppr")
         .group_by(Player.position)).all())
-    return {"rows": len(by_format["ppr"]), "ffc": by_source[adp_history.FFC], "mfl": by_source[adp_history.MFL],
-            "ffc_matched": f"{sum(pid is not None for _, pid in pairs['ppr'])}/{len(lists['ppr'])}",
+    return {"rows": len(by_format["ppr"]) if "ppr" in by_format else ppr_stored,
+            "ffc": by_source[adp_history.FFC], "mfl": by_source[adp_history.MFL],
+            "ffc_matched": f"{sum(pid is not None for _, pid in pairs.get('ppr', ()))}/{len(lists.get('ppr', ()))}",
             "mfl_matched": f"{sum(pid is not None for _, pid in mfl_pairs)}/{len(mfl)}",
             "formats": {fmt: len(fmt_rows) for fmt, fmt_rows in by_format.items()},
             "positions": positions, "players_created": created,

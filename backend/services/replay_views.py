@@ -123,11 +123,9 @@ GET  .../matchup?week=&team_id=   {week, played, playoff, label, winner, home: T
       without team_id: the user's game, else (a bye week) the week's first game; 422 when team_id has no game
 GET  .../scoreboard?week=         {week, played, playoff, results: GameRow[]}    any week of the season
 GET  .../standings                {results: [Record + TeamRef + {seed, in_playoffs}], regular_season_weeks,
-                                   playoff_teams, playoff_weeks: int[], byes, seeds_final, bracket: Scoreboard[],
-                                   champion: TeamRef | null}
+                                   playoff_teams, playoff_weeks: int[], byes, seeds_final}
       rows are in final order once the season is over, else by seed. in_playoffs: seed <= playoff_teams.
-      byes: how many top seeds skip round one (2 ** rounds - playoff_teams). bracket: one scoreboard per
-      playoff week whose games are known.
+      byes: how many top seeds skip round one (2 ** rounds - playoff_teams). The bracket: GET .../playoffs.
 GET  .../schedule?team_id=        {team: TeamRef, results: [{week, playoff, played, idle, opponent: TeamRef | null,
                                    points, opponent_points, result: W | L | T | null}]}
       idle          the week's games are known and the team has none (a playoff bye, or the odd team out of
@@ -429,6 +427,7 @@ def summary(game: Game) -> dict:
         "id": game.id, "name": game.name, "season": settings.season, "phase": state.phase, "week": state.week,
         "end_week": settings.end_week, "user_team_id": game.user.id,
         "settings": {**{key: getattr(settings, key) for key in SETTING_KEYS}, "starters": dict(settings.starters),
+                     "ir_slots": replay_ir.IR_SLOTS,
                      "scoring_rules": asdict(settings.scoring_rules) if settings.scoring_rules else None},
         "teams": [team_ref(game, t) for t in state.teams],
         "on_the_clock": replay_draft.on_the_clock(state, settings), "next_action": _next_action(game),

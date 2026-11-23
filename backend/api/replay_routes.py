@@ -20,7 +20,7 @@ from api.deps import Scoring
 from database.db import get_session
 from database.models import ReplayLeague
 from services import (
-    replay_data, replay_game as rg, replay_pool, replay_scoring, replay_slots, replay_state as rs,
+    replay_adp_format, replay_data, replay_game as rg, replay_pool, replay_scoring, replay_slots, replay_state as rs,
     replay_views as views, replay_views_league as league_views,
 )
 from services.replay_pool import SeasonData
@@ -62,7 +62,7 @@ def errors() -> Iterator[None]:
 def _season_data(session: Session, settings: Settings) -> SeasonData:
     """The season as this league sees it (its scoring and its ADP list, replay_adp_format)."""
     return replay_pool.load_season_data(session, settings.season, settings.scoring, settings.scoring_rules,
-                                        settings.starters)
+                                        settings.adp_format)
 
 
 def _game(row: ReplayLeague, settings: Settings, state: State, data: SeasonData) -> views.Game:
@@ -138,11 +138,15 @@ def prepare_season(season: int, force: bool = False, session: Session = Depends(
 # ---------------- games ----------------
 
 class RulesBody(BaseModel):
-    """A league's custom key settings (replay_scoring.ScoringRules; the allowed values are checked there)."""
-    reception: float = Field(..., ge=0, le=replay_scoring.RECEPTION_MAX)
-    te_premium: float = 0.0
-    pass_td: float = replay_scoring.BASE_PASS_TD
-    turnover: float = replay_scoring.BASE_TURNOVER
+    """A league's custom key settings (replay_scoring.ScoringRules): each bound + step allows exactly its values
+    there (TE_PREMIUMS 0/0.5/1, PASS_TDS 4/6, TURNOVERS -2/-1); replay_scoring.problem checks them again."""
+    reception: float = Field(..., ge=0, le=replay_scoring.RECEPTION_MAX, multiple_of=replay_scoring.RECEPTION_STEP)
+    te_premium: float = Field(0.0, ge=min(replay_scoring.TE_PREMIUMS), le=max(replay_scoring.TE_PREMIUMS),
+                              multiple_of=0.5)
+    pass_td: float = Field(replay_scoring.BASE_PASS_TD, ge=min(replay_scoring.PASS_TDS),
+                           le=max(replay_scoring.PASS_TDS), multiple_of=2)
+    turnover: float = Field(replay_scoring.BASE_TURNOVER, ge=min(replay_scoring.TURNOVERS),
+                            le=max(replay_scoring.TURNOVERS), multiple_of=1)
 
 
 class CreateBody(BaseModel):
@@ -205,8 +209,9 @@ def create_game(body: CreateBody, session: Session = Depends(get_session)) -> di
         settings = Settings(season=season, teams=body.teams, scoring=scoring, draft_slot=slot,
                             waiver_mode=body.waiver_mode, difficulty=body.difficulty, playoff_teams=playoff_teams,
                             regular_season_weeks=body.playoff_end_week - rs.playoff_rounds(playoff_teams),
-                            starters=starters, scoring_rules=rules)
-        data = replay_pool.load_season_data(session, season, scoring, rules, starters)
+                            starters=starters, scoring_rules=rules,
+                            adp_format=replay_adp_format.wanted(scoring, rules, starters))
+        data = replay_pool.load_season_data(session, season, scoring, rules, settings.adp_format)
         state = rg.create_game(settings, data, seed)
         name = (body.name or "").strip() or f"{season} Replay"
         game = _game(rs.create(session, name, settings, state, seed), settings, state, data)

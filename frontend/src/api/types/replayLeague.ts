@@ -43,9 +43,6 @@ export interface ReplayStandings {
   /** How many top seeds skip the first playoff round. */
   byes: number;
   seeds_final: boolean;
-  /** One scoreboard per playoff week whose games are known. */
-  bracket: ReplayScoreboard[];
-  champion: ReplayTeamRef | null;
 }
 
 /** A team in the playoff picture, with its seed (regular-season standings; provisional until seeds_final). */

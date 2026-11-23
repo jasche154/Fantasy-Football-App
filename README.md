@@ -865,10 +865,15 @@ that week's games on; only scoring a week reads its real points.
   2018-2025; MyFantasyLeague's PPR real drafts fill each list's tail past FFC's last pick). A league drafts
   from its own list (`services/replay_adp_format.py`): a superflex league (a SFLX slot or 2+ QB slots) the
   2-QB list, otherwise its scoring's list, and custom scoring the preset nearest its points per reception
-  (0.75 -> PPR, 0.25 -> half). A season missing that list uses the nearest one stored (2-QB -> the
+  (0.75 -> PPR, 0.25 -> half). The list is chosen once, at creation, and saved with the league
+  (`Settings.adp_format`; leagues saved before there were several lists keep PPR), so a league never
+  switches lists mid-season. A season missing that list uses the nearest one stored (2-QB -> the
   scoring's list; PPR <-> half <-> standard), and a superflex league without a 2-QB list falls back to
-  scaling QB ADP (`replay_chart.SUPERFLEX_QB_ADP`). A re-run of Prepare fetches the formats a season lacks;
-  a format FFC cannot give is reported and leaves what is stored.
+  scaling QB ADP (`replay_chart.SUPERFLEX_QB_ADP`). A re-run of Prepare fetches only the formats a season
+  lacks. A format FFC cannot give is reported and leaves what is stored; when FFC answered without a list
+  (rather than failing to answer) the format is remembered as having none and not asked for again until
+  a forced Prepare. While MyFantasyLeague is down, a format with nothing stored is saved from FFC alone
+  (its tail comes on the next run) and every stored format stays exactly as it is.
   The "experts" step (2020 on) stores FantasyPros position ranks from the nflverse archive in
   `replay_expert_ranks` (`services/replay_experts.py`): the last preseason cheatsheet and every in-season
   rest-of-season snapshot. Week W uses the latest snapshot taken before week W's first Sunday kickoff; the
@@ -1134,7 +1139,7 @@ League parameters accepted by every valuation endpoint: `scoring=ppr|half|std`,
 | POST | `/api/replay/games/{id}/lineup` | Body `{"starters": {"QB": [id], ...}}`, or `{"starters": null}` for the best lineup |
 | GET | `/api/replay/games/{id}/matchup?week=&team_id=` | One game's two lineups side by side |
 | GET | `/api/replay/games/{id}/scoreboard?week=` | Every game of a week |
-| GET | `/api/replay/games/{id}/standings` | The table with seeds, the playoff weeks and byes, and the playoff bracket once known |
+| GET | `/api/replay/games/{id}/standings` | The table with seeds, the playoff weeks and byes (the bracket: `.../playoffs`) |
 | GET | `/api/replay/games/{id}/playoffs` | The bracket for the Playoffs page: every title round (open slots until decided, round one projected from today's seeds), byes, and the consolation pools week by week |
 | GET | `/api/replay/games/{id}/schedule?team_id=` | A team's opponents and results |
 | GET | `/api/replay/games/{id}/activity?kind=&limit=&offset=` | The league log (picks, moves, trades, results), newest first |

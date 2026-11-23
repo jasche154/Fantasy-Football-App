@@ -14,7 +14,7 @@ const PATH = `/api/replay/games/${GAME_ID}`;
 function standings(overrides: Partial<ReplayStandings> = {}): ReplayStandings {
   return {
     results: TEAMS.map((team, index) => ({ ...team, ...record({ rank: index + 1 }), seed: index + 1, in_playoffs: index < 4 })),
-    regular_season_weeks: 14, playoff_teams: 4, playoff_weeks: [15, 16], byes: 0, seeds_final: false, bracket: [], champion: null, ...overrides,
+    regular_season_weeks: 14, playoff_teams: 4, playoff_weeks: [15, 16], byes: 0, seeds_final: false, ...overrides,
   };
 }
 

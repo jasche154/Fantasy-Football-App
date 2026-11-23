@@ -13,7 +13,7 @@ like `actual`); `defense_prior` is last season's defense factors (replay_defense
 `returns` says when each hard-tag streak really ended (`hard_tag_returns`).
 """
 import logging
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from collections.abc import Mapping
 from datetime import date
 from dataclasses import dataclass, field, replace
@@ -178,8 +178,17 @@ def _as_of(data: SeasonData, week: int) -> SeasonData:
 
 # ---------------- loading ----------------
 
-_cache: dict[tuple, SeasonData] = {}
+CACHED_SEASONS = 8                  # SeasonData builds kept (each season x scoring rules x ADP list), least recent out
+_cache: OrderedDict[tuple, SeasonData] = OrderedDict()
 _cache_lock = Lock()
+
+
+def _cached(key: tuple) -> SeasonData | None:
+    with _cache_lock:
+        found = _cache.get(key)
+        if found is not None:
+            _cache.move_to_end(key)
+        return found
 
 
 def clear_cache() -> None:
@@ -191,26 +200,27 @@ def clear_cache() -> None:
 
 
 def load_season_data(session: Session, season: int, scoring: str, rules: ScoringRules | None = None,
-                      starters: Mapping[str, int] | None = None) -> SeasonData:
+                      adp_format: str | None = None) -> SeasonData:
     """The season as plain data, built once per (database, season, scoring, rules, ADP list). `rules` (a league's
     custom key settings, replay_scoring) rescore every real game exactly and convert the projections (an
-    estimate). `starters` (the league's slots) and the scoring pick the ADP list (replay_adp_format).
+    estimate). `adp_format` is the ADP list the league wants (its Settings.adp_format, default: the scoring's
+    list); the nearest stored one stands in when the season lacks it (replay_adp_format.stored).
 
     Raises ValueError for an unknown scoring and valuation.NoDataError when the season isn't ready."""
     scoring_for(scoring)
-    want = replay_adp_format.wanted(scoring, rules, starters)
+    want = adp_format or replay_adp_format.scoring_format(scoring, rules)
     key = (str(session.get_bind().url), season, scoring, rules, want)
-    with _cache_lock:
-        cached = _cache.get(key)
+    cached = _cached(key)
     if cached is not None:
         return cached
     with key_lock(("replay_pool", key)):
-        with _cache_lock:
-            cached = _cache.get(key)                  # built by a request we waited for
+        cached = _cached(key)                         # built by a request we waited for
         if cached is None:
             cached = _build(session, season, scoring, rules, want)
             with _cache_lock:
                 _cache[key] = cached
+                while len(_cache) > CACHED_SEASONS:
+                    _cache.popitem(last=False)
     return cached
 
 
@@ -335,8 +345,12 @@ def _projections(session: Session, season: int, scoring: str, last_week: int,
                                   points, ReplayProjection.pts_ppr, ReplayProjection.pts_std).where(
         ReplayProjection.season == season, ReplayProjection.week.between(1, last_week)))
     for player_id, week, source, value, ppr, std in rows:
-        if source in by_source and value and value > 0:
-            by_source[source][(player_id, week)] = (float(ppr or 0), float(std or 0)) if custom else float(value)
+        if source not in by_source:
+            continue
+        if custom and max(ppr or 0, std or 0) > 0:          # the estimate reads these two, not the preset's column
+            by_source[source][(player_id, week)] = (float(ppr or 0), float(std or 0))
+        elif not custom and value and value > 0:
+            by_source[source][(player_id, week)] = float(value)
     merged: dict = {}
     for source in reversed(SOURCES):
         merged.update(by_source[source])

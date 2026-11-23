@@ -310,6 +310,8 @@ export interface ReplaySettings {
   starters: Partial<Record<Exclude<ReplaySlot, 'BN'>, number>>;
   bench: number;
   roster_size: number;
+  /** IR spots per team: a player traded off IR takes a free one, else a roster spot. */
+  ir_slots: number;
   draft_slot: number;
   waiver_mode: ReplayWaiverMode;
   difficulty: ReplayDifficulty;

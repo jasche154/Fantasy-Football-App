@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import type { ReplayPlayerSort, ReplaySummary, ReplayWireRow } from '../../api/types';
 import { SortableHeader, type SortState } from '../../components/SortableHeader';
 import { EMPTY_VALUE, formatNumber } from '../../lib/format';
@@ -77,6 +77,9 @@ function useOverflow() {
     box.addEventListener('scroll', measure, { passive: true });
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
     observer?.observe(box);
+    // The table changes width on its own (Box score / Advanced, another page) while the box keeps its size.
+    const table = box.querySelector('table');
+    if (table) observer?.observe(table);
     return () => {
       box.removeEventListener('scroll', measure);
       observer?.disconnect();
@@ -130,24 +133,30 @@ export function PlayersTable({ game, week, rows, columns, sort, onSort, claimedI
           {rows.map((row) => {
             const error = moves.errorFor(addKey(row.player.id));
             return (
-              <tr key={row.player.id} className={row.owner?.is_user ? 'row--mine' : undefined}>
-                <td className="td--player replay-players__pin-start">
-                  <ReplayPlayerCell player={row.player} info={{ out: row.out, trade_locked: row.trade_locked }} onOpen={openPlayer} />
-                  {row.news && <p className="hint">{row.news.text}</p>}
-                </td>
-                <td><StatusCell row={row} /></td>
-                <td className="replay-players__opp">
-                  {row.bye ? 'BYE' : (row.opponent ?? EMPTY_VALUE)}
-                  {!row.bye && <DefenseChip rating={row.defense} position={row.player.position} />}
-                </td>
-                {columns.map((column) => <td key={column.id} className="num">{column.text(row)}</td>)}
-                <td className="num replay-players__pin-value">{formatNumber(row.value)}</td>
-                <td className="replay-players__action replay-players__pin-action">
-                  <RowAction game={game} row={row} hasClaim={claimedIds.has(row.player.id)} moves={moves} onAdd={onAdd} onClaim={onClaim} />
-                  {/* The hub's alert announces it; this copy sits where the user is looking. */}
-                  {error && <p className="error-text replay-players__error">{error}</p>}
-                </td>
-              </tr>
+              <Fragment key={row.player.id}>
+                <tr className={row.owner?.is_user ? 'row--mine' : undefined}>
+                  <td className="td--player replay-players__pin-start">
+                    <ReplayPlayerCell player={row.player} info={{ out: row.out, trade_locked: row.trade_locked }} onOpen={openPlayer} />
+                    {row.news && <p className="hint">{row.news.text}</p>}
+                  </td>
+                  <td><StatusCell row={row} /></td>
+                  <td className="replay-players__opp">
+                    {row.bye ? 'BYE' : (row.opponent ?? EMPTY_VALUE)}
+                    {!row.bye && <DefenseChip rating={row.defense} position={row.player.position} />}
+                  </td>
+                  {columns.map((column) => <td key={column.id} className="num">{column.text(row)}</td>)}
+                  <td className="num replay-players__pin-value">{formatNumber(row.value)}</td>
+                  <td className="replay-players__action replay-players__pin-action">
+                    <RowAction game={game} row={row} hasClaim={claimedIds.has(row.player.id)} moves={moves} onAdd={onAdd} onClaim={onClaim} />
+                  </td>
+                </tr>
+                {/* The hub's alert announces it; this copy sits under the row, where the user is looking, full width. */}
+                {error && (
+                  <tr className="replay-players__error-row">
+                    <td colSpan={columns.length + 5}><p className="error-text replay-players__error">{error}</p></td>
+                  </tr>
+                )}
+              </Fragment>
             );
           })}
         </tbody>

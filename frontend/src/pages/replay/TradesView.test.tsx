@@ -5,7 +5,7 @@ import type { ReplayPendingOffer, ReplaySummary, ReplayTrades, ReplayVerdict } f
 import { json, mockFetch, type MockReply, type MockRequest, type MockRoute } from '../../test/mockFetch';
 import { META_ROUTE, renderWithProviders } from '../../test/render';
 import {
-  actionResult, COLLINS, COOK, ETIENNE, GAME_ID, MCCAFFREY, MOSTERT, rosterRow, summary, tagged, team, teamRef, USER_TEAM_ID, viewProps,
+  actionResult, COLLINS, COOK, ETIENNE, GAME_ID, MCCAFFREY, MOSTERT, OLAVE, playerRef, rosterRow, summary, tagged, team, teamRef, USER_TEAM_ID, viewProps,
 } from './fixtures';
 import type { ReplayViewProps } from './shared';
 import { TradesView } from './TradesView';
@@ -324,6 +324,45 @@ describe('TradesView injuries and IR', () => {
 
     await waitFor(() => expect(api.callsTo(EVALUATE_PATH, 'POST').at(-1)?.body)
       .toEqual({ to_team: 2, give: [COOK.id], get: [hurt.id, MOSTERT.id], drops: [] }));
+  });
+
+  describe('IR spots in the drop count', () => {
+    const hurt = tagged(ETIENNE, 'IR', null, 'Knee');
+    const mine = tagged(playerRef(112, 'Tank Dell', 'WR', 'HOU'), 'IR', null, 'Leg');
+    const irRow = (player: typeof hurt) => ({ ...rosterRow(player, 'BN', { out: true, projection: 0 }), slot: 'IR' as const, starting: false as const });
+
+    /** The user (11 players, a full roster) with Tank Dell on IR; Blitz Brigade with Mostert and Etienne on IR. */
+    function renderIrTrade() {
+      const reply = (request: MockRequest) => (Number(request.url.searchParams.get('team_id')) === 2
+        ? json(team({ team: teamRef(2), results: [rosterRow(MOSTERT, 'RB', { value: 35 })], ir: [irRow(hurt)] }))
+        : json(team({ ir: [irRow(mine)] })));
+      const full = summary({ settings: { ...summary().settings, roster_size: 11 } });
+      return renderTrades(trades(), [{ path: `${PATH}/team`, reply }, { method: 'POST', path: EVALUATE_PATH, reply: json({ verdict: verdict() }) }],
+        { props: { game: full }, hash: `#/replay?game=${GAME_ID}&view=trades&with=2&want=${hurt.id}` });
+    }
+
+    it("takes a roster spot, so a drop, when the user's IR slot is full", async () => {
+      const { api, user } = renderIrTrade();
+      await screen.findByRole('checkbox', { name: 'Get Travis Etienne' });
+      await user.click(screen.getByRole('checkbox', { name: 'Give James Cook' }));
+      await user.click(screen.getByRole('checkbox', { name: 'Get Raheem Mostert' }));
+
+      expect(await screen.findByRole('group', { name: 'Choose 1 player to drop (0 of 1 chosen)' })).toBeInTheDocument();
+      expect(api.callsTo(EVALUATE_PATH, 'POST')).toHaveLength(0);
+      await user.click(screen.getByRole('checkbox', { name: /Drop Chris Olave/ }));
+      await waitFor(() => expect(api.callsTo(EVALUATE_PATH, 'POST').at(-1)?.body)
+        .toEqual({ to_team: 2, give: [COOK.id], get: [hurt.id, MOSTERT.id], drops: [OLAVE.id] }));
+    });
+
+    it('frees the slot when the user trades away its own IR player, so no drop', async () => {
+      const { api, user } = renderIrTrade();
+      await screen.findByRole('checkbox', { name: 'Get Travis Etienne' });
+      await user.click(screen.getByRole('checkbox', { name: 'Give Tank Dell' }));
+
+      await waitFor(() => expect(api.callsTo(EVALUATE_PATH, 'POST').at(-1)?.body)
+        .toEqual({ to_team: 2, give: [mine.id], get: [hurt.id], drops: [] }));
+      expect(screen.queryByRole('group', { name: /to drop/ })).not.toBeInTheDocument();
+    });
   });
 
   it('shows the tag on an offer\'s player', async () => {

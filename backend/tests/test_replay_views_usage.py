@@ -141,12 +141,13 @@ def test_a_six_team_bracket_names_its_rounds_and_shows_the_byes():
     shown = six_game(six_team_bracket())
     table = league.standings(shown)
 
-    labels = [[row["label"] for row in week["results"]] for week in table["bracket"]]
+    boards = [views.scoreboard(shown, week)["results"] for week in table["playoff_weeks"]]
+    labels = [[row["label"] for row in board] for board in boards]
     assert (table["playoff_weeks"], table["byes"], table["playoff_teams"]) == ([15, 16, 17], 2, 6)
     assert sum(row["in_playoffs"] for row in table["results"]) == 6
     assert labels[0][:2] == ["Quarter-final"] * 2 and set(labels[0][2:]) <= {"Consolation"}
     assert labels[1][:2] == ["Semi-final"] * 2 and labels[2][:2] == ["Championship", "Third place"]
-    assert table["champion"]["team_id"] == table["bracket"][2]["results"][0]["winner"]
+    assert shown.state.champion == boards[2][0]["winner"]
 
 
 def test_a_bye_week_is_an_idle_schedule_row_and_the_matchup_shows_the_first_game():

@@ -1,6 +1,6 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ReplayClaim, ReplayClaims, ReplayPlayerRef, ReplaySummary, ReplayWireRow } from '../../api/types';
 import { json, mockFetch, type MockReply, type MockRoute } from '../../test/mockFetch';
 import { META_ROUTE, renderWithProviders } from '../../test/render';
@@ -315,11 +315,12 @@ describe('PlayersView adding a free agent', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  it('shows the server\'s reason next to the button when the add is refused', async () => {
+  it('shows the server\'s reason in a full-width row under the player when the add is refused', async () => {
     const { user } = renderPlayers(summary(), [post(ADD_DROP, json({ detail: 'Raheem Mostert was just dropped and is on waivers until next week.' }, 422))]);
     await user.click(await ready('Add Raheem Mostert'));
-    expect(await (await row('Raheem Mostert')).findByText('Raheem Mostert was just dropped and is on waivers until next week.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Add Raheem Mostert' })).toBeEnabled();
+    const reason = (await screen.findByText('Raheem Mostert was just dropped and is on waivers until next week.')).closest('tr')!;
+    expect(within(reason.previousElementSibling as HTMLElement).getByRole('button', { name: 'Add Raheem Mostert' })).toBeEnabled();
+    expect(reason.querySelector('td')).toHaveAttribute('colspan', String(reason.previousElementSibling!.children.length));
   });
 
   it('asks who to drop when the roster is full, least valuable first', async () => {
@@ -453,5 +454,31 @@ describe('PlayersView while an IR player has lost his tag', () => {
     const claimButton = (await row('Nico Collins')).getByRole('button', { name: 'Claim Nico Collins' });
     expect(claimButton).toBeDisabled();
     expect(claimButton).toHaveAttribute('title', BANNER);
+  });
+});
+
+describe('PlayersView pinned-column shadows', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('watches the table too, so a wider table (another stats view) shows the right-edge shadow', async () => {
+    const observers: { callback: () => void; targets: Element[] }[] = [];
+    vi.stubGlobal('ResizeObserver', class {
+      targets: Element[] = [];
+      constructor(callback: () => void) { observers.push({ callback, targets: this.targets }); }
+      observe(target: Element) { this.targets.push(target); }
+      disconnect() { this.targets.length = 0; }
+    });
+    renderPlayers(summary());
+    const table = await screen.findByRole('table', { name: 'Players, week 5' });
+    const box = table.parentElement!;
+    const watcher = observers.find((o) => o.targets.includes(table));
+    expect(watcher?.targets).toContain(box);
+    expect(box).not.toHaveAttribute('data-overflow-end');
+
+    Object.defineProperty(box, 'clientWidth', { configurable: true, value: 320 });
+    Object.defineProperty(box, 'scrollWidth', { configurable: true, value: 900 });   // the table grew; the box did not
+    act(() => watcher!.callback());
+
+    expect(box).toHaveAttribute('data-overflow-end', 'true');
   });
 });

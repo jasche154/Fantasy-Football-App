@@ -446,6 +446,19 @@ def test_load_is_cached_until_the_cache_is_cleared(seeded_db):
     assert rebuilt is not first and dict(rebuilt.actual) == dict(first.actual)
 
 
+def test_the_cache_keeps_only_the_most_recently_used_seasons(seeded_db, monkeypatch):
+    monkeypatch.setattr(replay_pool, "CACHED_SEASONS", 2)
+    monkeypatch.setattr(replay_pool, "_build", lambda *args: object())
+    load = lambda scoring: replay_pool.load_season_data(seeded_db, fakes.SEASON, scoring)   # noqa: E731
+
+    ppr, half = load("ppr"), load("half")
+    assert load("ppr") is ppr                       # used again: now the most recent
+    std = load("std")                               # pushes out the least recent (half)
+
+    assert load("ppr") is ppr and load("std") is std and load("half") is not half
+    assert len(replay_pool._cache) == 2
+
+
 def test_readiness_reports_a_loaded_season_as_ready(seeded_db):
     assert replay_pool.readiness(seeded_db, fakes.SEASON) == {
         "season": fakes.SEASON, "ready": True, "has_stats": True, "has_schedule": True, "has_kdst": True,

@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from database.models import ReplayLeague
 from database.models.base import utc_now
-from services import replay_scoring
+from services import replay_adp_format, replay_scoring
 from services.replay_scoring import ScoringRules
 from services.replay_slots import SLOTS, STANDARD as DEFAULT_STARTERS  # noqa: F401 (re-exported)
 from services.scoring import POINTS_PER_RECEPTION
@@ -75,6 +75,8 @@ class Settings(_Record):
     season_hidden: bool = False              # reserved; not used in v1
     difficulty: str = "normal"               # "normal" | "hard": see USER_TRADE_MULTIPLE, DRAFT_CHAOS_SCALE
     scoring_rules: ScoringRules | None = None   # custom key settings on top of `scoring`; None = the preset as is
+    adp_format: str = "ppr"                  # the ADP list it drafts from, fixed at creation (replay_adp_format.wanted);
+                                             # leagues saved before there were several lists read "ppr"
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -115,6 +117,8 @@ def _validate(s: Settings) -> None:
         (s.bench >= 0 and min(s.starters.values(), default=0) >= 0, "Starter and bench counts can't be negative."),
         (s.scoring_rules is None or not replay_scoring.problem(s.scoring_rules),
          s.scoring_rules and replay_scoring.problem(s.scoring_rules)),
+        (s.adp_format in replay_adp_format.FORMATS,
+         f"Unknown ADP list '{s.adp_format}'. Valid: {list(replay_adp_format.FORMATS)}"),
         (s.regular_season_weeks >= 1, "The regular season needs at least one week."),
         (s.trade_deadline_week <= s.regular_season_weeks,
          f"The trade deadline (week {s.trade_deadline_week}) must be in the {s.regular_season_weeks}-week regular season."),

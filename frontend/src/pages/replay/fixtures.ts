@@ -141,7 +141,7 @@ export function summary(overrides: Partial<ReplaySummary> = {}): ReplaySummary {
     settings: {
       teams: 12, scoring: 'half', starters: { QB: 1, RB: 2, WR: 2, TE: 1, FLEX: 1, K: 1, DST: 1 }, bench: 6, roster_size: 15,
       draft_slot: 4, waiver_mode: 'wednesday', difficulty: 'normal', regular_season_weeks: 14, playoff_teams: 4,
-      trade_deadline_week: 11,
+      trade_deadline_week: 11, ir_slots: 1,
     },
     teams: TEAMS, on_the_clock: null, next_action: nextAction('play'), record: record(),
     matchup: {

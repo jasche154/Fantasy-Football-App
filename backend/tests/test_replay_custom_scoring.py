@@ -7,7 +7,7 @@ from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from database.models import Base, PlayerStatsWeekly
+from database.models import Base, PlayerStatsWeekly, ReplayProjection
 from services import replay_pool, replay_scoring, replay_state as rs
 from services.replay_box import BoxLine
 from services.replay_scoring import ScoringRules
@@ -140,6 +140,20 @@ def test_custom_rules_rescore_real_games_exactly(db):
     assert (six.rules, half.rules) == (ScoringRules(pass_td=6.0), None) and six is not load(None)
 
 
+def test_custom_rules_keep_a_projection_whose_preset_column_is_zero(db):
+    row = db.scalars(select(ReplayProjection).where(ReplayProjection.source == replay_pool.SOURCES[0],
+                                                    ReplayProjection.pts_ppr > 0, ReplayProjection.week == 1)).first()
+    half, row.pts_half = row.pts_half, 0.0      # custom rules read pts_ppr / pts_std, never the preset's column
+    db.commit()
+    try:
+        custom = replay_pool._projections(db, fakes.SEASON, "half", 1, custom=True)
+    finally:
+        row.pts_half = half                     # the database is shared by the module
+        db.commit()
+
+    assert custom[(row.player_id, 1)] == (pytest.approx(row.pts_ppr), pytest.approx(row.pts_std or 0.0))
+
+
 def test_plain_half_is_identical_and_preset_equal_rules_reproduce_the_stored_projections(db):
     plain = replay_pool.load_season_data(db, fakes.SEASON, "half")
     converted = replay_pool.load_season_data(db, fakes.SEASON, "half", HALF)
@@ -178,15 +192,30 @@ def create(client, **body) -> tuple[int, dict]:
     ({"starters": {"QB": 1, "IDP": 1, "RB": 1}}, "Unknown lineup slots"),
     ({"starters": {"QB": 3, "RB": 3, "WR": 3, "TE": 3, "K": 1}}, "at most 12"),
     ({"starters": {"QB": 1, "K": 1}}, "RB, WR, TE or FLEX"),
-    ({"scoring_rules": {"reception": 0.3}}, "steps of 0.25"),
-    ({"scoring_rules": {"reception": 1, "te_premium": 0.75}}, "TE premium"),
-    ({"scoring_rules": {"reception": 1, "pass_td": 5}}, "passing TD"),
-    ({"scoring_rules": {"reception": 1, "turnover": -3}}, "turnover"),
 ])
-def test_create_refuses_a_bad_lineup_or_rules_with_a_clear_422(client, body, message):
+def test_create_refuses_a_bad_lineup_with_a_clear_422(client, body, message):
     status, answer = create(client, **body)
 
     assert status == 422 and message in answer["detail"]
+
+
+@pytest.mark.parametrize("field, value", [
+    ("reception", 0.3), ("reception", 1.75), ("te_premium", 0.75), ("te_premium", 1.5), ("pass_td", 5),
+    ("pass_td", 8), ("turnover", -3), ("turnover", -1.5), ("turnover", 0),
+])
+def test_the_request_schema_refuses_rules_replay_scoring_does_not_allow(client, field, value):
+    status, answer = create(client, scoring_rules={"reception": 1, field: value})
+
+    assert status == 422 and answer["detail"][0]["loc"] == ["body", "scoring_rules", field]
+    assert replay_scoring.problem(ScoringRules(**{"reception": 1.0, field: value}))   # the same values, both checks
+
+
+@pytest.mark.parametrize("rules", [
+    {"reception": 0.25, "te_premium": 0.5, "pass_td": 6, "turnover": -1},
+    {"reception": 1.5, "te_premium": 1, "pass_td": 4, "turnover": -2},
+])
+def test_the_request_schema_accepts_every_allowed_value(client, rules):
+    assert create(client, scoring_rules=rules)[0] == 200
 
 
 @pytest.mark.parametrize("body", [{"starters": {"QB": "one"}}, {"scoring_rules": {"reception": 2.0}},

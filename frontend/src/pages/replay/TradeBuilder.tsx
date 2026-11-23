@@ -13,8 +13,6 @@ import { ReplayPlayerCell, TeamSelect } from './shared';
 
 const EVALUATE_DELAY_MS = 300;
 const PROPOSE_KEY = 'propose';
-/** backend/services/replay_ir.py IR_SLOTS: a player traded off an IR slot takes a free one, else a roster spot. */
-const IR_SLOTS = 1;
 
 /** Both teams' IR players are listed and tradable. */
 type PickerRow = ReplayRosterRow | ReplayIrRow;
@@ -120,7 +118,7 @@ export function TradeBuilder({ game, version, roster, ir, maxPlayers, counterTo,
   const giveIds = tradableIds(myRows, give);
   const getIds = tradableIds(theirRows, get);
   const isIn = (rows: readonly PickerRow[]) => (id: number) => rows.some((row) => row.player.id === id);
-  const freeIr = IR_SLOTS - ir.filter((row) => !giveIds.includes(row.player.id)).length;
+  const freeIr = game.settings.ir_slots - ir.filter((row) => !giveIds.includes(row.player.id)).length;
   const toIr = Math.min(Math.max(freeIr, 0), getIds.filter(isIn(theirRows.filter((row) => row.slot === 'IR'))).length);
   const over = overLimit(roster, giveIds.filter(isIn(roster)).length, getIds.length - toIr, game.settings.roster_size);
   const spare = roster.filter((row) => !giveIds.includes(row.player.id));
