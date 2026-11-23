@@ -147,7 +147,7 @@ def _after_games(state: State, settings: Settings, data: SeasonData, seed: int) 
     """The chat about the week just scored, then this week's shops and the shopping managers' messages."""
     know = knowledge(state, settings, data, seed=seed)
     state = replay_chat.after_week(state, settings, know, seed)
-    state, opened = replay_mood.refresh_shops(state, settings, know, seed, state.results[-1].week)
+    state, opened = replay_mood.refresh_shops(state, settings, know, seed, len(state.results))  # league weeks
     return replay_chat.shop_lines(state, opened, know, seed)
 
 

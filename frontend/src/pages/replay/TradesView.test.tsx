@@ -452,6 +452,17 @@ describe('TradesView manager voices', () => {
     expect(within(strip).queryByText(/%/)).not.toBeInTheDocument();
   });
 
+  it('shows the strip and an offer quote in a simulated league that started mid-season', async () => {
+    const live = summary({ kind: 'live', sim_from: 6, start_week: 6, week: 9 });
+    const shop = { team: BRIGADE, player: MOSTERT, message: 'Selling Raheem Mostert. Make an offer.' };
+    renderTrades(trades({ shops: [shop], offers: [offer({ week: 9, message: 'Need a back. You in?' })] }), [], { props: { game: live } });
+
+    expect(await screen.findByRole('region', { name: 'Shopping to you' })).toBeInTheDocument();
+    const card = await screen.findByRole('listitem', { name: 'Offer from Blitz Brigade' });
+    expect(card).toHaveTextContent('week 9');
+    expect(within(card).getByText('Need a back. You in?').closest('blockquote')).toBeInTheDocument();
+  });
+
   it('shows the partner\'s mood in the builder', async () => {
     const moody = { ...summary(), teams: summary().teams.map((t) => (t.team_id === 1 ? { ...t, mood: 'Worried about Nico Collins.' } : t)) };
     renderTrades(trades(), [], { props: { game: moody } });

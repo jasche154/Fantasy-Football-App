@@ -47,6 +47,19 @@ describe('League chat', () => {
     expect(screen.queryByText('(new messages)')).not.toBeInTheDocument();
   });
 
+  it('labels lines with the real NFL week in a simulated league that started mid-season', async () => {
+    const live = summary({ kind: 'live', sim_from: 6, start_week: 6, week: 8, chat: 1 });
+    mockFetch([META_ROUTE, { path: CHAT_PATH, reply: json(page([line({ week: 7, text: 'Two straight. Feels good.' })])) },
+      { path: `/api/replay/games/${GAME_ID}/standings`, reply: json({ results: [], regular_season_weeks: 15, playoff_teams: 4,
+        playoff_weeks: [16, 17], byes: 0, seeds_final: false }) }]);
+    renderWithProviders(<LeagueView {...viewProps({ game: live })} />);
+    await userEvent.setup().click(screen.getByRole('button', { name: /Chat/ }));
+    const item = within(await screen.findByRole('list', { name: 'League chat, newest first' })).getByRole('listitem');
+
+    expect(item).toHaveTextContent('Wk 7');
+    expect(item).toHaveTextContent('Two straight. Feels good.');
+  });
+
   it('says so when nobody has talked yet', async () => {
     mockFetch([META_ROUTE, { path: CHAT_PATH, reply: json(page([])) },
       { path: `/api/replay/games/${GAME_ID}/standings`, reply: json({ results: [], regular_season_weeks: 14, playoff_teams: 4,

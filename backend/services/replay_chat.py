@@ -9,7 +9,8 @@ has been used (`Chat.line`); the choice is seeded (`rs.rng`), so a reload never 
 When lines are posted (replay_game calls these; each reads only what is known when it posts):
 - `after_week`, once a week is scored: every CPU may say one thing about the week just played, from that
   week's result and the standings with and without it. Kinds by priority: champion / runner_up (the final),
-  clinch / eliminated (newly, regular season), upset (beat a team UPSET_GAP or more places above him),
+  clinch / eliminated (newly, regular season), upset (beat a team UPSET_GAP or more places above him, from
+  the league's UPSET_FROM_WEEK-th week: league weeks, so a league that jumped in mid-season waits too),
   streak_win / streak_loss (STREAK games), then one of boom (a starter's huge game), bust (a starter's dud;
   never a player who is hurt or did not score) and the result itself: close_* under CLOSE_MARGIN points,
   blowout_* from BLOWOUT_MARGIN. The user's opponent always talks to the user (a kind that names him, by
@@ -55,7 +56,7 @@ MAX_CHARS = 140
 CLOSE_MARGIN = 10.0             # points: a game decided by less is close
 BLOWOUT_MARGIN = 25.0           # and by this or more a blowout
 UPSET_GAP = 4                   # places in the table before the week
-UPSET_FROM_WEEK = 4
+UPSET_FROM_WEEK = 4             # league weeks played (a jump-in league's NFL weeks before start_week don't count)
 STREAK = 3
 BOOM_POINTS, BOOM_RATE = 25.0, 1.75     # a starter's points >= both 25 and 1.75 x his expected rate
 BUST_RATE, BUST_MIN_PPG = 0.4, 10.0     # <= 0.4 x a rate of at least 10 (and more than 0)
@@ -105,9 +106,10 @@ def _wins(state: State) -> dict[int, float]:
 
 
 def _playoff_status(state: State, settings: Settings) -> tuple[set[int], set[int]]:
-    """(clinched, eliminated) on the regular-season table as it stands; a tie on wins counts against a team."""
-    played = sum(not r.playoff for r in state.results)
-    left = settings.regular_season_weeks - played
+    """(clinched, eliminated) on the regular-season table as it stands; a tie on wins counts against a team.
+    Weeks left count from the last week played (start_week - 1 before any), so a jump-in league is right too."""
+    last = max((r.week for r in state.results if not r.playoff), default=settings.start_week - 1)
+    left = settings.regular_season_weeks - last
     rows, spots = rs.standings(state), settings.playoff_teams
     if left == 0:
         return ({r["team_id"] for r in rows if r["rank"] <= spots}, {r["team_id"] for r in rows if r["rank"] > spots})
@@ -180,7 +182,8 @@ def _game_lines(state: State, settings: Settings, know: Knowledge, before: State
             if me_id in now_out - was_out:
                 kinds.append(("eliminated", values, ()))
             won = mine > theirs
-            if won and not result.playoff and week >= UPSET_FROM_WEEK and seat[me_id] - seat[you_id] >= UPSET_GAP:
+            upset_on = len(state.results) >= UPSET_FROM_WEEK
+            if won and not result.playoff and upset_on and seat[me_id] - seat[you_id] >= UPSET_GAP:
                 kinds.append(("upset", values, ()))
             streak = _streak(state, me_id)
             if abs(streak) >= STREAK:

@@ -1026,7 +1026,7 @@ that week's games on; only scoring a week reads its real points.
   players, from the same numbers his price uses (recent games `form_chart` plus hype x `shock_chart`), so what
   he says never contradicts what he accepts. Panicky managers feel a slump 1.8x, gamblers a hot streak 1.8x,
   steady ones a slump only 0.3x (and stay high on a slumping star). Strength is that signal over his chart
-  (at least 250): worried at -0.08 or below, high at +0.08 or above. After 3 weeks each CPU shows a **mood
+  (at least 250): worried at -0.08 or below, high at +0.08 or above. After 3 league weeks each CPU shows a **mood
   line** in the trade builder ("Worried about X. High on Y."). When a CPU is worried at -0.15 or worse about
   one of his 6 most valuable skill players whose last game fell short of his rate, he may **shop him to you**
   (chance by persona: panicky 75%, gambler 35%, balanced 25%, steady and shark never; one shop per CPU, at
@@ -1038,12 +1038,15 @@ that week's games on; only scoring a week reads its real points.
   sends you his offer first. The shop closes after a good game, a trade, or the deadline.
 - **League chat** (`services/replay_chat.py`, lines in `services/replay_chat_lines.json`): a one-way group
   chat under League > Chat (an unread dot on the League tab). After each week every CPU may say one thing:
-  a championship or final loss, clinching or elimination, an upset (beating a team 4+ places above him), a
+  a championship or final loss, clinching or elimination, an upset (beating a team 4+ places above him, from
+  the league's 4th week), a
   3+ game streak, a starter's huge game (25+ and 1.75x his rate) or dud (40% of a 10+ rate; never a player
   who is hurt or scored 0), or the result itself (close under 10 points, a blowout from 25). Your opponent
   always talks to you; the others post now and then, at most 5 lines a week. A third manager may react to a
   trade (at most 2 a week), a shopping CPU messages you, and every CPU offer carries a one-line reason in
   his voice (worried about a player, high on yours, short at a position, a counter, or a value pitch).
+  In a league that started mid-season (or a simulated one) all of this counts the league's own weeks, and
+  each line is dated with the real NFL week.
   Lines come from a bank of 1,400+ clean lines in five voices, one per persona, so a manager sounds the same
   all season; a game never repeats a line until that bucket is used up, and the text is copied into the save.
 - **Season:** the user picks the championship week (16, 17 or 18; 18 only when the season has a week 18)

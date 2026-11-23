@@ -10,7 +10,7 @@ contradicts what he accepts:
 - strength = signal / max(chart, CHART_FLOOR): worried at <= -WORRY, high at >= HIGH. Only his own healthy
   skill players worth FEEL_MIN_CHART or more: an injured player is never something to be "worried" about.
 - `mood_line`: "Worried about X. High on Y." from his strongest feeling each way (None without one). Views
-  show it from replay_personas.TENDENCY_WEEKS weeks played; the persona's name stays hidden.
+  show it from replay_personas.TENDENCY_WEEKS league weeks played; the persona's name stays hidden.
 
 Shopping (`refresh_shops`, once a week after the games): a CPU worried at >= SHOP_WORRY about one of his
 SHOP_TOP most valuable skill players, whose last game fell short of his rate, shops him to the user with
@@ -130,7 +130,8 @@ def refresh_shops(state: State, settings: Settings, know: Knowledge, seed: int,
                   weeks_played: int) -> tuple[State, tuple[Shop, ...]]:
     """(the state with this week's shops, the ones newly opened). Closes the shops that no longer hold, renews
     the rest for `state.week`, then lets worried CPUs (in seeded order, each rolling SHOP_RATE) open new ones
-    up to MAX_SHOPS. No shops before TENDENCY_WEEKS weeks are played or once trades have closed."""
+    up to MAX_SHOPS. No shops before TENDENCY_WEEKS league weeks (`weeks_played` = len(state.results)) are
+    played or once trades have closed."""
     trading = state.phase in ("waivers", "open") and rs.trades_open(state, settings)
     if not trading or weeks_played < replay_personas.TENDENCY_WEEKS:
         return replace(state, shops=()), ()
