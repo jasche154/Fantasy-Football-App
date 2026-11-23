@@ -79,6 +79,23 @@ def test_the_stand_in_loses_value_when_the_starter_comes_back():
     assert (shock.other, shock.up, shock.anchor) == (LEAD, False, 12.0)
     assert shock.toward == rs.market_ranks(data.as_of(4), 4)[BACKUP]                     # where he stood before
     assert loss < 0
+    fading = [w for w in range(7, 7 + rs.FADE_WEEKS + 2) if any(s.kind == "starter_back" for s in _mine(data, w))]
+    assert fading == list(range(7, 7 + rs.FADE_WEEKS))                                    # every fade week, then gone
+
+
+def test_a_traded_away_player_lifts_the_next_in_line_on_his_old_team_from_the_week_after():
+    data, gone = fakes.fake_season(), fakes.TRADED_ID
+
+    def left(week):
+        return [s for s in rs.events(data, week) if s.kind == "teammate_left" and s.other == gone]
+
+    first = fakes.TRADED_WEEK + 1                                       # shortcut in replay_shocks: seen a week late
+    shock, = left(first)
+    assert not left(fakes.TRADED_WEEK)
+    assert (shock.week, shock.up, shock.position) == (first, True, "WR")
+    assert data.team_at(shock.player_id, fakes.TRADED_WEEK - 1) == data.team_at(gone, fakes.TRADED_WEEK - 1)
+    assert all(left(w) for w in range(first, first + rs.FADE_WEEKS))
+    assert not left(first + rs.FADE_WEEKS)
 
 
 def test_an_untagged_absence_is_not_a_starter_coming_back():
@@ -142,6 +159,26 @@ def test_a_backup_who_takes_the_job_in_week_1_wins_and_the_starter_loses(monkeyp
     assert [s.kind for s in won] == ["role_won"] and [s.kind for s in lost] == ["role_lost"]
     assert won[0].toward < won[0].anchor and lost[0].toward > lost[0].anchor
     assert moved[BACKUP][0] > 0 > moved[LEAD][0]                                         # losers lose, symmetrically
+
+
+def test_a_tight_end_who_loses_his_targets_to_a_teammate_loses_value_with_the_real_gamma():
+    data = fakes.fake_season()
+    lead = min((pid for pid, p in data.players.items() if p.position == "TE"),
+               key=lambda pid: rs.market_ranks(data, 1).get(pid, 99))
+    team = data.team_at(lead, 1)
+    backup = next(pid for pid, p in data.players.items() if p.position == "TE" and pid != lead
+                  and data.team_at(pid, 1) == team and pid in rs.market_ranks(data, 1))
+    usage = dict(data.usage)
+    usage[(lead, 1)], usage[(backup, 1)] = Usage(40.0, 1, 0.03, 0), Usage(90.0, 9, 0.30, 0)
+    swapped = replace(data, usage=MappingProxyType(usage))
+
+    lost, won = _mine(swapped, 2, lead), _mine(swapped, 2, backup)
+    ranks = rs.market_ranks(swapped, 2)
+    moved = rs.moves(swapped, 2, {}, {lead: 800.0, backup: 100.0}, {lead: ranks[lead], backup: ranks[backup]},
+                     lambda position, r: 1000.0 / r)
+
+    assert [s.kind for s in lost] == ["role_lost"] and [s.kind for s in won] == ["role_won"]
+    assert moved[lead][0] < 0 < moved[backup][0]
 
 
 def test_one_big_game_without_an_event_moves_nothing():

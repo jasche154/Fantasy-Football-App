@@ -77,6 +77,8 @@ def fit_shares(seasons: dict[int, SeasonData]) -> dict[str, tuple[float, float]]
                 points[at.players[pid].position].append((math.log(pre[pid]), share))
     fit = {}
     for position, found in points.items():
+        if len({x for x, _ in found}) < 2:                # no spread: no slope to fit
+            continue
         mx, my = mean(x for x, _ in found), mean(y for _, y in found)
         b = sum((x - mx) * (y - my) for x, y in found) / sum((x - mx) ** 2 for x, _ in found)
         fit[position] = (round(my - b * mx, 3), round(b, 3))

@@ -36,7 +36,7 @@ from dataclasses import replace
 from functools import lru_cache
 from types import MappingProxyType
 
-from services import replay_news, replay_role, replay_shocks
+from services import replay_news, replay_pool, replay_role, replay_shocks
 from services.replay_pool import PoolPlayer, SeasonData
 
 TAU = 40.0                     # pick_value decay: 1 -> 1000, 12 -> 760, 24 -> 563, 50 -> 294, 100 -> 84
@@ -94,6 +94,9 @@ def clear_cache() -> None:
     _by_week.cache_clear()
     replay_news.clear_cache()
     replay_shocks.clear_cache()
+
+
+replay_pool.EVICT_HOOKS.append(clear_cache)
 
 
 def pick_value(pick: float) -> float:
@@ -316,7 +319,7 @@ def _shocked(data: SeasonData, rows: Mapping[int, dict], fields: Mapping[int, di
     for pid, (delta, shock) in found.items():
         now = news.get(pid, fields[pid])
         moved = max(0.0, now["healthy_chart"] + delta)
-        chart = now["chart"] * moved / now["healthy_chart"] if now["healthy_chart"] > 0 else moved * availability[pid]
+        chart = now["chart"] * moved / now["healthy_chart"]          # > 0: moves() scales delta by it
         other = data.players[shock.other].name if shock.other in data.players else None
         missed = 1.0 - availability.get(shock.other, 1.0)
         hype = replay_shocks.reason(shock, other, missed) if delta >= replay_shocks.STAR_MIN else None

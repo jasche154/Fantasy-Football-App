@@ -203,7 +203,8 @@ def _starter_back(data: SeasonData, week: int) -> list[Shock]:
                 if now < old[pid]:
                     found.append(Shock(pid, data.players[pid].position, "starter_back", returned, now, old[pid],
                                        False, back, returned))
-            break                                            # only his latest game counts
+            if since:
+                break                                        # only his latest return counts
     return found
 
 

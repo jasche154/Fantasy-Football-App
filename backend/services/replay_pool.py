@@ -181,6 +181,7 @@ def _as_of(data: SeasonData, week: int) -> SeasonData:
 CACHED_SEASONS = 8                  # SeasonData builds kept (each season x scoring rules x ADP list), least recent out
 _cache: OrderedDict[tuple, SeasonData] = OrderedDict()
 _cache_lock = Lock()
+EVICT_HOOKS: list = []              # clear_cache()s of modules whose caches key on SeasonData (replay_chart adds its own)
 
 
 def _cached(key: tuple) -> SeasonData | None:
@@ -219,8 +220,13 @@ def load_season_data(session: Session, season: int, scoring: str, rules: Scoring
             cached = _build(session, season, scoring, rules, want)
             with _cache_lock:
                 _cache[key] = cached
+                evicted = len(_cache) > CACHED_SEASONS
                 while len(_cache) > CACHED_SEASONS:
                     _cache.popitem(last=False)
+            if evicted:                               # other caches would keep the dropped season alive
+                _as_of.cache_clear()
+                for hook in EVICT_HOOKS:
+                    hook()
     return cached
 
 
