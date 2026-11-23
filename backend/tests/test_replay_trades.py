@@ -14,7 +14,7 @@ from types import MappingProxyType, SimpleNamespace
 
 import pytest
 
-from services import replay_state as rs, replay_trade_value as tv, replay_trades as rt
+from services import replay_personas as rp, replay_state as rs, replay_trade_value as tv, replay_trades as rt
 from services.replay_personas import PERSONAS
 from services.replay_pool import SKILL
 from tests import replay_fakes as fakes
@@ -257,6 +257,17 @@ def test_a_shark_wants_an_edge_and_an_out_player_is_sold_to_the_user_at_a_floor(
         know, "shark", [1], [2], [], 0.0, 1.0, False).score
     assert tv.tally(know, "balanced", [3], [1], [], 0.0, 1.0, True).sent == tv.OUT_SELL_SHARE * 800
     assert tv.tally(know, "balanced", [3], [1], [], 0.0, 0.95, False).sent == 200
+
+
+def test_an_emotional_cpu_pays_more_for_a_hyped_player_and_asks_more_for_its_own():
+    know = values(p1=star(400.0, shock_chart=30.0), p2=star(400.0))
+
+    def score(sends, kept, hype):
+        return tv.tally(know, "balanced", sends, kept, [], 0.0, 1.0, True, hype).score
+
+    extra = (rp.HYPE - 1) * 30.0
+    assert score([2], [1], rp.HYPE) == pytest.approx(score([2], [1], 1.0) + extra, abs=0.01)              # buying
+    assert score([1], [2], rp.HYPE) == pytest.approx(score([1], [2], 1.0) - extra * tv.OUT_MARGIN, abs=0.01)  # holding
 
 
 def test_the_market_guard_stops_a_persona_whose_private_values_say_yes():

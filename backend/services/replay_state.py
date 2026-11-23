@@ -138,6 +138,7 @@ class Team(_Record):
     lean: Mapping[str, float] = field(hash=False)      # position -> multiplier on a CPU's draft score
     ir: tuple[int, ...] = ()                  # players in the IR slot (not in `roster`); see replay_ir
     persona: str = "balanced"                # a CPU's trading style (replay_personas.PERSONAS)
+    hype: float = 1.0                         # a CPU's multiple on opportunity shocks (replay_personas.hype_for); old saves: calm
 
 
 @dataclass(frozen=True)

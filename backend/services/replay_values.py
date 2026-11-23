@@ -83,6 +83,7 @@ class ReplayValue:
     news: Report | None = None     # injury report while he is out (replay_news)
     shock_chart: float = 0.0       # signed chart points from an opportunity shock (replay_shocks)
     shock: str | None = None       # its kind: teammate_out, teammate_left, starter_back, role_won, role_lost
+    hype_reason: str | None = None  # why his role jumped (replay_shocks.reason), when a shock lifts him STAR_MIN+
 
 
 @dataclass(frozen=True, eq=False)

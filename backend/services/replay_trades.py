@@ -242,7 +242,7 @@ def _side(state: State, settings: Settings, know: Knowledge, team: Team, other: 
     own_cuts = tuple(pid for pid in (cut or ()) if pid not in receives)
     per_week = gain / max(1e-9, sum(rv.horizon(know, settings).weights.values()))
     counted = tv.tally(know, team.persona, sends, kept, own_cuts, per_week, needed_multiple(settings, other),
-                       other.is_user)
+                       other.is_user, team.hype)
     return replace(side, tally=counted, market_ok=tv.market_ok(know, sends, kept, own_cuts))
 
 

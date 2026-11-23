@@ -4,7 +4,7 @@ from types import MappingProxyType
 
 import pytest
 
-from services import replay_shocks as rs, replay_values as rv
+from services import replay_shocks as rs, replay_values as rv, replay_views
 from services.replay_pool import Injury, Usage
 from tests import replay_fakes as fakes
 
@@ -81,6 +81,35 @@ def test_the_stand_in_loses_value_when_the_starter_comes_back():
     assert loss < 0
 
 
+def test_an_untagged_absence_is_not_a_starter_coming_back():
+    """No injury tag while he sat (a scratch, a trade, a release): his return is not news for the stand-in."""
+    data = fakes.patched(fakes.fake_season(), projected={(LEAD, w): None for w in range(4, 7)})
+    ranks = {**data.expert_ranks, **{(BACKUP, w): 12 for w in range(4, 7)}}
+    data = replace(data, expert_ranks=MappingProxyType(ranks))
+
+    assert not [s for s in rs.events(data, 7) if s.kind == "starter_back" and s.other == LEAD]
+
+
+def test_the_lifted_back_is_starred_with_a_public_reason(season_out):
+    lifted, lead = _value(season_out, BACKUP, HURT), season_out.players[LEAD].name
+
+    assert lifted.hype_reason.startswith(f"{lead} went out")
+    assert replay_views.player_ref(lifted)["hype"] == {"reason": lifted.hype_reason}
+    assert replay_views.player_ref(_value(season_out, THIRD, HURT))["hype"] is None          # not the one who gains
+    assert replay_views.player_ref(_value(season_out, BACKUP, HURT - 1))["hype"] is None     # nothing yet
+
+
+def test_hype_reasons_name_public_events_only_for_moves_up():
+    shock = rs.Shock(1, "RB", "teammate_out", 5, 30.0, 5.0, True, 2, 5)
+
+    assert rs.reason(shock, "Puka Nacua", 1.0) == "Puka Nacua went out for the season"
+    assert rs.reason(shock, "Puka Nacua", 0.5) == "Puka Nacua went out"
+    assert rs.reason(replace(shock, kind="teammate_left"), None, 1.0) == "a teammate left the team"
+    assert rs.reason(replace(shock, kind="role_won", other=None), None, 1.0) == "he won the backfield"
+    assert rs.reason(replace(shock, kind="role_won", position="WR"), None, 1.0) == "he won a bigger target share"
+    assert rs.reason(replace(shock, kind="starter_back", up=False), "Puka Nacua", 1.0) is None
+
+
 def test_a_starter_out_again_is_not_back():
     data = _lead_out(_lead_out(fakes.fake_season(), range(4, 7)), [9])                   # back in week 7, out in 9
     ranks = {**data.expert_ranks, **{(BACKUP, w): 12 for w in range(4, 7)}}               # the stand-in was bought
@@ -138,9 +167,11 @@ def test_shocks_never_read_later_weeks(season_out, week):
     league = rv.league_settings(fakes.fake_settings())
 
     assert rs.events(season_out, week) == rs.events(other, week) == rs.events(season_out.as_of(week), week)
-    mine = {v.player_id: (v.chart, v.shock) for v in rv.knowledge(season_out, league, week, END).values}
-    theirs = {v.player_id: (v.chart, v.shock) for v in rv.knowledge(other, league, week, END).values}
-    assert mine == theirs
+    mine = {v.player_id: (v.chart, v.shock, replay_views.player_ref(v)["hype"])
+            for v in rv.knowledge(season_out, league, week, END).values}
+    theirs = {v.player_id: (v.chart, v.shock, replay_views.player_ref(v)["hype"])
+              for v in rv.knowledge(other, league, week, END).values}
+    assert mine == theirs                                               # the hype star too
 
 
 def test_a_tag_during_his_bye_week_is_news_at_once(season_out):

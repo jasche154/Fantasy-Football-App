@@ -48,7 +48,7 @@ export function teamRef(teamId: number): ReplayTeamRef {
 
 export function playerRef(id: number, name: string, position: ReplayPosition, team: string | null,
   injury: ReplayInjury | null = null): ReplayPlayerRef {
-  return { id, name, position, team, injury };
+  return { id, name, position, team, injury, hype: null };
 }
 
 /** A tagged copy of a player (the shared constants stay untagged): `tagged(OLAVE, 'IR', null, 'Knee')`. */

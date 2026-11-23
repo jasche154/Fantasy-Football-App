@@ -23,15 +23,17 @@ from functools import lru_cache
 from pathlib import Path
 from statistics import mean, median
 
-from services import replay_chart, replay_pool, replay_shocks as rs, replay_state, replay_values as rv
+from services import replay_chart, replay_personas, replay_pool, replay_shocks as rs, replay_state, replay_values as rv
 from services.replay_pool import SeasonData
 from services.replay_value_eval import DEFAULT_DB, Week, add_expert_rows, parse_seasons, read_only_copy
 
 WEEKS = range(2, 15)
 FORECAST_WEEKS = range(2, 12)
 SHARE_RANKS = 80                 # SHARE_FIT: players ranked inside this before the season
-MIN_FIT = 4                      # events needed to fit a (kind, position) on its own; else the kind's pooled fit
+MIN_FIT = 20                     # events needed to fit a (kind, position) on its own; else the kind's pooled fit
+                                 # (4 let n=1-8 fits through that hurt out of sample: role_lost TE, teammate_left TE)
 MAX_GAMMA = 1.5
+NEXT_HYPE = 1.5                  # the next step up for replay_personas.HYPE, printed for comparison only
 CONTROL_RANKS = 60               # players without a shock ranked inside this give each week's market baseline
 
 
@@ -225,8 +227,18 @@ def example(name: str, season: int, data: SeasonData, weeks: dict[int, Week], sp
         pos = data.players[pid].position
         cells.append(f"w{n} {off[pid]['chart']:.0f} {pos}{_rank(off, week.data, pid)} -> {on[pid]['chart']:.0f} "
                      f"{pos}{_rank(on, week.data, pid)}{' [' + on[pid]['shock'] + ']' if on[pid].get('shock') else ''}"
+                     f"{_emotional(on[pid].get('shock_chart', 0.0))}"
                      f" (experts {data.expert_ranks.get((pid, n), '-')})")
     print(f"{season} {name}: " + "; ".join(cells))
+
+
+def _emotional(shock_chart: float) -> str:
+    """What an emotional CPU adds on top (replay_personas.HYPE, and the next step up for comparison)."""
+    if not shock_chart:
+        return ""
+    extra = [min(max((hype - 1.0) * shock_chart, -replay_personas.HYPE_CAP), replay_personas.HYPE_CAP)
+             for hype in (replay_personas.HYPE, NEXT_HYPE)]
+    return f" emotional {extra[0]:+.1f} (x{NEXT_HYPE}: {extra[1]:+.1f})"
 
 
 EXAMPLES = ((2025, "Javonte Williams", range(1, 7)), (2025, "Miles Sanders", range(1, 6)),

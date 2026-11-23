@@ -943,19 +943,28 @@ that week's games on; only scoring a week reads its real points.
   detects events the market reacts to on little or no game sample, from point-in-time data only: a teammate
   at his position ranked inside the top 36 RB / 48 WR / 18 TE goes out for at least a quarter of the games
   left (the injury news counts, "out for the season" fully) or leaves for another team (the next back or
-  receiver in line gains); that teammate comes back after two or more weeks out (the stand-in loses); a
+  receiver in line gains); that teammate comes back after two or more weeks out with an injury tag (the
+  stand-in loses; an untagged absence is a scratch, trade or release, e.g. Cam Akers' 2023 first game for
+  Minnesota, which used to cut Kyren Williams); a
   player's week 1-2 share of his team's work is well above or below what his preseason rank implies (role
   won / lost). One game's points never move anything. Each event pulls his chart rank part of the way
   toward the rank it points to (the lost starter's, his old one, the one his share implies), fading over 4
   weeks and shrinking as the experts and projections catch up, so nothing counts twice. The size of each
   pull is calibrated (`python -m services.replay_shock_eval`, 2018-25, leave one season out) on how far the
   market really moved in the 1-3 weeks after: the expert ranks and the projections, minus the drift every
-  other player saw. Honest result: the chart already moves at the event week about as far as that market
-  later does (median gap about 0), so most pulls are small: the fill-in's drop when the starter returns is
-  the largest (RB 0.38 of the gap), a back's gain from a lost starter 0.15, role won 0.02-0.05, role lost
-  0 for RB/WR. Javonte Williams in 2025 week 2 goes 166 -> 181 (RB26 -> RB25; the experts reached RB16-20
-  only in weeks 3-5). Lead: mean distance to the market's later rank 11.3 -> 11.3 ranks. Forecast cost:
-  mean Spearman against real points from then on moves -0.009 to +0.001 per season (2022 worst).
+  other player saw (no Vegas player props exist for past seasons: the app holds props for 2026 only). A
+  (kind, position) with fewer than 20 events uses its kind's pooled fit (smaller fits made role_lost TE and
+  teammate_left TE worse out of sample). Honest result: the chart already moves at the event week about as
+  far as that market later does (median gap about 0), so most pulls are small: the fill-in's drop when the
+  starter returns is the largest (RB 0.48 of the gap), a back's gain from a lost starter 0.15, a teammate
+  traded away 0.17, role won 0.02-0.05, role lost about 0. Javonte Williams in 2025 week 2 goes 166 -> 181
+  (RB26 -> RB25; the experts reached RB16-20 only in weeks 3-5). Lead: mean distance to the market's later
+  rank 11.3 -> 11.2 ranks. Forecast cost: mean Spearman against real points from then on moves -0.009 to
+  +0.002 per season (2022 worst). A trade is seen only after the player's first game for his new team (no
+  stored source is point-in-time before it), so a teammate_left pull comes a week late.
+  A player a shock lifts by at least 1 chart point gets a **hype star** next to his name wherever player
+  rows show, with the public reason ("Hype: role jumped after Puka Nacua went out for the season", "... he
+  won the backfield").
 - **Injury news:** a player who is out carries a report of when he is due back (`services/replay_news.py`).
   It is built from the week he really returned, blurred by seeded noise (off by up to two weeks, a few
   false "out for the season" calls, season-ending injuries first reported as a return weeks out) that
@@ -1002,7 +1011,10 @@ that week's games on; only scoring a week reads its real points.
   (`replay_cover.cpu_cover`): right away, or in the waiver phase once waivers clear. Each CPU has a hidden **persona** (balanced, panicky, shark, steady,
   gambler: `services/replay_personas.py`, assigned from the league's seed at creation) that nudges what it
   thinks a player is worth by up to 15% and how often it offers and counters; after 3 weeks a one-line
-  tendency hint is shown, never the persona. **Counters:** a CPU that turns down a deal on value alone may
+  tendency hint is shown, never the persona. Panicky and gambler CPUs are also **emotional**: they price a
+  hype move at 1.25x its calibrated size (`replay_personas.HYPE`, at most 8 chart points more), both when
+  buying and when holding; the rest stay calm. Small on purpose: Javonte Williams' week-2 jump of 15 points
+  becomes about 19 to an emotional CPU. **Counters:** a CPU that turns down a deal on value alone may
   answer with a counter offer it would take (`services/replay_counter.py`; one roll and at most one counter
   per CPU per week), shown under Offers for you;
   you can counter a CPU's offer from the trade builder (the offer is marked "countered"). The **deadline**:

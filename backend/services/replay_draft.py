@@ -87,7 +87,8 @@ def new_game(settings: Settings, seed: int, team_names: Sequence[str] | None = N
         taste = {position: 1.0 if is_user else round(float(lean[index, n]), 3)
                  for n, position in enumerate(ALL_POSITIONS)}
         teams.append(Team(index + 1, name, is_user, (), 0.0 if is_user else round(float(chaos[index]), 3), taste,
-                          persona=personas.get(index + 1, "balanced")))
+                          persona=personas.get(index + 1, "balanced"),
+                          hype=replay_personas.hype_for(personas.get(index + 1, "balanced"))))
     ids = tuple(team.id for team in teams)
     return State(phase="draft", week=0, teams=tuple(teams), draft_order=ids, picks=(), schedule=(), results=(),
                  waiver_order=(), claims=(), locked=(), lineup=None, offers=(), events=(), traded={})

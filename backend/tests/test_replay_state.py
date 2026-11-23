@@ -376,6 +376,7 @@ def test_a_league_saved_before_personas_and_counters_loads_with_their_defaults()
     saved = json.loads(rs.to_json(make_state()))
     for team in saved["teams"]:
         team.pop("persona")
+        team.pop("hype")
     for offer in saved["offers"]:
         offer.pop("counter_to")
 
@@ -383,6 +384,13 @@ def test_a_league_saved_before_personas_and_counters_loads_with_their_defaults()
 
     assert restored == make_state()
     assert all(t.persona == "balanced" for t in restored.teams) and restored.offers[0].counter_to is None
+    assert all(t.hype == 1.0 for t in restored.teams)                     # no emotion saved: calm
+
+
+def test_a_cpus_hype_round_trips():
+    state = rs.with_team(make_state(), replace(rs.team(make_state(), 2), persona="gambler", hype=1.25))
+
+    assert rs.team(rs.state_from_json(rs.to_json(state)), 2).hype == 1.25
 
 
 def test_held_and_rostered_include_ir_players():

@@ -3,7 +3,7 @@ shared shapes (PlayerRow, Usage, DefenseRating ...) are documented at the top of
 same no-hindsight rule holds (`Game.data` and `Game.know_at` only).
 
 GET  .../players?position=&search=&status=&sort=&dir=&stats=&stat_week=&limit=&offset=
-      Page of WireRow + {week, stats, stat_week}
+      Page of WireRow + {week, stats, stat_week}      (player.hype: the PlayerRef hype star, as of the current week)
       WireRow = PlayerRow + {status: rostered | waivers | free_agent, owner: TeamRef | null, season_points,
                 last_points, usage: Usage | null, line: StatLine}
                 season_points / last_points: real points in weeks already played

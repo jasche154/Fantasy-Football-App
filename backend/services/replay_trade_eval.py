@@ -26,7 +26,7 @@ from types import MappingProxyType
 import numpy as np
 
 from services import replay_state as rs, replay_trade_value as tv, replay_trades as rt, replay_values as rv
-from services.replay_personas import PERSONAS
+from services.replay_personas import PERSONAS, hype_for
 from services.replay_pool import ALL_POSITIONS, SKILL, Injury, PoolPlayer, SeasonData
 from services.replay_state import Pick, Settings, State, Team
 from services.schedule_strength import Game, Schedule
@@ -221,7 +221,7 @@ def _tally(state: State, settings: Settings, know: rv.Knowledge, cpu: Team, give
     own_cuts = tuple(pid for pid in verdict.their_drops if pid not in gets)
     per_week = verdict.their_gain / max(1e-9, sum(rv.horizon(know, settings).weights.values()))
     return tv.tally(know, cpu.persona, gives, kept, own_cuts, per_week,
-                    rt.needed_multiple(settings, rs.user_team(state)), True)
+                    rt.needed_multiple(settings, rs.user_team(state)), True, cpu.hype)
 
 
 def judge(data: SeasonData, case: dict, seed: int, personas=PERSONAS) -> list[Result]:
@@ -238,7 +238,7 @@ def judge(data: SeasonData, case: dict, seed: int, personas=PERSONAS) -> list[Re
                    for pid in (*gives, *gets))
     out = []
     for persona in personas:
-        cpu = replace(rs.team(state, cpu_id), persona=persona)
+        cpu = replace(rs.team(state, cpu_id), persona=persona, hype=hype_for(persona))
         trial = rs.with_team(state, cpu)
         verdict = rt.evaluate(trial, settings, know, USER, cpu_id, gets, gives, drops)
         out.append(Result(case["id"], case["label"], seed, persona, verdict.accepted, verdict.score,

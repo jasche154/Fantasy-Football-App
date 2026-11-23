@@ -317,6 +317,9 @@ def _shocked(data: SeasonData, rows: Mapping[int, dict], fields: Mapping[int, di
         now = news.get(pid, fields[pid])
         moved = max(0.0, now["healthy_chart"] + delta)
         chart = now["chart"] * moved / now["healthy_chart"] if now["healthy_chart"] > 0 else moved * availability[pid]
+        other = data.players[shock.other].name if shock.other in data.players else None
+        missed = 1.0 - availability.get(shock.other, 1.0)
+        hype = replay_shocks.reason(shock, other, missed) if delta >= replay_shocks.STAR_MIN else None
         out[pid] = {**now, "healthy_chart": round(moved, 1), "chart": round(chart, 1),
-                    "shock_chart": round(delta, 1), "shock": shock.kind}
+                    "shock_chart": round(delta, 1), "shock": shock.kind, "hype_reason": hype}
     return out

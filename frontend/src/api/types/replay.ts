@@ -48,6 +48,13 @@ export interface ReplayPlayerRef {
   team: string | null;
   /** His tag in the current week (a row built for another week: that week's); always null in the draft room. */
   injury: ReplayInjury | null;
+  /** The trade market is hyping him (an opportunity shock lifted his value that week); null otherwise. */
+  hype: ReplayHype | null;
+}
+
+/** reason: public words for why his role jumped, e.g. "Puka Nacua went out for the season", "he won the backfield". */
+export interface ReplayHype {
+  reason: string;
 }
 
 /** One game's (or a sum or average of games') box score; K/DST have none. Whole numbers, averages 1 decimal. */

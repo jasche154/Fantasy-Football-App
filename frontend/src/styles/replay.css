@@ -12,6 +12,8 @@
 .replay-player__name { padding: 0; border: 0; background: none; font: inherit; font-weight: 650; color: var(--color-text); text-align: start; }
 button.replay-player__name { cursor: pointer; }
 button.replay-player__name:hover { color: var(--color-accent); text-decoration: underline; }
+/* The hype star: an opportunity shock lifted his trade value (the label says why). */
+.replay-hype { margin-inline-start: calc(-1 * var(--space-1)); color: var(--color-warn); font-size: var(--text-xs); line-height: 1; cursor: help; }
 
 /* Segmented controls with many options wrap instead of pushing the page wide. */
 .replay-segmented { flex-wrap: wrap; }

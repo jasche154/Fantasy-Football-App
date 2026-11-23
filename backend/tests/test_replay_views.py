@@ -26,7 +26,7 @@ PLAYER_ROW = {"player", "opponent", "bye", "out", "projection", "points", "ros_p
 WIRE_ROW = PLAYER_ROW | {"status", "owner", "season_points", "last_points", "usage", "line"}
 SIDE = {"team_id", "name", "is_user", "tendency", "projected", "points", "record"}
 RECORD = {"wins", "losses", "ties", "rank", "points_for", "points_against", "place"}
-PLAYER_REF = {"id", "name", "position", "team", "injury"}
+PLAYER_REF = {"id", "name", "position", "team", "injury", "hype"}
 SUMMARY = {"id", "name", "season", "phase", "week", "end_week", "user_team_id", "settings", "teams", "on_the_clock",
            "next_action", "record", "matchup", "pending", "champion", "updated_at", "ir_blocked", "has_injuries",
            "trades_open", "rank_source"}

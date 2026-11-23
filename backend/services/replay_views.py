@@ -13,8 +13,12 @@ Shared pieces
       tendency      a one-line hint at how a CPU trades, from its hidden persona; null for the user and
                     before 3 weeks are played (the persona's name is never shown)
   Injury     {tag: Q | D | O | IR | PUP | SUS, practice: DNP | LP | FP | null, injury: string | null}
-  PlayerRef  {id, name, position, team, injury: Injury | null}
+  PlayerRef  {id, name, position, team, injury: Injury | null, hype: {reason} | null}
       team          his NFL team as known before the week shown, or null
+      hype          the trade market is hyping him: an opportunity shock (services/replay_shocks.py) lifted his
+                    value this week (same week as `injury`). reason: public words for why, e.g. "Puka Nacua went
+                    out for the season", "he won the backfield" (the UI shows "role jumped after <reason>").
+                    Null otherwise, for a move down, and always in the draft room.
       injury        his tag in the CURRENT week, wherever the ref appears (events, offers, verdicts, claims). Only a
                     PlayerRow built for another week (team / matchup with ?week=) carries that week's tag. Always null
                     in the draft room. O, IR, PUP and SUS mean he does not play; O, IR and PUP may go on IR.
@@ -225,7 +229,8 @@ def team_ref(game: Game, team: Team) -> dict:
 def player_ref(value: ReplayValue) -> dict:
     tag = value.injury
     return {"id": value.player_id, "name": value.name, "position": value.position, "team": value.team,
-            "injury": {"tag": tag.tag, "practice": tag.practice, "injury": tag.injury} if tag else None}
+            "injury": {"tag": tag.tag, "practice": tag.practice, "injury": tag.injury} if tag else None,
+            "hype": {"reason": value.hype_reason} if value.hype_reason else None}
 
 
 def refs(game: Game, player_ids: Sequence[int]) -> list[dict]:

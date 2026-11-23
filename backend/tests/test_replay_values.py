@@ -710,8 +710,8 @@ NEWS_FIELDS = {"news": None, "availability": 0, "expected_missed": 0, "chart": 0
                "trade_value": 0, "rank": 0, "pos_rank": ""}
 
 
-SHOCK_FIELDS = {"chart": 0, "healthy_chart": 0, "trade_value": 0, "shock_chart": 0, "shock": None, "rank": 0,
-                "pos_rank": ""}
+SHOCK_FIELDS = {"chart": 0, "healthy_chart": 0, "trade_value": 0, "shock_chart": 0, "shock": None, "hype_reason": None,
+                "rank": 0, "pos_rank": ""}
 
 
 def hard_tagged(data, week: int) -> set[int]:

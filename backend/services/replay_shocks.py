@@ -17,8 +17,9 @@ f = 1 - (W - week) / FADE_WEEKS fades the hype; his own injury discount still ap
   misses (his news report when there is one: "out for the season" counts fully), at least MIN_MISSED.
 - teammate_left: such a teammate played for another team (a trade or a signing; seen after his first game
   there); m = 1.
-- starter_back: such a teammate back after MIN_ABSENCE+ weeks out: the one who stood in moves back toward
-  his rank before the absence.
+- starter_back: such a teammate back after MIN_ABSENCE+ weeks out with an injury tag (an untagged absence is a
+  scratch, a trade or a release: Cam Akers' 2023 "return" was his first game for Minnesota): the one who
+  stood in moves back toward his rank before the absence.
 - role_won / role_lost (weeks ROLE_WEEKS): his share of his team's opportunities (RB carries + targets
   among its backs; WR/TE target share) at least ROLE_MARGIN above or below the share his preseason rank
   implies (SHARE_FIT); toward = the rank that implies the share he got. A loser needs a winning teammate.
@@ -48,14 +49,15 @@ ROLE_MARGIN = {"RB": 0.15, "WR": 0.07, "TE": 0.07}       # share above / below w
 SHARE_FIT = {"RB": (1.071, -0.192), "WR": (0.36, -0.049), "TE": (0.26, -0.048)}
 MAX_RANK = 150.0
 UNLISTED_GAP = 10              # missing from a snapshot: last listed + this
+STAR_MIN = 1.0                 # healthy-chart points a shock must add before views star him as hype (`reason`)
 RECENT_WEEKS = 3               # tie-break between unlisted teammates: mean projection over these weeks
 # the share of the log gap to `toward` the market moved beyond the chart, fitted on 2018-25 (replay_shock_eval)
 GAMMA = {
     ("teammate_out", "RB"): 0.15, ("teammate_out", "WR"): 0.01, ("teammate_out", "TE"): 0.09,
-    ("teammate_left", "RB"): 0.13, ("teammate_left", "WR"): 0.32, ("teammate_left", "TE"): 0.17,
-    ("starter_back", "RB"): 0.38, ("starter_back", "WR"): 0.2, ("starter_back", "TE"): 0.31,
+    ("teammate_left", "RB"): 0.17, ("teammate_left", "WR"): 0.17, ("teammate_left", "TE"): 0.17,
+    ("starter_back", "RB"): 0.48, ("starter_back", "WR"): 0.2, ("starter_back", "TE"): 0.36,
     ("role_won", "RB"): 0.02, ("role_won", "WR"): 0.05, ("role_won", "TE"): 0.05,
-    ("role_lost", "RB"): 0.0, ("role_lost", "WR"): 0.0, ("role_lost", "TE"): 0.22,
+    ("role_lost", "RB"): 0.0, ("role_lost", "WR"): 0.0, ("role_lost", "TE"): 0.01,
 }
 
 
@@ -193,7 +195,8 @@ def _starter_back(data: SeasonData, week: int) -> list[Shock]:
             since = absence(data, back, last) if last else None
             gap = sum(bool(_absent(data, back, w)) for w in range(since, returned)) if since else 0
             team = data.team_at(back, returned)
-            pick = _next_in_line(data, back, team, since) if since and since >= 2 and gap >= MIN_ABSENCE and team else None
+            hurt = since is not None and any(data.injuries.get((back, w)) for w in range(since, returned))
+            pick = _next_in_line(data, back, team, since) if hurt and since >= 2 and gap >= MIN_ABSENCE and team else None
             if pick:
                 pid, old = pick
                 now = market_ranks(data, returned).get(pid, old[pid])
@@ -309,3 +312,16 @@ def moves(data: SeasonData, week: int, availability: Mapping[int, float], health
         if delta != 0 and abs(delta) > abs(best.get(pid, (0.0,))[0]):
             best[pid] = (delta, shock)
     return best
+
+
+def reason(shock: Shock, other: str | None, missed: float) -> str | None:
+    """Public words for why his role jumped (the views' hype star): `other` the teammate's name, `missed` the
+    share of the remaining games that teammate misses; None for a move down."""
+    who = other or "a teammate"
+    if not shock.up:
+        return None
+    if shock.kind == "teammate_out":
+        return f"{who} went out" + (" for the season" if missed >= 1.0 else "")
+    if shock.kind == "teammate_left":
+        return f"{who} left the team"
+    return "he won the backfield" if shock.position == "RB" else "he won a bigger target share"

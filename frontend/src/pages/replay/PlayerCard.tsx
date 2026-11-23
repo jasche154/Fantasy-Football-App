@@ -4,7 +4,7 @@ import { formatNumber } from '../../lib/format';
 import { ADVANCED_POSITIONS, PlayerAdvanced } from './PlayerAdvanced';
 import { PlayerGameLog } from './PlayerGameLog';
 import { PlayerUpcoming } from './PlayerUpcoming';
-import { formatPoints, injuryLabel, ReplayInjuryBadge, ReplayPositionChip, showsOut } from './shared';
+import { formatPoints, hypeLabel, injuryLabel, ReplayHypeStar, ReplayInjuryBadge, ReplayPositionChip, showsOut } from './shared';
 
 function statusText(player: ReplayWireRow): string {
   if (player.owner) return player.owner.is_user ? 'On your team' : `Rostered by ${player.owner.name}`;
@@ -17,12 +17,14 @@ function Header({ row }: { row: ReplayWireRow }) {
     <header className="replay-card__head">
       <p className="replay-drawer__status">
         <ReplayPositionChip position={row.player.position} /> {row.player.team ?? 'No team'} · {row.pos_rank} · {statusText(row)}
+        {row.player.hype && <> <ReplayHypeStar player={row.player} /></>}
         {injury && <> <ReplayInjuryBadge injury={injury} /></>}
         {showsOut(row.out, injury) && <span className="status-badge status-badge--out replay-drawer__badge">Out</span>}
         {row.trade_locked && <span className="status-badge status-badge--missing replay-drawer__badge">Trade-locked</span>}
       </p>
       {/* Hover isn't there on touch or for the keyboard: the full label in plain text. */}
       {injury && <p className="replay-card__injury">{injuryLabel(injury)}</p>}
+      {row.player.hype && <p className="replay-card__injury" aria-hidden="true">{hypeLabel(row.player)}</p>}
       {row.news && <p className="replay-card__news">{row.news.text}</p>}
     </header>
   );
