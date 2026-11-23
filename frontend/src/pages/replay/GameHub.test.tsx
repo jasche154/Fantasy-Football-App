@@ -314,3 +314,21 @@ describe('GameHub player drawer', () => {
     expect(screen.getByRole('button', { name: 'Open Mostert' })).toHaveFocus();
   });
 });
+
+describe('GameHub simulated badge', () => {
+  it('marks a live league with the week its simulation starts, a future league as simulated, and a replay not at all', async () => {
+    renderHub(summary({ season: 2026, kind: 'live', sim_from: 10, start_week: 10, week: 10 }));
+    expect(await screen.findByText('2026 · simulated from week 10')).toHaveClass('game-sim-badge');
+  });
+
+  it('marks a future league as a simulated season', async () => {
+    renderHub(summary({ season: 2027, kind: 'future', sim_from: 1 }));
+    expect(await screen.findByText('2027 · simulated season')).toBeInTheDocument();
+  });
+
+  it('shows no badge on a real replay', async () => {
+    renderHub(summary());
+    await screen.findByRole('heading', { level: 1, name: 'Sunday Replay' });
+    expect(screen.queryByText(/simulated/)).not.toBeInTheDocument();
+  });
+});

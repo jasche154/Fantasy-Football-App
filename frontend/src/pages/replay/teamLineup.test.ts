@@ -12,6 +12,11 @@ describe('lineup helpers', () => {
     expect(weekOptions(3)).toEqual([{ value: 1, label: 'Week 1' }, { value: 2, label: 'Week 2' }, { value: 3, label: 'Week 3' }]);
   });
 
+  it('never offers a week before a league that jumped in began', () => {
+    expect(weekOptions(11, 10)).toEqual([{ value: 10, label: 'Week 10' }, { value: 11, label: 'Week 11' }]);
+    expect(weekOptions(10, 10)).toEqual([{ value: 10, label: 'Week 10' }]);
+  });
+
   it('knows which positions a slot takes', () => {
     expect(['RB', 'WR', 'TE', 'QB', 'K', 'DST'].map((position) => slotAccepts('FLEX', position as 'RB'))).toEqual([true, true, true, false, false, false]);
     expect([slotAccepts('BN', 'DST'), slotAccepts('QB', 'QB'), slotAccepts('K', 'DST')]).toEqual([true, true, false]);

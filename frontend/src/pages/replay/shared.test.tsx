@@ -199,3 +199,17 @@ describe('the game screen', () => {
     expect(screen.getByRole('dialog', { name: 'Raheem Mostert' })).not.toHaveClass('replay-drawer--wide');
   });
 });
+
+describe('buzz chip', () => {
+  it('shows a quiet Buzz chip with the rumor as its accessible name and tooltip, and nothing without one', () => {
+    const { unmount } = render(<ReplayPlayerCell player={MOSTERT} info={{ buzz: 'Named the starter' }} />);
+    const chip = screen.getByRole('img', { name: 'Rumor: Named the starter' });
+    expect(chip).toHaveAttribute('title', 'Rumor: Named the starter');
+    expect(chip).toHaveClass('replay-buzz');
+    expect(chip).toHaveTextContent('Buzz');
+    expect(chip).not.toHaveClass('status-badge--out');
+    unmount();
+    render(<ReplayPlayerCell player={MOSTERT} info={{ buzz: null }} />);
+    expect(screen.queryByText('Buzz')).not.toBeInTheDocument();
+  });
+});

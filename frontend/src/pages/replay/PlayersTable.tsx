@@ -136,7 +136,7 @@ export function PlayersTable({ game, week, rows, columns, sort, onSort, claimedI
               <Fragment key={row.player.id}>
                 <tr className={row.owner?.is_user ? 'row--mine' : undefined}>
                   <td className="td--player replay-players__pin-start">
-                    <ReplayPlayerCell player={row.player} info={{ out: row.out, trade_locked: row.trade_locked }} onOpen={openPlayer} />
+                    <ReplayPlayerCell player={row.player} info={{ out: row.out, trade_locked: row.trade_locked, buzz: row.buzz }} onOpen={openPlayer} />
                     {row.news && <p className="hint">{row.news.text}</p>}
                   </td>
                   <td><StatusCell row={row} /></td>

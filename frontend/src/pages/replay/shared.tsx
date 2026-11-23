@@ -17,12 +17,13 @@
  *   openPlayer  opens the hub's player drawer for a player id
  * POSTs that answer something else (evaluateReplayTrade) are called directly, not through `act`.
  *
- * Pieces: ReplayPlayerCell, ReplayHypeStar (+ hypeLabel), ReplayInjuryBadge (+ isHardTag, canGoOnIr, injuryLabel), ReplayIrBlockedNotice, ReplayPositionChip, PositionTabs (+ positionParam), TeamSelect, ConfirmButton,
+ * Pieces: ReplayPlayerCell, ReplayHypeStar (+ hypeLabel), ReplayBuzzChip (+ buzzLabel), ReplayInjuryBadge (+ isHardTag, canGoOnIr, injuryLabel), ReplayIrBlockedNotice, ReplayPositionChip, PositionTabs (+ positionParam), TeamSelect, ConfirmButton,
  * useKeyedAct (act with a pending state and a refusal per button), ReplayDrawer (the dialog frame, in ReplayDrawer.tsx),
  * EventList (+ groupEvents), formatPoints, formatRecord, ordinal, viewHash, REPLAY_VIEWS.
  */
 import { useState } from 'react';
 import { errorMessage } from '../../api/client';
+import { Icon } from '../../components/Icon';
 import type {
   ReplayActionResult,
   ReplayEvent,
@@ -96,7 +97,7 @@ export function ReplayPositionChip({ position }: { position: ReplayPosition }) {
 }
 
 /** The week facts shown next to a name; any PlayerRow (roster, wire, claim) can be passed as is. */
-export type ReplayPlayerInfo = Partial<Pick<ReplayPlayerRow, 'opponent' | 'bye' | 'out' | 'trade_locked'>>;
+export type ReplayPlayerInfo = Partial<Pick<ReplayPlayerRow, 'opponent' | 'bye' | 'out' | 'trade_locked' | 'buzz'>>;
 
 interface ReplayPlayerCellProps {
   player: ReplayPlayerRef;
@@ -153,6 +154,23 @@ export function ReplayHypeStar({ player }: { player: ReplayPlayerRef }) {
   );
 }
 
+/** "Rumor: Beat reporters say his role is growing; expect more work." */
+export function buzzLabel(text: string): string {
+  return `Rumor: ${text}`;
+}
+
+/** A small "Buzz" chip for a simulated season's news line about his role; the line on hover and for screen readers.
+ * Quiet on purpose: it is a rumor, not an injury or a fact. */
+export function ReplayBuzzChip({ text }: { text: string | null | undefined }) {
+  if (!text) return null;
+  const label = buzzLabel(text);
+  return (
+    <span className="replay-buzz" role="img" aria-label={label} title={label}>
+      <Icon name="news" size={12} /><span aria-hidden="true">Buzz</span>
+    </span>
+  );
+}
+
 /** The plain Out badge, unless a hard tag already says so. */
 export function showsOut(out: boolean | undefined, injury: ReplayInjury | null | undefined): boolean {
   return !!out && !isHardTag(injury);
@@ -190,6 +208,7 @@ export function ReplayPlayerCell({ player, info = {}, onOpen }: ReplayPlayerCell
         {info.bye && <span className="status-badge status-badge--missing">Bye</span>}
         {player.injury && <ReplayInjuryBadge injury={player.injury} />}
         {showsOut(info.out, player.injury) && <span className="status-badge status-badge--out">Out</span>}
+        <ReplayBuzzChip text={info.buzz} />
         {info.trade_locked && (
           <span className="status-badge status-badge--missing" title="Traded in the last two weeks, so he can't be traded yet">Trade-locked</span>
         )}

@@ -15,6 +15,13 @@ import { scoringLabel } from '../../state/leagueSettings';
 import { SetupForm } from './SetupForm';
 import { ConfirmButton } from './shared';
 
+/** "Live 2026" or "Simulated" next to a simulated league's name; nothing for a real replay. */
+function KindChip({ game }: { game: ReplayGameListing }) {
+  if (game.kind === 'replay') return null;
+  // The space keeps the name and the chip two words for screen readers.
+  return <>{' '}<span className="replay-kind-chip">{game.kind === 'live' ? `Live ${game.season}` : 'Simulated'}</span></>;
+}
+
 function statusText(game: ReplayGameListing): string {
   if (game.phase === 'draft') return 'Drafting';
   if (game.phase === 'complete') return 'Season complete';
@@ -45,7 +52,7 @@ function SavedGames({ games, isDeleting, onDelete }: SavedGamesProps) {
           {games.map((game) => (
             <tr key={game.id}>
               <th scope="row" className="td--player">
-                {game.name}
+                {game.name}<KindChip game={game} />
                 <span className="replay-saved__meta">{game.teams} teams · {scoringLabel(game.scoring)}</span>
               </th>
               <td className="num">{game.season}</td>
@@ -89,7 +96,7 @@ export function ReplayHome() {
   return (
     <>
       <PageHeader title="Replay League"
-        subtitle="Draft against CPU managers in a past NFL season, then play it out week by week with the real results." />
+        subtitle="Draft against CPU managers in a past NFL season and play it out week by week with the real results, or in a simulated one." />
       <Card title="Your leagues">
         {remove.status === 'error' && <p className="error-text" role="alert">{errorMessage(remove.error)}</p>}
         <p ref={noticeRef} tabIndex={-1} role="status" className="success-text replay-notice">{deleted && `Deleted ${deleted.name}.`}</p>

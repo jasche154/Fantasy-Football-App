@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import type { ReplayPlayerDetail, ReplayPlayerWeek, ReplayPosition, ReplayWireRow } from '../../api/types';
 import { Tabs } from '../../components/Tabs';
 import { formatNumber } from '../../lib/format';
@@ -45,10 +46,34 @@ function Tiles({ row }: { row: ReplayWireRow }) {
   );
 }
 
+/** A simulated season's news lines about his role, newest first: rumors, worded as such (never an injury). */
+function Buzz({ buzz }: { buzz: ReplayPlayerDetail['buzz'] }) {
+  const headingId = useId();
+  if (buzz.length === 0) return null;
+  return (
+    <section className="replay-card__section" aria-labelledby={headingId}>
+      <h3 id={headingId} className="game-subhead replay-card__subhead">News</h3>
+      <ul className="replay-card__buzz">
+        {buzz.map((line) => (
+          <li key={line.week}><span className="replay-card__buzz-week">Week {line.week}</span> {line.text}</li>
+        ))}
+      </ul>
+      <p className="hint">Rumors from around the league, heard before that week's games. They are right only some of the time.</p>
+    </section>
+  );
+}
+
+interface WeeksTabsProps {
+  name: string;
+  position: ReplayPosition;
+  weeks: readonly ReplayPlayerWeek[];
+  simFrom: number | null;
+}
+
 /** Game log, plus an Advanced tab (usage and efficiency) for skill players; K and DST get the game log alone. */
-function WeeksTabs({ name, position, weeks }: { name: string; position: ReplayPosition; weeks: readonly ReplayPlayerWeek[] }) {
-  if (!ADVANCED_POSITIONS.includes(position)) return <PlayerGameLog name={name} position={position} weeks={weeks} />;
-  const log = <PlayerGameLog name={name} position={position} weeks={weeks} hasHeading={false} />;
+function WeeksTabs({ name, position, weeks, simFrom }: WeeksTabsProps) {
+  if (!ADVANCED_POSITIONS.includes(position)) return <PlayerGameLog name={name} position={position} weeks={weeks} simFrom={simFrom} />;
+  const log = <PlayerGameLog name={name} position={position} weeks={weeks} hasHeading={false} simFrom={simFrom} />;
   return (
     <Tabs label={`${name} stats`} className="replay-adv__tabs" tabs={[
       { id: 'log', label: 'Game log', panel: log },
@@ -57,19 +82,26 @@ function WeeksTabs({ name, position, weeks }: { name: string; position: ReplayPo
   );
 }
 
-/** The player card: who he is and his news, five season numbers, his game log (and advanced stats) and the weeks ahead. */
-export function PlayerCard({ detail }: { detail: ReplayPlayerDetail }) {
+interface PlayerCardProps {
+  detail: ReplayPlayerDetail;
+  /** The league's first simulated week (Summary.sim_from): its weeks from there on are marked Sim. */
+  simFrom?: number | null;
+}
+
+/** The player card: who he is and his news, five season numbers, rumors, his game log (and advanced stats) and the weeks ahead. */
+export function PlayerCard({ detail, simFrom = null }: PlayerCardProps) {
   const { player: row, weeks, upcoming, defense_basis: basis } = detail;
   const { name, position } = row.player;
   return (
     <div className="replay-card">
       <Header row={row} />
       <Tiles row={row} />
+      <Buzz buzz={detail.buzz} />
       {/* During the draft there are no weeks yet. */}
       {weeks.length === 0
         ? <p className="hint">The season has not started: these are his preseason numbers.</p>
-        : <WeeksTabs name={name} position={position} weeks={weeks} />}
-      <PlayerUpcoming name={name} position={position} upcoming={upcoming} basis={basis} />
+        : <WeeksTabs name={name} position={position} weeks={weeks} simFrom={simFrom} />}
+      <PlayerUpcoming name={name} position={position} upcoming={upcoming} basis={basis} simFrom={simFrom} />
     </div>
   );
 }

@@ -12,10 +12,33 @@ export function opponentText(opponent: string | null, away: boolean, bye: boolea
   return away ? `@ ${opponent}` : opponent;
 }
 
-function WeekRow({ week, position, box }: { week: ReplayPlayerWeek; position: ReplayPosition; box: readonly BoxColumn[] }) {
+/** A simulated league's NFL weeks from `simFrom` on are simulated, not the real season. */
+export function isSimWeek(week: number, simFrom: number | null | undefined): boolean {
+  return simFrom != null && week >= simFrom;
+}
+
+/** The quiet "Sim" marker after a simulated week's number (not colour alone: a word, and words for screen readers). */
+export function SimWeekMark() {
+  return <span className="replay-sim-mark" title="Simulated week"><span aria-hidden="true">Sim</span><span className="sr-only"> (simulated)</span></span>;
+}
+
+/** The legend under a table with Sim weeks; null when no week shown is simulated. */
+export function SimLegend({ weeks, simFrom }: { weeks: readonly { week: number }[]; simFrom: number | null | undefined }) {
+  if (!weeks.some((row) => isSimWeek(row.week, simFrom))) return null;
+  return <p className="hint">Sim marks a simulated week: from week {simFrom} on, this season is simulated, not the real NFL results.</p>;
+}
+
+interface WeekRowProps {
+  week: ReplayPlayerWeek;
+  position: ReplayPosition;
+  box: readonly BoxColumn[];
+  simFrom?: number | null;
+}
+
+function WeekRow({ week, position, box, simFrom }: WeekRowProps) {
   return (
     <tr>
-      <th scope="row" className="num">{week.week}</th>
+      <th scope="row" className="num">{week.week}{isSimWeek(week.week, simFrom) && <> <SimWeekMark /></>}</th>
       <td className="replay-card__opp">
         {opponentText(week.opponent, week.away, week.bye)}
         {week.injury && <> <ReplayInjuryBadge injury={week.injury} /></>}
@@ -37,10 +60,12 @@ interface PlayerGameLogProps {
   weeks: readonly ReplayPlayerWeek[];
   /** False inside the card's tabs: the tab already names it. */
   hasHeading?: boolean;
+  /** The league's first simulated week (Summary.sim_from): later weeks are marked Sim. */
+  simFrom?: number | null;
 }
 
 /** Weeks 1..current: the pre-game projection, the real points and his box score (played weeks only). */
-export function PlayerGameLog({ name, position, weeks, hasHeading = true }: PlayerGameLogProps) {
+export function PlayerGameLog({ name, position, weeks, hasHeading = true, simFrom = null }: PlayerGameLogProps) {
   const headingId = useId();
   const box = boxColumns(position);
   return (
@@ -58,10 +83,11 @@ export function PlayerGameLog({ name, position, weeks, hasHeading = true }: Play
               {box.map(({ key, label, title }) => <th key={key} scope="col" className="num"><abbr title={title}>{label}</abbr></th>)}
             </tr>
           </thead>
-          <tbody>{weeks.map((week) => <WeekRow key={week.week} week={week} position={position} box={box} />)}</tbody>
+          <tbody>{weeks.map((week) => <WeekRow key={week.week} week={week} position={position} box={box} simFrom={simFrom} />)}</tbody>
         </table>
       </div>
       <p className="hint">Proj is the pre-game projection. Pts and the box score show played weeks only; a dash means he did not play.</p>
+      <SimLegend weeks={weeks} simFrom={simFrom} />
     </section>
   );
 }

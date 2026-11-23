@@ -247,3 +247,18 @@ body:has(.game) { background: var(--game-bg); }
   .game-view, .game .news-panel { animation: none; }
   .scorebug__exit, .game-nav__tab { transition: none; }
 }
+
+/* ---------- Simulated seasons (live / future leagues) and buzz ----------
+   One block on purpose: the badge, the Sim week marker and the buzz rumours. Quiet, never the injury red or the hype
+   amber: a word or icon always carries the meaning, the colour never does alone. */
+.game-sim-badge { justify-self: start; display: inline-block; max-width: 100%; margin: 3px 0 0; padding: 1px var(--space-2);
+  overflow: hidden; border: 1px solid var(--game-line-strong); border-radius: var(--radius-pill); color: var(--game-ink);
+  font-size: var(--text-2xs); font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.replay-sim-mark { color: var(--game-ink-dim, var(--color-text-muted)); font-size: var(--text-2xs); font-weight: 700;
+  letter-spacing: 0.04em; text-transform: uppercase; cursor: help; }
+.replay-buzz { display: inline-flex; align-items: center; gap: 3px; padding: 0 6px; border: 1px dashed var(--game-line-strong, var(--color-border-strong));
+  border-radius: var(--radius-pill); color: var(--game-ink-dim, var(--color-text-muted)); font-size: var(--text-2xs); font-weight: 650;
+  line-height: 1.5; cursor: help; }
+.replay-card__buzz { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; font-size: var(--text-sm); }
+.replay-card__buzz li { padding-inline-start: var(--space-3); border-inline-start: 2px dashed var(--game-line-strong, var(--color-border-strong)); }
+.replay-card__buzz-week { margin-inline-end: var(--space-1); color: var(--game-ink-dim, var(--color-text-muted)); font-size: var(--text-xs); font-weight: 700; }

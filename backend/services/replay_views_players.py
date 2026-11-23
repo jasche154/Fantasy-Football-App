@@ -34,7 +34,7 @@ GET  .../players/{player_id}      {player: WireRow, weeks: [{week, played, team,
                                    points, ros_ppg, value, rank, pos_rank, expert_rank, news, defense,
                                    injury: Injury | null, usage: Usage | null, box: BoxLine | null}],
                                    upcoming: [{week, opponent, away, bye, estimate, defense, out_expected}],
-                                   defense_basis: {weeks, prior}}
+                                   defense_basis: {weeks, prior}, buzz: [{week, text}]}
       injury: that week's tag (weeks 1..current). usage / box: that week's own game once played, else null.
       weeks from the first one he was in the pool (a late arrival has no rows before his first projection
       or game) to the current one. points: null when the week is unplayed or he did not play. away: his team
@@ -43,6 +43,8 @@ GET  .../players/{player_id}      {player: WireRow, weeks: [{week, played, team,
                     estimate = ros_ppg x the defense factor (1 decimal; factor 1 without a rating), null on a
                     bye or when out_expected (the current injury news has him out that week or for the season)
       defense_basis what the ratings rest on now: played weeks this season, and whether last season is blended
+      buzz          every news line about him known so far (dated up to the current week), newest first: the
+                    PlayerRow `buzz` rumours of a simulated season; [] in a real replay
 """
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
@@ -269,4 +271,12 @@ def player(game: Game, player_id: int) -> dict:
             "weeks": [_history_row(game, player_id, week) for week in range(1, game.state.week + 1)
                       if player_id in game.know_at(week).by_id],
             "upcoming": _upcoming(game, value),
-            "defense_basis": replay_defense.basis(game.full_season.as_of(game.know.week))}
+            "defense_basis": replay_defense.basis(game.full_season.as_of(game.know.week)),
+            "buzz": _buzz_lines(game, player_id)}
+
+
+def _buzz_lines(game: Game, player_id: int) -> list[dict]:
+    """His news lines known now (as_of drops later ones), newest first."""
+    notes = game.full_season.as_of(game.state.week).notes
+    return [{"week": week, "text": notes[(pid, week)]}
+            for pid, week in sorted(notes, key=lambda key: -key[1]) if pid == player_id]

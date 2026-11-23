@@ -121,7 +121,7 @@ export function MatchupView({ game, version, openPlayer }: ReplayViewProps) {
   return (
     <>
       <div className="weekly-controls replay-team__controls">
-        <SelectField label="Week" isInline value={week} options={weekOptions(game.week)} onChange={changeWeek} />
+        <SelectField label="Week" isInline value={week} options={weekOptions(game.week, game.start_week)} onChange={changeWeek} />
       </div>
       <section ref={faceOffRef} className="replay-matchup" tabIndex={-1} aria-label="Face-off">
         <AsyncView state={matchup} loading={<TableSkeleton rows={9} columns={4} label="Loading the matchup…" />} errorTitle="Couldn't load this matchup">

@@ -25,9 +25,10 @@ export interface LineupSpot {
   row: ReplayRosterRow | null;
 }
 
-/** Weeks 1..current for a week picker; nothing later is ever shown. */
-export function weekOptions(currentWeek: number): SelectOption[] {
-  return Array.from({ length: currentWeek }, (_, index) => ({ value: index + 1, label: `Week ${index + 1}` }));
+/** Weeks firstWeek..current for a week picker; nothing later is ever shown, nor (in a league that jumped in at
+ * Summary.start_week) a week before the league began. */
+export function weekOptions(currentWeek: number, firstWeek = 1): SelectOption[] {
+  return Array.from({ length: Math.max(0, currentWeek - firstWeek + 1) }, (_, index) => ({ value: firstWeek + index, label: `Week ${firstWeek + index}` }));
 }
 
 export function slotAccepts(slot: ReplaySlot, position: ReplayPosition): boolean {
