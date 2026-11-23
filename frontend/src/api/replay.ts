@@ -4,6 +4,7 @@ import type {
   ReplayActionResult,
   ReplayActivityQuery,
   ReplayAdvanceResult,
+  ReplayChat,
   ReplayClaimBody,
   ReplayClaims,
   ReplayCounterBody,
@@ -18,6 +19,7 @@ import type {
   ReplayLineupResult,
   ReplayMatchup,
   ReplayPage,
+  ReplayPagination,
   ReplayPlayerDetail,
   ReplayPlayers,
   ReplayPlayersQuery,
@@ -116,6 +118,11 @@ export function getReplayActivity(
   signal?: AbortSignal,
 ): Promise<ReplayPage<ReplayEvent>> {
   return apiRequest(`${game(gameId)}/activity`, { query: { ...query }, signal });
+}
+
+/** The league chat, newest first. */
+export function getReplayChat(gameId: number, query: ReplayPagination = {}, signal?: AbortSignal): Promise<ReplayPage<ReplayChat>> {
+  return apiRequest(`${game(gameId)}/chat`, { query: { ...query }, signal });
 }
 
 /** The waiver wire: the whole pool, filtered and paged. */

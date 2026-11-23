@@ -158,7 +158,8 @@ export function TradeBuilder({ game, version, roster, ir, maxPlayers, counterTo,
     actions.announce({ text: `Trade executed with ${partner}.`, isGood: true });
     if (counterTo) onCounterDone();         // the counter went through: back to a fresh builder
   };
-  const tendency = partners.find((team) => team.team_id === partnerId)?.tendency;
+  const chosen = partners.find((team) => team.team_id === partnerId);
+  const tendency = chosen?.tendency;
   const error = actions.errorFor(PROPOSE_KEY);
 
   return (
@@ -169,6 +170,7 @@ export function TradeBuilder({ game, version, roster, ir, maxPlayers, counterTo,
           onChange={(id) => change(() => { setPartnerId(id); setGet([]); })} />
       </div>
       {tendency && <p className="hint">{tendency}</p>}
+      {chosen?.mood && <p className="game-mood"><span className="game-mood__label">Mood</span> {chosen.mood}</p>}
       <div className="replay-trade__sides">
         <RosterPicker title="You give" caption="Your roster" verb="Give" rows={myRows} selected={giveIds} max={maxPlayers}
           onToggle={(id) => change(() => setGive(toggleId(giveIds, id)))} openPlayer={openPlayer} />

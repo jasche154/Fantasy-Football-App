@@ -63,6 +63,12 @@ function OfferCard({ game, version, offer, roster, isOpen, actions, openPlayer, 
       <p className="league-trade__head">
         <strong>{partner}</strong> <span className="league-trade__owner">{offer.counter_to === null ? 'offered' : 'countered with'} this in week {offer.week}</span>
       </p>
+      {offer.message && (
+        <blockquote className="game-quote" data-team={offer.from_team.team_id}>
+          <p>{offer.message}</p>
+          <footer className="sr-only">{partner}</footer>
+        </blockquote>
+      )}
       <div className="replay-trade__sides">
         <TradeSide title="You give" players={verdict?.give ?? offer.get.map((player) => ({ player }))} onOpen={openPlayer} />
         <TradeSide title="You get" players={verdict?.get ?? offer.give.map((player) => ({ player }))} onOpen={openPlayer} />

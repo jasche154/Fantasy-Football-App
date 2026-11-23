@@ -30,11 +30,11 @@ function verdict(overrides: Partial<ReplayVerdict> = {}): ReplayVerdict {
 /** Blitz Brigade offers Mostert for Etienne. */
 function offer(overrides: Partial<ReplayPendingOffer> = {}): ReplayPendingOffer {
   return { id: 61, week: 5, status: 'pending', from_team: BRIGADE, to_team: teamRef(USER_TEAM_ID), give: [MOSTERT], get: [ETIENNE],
-    verdict: verdict(), note: null, counter_to: null, ...overrides };
+    verdict: verdict(), note: null, counter_to: null, message: null, ...overrides };
 }
 
 function trades(overrides: Partial<ReplayTrades> = {}): ReplayTrades {
-  return { open: true, deadline_week: 11, max_players: 3, offers: [], results: [], ...overrides };
+  return { open: true, deadline_week: 11, max_players: 3, offers: [], results: [], shops: [], ...overrides };
 }
 
 /** GET team: the user's roster, or a CPU roster of Mostert and Collins (locked). */
@@ -59,7 +59,7 @@ async function tickBothSides(user: ReturnType<typeof userEvent.setup>) {
 describe('TradesView offers', () => {
   it('shows an offer with its values, fairness and lineup gain, and the history with a status', async () => {
     const openPlayer = vi.fn();
-    const past = { id: 50, week: 3, status: 'declined' as const, from_team: teamRef(USER_TEAM_ID), to_team: GHOSTS, give: [MCCAFFREY], get: [COLLINS], counter_to: null };
+    const past = { id: 50, week: 3, status: 'declined' as const, from_team: teamRef(USER_TEAM_ID), to_team: GHOSTS, give: [MCCAFFREY], get: [COLLINS], counter_to: null, message: null };
     const { user } = renderTrades(trades({ offers: [offer()], results: [past] }), [], { props: { openPlayer } });
 
     const card = await screen.findByRole('listitem', { name: 'Offer from Blitz Brigade' });
@@ -397,7 +397,7 @@ describe('TradesView counters', () => {
     const COUNTER_PATH = `${TRADES_PATH}/offers/61/counter`;
     const no = verdict({ accepted: false, reasons: ['Value is too far apart.'], suggestion: 'Add Nico Collins to make this fair.' });
     const back = { id: 71, week: 5, status: 'pending' as const, from_team: BRIGADE, to_team: teamRef(USER_TEAM_ID),
-      give: [MOSTERT], get: [MCCAFFREY], counter_to: 70 };
+      give: [MOSTERT], get: [MCCAFFREY], counter_to: 70, message: null };
     const other = offer({ id: 62, from_team: GHOSTS });
     const { user } = renderTrades(trades({ offers: [offer(), other] }), [
       { method: 'POST', path: EVALUATE_PATH, reply: json({ verdict: no }) },
@@ -420,7 +420,7 @@ describe('TradesView counters', () => {
   it("shows the CPU's counter after it turns a proposal down", async () => {
     const no = verdict({ accepted: false, reasons: ['Value is too far apart.'] });
     const counter = { id: 70, week: 5, status: 'pending' as const, from_team: GHOSTS, to_team: teamRef(USER_TEAM_ID),
-      give: [COLLINS], get: [ETIENNE], counter_to: 69 };
+      give: [COLLINS], get: [ETIENNE], counter_to: 69, message: null };
     const { user } = renderTrades(trades(), [
       { method: 'POST', path: EVALUATE_PATH, reply: json({ verdict: no }) },
       { method: 'POST', path: PROPOSE_PATH, reply: json({ ...actionResult(), verdict: no, executed: false, counter }) },
@@ -431,5 +431,36 @@ describe('TradesView counters', () => {
 
     const shown = (await screen.findByText('Gridiron Ghosts countered:')).closest('p');
     expect(shown).toHaveTextContent('you give Travis Etienne for Nico Collins. Answer it under Offers for you.');
+  });
+});
+
+describe('TradesView manager voices', () => {
+  it('quotes the manager above his offer', async () => {
+    renderTrades(trades({ offers: [offer({ message: 'Man, I am kinda worried about Raheem Mostert. Take him?' })] }));
+    const card = await screen.findByRole('listitem', { name: 'Offer from Blitz Brigade' });
+    expect(within(card).getByText('Man, I am kinda worried about Raheem Mostert. Take him?').closest('blockquote')).toBeInTheDocument();
+  });
+
+  it('lists the players shopped to the user, with a link that opens the builder on that manager and player', async () => {
+    const shop = { team: BRIGADE, player: MOSTERT, message: 'Selling Raheem Mostert. Make an offer.' };
+    renderTrades(trades({ shops: [shop] }));
+    const strip = await screen.findByRole('region', { name: 'Shopping to you' });
+
+    expect(within(strip).getByText('Selling Raheem Mostert. Make an offer.')).toBeInTheDocument();
+    expect(within(strip).getByRole('link', { name: /Make an offer to Blitz Brigade for Raheem Mostert/ }))
+      .toHaveAttribute('href', `#/play?game=${GAME_ID}&view=trades&with=2&want=${MOSTERT.id}`);
+    expect(within(strip).queryByText(/%/)).not.toBeInTheDocument();
+  });
+
+  it('shows the partner\'s mood in the builder', async () => {
+    const moody = { ...summary(), teams: summary().teams.map((t) => (t.team_id === 1 ? { ...t, mood: 'Worried about Nico Collins.' } : t)) };
+    renderTrades(trades(), [], { props: { game: moody } });
+    expect(await screen.findByText('Worried about Nico Collins.')).toBeInTheDocument();
+  });
+
+  it('hides the strip once trades close', async () => {
+    renderTrades(trades({ open: false, shops: [{ team: BRIGADE, player: MOSTERT, message: null }] }));
+    expect(await screen.findByText(/trade deadline has passed/)).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Shopping to you' })).not.toBeInTheDocument();
   });
 });

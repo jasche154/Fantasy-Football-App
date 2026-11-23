@@ -40,7 +40,7 @@ const TEAM_NAMES = ['Gridiron Ghosts', 'Blitz Brigade', 'End Zone Elite', 'Your 
 
 /** The league's 12 teams, team_id 1..12; team 4 is the user's. */
 export const TEAMS: ReplayTeamRef[] = TEAM_NAMES.map((name, index) => ({ team_id: index + 1, name, is_user: index + 1 === USER_TEAM_ID,
-  tendency: null }));
+  tendency: null, mood: null }));
 
 export function teamRef(teamId: number): ReplayTeamRef {
   return TEAMS[teamId - 1];
@@ -149,7 +149,7 @@ export function summary(overrides: Partial<ReplaySummary> = {}): ReplaySummary {
       opponent: side(OPPONENT_TEAM_ID, { projected: 104.75, record: record({ wins: 2, losses: 2, rank: 6 }) }),
     },
     pending: { claims: 0, offers: 0 }, champion: null, updated_at: '2026-11-20T12:00:00',
-    ir_blocked: [], has_injuries: true, trades_open: true, rank_source: 'experts',
+    ir_blocked: [], has_injuries: true, trades_open: true, rank_source: 'experts', chat: 0,
     ...overrides,
   };
 }

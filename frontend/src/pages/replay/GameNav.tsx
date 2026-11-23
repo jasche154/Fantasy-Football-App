@@ -1,5 +1,7 @@
 import type { ReplaySummary } from '../../api/types';
 import { Icon, type IconName } from '../../components/Icon';
+import { useChatUnread } from './chatSeen';
+import { UnreadDot } from './gameUi';
 import { REPLAY_VIEWS, viewHash, type ReplayView } from './shared';
 
 const ICONS: Record<ReplayView, IconName> = { team: 'team', matchup: 'stats', players: 'search', trades: 'trade', league: 'rankings' };
@@ -10,6 +12,7 @@ export function GameNav({ game, view }: { game: ReplaySummary; view: ReplayView 
     players: { count: game.pending.claims, noun: 'pending claims' },
     trades: { count: game.pending.offers, noun: 'offers to answer' },
   };
+  const hasUnread = useChatUnread(game.id, game.chat);
   return (
     <nav className="game-nav" aria-label="League sections">
       <ul className="game-nav__list">
@@ -23,6 +26,7 @@ export function GameNav({ game, view }: { game: ReplaySummary; view: ReplayView 
                 {badge && badge.count > 0 && (
                   <span className="game-nav__badge">{badge.count}<span className="sr-only"> {badge.noun}</span></span>
                 )}
+                {tab.value === 'league' && hasUnread && <UnreadDot />}
               </a>
             </li>
           );

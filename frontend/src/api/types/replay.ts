@@ -38,6 +38,8 @@ export interface ReplayTeamRef {
   is_user: boolean;
   /** A one-line hint at how a CPU trades (its persona stays hidden); null for the user and before 3 weeks. */
   tendency: string | null;
+  /** Who a CPU is down on and high on right now ("Worried about X. High on Y."); null for the user, early on or with no feelings. */
+  mood: string | null;
 }
 
 export interface ReplayPlayerRef {
@@ -373,6 +375,8 @@ export interface ReplaySummary {
   trades_open: boolean;
   /** What this week's chart values lean on: expert ranks, or the app's model when none are loaded. */
   rank_source: 'experts' | 'model';
+  /** Lines in the league chat so far (GET chat total), for the unread dot. */
+  chat: number;
 }
 
 /** What every POST under /games answers; `events` is what the action caused, oldest first. */

@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { getReplayTeam, getReplayTrades } from '../../api/replay';
-import type { ReplayOffer, ReplaySummary, ReplayTrades } from '../../api/types';
+import type { ReplayOffer, ReplayShop, ReplaySummary, ReplayTrades } from '../../api/types';
 import { AsyncView } from '../../components/AsyncView';
 import { Card } from '../../components/Card';
 import { Skeleton } from '../../components/StatusViews';
 import { useAsync } from '../../hooks/useAsync';
-import { parsePositiveInt } from '../../router/routes';
+import { buildHash, parsePositiveInt, paths } from '../../router/routes';
 import { useHashLocation } from '../../router/useHashLocation';
+import { TeamBadge } from './gameUi';
 import { TradeBuilder } from './TradeBuilder';
 import { TradeOffers } from './TradeOffers';
 import { PlayerNames, useTradeActions } from './TradeParts';
@@ -67,6 +68,32 @@ function TradeHistory({ offers, openPlayer }: { offers: readonly ReplayOffer[]; 
   );
 }
 
+/** Players worried CPU managers are shopping to the user this week, each with his message and a link that opens
+ * the builder with that manager and player picked. */
+function ShoppingStrip({ game, shops, openPlayer }: { game: ReplaySummary; shops: readonly ReplayShop[]; openPlayer: (playerId: number) => void }) {
+  if (shops.length === 0) return null;
+  return (
+    <section className="game-shops" aria-labelledby="game-shops-title">
+      <h2 id="game-shops-title" className="section-title">Shopping to you</h2>
+      <ul className="game-shops__list">
+        {shops.map((shop) => (
+          <li key={`${shop.team.team_id}-${shop.player.id}`} className="game-shops__item">
+            <p className="game-shops__who">
+              <TeamBadge team={shop.team} /> is shopping{' '}
+              <button type="button" className="replay-player__name" onClick={() => openPlayer(shop.player.id)}>{shop.player.name}</button>
+            </p>
+            {shop.message && <blockquote className="game-quote" data-team={shop.team.team_id}><p>{shop.message}</p></blockquote>}
+            <a className="btn btn--primary btn--sm game-shops__go"
+              href={buildHash(paths.play, { game: game.id, view: 'trades', with: shop.team.team_id, want: shop.player.id })}>
+              Make an offer <span className="sr-only">to {shop.team.name} for {shop.player.name}</span>
+            </a>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 /** Trades: CPU offers, the trade builder and the league's trades. */
 export function TradesView({ game, version, act, isBusy, openPlayer }: ReplayViewProps) {
   const { query } = useHashLocation();
@@ -104,13 +131,14 @@ export function TradesView({ game, version, act, isBusy, openPlayer }: ReplayVie
           return (
           <>
             {!trades.open && <p className="notice">{closedText(game, trades)}</p>}
+            {trades.open && <ShoppingStrip game={game} shops={trades.shops} openPlayer={openPlayer} />}
             <h2 className="section-title">Offers for you</h2>
             <TradeOffers game={game} version={version} offers={trades.offers} roster={mine.results} isOpen={trades.open}
               actions={actions} openPlayer={openPlayer} onCounter={(offer) => setCounteringId(offer.id)} isCountering={countering !== null} />
             {trades.open && (
               <Card title={<span ref={builderTitleRef} tabIndex={-1}>{countering ? `Counter ${countering.from_team.name}'s offer` : 'Propose a trade'}</span>}
                 eyebrow={`Open through week ${trades.deadline_week}'s waivers`}>
-                <TradeBuilder key={counteringId ?? 'new'} game={game} version={version} roster={mine.results} ir={mine.ir}
+                <TradeBuilder key={counteringId ?? `new-${query.with ?? ''}-${query.want ?? ''}`} game={game} version={version} roster={mine.results} ir={mine.ir}
                   maxPlayers={trades.max_players} counterTo={countering} onCounterDone={() => setCounteringId(null)}
                   initialPartner={parsePositiveInt(query.with)} initialWant={parsePositiveInt(query.want)}
                   actions={actions} openPlayer={openPlayer} />

@@ -108,3 +108,8 @@ export function DefenseChip({ rating, position }: DefenseChipProps) {
     </span>
   );
 }
+
+/** A small dot that says the league chat has lines the user hasn't read; screen readers hear the words. */
+export function UnreadDot() {
+  return <span className="game-unread"><span className="sr-only">(new messages)</span></span>;
+}
