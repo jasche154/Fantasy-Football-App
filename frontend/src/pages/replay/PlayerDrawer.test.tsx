@@ -32,13 +32,13 @@ describe('PlayerDrawer card', () => {
   it('logs box scores for played weeks only, with @ for away games', async () => {
     renderCard(cardDetail());
     const log = within(await screen.findByRole('table', { name: 'Raheem Mostert game log' }));
-    expect(log.getAllByRole('columnheader').map((header) => header.textContent)).toEqual(['Wk', 'Opp', 'Proj', 'Pts', 'Car', 'RuYd', 'Tgt', 'Rec', 'ReYd']);
+    expect(log.getAllByRole('columnheader').map((header) => header.textContent)).toEqual(['Wk', 'Opp', 'Proj', 'Pts', 'Car', 'RuYd', 'RuTD', 'Tgt', 'Rec', 'ReYd', 'ReTD']);
     const rows = log.getAllByRole('row');
-    expect(cellsOf(rows[1])).toEqual(['DEN', '12.50', '11.00', '15', '51', '4', '3', '21']);
+    expect(cellsOf(rows[1])).toEqual(['DEN', '12.50', '11.00', '15', '51', '1', '4', '3', '21', '0']);
     expect(cellsOf(rows[2])[0]).toBe('@ DEN');
-    expect(cellsOf(rows[3])).toEqual(['BYE', '0.00', '—', '—', '—', '—', '—', '—']);
+    expect(cellsOf(rows[3])).toEqual(['BYE', '0.00', '—', '—', '—', '—', '—', '—', '—', '—']);
     // Week 5 is still to play: its projection and matchup, no result.
-    expect(cellsOf(rows[5])).toEqual(['DENTough · 29th Tough matchup: ranks 29th of 32 in points allowed to RBs (18.4 a game).', '12.50', '—', '—', '—', '—', '—', '—']);
+    expect(cellsOf(rows[5])).toEqual(['DENTough · 29th Tough matchup: ranks 29th of 32 in points allowed to RBs (18.4 a game).', '12.50', '—', '—', '—', '—', '—', '—', '—', '—']);
     expect(within(rows[5]).getByText(/^Tough · 29th/)).toHaveClass('game-chip--tough');
   });
 

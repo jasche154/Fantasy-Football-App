@@ -30,7 +30,7 @@ SUMMARY = {"id", "name", "season", "phase", "week", "end_week", "user_team_id", 
            "next_action", "record", "matchup", "pending", "champion", "updated_at", "ir_blocked", "has_injuries",
            "trades_open", "rank_source"}
 SETTING_KEYS = {"teams", "scoring", "starters", "bench", "roster_size", "draft_slot", "waiver_mode", "difficulty",
-                "regular_season_weeks", "playoff_teams", "trade_deadline_week"}
+                "regular_season_weeks", "playoff_teams", "trade_deadline_week", "scoring_rules"}
 PAGE = {"total", "limit", "offset", "results"}
 
 
@@ -67,7 +67,7 @@ def every_view(state: rs.State, data=DATA) -> dict[str, str]:
         "teams": [views.team(shown, team.id, w) for team in state.teams for w in range(min(1, week), week + 1)],
         "matchups": [views.matchup(shown, w) for w in range(1, week + 1)],
         "scoreboards": [views.scoreboard(shown, w) for w in weeks],
-        "standings": league.standings(shown), "schedule": league.schedule(shown),
+        "standings": league.standings(shown), "playoffs": league.playoffs(shown), "schedule": league.schedule(shown),
         "activity": league.activity(shown, limit=10_000),
         "players": [league.players(shown, status="all", sort=sort, limit=10_000) for sort in league.SORTS],
         "stat_lines": [league.players(shown, status="all", sort=sort, direction=direction, stats=stats,
@@ -660,15 +660,14 @@ def test_an_ir_player_without_his_tag_blocks_the_user():
     assert still_hurt == []
 
 
-def test_an_offer_for_a_player_since_moved_to_ir_says_why_it_cannot_be_accepted():
+def test_an_offer_for_a_player_since_moved_to_ir_is_still_priced():
     state = at(3)
     mine, theirs = _swap(state, 9)
     offered = _on_ir(replay_trades.record_offer(state, 9, USER, theirs, mine, "pending"), mine[0])     # IR-26
 
     offer = league.trades(game(offered))["offers"][0]
 
-    name = rg.knowledge(state, SETTINGS, DATA, seed=SEED).by_id[mine[0]].name
-    assert (offer["verdict"], offer["note"]) == (None, f"On IR, so not tradable until activated: {name}.")
+    assert offer["verdict"] is not None and offer["note"] is None
 
 
 def test_draft_board_gives_no_round_past_the_last_round_of_the_draft():

@@ -27,6 +27,7 @@ import type {
   ReplaySchedule,
   ReplayScoreboard,
   ReplaySeasons,
+  ReplayPlayoffs,
   ReplayStandings,
   ReplaySummary,
   ReplayTeam,
@@ -98,6 +99,10 @@ export function getReplayScoreboard(gameId: number, week?: number, signal?: Abor
 
 export function getReplayStandings(gameId: number, signal?: AbortSignal): Promise<ReplayStandings> {
   return apiRequest(`${game(gameId)}/standings`, { signal });
+}
+
+export function getReplayPlayoffs(gameId: number, signal?: AbortSignal): Promise<ReplayPlayoffs> {
+  return apiRequest(`${game(gameId)}/playoffs`, { signal });
 }
 
 export function getReplaySchedule(gameId: number, teamId?: number, signal?: AbortSignal): Promise<ReplaySchedule> {

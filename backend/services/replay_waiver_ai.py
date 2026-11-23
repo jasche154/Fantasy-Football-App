@@ -146,7 +146,8 @@ def _bars(roster: Sequence[ReplayValue], ctx: _Context) -> tuple[float, dict[int
 
     The bar is the weakest starter in the newcomer's group, or 0 while one of its slots is unfilled."""
     starters = ctx.settings.starters
-    slots = {"QB": starters.get("QB", 0), "FLEX": sum(starters.get(slot, 0) for slot in ("FLEX", *rv.FLEX_POSITIONS))}
+    slots = {"QB": starters.get("QB", 0) + starters.get("SUPERFLEX", 0),     # a superflex usually starts a QB
+             "FLEX": sum(starters.get(slot, 0) for slot in ("FLEX", *rv.FLEX_POSITIONS))}
     by_id = {v.player_id: v for v in roster}
     base, bars = 0.0, {}
     for week, weight in ctx.horizon.weights.items():
@@ -295,7 +296,7 @@ def _cover(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: _Con
     # use up crowded's allowance for it (two QBs on bye and one on IR would leave the slot empty).
     bare = replace(ctx, stash=())
     for slot in idle:
-        eligible = rv.FLEX_POSITIONS if slot == "FLEX" else (slot,)
+        eligible = rv.eligible(slot)
         best = (_top(v for v in free if v.position == position and v.projection > 0) for position in eligible)
         for add in sorted(filter(None, best), key=_this_week):
             own = _worst_own(roster, add)

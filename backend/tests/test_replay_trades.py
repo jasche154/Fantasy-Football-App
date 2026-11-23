@@ -311,15 +311,36 @@ def test_a_traded_player_cannot_be_traded_again_for_two_weeks():
     assert not said(week_after, "Traded in the last")
 
 
-def test_a_cpu_trades_once_a_week_but_the_user_may_deal_with_another_cpu():
+def with_trades(state: rs.State, team_id: int, count: int) -> rs.State:
+    """`count` more accepted trades this week for `team_id` (with a far-off CPU, moving nobody)."""
+    other = next(t.id for t in state.teams if t.id not in (team_id, USER))
+    made = tuple(rs.Offer(state.next_id + i, state.week, other, team_id, (), (), "accepted") for i in range(count))
+    return replace(state, offers=(*state.offers, *made), next_id=state.next_id + count)
+
+
+def test_a_cpu_makes_up_to_three_trades_a_week_but_the_user_may_deal_with_another_cpu():
     state, know = league()
-    traded, _ = rt.propose(state, SETTINGS, know, *FAIR)
+    traded, verdict = rt.propose(state, SETTINGS, know, *FAIR)
+    second = (NEEDS_RB, [RB23], [P("WR", 61)])
 
-    same_cpu = rt.evaluate(traded, SETTINGS, know, USER, NEEDS_RB, [RB23], [P("WR", 61)])
-    other_cpu = rt.evaluate(traded, SETTINGS, know, USER, DEEP_AT_WR, [RB23], [P("WR", 44)])
+    assert verdict.accepted and rs.trades_this_week(traded, NEEDS_RB) == 1
+    for already in (1, 2):
+        assert not said(rt.evaluate(with_trades(traded, NEEDS_RB, already - 1), SETTINGS, know, USER, *second),
+                        "trades this week")
+    capped = with_trades(traded, NEEDS_RB, rs.MAX_TRADES_PER_WEEK - 1)
+    same_cpu = rt.evaluate(capped, SETTINGS, know, USER, *second)
+    other_cpu = rt.evaluate(capped, SETTINGS, know, USER, DEEP_AT_WR, [RB23], [P("WR", 44)])
 
-    assert said(same_cpu, "CPU 9 has already made a trade this week.")
-    assert not said(other_cpu, "already made a trade")
+    assert said(same_cpu, "CPU 9 has already made 3 trades this week.")
+    assert not said(other_cpu, "trades this week")
+
+
+def test_the_user_has_no_weekly_trade_cap():
+    state, know = league()
+    busy = with_trades(state, USER, rs.MAX_TRADES_PER_WEEK + 2)
+
+    assert rs.trades_this_week(busy, USER) == 5
+    assert rt.propose(busy, SETTINGS, know, *FAIR)[1].accepted
 
 
 def test_trades_close_after_the_deadline_weeks_waivers():
@@ -522,7 +543,7 @@ def test_on_the_real_chart_the_star_for_two_deal_is_declined():
 
 # ---------------- the IR slot ----------------
 
-T1, B1 = "On IR, so not tradable until activated", "can't add, claim or trade for players while"
+B1 = "can't add, claim or trade for players while"
 
 
 def on_ir(state: rs.State, team_id: int, player_id: int) -> rs.State:
@@ -536,22 +557,48 @@ def hurt(week: int, *player_ids: int):
     return chart_knowledge(week, data=fakes.tagged(fakes.fake_season(), tags))
 
 
-def test_a_player_on_ir_cannot_be_traded_by_either_side():
+def test_a_player_on_ir_may_be_traded_by_either_side():
     state, know = league()
 
-    with pytest.raises(ValueError, match=f"{T1}: {know.by_id[RB14].name}."):
-        rt.evaluate(on_ir(state, USER, RB14), SETTINGS, know, USER, *FAIR)
-    with pytest.raises(ValueError, match=f"{T1}: {know.by_id[TE7].name}."):
-        rt.propose(on_ir(state, NEEDS_RB, TE7), SETTINGS, know, *FAIR)
+    for moved, player in ((on_ir(state, USER, RB14), RB14), (on_ir(state, NEEDS_RB, TE7), TE7)):
+        verdict = rt.evaluate(moved, SETTINGS, hurt(1, player), USER, *FAIR)
+        assert not any("IR" in r for r in verdict.reasons), verdict.reasons
 
 
-def test_an_offer_whose_player_went_on_ir_expires_with_t1():
-    made, know = offered()
+def test_a_traded_ir_player_takes_the_receivers_free_ir_slot_else_a_roster_spot():
+    state = on_ir(league()[0], NEEDS_RB, TE7)
+    user, cpu = rs.team(state, USER), rs.team(state, NEEDS_RB)
 
-    with pytest.raises(rt.OfferExpired, match=T1) as error:
-        rt.respond(on_ir(made, NEEDS_RB, TE7), SETTINGS, know, made.offers[0].id, accept=True)
+    assert rt._landing(user, cpu, (RB14,), (TE7,)) == (tuple(p for p in user.roster if p != RB14), (TE7,))
+    assert rt._landing(cpu, user, (TE7,), (RB14,)) == ((*cpu.roster, RB14), ())
+    full = replace(user, roster=tuple(p for p in user.roster if p != SCRUB), ir=(SCRUB,))
+    assert rt._landing(full, cpu, (RB14,), (TE7,)) == ((*(p for p in full.roster if p != RB14), TE7), (SCRUB,))
+    assert rt._landing(full, cpu, (SCRUB,), (TE7,)) == (full.roster, (TE7,))       # sending his IR player frees it
 
-    assert error.value.state.offers[0].status == "expired"
+
+def test_an_accepted_trade_moves_the_ir_player_into_the_users_ir_slot():
+    state = on_ir(league()[0], NEEDS_RB, TE7)
+    know = hurt(1, TE7)
+    verdict = rt.evaluate(state, SETTINGS, know, USER, *FAIR)
+
+    after = rt._apply(state, SETTINGS, know, USER, NEEDS_RB, (RB14,), (TE7,), verdict)
+
+    user, cpu = rs.team(after, USER), rs.team(after, NEEDS_RB)
+    assert user.ir == (TE7,) and TE7 not in user.roster and RB14 not in user.roster
+    assert cpu.ir == () and RB14 in cpu.roster
+    assert verdict.your_drops == ()                     # he came in on IR: no roster spot used
+
+
+def test_an_ir_player_arriving_with_the_ir_slot_full_needs_a_roster_spot():
+    state = on_ir(league()[0], NEEDS_RB, TE7)
+    stashed = rt.free_agents(state, league()[1])[0]
+    know = hurt(1, TE7, stashed)
+    deal = (USER, NEEDS_RB, [RB14], [TE7, P("WR", 61)])
+    full = rs.with_team(state, replace(rs.team(state, USER), ir=(stashed,)))
+
+    assert rt.evaluate(state, SETTINGS, know, *deal).your_drops == ()           # TE7 goes on the free IR slot
+    with pytest.raises(ValueError, match="over the roster limit"):
+        rt.evaluate(full, SETTINGS, know, *deal)
 
 
 def test_the_roster_limit_of_a_trade_ignores_the_ir_player():

@@ -1,7 +1,8 @@
 """Preseason ADP for past seasons (Replay League), fetched once and stored by services/replay_data.py.
 
-- Fantasy Football Calculator (FFC): 12-team PPR mock-draft ADP from the days before week 1. Free with
-  attribution ("ADP: Fantasy Football Calculator"); they ask not to be called often, so it is stored.
+- Fantasy Football Calculator (FFC): 12-team mock-draft ADP from the days before week 1, one list per format
+  (FFC_FORMATS: PPR, half-PPR, non-PPR and 2-QB, every season 2018-2025). Free with attribution ("ADP:
+  Fantasy Football Calculator"); they ask not to be called often, so it is stored.
 - MyFantasyLeague (MFL): real-draft ADP after August 15, about 300 deep. It supplies the long tail and the
   kickers and defenses FFC lacks, and its ids map to gsis ids through the DynastyProcess crosswalk.
 
@@ -29,7 +30,10 @@ USER_AGENT = "Mozilla/5.0"
 PAUSE_SECONDS = 1.0
 TIMEOUT_SECONDS = 45.0          # the biggest payloads (Sleeper, MFL players) are 1-2 MB
 ATTEMPTS = 2                    # one retry
-FFC_URL = "https://fantasyfootballcalculator.com/api/v1/adp/ppr"
+FFC_URL = "https://fantasyfootballcalculator.com/api/v1/adp/{format}"
+# replay_adp.format -> (FFC's path, the meta "type" FFC answers with). 2qb stands in for superflex.
+FFC_FORMATS = {"ppr": ("ppr", "PPR"), "half": ("half-ppr", "Half-PPR"), "std": ("standard", "Non-PPR"),
+               "2qb": ("2qb", "2 QB")}
 MFL_URL = "https://api.myfantasyleague.com/{season}/export"
 FFC, MFL = "ffc", "mfl"
 POSITIONS = {"QB": "QB", "RB": "RB", "WR": "WR", "TE": "TE", "PK": "K", "DEF": "DST"}   # FFC "DEF", MFL "Def"
@@ -120,18 +124,24 @@ def _ffc_entry(row: dict) -> AdpEntry | None:
     return AdpEntry(FFC, str(row["name"]), position, adp, _number(row.get("stdev")), team_code(row.get("team")))
 
 
-def parse_ffc(payload: Any) -> list[AdpEntry]:
-    """FFC answers HTTP 200 with status "Error", or "Success" with no players, when it has no data."""
+def parse_ffc(payload: Any, adp_format: str = "ppr") -> list[AdpEntry]:
+    """FFC answers HTTP 200 with status "Error", or "Success" with no players, when it has no data. A list of
+    another format (FFC's meta "type") is refused rather than stored under the wrong one."""
     ok = isinstance(payload, dict) and payload.get("status") == "Success" and isinstance(payload.get("players"), list)
+    meta = payload.get("meta") if isinstance(payload, dict) else None
+    kind = meta.get("type") if isinstance(meta, dict) else None
+    if ok and kind is not None and kind != FFC_FORMATS[adp_format][1]:
+        raise HistoryError("Fantasy Football Calculator returned ADP for another format.")
     entries = parse_rows("Fantasy Football Calculator ADP", payload["players"], _ffc_entry) if ok else []
     if not entries:                     # an empty list too: a forced load would replace the season with MFL alone
         raise HistoryError("Fantasy Football Calculator has no ADP for that season.")
     return sorted(entries, key=lambda e: e.adp)
 
 
-def fetch_ffc(http: HistoryClient, season: int) -> list[AdpEntry]:
-    return parse_ffc(http.get_json("Fantasy Football Calculator ADP", FFC_URL,
-                                   params={"teams": 12, "year": season}))
+def fetch_ffc(http: HistoryClient, season: int, adp_format: str = "ppr") -> list[AdpEntry]:
+    url = FFC_URL.format(format=FFC_FORMATS[adp_format][0])
+    return parse_ffc(http.get_json("Fantasy Football Calculator ADP", url, params={"teams": 12, "year": season}),
+                     adp_format)
 
 
 def _first_last(name: str) -> str:

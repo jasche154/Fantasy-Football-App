@@ -5,11 +5,11 @@ from dataclasses import asdict
 
 import pytest
 
-from services import replay_box, replay_defense, replay_views_players as wire
+from services import replay_advanced, replay_box, replay_defense, replay_views_players as wire
 from tests import replay_fakes as fakes
 from tests.test_replay_views import DATA, at, drafting, finished, game, hidden_changed
 
-STAT_LINE = {"span", "week", "games", "points", "projection", "box"}
+STAT_LINE = {"span", "week", "games", "points", "projection", "box", "adv"}
 UPCOMING = {"week", "opponent", "away", "bye", "estimate", "defense", "out_expected"}
 
 
@@ -36,9 +36,12 @@ def test_the_season_line_totals_his_games_so_far_with_a_box_for_skill_players_on
     assert set(line) == STAT_LINE and (line["span"], line["week"], line["projection"]) == ("season", None, None)
     assert line["games"] == len(weeks) and line["points"] == pytest.approx(sum(DATA.actual[(back, w)] for w in weeks))
     assert line["box"] == asdict(replay_box.total(DATA.box[(back, w)] for w in weeks))
+    assert line["adv"] == replay_advanced.line([DATA.box[(back, w)] for w in weeks],
+                                               [DATA.usage[(back, w)] for w in weeks if (back, w) in DATA.usage])
     assert shown[kicker]["line"]["box"] is None and shown[kicker]["line"]["games"] > 0
+    assert shown[kicker]["line"]["adv"] is None
     assert shown[fakes.NEVER_PLAYED_ID]["line"] == {"span": "season", "week": None, "games": 0, "points": 0,
-                                                    "projection": None, "box": None}
+                                                    "projection": None, "box": None, "adv": None}
 
 
 def test_the_last4_line_averages_his_last_four_games():
@@ -50,6 +53,9 @@ def test_the_last4_line_averages_his_last_four_games():
     assert (line["span"], line["games"]) == ("last4", 4)
     assert line["points"] == pytest.approx(sum(DATA.actual[(back, w)] for w in weeks) / 4, abs=0.01)
     assert line["box"] == asdict(replay_box.mean(DATA.box[(back, w)] for w in weeks))
+    assert line["adv"] == replay_advanced.line([DATA.box[(back, w)] for w in weeks],
+                                               [DATA.usage[(back, w)] for w in weeks if (back, w) in DATA.usage],
+                                               per_game_td=True)
     assert by_id(at(2), stats="last4")[back]["line"]["games"] == 1
     assert by_id(at(1), stats="last4")[back]["line"]["points"] is None
 
@@ -61,8 +67,9 @@ def test_a_week_line_shows_points_and_box_once_played_and_the_projection_always(
     past, now = by_id(state, stats="week", stat_week=3)[back]["line"], by_id(state, stats="week")[back]["line"]
 
     assert past == {"span": "week", "week": 3, "games": 1, "points": DATA.actual[(back, 3)],
-                    "projection": round(DATA.projection(back, 3), 2), "box": asdict(DATA.box[(back, 3)])}
-    assert (now["week"], now["points"], now["box"], now["games"]) == (6, None, None, 0)
+                    "projection": round(DATA.projection(back, 3), 2), "box": asdict(DATA.box[(back, 3)]),
+                    "adv": replay_advanced.line([DATA.box[(back, 3)]], [DATA.usage[(back, 3)]])}
+    assert (now["week"], now["points"], now["box"], now["adv"], now["games"]) == (6, None, None, None, 0)
     assert now["projection"] == round(DATA.projection(back, 6), 2)
     out = by_id(state, stats="week", stat_week=fakes.INJURED_WEEKS[0])
     assert out[fakes.INJURED_STAR_ID]["line"]["points"] is None and out[fakes.INJURED_STAR_ID]["line"]["games"] == 0
@@ -92,6 +99,8 @@ def sort_value(row: dict, sort: str):
     line = row["line"]
     if sort in replay_box.KEYS:
         return line["box"][sort] if line["box"] else None
+    if sort.startswith("adv_"):
+        return line["adv"][sort.removeprefix("adv_")] if line["adv"] else None
     return {"value": 0, "projection": row["projection"], "ros_ppg": row["ros_ppg"], "adp": row["adp"],
             "points": row["season_points"], "name": row["player"]["name"].lower(), "ppg": row["ppg"],
             "last": row["last_points"], "line_points": line["points"], "line_projection": line["projection"]}[sort]
@@ -114,8 +123,24 @@ def test_default_directions_and_value_order_and_paging_totals():
     assert page["results"] == rows(state, sort="rec")[20:30]
 
 
+def test_every_advanced_stat_is_a_sort_with_players_lacking_it_last():
+    state = at(6)
+
+    assert {f"adv_{key}" for key in replay_advanced.KEYS} <= set(wire.SORTS)
+    for direction in ("asc", "desc"):
+        snaps = [row["line"]["adv"] and row["line"]["adv"]["snap_pct"]
+                 for row in rows(state, sort="adv_snap_pct", direction=direction)]
+        known = [snap for snap in snaps if snap is not None]
+        assert len(known) > 50 and snaps[len(known):] == [None] * (len(snaps) - len(known))
+        assert known == sorted(known, reverse=direction == "desc")
+    assert rows(state, sort="adv_ypc") == rows(state, sort="adv_ypc", direction="desc")
+    rushers = [row["player"]["position"] for row in rows(state, sort="adv_ypc", stats="last4")
+               if row["line"]["adv"] and row["line"]["adv"]["ypc"] is not None]
+    assert "RB" in rushers and not {"K", "DST"} & set(rushers)
+
+
 @pytest.mark.parametrize("query, message", [
-    ({"sort": "luck"}, "Unknown sort"), ({"direction": "up"}, "Unknown dir"), ({"stats": "career"}, "Unknown stats"),
+    ({"sort": "luck"}, "Unknown sort"), ({"sort": "adv_bogus"}, "Unknown sort"), ({"direction": "up"}, "Unknown dir"), ({"stats": "career"}, "Unknown stats"),
     ({"stats": "week", "stat_week": 0}, "can't be shown"), ({"stats": "week", "stat_week": 7}, "can't be shown"),
     ({"stat_week": 7}, "can't be shown"),
 ])

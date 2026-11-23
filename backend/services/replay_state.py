@@ -21,10 +21,11 @@ from sqlalchemy.orm import Session
 
 from database.models import ReplayLeague
 from database.models.base import utc_now
+from services import replay_scoring
+from services.replay_scoring import ScoringRules
+from services.replay_slots import SLOTS, STANDARD as DEFAULT_STARTERS  # noqa: F401 (re-exported)
 from services.scoring import POINTS_PER_RECEPTION
 
-SLOTS = ("QB", "RB", "WR", "TE", "FLEX", "K", "DST")
-DEFAULT_STARTERS = MappingProxyType({"QB": 1, "RB": 2, "WR": 2, "TE": 1, "FLEX": 1, "K": 1, "DST": 1})
 WAIVER_MODES = ("wednesday", "faab", "none")
 FAAB_BUDGET = 100                         # whole dollars per team per season ("faab" waivers)
 VALID_TEAMS = (4, 6, 8, 10, 12, 14, 16)
@@ -32,6 +33,7 @@ PLAYOFF_TEAMS_RANGE = (4, 8)              # title bracket sizes (capped at the l
 USER_TRADE_MULTIPLE = MappingProxyType({"normal": 1.00, "hard": 1.08})   # value a CPU needs back from the USER
 DRAFT_CHAOS_SCALE = MappingProxyType({"normal": 1.0, "hard": 0.5})       # on a CPU's Team.chaos in the draft
 DIFFICULTIES = tuple(USER_TRADE_MULTIPLE)
+MAX_TRADES_PER_WEEK = 3                   # accepted trades a CPU may make in a week (the user has no cap)
 RETRADE_LOCK_WEEKS = 2                    # a traded player can't be traded again for this many weeks
 STATE_VERSION = 1                         # the "v" in a saved state's JSON
 Matchups = tuple[tuple[int, int], ...]    # one week: ((home team id, away team id), ...)
@@ -72,6 +74,7 @@ class Settings(_Record):
     trade_deadline_week: int = 11            # the last week traded in, plus its waiver phase (`trades_open`)
     season_hidden: bool = False              # reserved; not used in v1
     difficulty: str = "normal"               # "normal" | "hard": see USER_TRADE_MULTIPLE, DRAFT_CHAOS_SCALE
+    scoring_rules: ScoringRules | None = None   # custom key settings on top of `scoring`; None = the preset as is
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -110,6 +113,8 @@ def _validate(s: Settings) -> None:
          f"Playoff teams must be between {PLAYOFF_TEAMS_RANGE[0]} and {min(PLAYOFF_TEAMS_RANGE[1], s.teams)}."),
         (not unknown, f"Unknown lineup slots {unknown}. Valid: {list(SLOTS)}"),
         (s.bench >= 0 and min(s.starters.values(), default=0) >= 0, "Starter and bench counts can't be negative."),
+        (s.scoring_rules is None or not replay_scoring.problem(s.scoring_rules),
+         s.scoring_rules and replay_scoring.problem(s.scoring_rules)),
         (s.regular_season_weeks >= 1, "The regular season needs at least one week."),
         (s.trade_deadline_week <= s.regular_season_weeks,
          f"The trade deadline (week {s.trade_deadline_week}) must be in the {s.regular_season_weeks}-week regular season."),
@@ -336,9 +341,9 @@ def faab_left(state: State, team_id: int) -> int:
     return FAAB_BUDGET - state.faab_spent.get(team_id, 0)
 
 
-def has_traded_this_week(state: State, team_id: int) -> bool:
-    """The team is on either side of an accepted Offer made this week."""
-    return any(o.status == "accepted" and o.week == state.week and team_id in (o.from_team, o.to_team)
+def trades_this_week(state: State, team_id: int) -> int:
+    """Accepted Offers made this week with the team on either side (a CPU may make MAX_TRADES_PER_WEEK)."""
+    return sum(o.status == "accepted" and o.week == state.week and team_id in (o.from_team, o.to_team)
                for o in state.offers)
 
 

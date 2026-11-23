@@ -289,8 +289,8 @@ describe('GameHub player drawer', () => {
     expect(within(dialog).getByText(/Free agent/)).toBeInTheDocument();
     const rows = within(within(dialog).getByRole('table', { name: 'Raheem Mostert game log' })).getAllByRole('row');
     expect(rows.map((row) => row.textContent)).toEqual([
-      'WkOppProjPtsCarRuYdTgtRecReYd', '1DEN12.5011.00—————', '2DEN12.5012.00—————',
-      '3BYE0.00——————', '4DEN12.5014.00—————', '5DEN12.50——————',
+      'WkOppProjPtsCarRuYdRuTDTgtRecReYdReTD', '1DEN12.5011.00———————', '2DEN12.5012.00———————',
+      '3BYE0.00————————', '4DEN12.5014.00———————', '5DEN12.50————————',
     ]);
 
     await user.keyboard('{Escape}');

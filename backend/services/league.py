@@ -44,12 +44,17 @@ def _take_best(pools: dict[str, list[float]], taken: dict[str, int], eligible: I
     return counts
 
 
+def superflex_slots(league) -> int:
+    """SUPERFLEX starting spots per team: the starters' count (replay leagues) or one for a superflex flag (Yahoo)."""
+    return max(league.starters.get("SUPERFLEX", 0), int(bool(league.superflex)))
+
+
 def starter_counts(pools: dict[str, list[float]], league: LeagueSettings) -> dict[str, int]:
     """League-wide number of starters at each position, flex spots included."""
     counts = {p: min(len(pools[p]), league.teams * league.starters.get(p, 0)) for p in POSITIONS}
     counts = _take_best(pools, counts, FLEX_POSITIONS, league.teams * league.starters.get("FLEX", 0))
-    if league.superflex:
-        counts = _take_best(pools, counts, SUPERFLEX_POSITIONS, league.teams)
+    if superflex_slots(league):
+        counts = _take_best(pools, counts, SUPERFLEX_POSITIONS, league.teams * superflex_slots(league))
     return counts
 
 

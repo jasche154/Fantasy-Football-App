@@ -29,13 +29,14 @@ from database.models import (
     TeamGameStats,
 )
 from integrations.adp_history import TWO_WAY
-from services import kdst_model, replay_box, replay_defense
+from services import kdst_model, replay_adp_format, replay_box, replay_defense, replay_scoring
 from services.build_locks import key_lock
 from services.kdst_rankings import DST_PREFIX
 from services.projections import REGULAR_SEASON, load_game_lines
 from services.replay_box import BoxLine
+from services.replay_scoring import ScoringRules
 from services.schedule_strength import Schedule, load_schedule
-from services.scoring import scoring_for
+from services.scoring import ScoringSettings, scoring_for
 from services.valuation import NoDataError
 
 log = logging.getLogger(__name__)
@@ -106,6 +107,8 @@ class SeasonData:
     returns: Mapping[PlayerWeek, int] = field(default_factory=lambda: MappingProxyType({}))
     box: Mapping[PlayerWeek, BoxLine] = field(default_factory=lambda: MappingProxyType({}))     # skill games only
     defense_prior: Mapping[tuple[str, str], float] = field(default_factory=lambda: MappingProxyType({}))  # last season
+    rules: ScoringRules | None = None                         # custom key settings on `scoring` (replay_scoring)
+    adp_format: str = "ppr"                                   # the replay_adp list `players` carry (replay_adp_format)
 
     def as_of(self, week: int) -> "SeasonData":
         """A copy holding only what was known before `week` was played (0 = draft time); cached.
@@ -187,12 +190,16 @@ def clear_cache() -> None:
     replay_defense.ratings.cache_clear()
 
 
-def load_season_data(session: Session, season: int, scoring: str) -> SeasonData:
-    """The season as plain data, built once per (database, season, scoring).
+def load_season_data(session: Session, season: int, scoring: str, rules: ScoringRules | None = None,
+                      starters: Mapping[str, int] | None = None) -> SeasonData:
+    """The season as plain data, built once per (database, season, scoring, rules, ADP list). `rules` (a league's
+    custom key settings, replay_scoring) rescore every real game exactly and convert the projections (an
+    estimate). `starters` (the league's slots) and the scoring pick the ADP list (replay_adp_format).
 
     Raises ValueError for an unknown scoring and valuation.NoDataError when the season isn't ready."""
     scoring_for(scoring)
-    key = (str(session.get_bind().url), season, scoring)
+    want = replay_adp_format.wanted(scoring, rules, starters)
+    key = (str(session.get_bind().url), season, scoring, rules, want)
     with _cache_lock:
         cached = _cache.get(key)
     if cached is not None:
@@ -201,7 +208,7 @@ def load_season_data(session: Session, season: int, scoring: str) -> SeasonData:
         with _cache_lock:
             cached = _cache.get(key)                  # built by a request we waited for
         if cached is None:
-            cached = _build(session, season, scoring)
+            cached = _build(session, season, scoring, rules, want)
             with _cache_lock:
                 _cache[key] = cached
     return cached
@@ -235,7 +242,7 @@ def readiness(session: Session, season: int) -> dict:
     has_kdst = (_count(session, KickerGame.id, KickerGame.season == season) > 0
                 and _count(session, TeamGameStats.id, TeamGameStats.season == season) > 0
                 and all(f"{DST_PREFIX}{team}" in defenses for team in teams))     # every team's D/ST row exists
-    adp_players = _count(session, ReplayAdp.id, ReplayAdp.season == season)
+    adp_players = _count(session, ReplayAdp.player_id.distinct(), ReplayAdp.season == season)   # any format
     weeks = set(session.scalars(select(ReplayProjection.week.distinct()).where(ReplayProjection.season == season)))
     last_week = session.scalar(select(func.max(NflGame.week)).where(
         NflGame.season == season, NflGame.game_type == REGULAR_SEASON)) or 0
@@ -269,13 +276,13 @@ def _two_way(session: Session) -> dict[int, tuple[str, str]]:
     return {pid: (stored, TWO_WAY[gsis]) for pid, stored, gsis in rows if stored not in ALL_POSITIONS}
 
 
-def _skill_games(session: Session, season: int, scoring: str, schedule: Schedule, last_week: int,
+def _skill_games(session: Session, season: int, scoring: ScoringSettings, schedule: Schedule, last_week: int,
                  two_way: Mapping[int, tuple[str, str]]) -> tuple[dict[PlayerWeek, float], dict[PlayerWeek, str],
                                                                   dict[PlayerWeek, Usage], dict[PlayerWeek, BoxLine]]:
     actual, teams, usage, box = {}, {}, {}, {}
-    lines = load_game_lines(session, season, scoring_for(scoring))
+    lines = load_game_lines(session, season, scoring)
     if two_way:                                       # the skill-position load leaves them out
-        lines.update(load_game_lines(session, season, scoring_for(scoring), list(two_way),
+        lines.update(load_game_lines(session, season, scoring, list(two_way),
                                      positions=tuple({stored for stored, _ in two_way.values()})))
     for player_id, (_, games) in lines.items():
         for game in games:
@@ -318,27 +325,30 @@ def _defense_games(session: Session, season: int, last_week: int, schedule: Sche
     return actual, teams
 
 
-def _projections(session: Session, season: int, scoring: str, last_week: int) -> dict[PlayerWeek, float]:
-    """ESPN's number when it has one above zero, otherwise Sleeper's."""
+def _projections(session: Session, season: int, scoring: str, last_week: int,
+                 custom: bool = False) -> dict[PlayerWeek, float | tuple[float, float]]:
+    """ESPN's number when it has one above zero, otherwise Sleeper's. custom: that source's (pts_ppr, pts_std)
+    instead, for replay_scoring.convert."""
     points = getattr(ReplayProjection, f"pts_{scoring}")
-    by_source: dict[str, dict[PlayerWeek, float]] = {source: {} for source in SOURCES}
+    by_source: dict[str, dict] = {source: {} for source in SOURCES}
     rows = session.execute(select(ReplayProjection.player_id, ReplayProjection.week, ReplayProjection.source,
-                                  points).where(ReplayProjection.season == season,
-                                                ReplayProjection.week.between(1, last_week)))
-    for player_id, week, source, value in rows:
+                                  points, ReplayProjection.pts_ppr, ReplayProjection.pts_std).where(
+        ReplayProjection.season == season, ReplayProjection.week.between(1, last_week)))
+    for player_id, week, source, value, ppr, std in rows:
         if source in by_source and value and value > 0:
-            by_source[source][(player_id, week)] = float(value)
-    merged: dict[PlayerWeek, float] = {}
+            by_source[source][(player_id, week)] = (float(ppr or 0), float(std or 0)) if custom else float(value)
+    merged: dict = {}
     for source in reversed(SOURCES):
         merged.update(by_source[source])
     return merged
 
 
 def _pool(session: Session, season: int, ids: set[int], two_way: Mapping[int, tuple[str, str]],
-          teams: set[str]) -> dict[int, PoolPlayer]:
+          teams: set[str], adp_format: str = "ppr") -> dict[int, PoolPlayer]:
     """`teams` are the season's schedule teams: an ADP team code outside them ('FA', an old code) is dropped,
-    or that player would be on a bye every week."""
-    adp = {row.player_id: row for row in session.scalars(select(ReplayAdp).where(ReplayAdp.season == season))}
+    or that player would be on a bye every week. `adp_format` is the replay_adp list to read."""
+    adp = {row.player_id: row for row in session.scalars(select(ReplayAdp).where(
+        ReplayAdp.season == season, ReplayAdp.format == adp_format))}
     people = session.execute(select(Player.id, Player.full_name, Player.position).where(
         or_(Player.position.in_(ALL_POSITIONS), Player.id.in_(list(two_way)))))
     return {pid: PoolPlayer(pid, name, two_way[pid][1] if pid in two_way else position,
@@ -394,7 +404,8 @@ def _expert_ranks(session: Session, season: int, schedule: Schedule,
     return {key: rank for key, rank in ranks.items() if key[0] in players}, age
 
 
-def _build(session: Session, season: int, scoring: str) -> SeasonData:
+def _build(session: Session, season: int, scoring: str, rules: ScoringRules | None = None,
+           want: str | None = None) -> SeasonData:
     status = readiness(session, season)
     if not status["ready"]:
         raise NoDataError(f"Replay data for {season} is not ready: {status}")
@@ -403,15 +414,19 @@ def _build(session: Session, season: int, scoring: str) -> SeasonData:
     schedule = replace(loaded, games=tuple(replace(g, home_score=None, away_score=None) for g in loaded.games))
     last_week = max(game.week for game in schedule.games)
     two_way = _two_way(session)
-    skill_points, skill_teams, usage, box = _skill_games(session, season, scoring, schedule, last_week, two_way)
+    rescored = replay_scoring.scoring_settings(scoring, rules)
+    skill_points, skill_teams, usage, box = _skill_games(session, season, rescored, schedule, last_week, two_way)
     parts = ((skill_points, skill_teams),
              _kicker_games(session, season, last_week),
              _defense_games(session, season, last_week, schedule, _defense_ids(session)))
     actual = {key: points for part, _ in parts for key, points in part.items()}
     teams = {key: team for _, part in parts for key, team in part.items()}
-    projected = _projections(session, season, scoring, last_week)
+    projected = _projections(session, season, scoring, last_week, custom=rules is not None)
+    adp_format = replay_adp_format.stored(session, season, scoring, rules, want)
     players = _pool(session, season, {pid for pid, _ in (*actual, *projected)}, two_way,
-                    {team for team, _ in schedule.opponents})
+                    {team for team, _ in schedule.opponents}, adp_format)
+    if rules is not None:
+        projected = replay_scoring.convert(projected, {pid: p.position for pid, p in players.items()}, box, rules)
     actual, projected, teams, usage, box = ({key: value for key, value in table.items() if key[0] in players}
                                             for table in (actual, projected, teams, usage, box))
     injuries = {(row.player_id, row.week): Injury(row.tag, row.practice, row.injury)
@@ -429,5 +444,5 @@ def _build(session: Session, season: int, scoring: str) -> SeasonData:
                       injuries=MappingProxyType(injuries), usage=MappingProxyType(usage),
                       expert_ranks=MappingProxyType(expert_ranks), expert_age=MappingProxyType(expert_age),
                       returns=MappingProxyType(hard_tag_returns(injuries, actual, last_week)),
-                      box=MappingProxyType(box),
-                      defense_prior=MappingProxyType(replay_defense.load_prior(session, season, scoring)))
+                      box=MappingProxyType(box), rules=rules, adp_format=adp_format,
+                      defense_prior=MappingProxyType(replay_defense.load_prior(session, season, rescored)))

@@ -42,3 +42,25 @@
 /* ---------- Table ---------- */
 .replay-players__opp { white-space: nowrap; }
 .replay-players__opp .game-chip { margin-inline-start: var(--space-2); }
+
+/* ---------- Pinned columns ----------
+   Player stays on the left, Value and the row's action on the right; only the stats scroll between them.
+   A soft edge shadow shows on a pinned side only while columns are hidden under it (data-overflow-*). */
+.replay-players__wrap { --pin-bg: var(--game-panel, var(--color-surface-1)); --pin-hover: var(--game-panel-2, var(--color-accent-soft));
+  --pin-action: 6.75rem; --pin-shadow: light-dark(rgb(0 0 0 / 0.14), rgb(0 0 0 / 0.5)); scrollbar-width: thin; scrollbar-color: var(--game-line, var(--color-border-strong)) transparent; }
+.replay-players__pin-start,
+.replay-players__pin-value,
+.replay-players__pin-action { position: sticky; z-index: 1; background: var(--pin-bg); transition: box-shadow var(--duration-fast) var(--ease-out); }
+.replay-players__wrap thead .replay-players__pin-start,
+.replay-players__wrap thead .replay-players__pin-value,
+.replay-players__wrap thead .replay-players__pin-action { z-index: 3; }
+.replay-players__pin-start { left: 0; }
+.replay-players__pin-action { right: 0; width: var(--pin-action); min-width: var(--pin-action); }
+.replay-players__pin-value { right: var(--pin-action); }
+.replay-players__wrap tbody tr:hover > .replay-players__pin-start,
+.replay-players__wrap tbody tr:hover > .replay-players__pin-value,
+.replay-players__wrap tbody tr:hover > .replay-players__pin-action { background: var(--pin-hover); }
+.replay-players__wrap[data-overflow-start] .replay-players__pin-start { box-shadow: 10px 0 12px -12px var(--pin-shadow); }
+.replay-players__wrap[data-overflow-end] .replay-players__pin-value { box-shadow: -10px 0 12px -12px var(--pin-shadow); }
+.replay-players__wrap .replay-players__error { min-width: 0; }
+.replay-players__views { flex: none; }

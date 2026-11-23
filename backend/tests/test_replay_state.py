@@ -405,14 +405,15 @@ def test_release_drops_a_player_from_ir():
         rs.release(state, Settings(season=2021), 1, 25)
 
 
-def test_a_team_has_traded_this_week_only_with_an_accepted_offer_from_this_week():
+def test_trades_this_week_counts_accepted_offers_from_this_week_on_either_side():
     offers = (Offer(1, 2, 2, 1, (21,), (12,), "accepted"), Offer(2, 1, 3, 4, (31,), (), "accepted"),
-              Offer(3, 2, 3, 4, (31,), (), "declined"), Offer(4, 2, 4, 3, (), (31,), "pending"))
+              Offer(3, 2, 3, 4, (31,), (), "declined"), Offer(4, 2, 4, 3, (), (31,), "pending"),
+              Offer(5, 2, 1, 4, (12,), (), "accepted"))
     state = make_state(offers=offers)
 
-    assert rs.has_traded_this_week(state, 1) and rs.has_traded_this_week(state, 2)      # either side
-    assert not rs.has_traded_this_week(state, 3) and not rs.has_traded_this_week(state, 4)
-    assert rs.has_traded_this_week(replace(state, week=1), 3) and not rs.has_traded_this_week(replace(state, week=3), 1)
+    assert [rs.trades_this_week(state, team_id) for team_id in (1, 2, 3, 4)] == [2, 1, 0, 1]
+    assert rs.trades_this_week(replace(state, week=1), 3) == 1 and rs.trades_this_week(replace(state, week=3), 1) == 0
+    assert rs.MAX_TRADES_PER_WEEK == 3
 
 
 def test_a_traded_player_is_locked_for_two_weeks():

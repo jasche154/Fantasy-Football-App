@@ -10,9 +10,6 @@
 /* The playoff cut: a line under the last seed that gets in. */
 .replay-league .data-table tbody tr.replay-standings__cut > td { border-bottom: 2px solid var(--color-border-strong); }
 
-.replay-bracket__champion { display: flex; align-items: center; gap: var(--space-2); margin: 0 0 var(--space-2); }
-.replay-bracket__champion .icon { color: var(--color-accent); }
-.replay-bracket__week { margin: var(--space-3) 0 var(--space-1); font-size: var(--text-sm); }
 
 .replay-pager { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
 
@@ -29,3 +26,64 @@
 .game-tile__won { color: light-dark(#036649, var(--color-pos)); font-size: var(--text-xs); font-weight: 650; }
 .game-tile__score { grid-column: 3; color: var(--color-text-muted); font: 600 var(--text-lg) / 1 var(--font-display); font-variant-numeric: tabular-nums; }
 .game-tile__side.is-winner .game-tile__score { color: var(--color-text); }
+
+/* ---------- Playoff bracket (League > Playoffs) ----------
+   One column per playoff week, ruled like a broadsheet table. A round's games spread over the column's height, so
+   each later round sits between the games that feed it and the Championship lands on the bracket's midline.
+   No connector lines: every round is reseeded, so a line from a slot to the next would promise a path that isn't
+   fixed. Below 720px the columns stack. Accent is only for the user's games, as everywhere in the game. */
+.replay-playoffs { display: grid; gap: var(--space-6); }
+.replay-playoffs > section { display: grid; gap: var(--space-3); min-width: 0; }
+.replay-playoffs .section-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-3); margin: 0; }
+.replay-playoffs .hint { max-width: 70ch; }
+
+.replay-playoffs__champion { display: flex; align-items: center; gap: var(--space-2); margin: 0; font-size: var(--text-lg); }
+.replay-playoffs__champion--mine .icon { color: var(--game-you); }
+
+.bracket { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(13rem, 1fr); gap: var(--space-5); margin: 0; padding: 0;
+  overflow-x: auto; list-style: none; }
+.bracket__round { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
+.bracket__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-2); margin: 0; padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--game-line-strong, var(--color-border-strong)); font: var(--game-title, inherit); font-size: var(--text-sm); }
+.bracket__week { color: var(--game-ink-dim, var(--color-text-muted)); font: var(--game-label, inherit); }
+.bracket__projected { align-self: center; }
+.bracket__games { display: flex; flex: 1; flex-direction: column; justify-content: space-around; gap: var(--space-3); margin: 0; padding: 0; list-style: none; }
+/* The final week: the Championship on the midline, the third-place game under it. */
+.bracket__games--final { display: grid; grid-template-rows: 1fr auto 1fr; justify-content: stretch; gap: var(--space-4); }
+.bracket__games--final > :first-child { grid-row: 2; }
+.bracket__games--final > :nth-child(2) { grid-row: 3; align-self: start; }
+
+.bracket-game { display: grid; gap: 1px; padding: var(--space-1); border: 1px solid var(--game-line, var(--color-border)); border-radius: var(--radius-md);
+  background: var(--game-panel, var(--color-surface-1)); }
+.bracket-game--mine { border-color: var(--game-you, var(--color-accent)); }
+.bracket-game--tbd { border-style: dashed; background: transparent; }
+.bracket-game--bye { background: transparent; }
+/* The title game: an ink rule instead of a hairline and a larger score; no shadow (the game world has none). */
+.bracket-game--final { padding-top: var(--space-2); border-color: var(--game-ink, var(--color-text)); }
+.bracket-game--final.bracket-game--mine { border-color: var(--game-you, var(--color-accent)); }
+.bracket-game--final .bracket-game__score { font-size: var(--text-lg); }
+.bracket-game__label { display: flex; align-items: center; gap: var(--space-1); margin: 0 var(--space-2) var(--space-1);
+  color: var(--game-ink-dim, var(--color-text-muted)); font: var(--game-label, inherit); }
+.bracket-game--final .bracket-game__label { color: var(--game-ink, var(--color-text)); font-weight: 700; }
+.bracket-game__line { display: grid; grid-template-columns: 1.25rem minmax(0, 1fr) auto; align-items: center; gap: var(--space-2);
+  min-height: 2.25rem; padding: 0 var(--space-2); border-radius: calc(var(--radius-md) - 3px); font-size: var(--text-sm); }
+.bracket-game__line.is-winner { background: var(--game-panel-2, var(--color-surface-2)); font-weight: 700; }
+.bracket-game__line.is-loser { color: var(--game-ink-dim, var(--color-text-muted)); }
+.bracket-game__line.is-loser .game-team__dot { opacity: 0.5; }
+.bracket-game__line--tbd { color: var(--game-ink-dim, var(--color-text-muted)); }
+.bracket-game__seed { color: var(--game-ink-dim, var(--color-text-muted)); font-size: var(--text-xs); font-weight: 650; font-variant-numeric: tabular-nums; text-align: end; }
+.bracket-game__score { font: var(--game-score-sm, 600 var(--text-base) / 1 var(--font-display)); font-size: var(--text-base); font-variant-numeric: tabular-nums; }
+.bracket-game__line.is-loser .bracket-game__score { font-weight: 500; }
+.bracket-game__score--proj { color: var(--game-ink-dim, var(--color-text-muted)); font-size: var(--text-sm); font-weight: 500; }
+.bracket-game__bye { color: var(--game-ink-dim, var(--color-text-muted)); font: var(--game-label, inherit); }
+
+.bracket-pool { display: grid; gap: var(--space-3); padding-top: var(--space-4); border-top: 1px solid var(--game-line, var(--color-border)); }
+.bracket-pool__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-2); margin: 0; font: var(--game-title, inherit); font-size: var(--text-base); }
+.bracket-pool__wait { margin: 0; padding: var(--space-3); border: 1px dashed var(--game-line-strong, var(--color-border)); border-radius: var(--radius-md);
+  color: var(--game-ink-dim, var(--color-text-muted)); font-size: var(--text-sm); }
+
+@media (max-width: 719.98px) {
+  .bracket { grid-auto-flow: row; grid-auto-columns: auto; gap: var(--space-5); overflow-x: visible; }
+  .bracket__games--final { display: flex; }
+  .bracket__games--final > :nth-child(2) { align-self: stretch; }
+}

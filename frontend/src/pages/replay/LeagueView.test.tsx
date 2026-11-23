@@ -73,75 +73,23 @@ describe('LeagueView standings', () => {
     expect(within(table).getByRole('row', { name: /Your Team/ }).querySelector('[data-team="4"]')).not.toBeNull();
   });
 
-  it('marks the playoff teams once the seeds are final and shows the bracket with projections, scores and the champion', async () => {
-    const semis = board(15, { played: true, playoff: true, results: [
-      { home: side(1, { points: 120.5 }), away: side(USER_TEAM_ID, { points: 131.02 }), winner: USER_TEAM_ID, label: 'Semi-final' },
-      { home: side(2, { points: 99.1 }), away: side(3, { points: 98.4 }), winner: 2, label: 'Semi-final' },
-      { home: side(5, { points: 80 }), away: side(6, { points: 70 }), winner: 5, label: 'Consolation' },
-    ] });
-    const final = board(16, { playoff: true, results: [
-      { home: side(USER_TEAM_ID, { projected: 111.11 }), away: side(2, { projected: 109.9 }), winner: null, label: 'Championship' },
-      { home: side(1, { projected: 101 }), away: side(3, { projected: 100 }), winner: null, label: 'Third place' },
-    ] });
-    renderLeague([{ path: `${PATH}/standings`, reply: json(standings({ seeds_final: true, bracket: [semis, final], champion: teamRef(USER_TEAM_ID) })) }]);
-
-    const table = await screen.findByRole('table', { name: 'League standings' });
-    expect(within(table).getAllByText('In playoffs')).toHaveLength(4);
-    expect(within(table).getByRole('row', { name: /Hail Marys/ })).not.toHaveTextContent('In playoffs');
-    expect(screen.getByText(/The seeds are final\./)).toBeInTheDocument();
-
-    const bracket = screen.getByRole('region', { name: 'Playoff bracket' });
-    expect(within(bracket).getByText(/Champion:/)).toHaveTextContent('Champion: Your Team');
-    const played = within(bracket).getByRole('list', { name: 'Week 15 playoff games' });
-    expect(tile(played, /Your Team/)).toHaveTextContent('Semi-final · FinalGridiron Ghosts120.50Your Team (you)Won131.02');
-    expect(within(played).queryByText('Consolation')).not.toBeInTheDocument();
-    const ahead = within(bracket).getByRole('list', { name: 'Week 16 playoff games' });
-    expect(tile(ahead, /Championship/)).toHaveTextContent('Championship · ProjectedYour Team (you)111.11Blitz Brigade109.90');
-    expect(within(ahead).queryByText('Won')).not.toBeInTheDocument();
-  });
-
-  it('puts quarter-finals in the title bracket and names the playoff weeks and the byes', async () => {
-    const quarters = board(15, { playoff: true, results: [
-      { home: side(3), away: side(6), winner: null, label: 'Quarter-final' },
-      { home: side(4), away: side(5), winner: null, label: 'Quarter-final' },
-      { home: side(7), away: side(8), winner: null, label: 'Consolation' },
-    ] });
+  it('marks the playoff teams once the seeds are final and names the playoff weeks and the byes', async () => {
     renderLeague([{ path: `${PATH}/standings`, reply: json(standings({
-      regular_season_weeks: 14, playoff_teams: 6, playoff_weeks: [15, 16, 17], byes: 2, seeds_final: true, bracket: [quarters],
+      regular_season_weeks: 14, playoff_teams: 6, playoff_weeks: [15, 16, 17], byes: 2, seeds_final: true,
+      results: standings().results.map((row) => ({ ...row, in_playoffs: row.seed <= 6 })),
     })) }]);
 
-    expect(await screen.findByText(/the top 6 seeds play for the title in weeks 15-17, and the top 2 skip the first round\. The seeds are final\./))
+    const table = await screen.findByRole('table', { name: 'League standings' });
+    expect(within(table).getAllByText('In playoffs')).toHaveLength(6);
+    expect(screen.getByText(/the top 6 seeds play for the title in weeks 15-17, and the top 2 skip the first round\. The seeds are final\./))
       .toBeInTheDocument();
-    const bracket = screen.getByRole('region', { name: 'Playoff bracket' });
-    expect(within(within(bracket).getByRole('list', { name: 'Week 15 playoff games' })).getAllByText(/^Quarter-final ·/)).toHaveLength(2);
-    expect(within(screen.getByRole('region', { name: 'Consolation games' })).getByRole('list', { name: 'Week 15 consolation games' })).toHaveTextContent('Red Zone Rebels');
-    expect(screen.getByText(/Teams out of the title race play for the places below it/)).toBeInTheDocument();
   });
 
-  it('lists the consolation games apart from the title bracket', async () => {
-    const semis = board(15, { played: true, playoff: true, results: [
-      { home: side(1, { points: 120.5 }), away: side(USER_TEAM_ID, { points: 131.02 }), winner: USER_TEAM_ID, label: 'Semi-final' },
-      { home: side(5, { points: 80 }), away: side(6, { points: 70 }), winner: 5, label: 'Consolation' },
-    ] });
-    const final = board(16, { played: true, playoff: true, results: [
-      { home: side(USER_TEAM_ID, { points: 111.11 }), away: side(2, { points: 109.9 }), winner: USER_TEAM_ID, label: 'Championship' },
-      { home: side(1, { points: 101 }), away: side(3, { points: 100 }), winner: 1, label: 'Third place' },
-      { home: side(5, { points: 90 }), away: side(7, { points: 85 }), winner: 5, label: 'Consolation' },
-      { home: side(6, { points: 70 }), away: side(8, { points: 75 }), winner: 8, label: 'Consolation' },
-    ] });
-    renderLeague([{ path: `${PATH}/standings`, reply: json(standings({ seeds_final: true, bracket: [semis, final], champion: teamRef(USER_TEAM_ID) })) }]);
-
-    const bracket = await screen.findByRole('region', { name: 'Playoff bracket' });
-    const title = within(bracket).getByRole('list', { name: 'Week 16 playoff games' });
-    expect(within(title).getAllByRole('listitem')).toHaveLength(2);                  // Championship, Third place
-    expect(within(bracket).queryByText('Consolation')).not.toBeInTheDocument();
-
-    const consolation = screen.getByRole('region', { name: 'Consolation games' });
-    expect(within(consolation).getByRole('list', { name: 'Week 15 consolation games' })).toHaveTextContent('Consolation · FinalHail MarysWon80.00');
-    const places = within(consolation).getByRole('list', { name: 'Week 16 consolation games' });
-    expect(tile(places, /Hail Marys/)).toHaveTextContent('Consolation · FinalHail MarysWon90.00Fourth and Long85.00');
-    expect(tile(places, /Pigskin Pros/)).toHaveTextContent('Consolation · FinalPigskin Pros70.00Red Zone RebelsWon75.00');
-    expect(within(consolation).queryByText('Championship')).not.toBeInTheDocument();
+  it('opens on the Playoffs page once the regular season is over', async () => {
+    renderLeague([{ path: `${PATH}/playoffs`, reply: json({ weeks: [15, 16], seeds_final: true, champion: null, title: [], pools: [] }) }],
+      { game: summary({ week: 15 }) });
+    expect(screen.getByRole('button', { name: 'Playoffs' })).toHaveAttribute('aria-pressed', 'true');
+    expect(await screen.findByRole('list', { name: 'Title bracket' })).toBeInTheDocument();
   });
 
   it('shows the finish once the season is over', async () => {

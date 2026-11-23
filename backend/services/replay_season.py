@@ -34,7 +34,7 @@ def _slots(settings: Settings) -> list[str]:
 
 
 def _eligible(slot: str, position: str) -> bool:
-    return position in rv.FLEX_POSITIONS if slot == "FLEX" else slot == position
+    return position in rv.eligible(slot)
 
 
 def _check_starter(know: rv.Knowledge, team: rs.Team, slot: str, player_id: int, seen: set[int]) -> None:

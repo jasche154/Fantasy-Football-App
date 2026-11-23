@@ -99,18 +99,25 @@ def join_prepare_thread() -> None:
 
 
 class Sites:
-    """Stands in for the four sites; counts requests and can fail one host."""
+    """Stands in for the four sites; counts requests and can fail one host (or one FFC format's path).
+    FFC answers every format with `ffc` under that format's meta type, or `formats[format]` when given."""
 
-    def __init__(self, ffc: dict | None = None, broken: str = ""):
+    def __init__(self, ffc: dict | None = None, broken: str = "", formats: dict[str, dict] | None = None):
         self.ffc, self.broken, self.requests = ffc or FFC_PAYLOAD, broken, []
+        self.formats = formats or {}
+
+    def _ffc(self, path: str) -> dict:
+        adp_format, (_, kind) = next((f, v) for f, v in adp_history.FFC_FORMATS.items() if path.endswith(f"/{v[0]}"))
+        payload = self.formats.get(adp_format, self.ffc)
+        return {**payload, "meta": {**payload["meta"], "type": kind}} if "meta" in payload else payload
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
         host, params = request.url.host, request.url.params
-        if self.broken and self.broken in host:
+        if self.broken and (self.broken in host or request.url.path.endswith(f"/{self.broken}")):
             return httpx.Response(503)
         if "fantasyfootballcalculator" in host:
-            return httpx.Response(200, json=self.ffc)
+            return httpx.Response(200, json=self._ffc(request.url.path))
         if "myfantasyleague" in host:
             return httpx.Response(200, json=MFL_ADP if params["TYPE"] == "adp" else MFL_PLAYERS)
         if "espn" in host:
@@ -154,9 +161,9 @@ def player_id(session: Session, gsis: str) -> int:
     return session.scalar(select(Player.id).where(Player.gsis_id == gsis))
 
 
-def adp_by_gsis(session: Session) -> dict[str, tuple[float, str]]:
+def adp_by_gsis(session: Session, adp_format: str = "ppr") -> dict[str, tuple[float, str]]:
     rows = session.execute(select(Player.gsis_id, ReplayAdp.adp, ReplayAdp.source).join(
-        ReplayAdp, ReplayAdp.player_id == Player.id).where(ReplayAdp.season == SEASON))
+        ReplayAdp, ReplayAdp.player_id == Player.id).where(ReplayAdp.season == SEASON, ReplayAdp.format == adp_format))
     return {gsis: (adp, source) for gsis, adp, source in rows}
 
 
@@ -526,7 +533,7 @@ def test_prepare_season_runs_every_step_and_a_second_run_makes_no_requests(db, l
     assert steps == ["game_results", "snaps", "adp", "experts", "projections", "injuries"]
     assert loaders == ["crosswalk", "snaps", "crosswalk"]           # stats were stored: snaps still load once
     assert summary["snaps"] == {"rows": 1} and again["snaps"] == {"rows": 1, "skipped": "already loaded"}
-    assert summary["errors"] == {} and summary["requests"] == 7 and summary["defenses"] == 32
+    assert summary["errors"] == {} and summary["requests"] == 10 and summary["defenses"] == 32   # 4 FFC formats
     assert summary["adp"]["rows"] == 7 and summary["projections"]["weeks"] == 2
     assert summary["injuries"] == {"rows": 2, "weeks": 2, "tags": {"IR": 1, "Q": 1}}   # the rookie is matched
     assert again["requests"] == 0 and again["adp"] == {"rows": 7, "skipped": True}

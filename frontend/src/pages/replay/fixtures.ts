@@ -102,7 +102,7 @@ export function usage(overrides: Partial<ReplayUsage> = {}): ReplayUsage {
 
 /** A season stat line: 4 games, no box score unless overridden. */
 export function statLine(overrides: Partial<ReplayStatLine> = {}): ReplayStatLine {
-  return { span: 'season', week: null, games: 4, points: 60.4, projection: null, box: null, ...overrides };
+  return { span: 'season', week: null, games: 4, points: 60.4, projection: null, box: null, adv: null, ...overrides };
 }
 
 /** A waiver-wire row: a free agent with no usage yet unless overridden. */

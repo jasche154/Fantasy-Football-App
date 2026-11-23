@@ -10,18 +10,26 @@ GET  .../players?position=&search=&status=&sort=&dir=&stats=&stat_week=&limit=&o
       usage         his last 3 games BEFORE the current week (games 1-3); null for K, DST or before his first game
       position: QB | RB | WR | TE | K | DST | FLEX. status: available (default) | waivers | free_agent |
       rostered | all. sort: value (default) | projection | ros_ppg | adp | points | name | ppg | last |
-      line_points | line_projection | a BoxLine key. dir: asc | desc (default asc for name and adp, desc
+      line_points | line_projection | a BoxLine key | adv_<an AdvLine key> (e.g. adv_snap_pct). dir: asc | desc (default asc for name and adp, desc
       otherwise); players without the number come last either way. Sorting never changes `total`.
       stats: season (default) | last4 | week; stat_week: 1..current (default current, only with "week"; the
       response's stat_week is null otherwise). 422 on an unknown sort / dir / stats or a stat_week out of range.
   BoxLine   {pass_yds, pass_td, pass_int, carries, rush_yds, rush_td, targets, rec, rec_yds, rec_td}
-  StatLine  {span: season | last4 | week, week: number | null, games, points, projection, box: BoxLine | null}
+  StatLine  {span: season | last4 | week, week: number | null, games, points, projection, box: BoxLine | null,
+             adv: AdvLine | null}
       season        games and points before now, box totals; projection null
       last4         his last 4 games played: games (<= 4), points and box per-game averages (1 decimal); null
                     points before his first game; projection null
       week          stat_week: points and box only once played and he played (games 1, else 0); projection =
                     that week's pre-game number (0 when out or on a bye), null when he wasn't in the pool yet
-      box           null for K/DST and when he has no game in the span
+      box, adv      null for K/DST and when he has no game in the span
+  AdvLine   {snap_pct, target_share, targets_pg, carries_pg, touches_pg, ypc, ypr, ypt, catch_rate, total_td,
+             td_rate, pass_ypg, td_int} (services/replay_advanced.py): rates over the span's games from their box
+      lines and usage; each null when its denominator is 0 or its data is missing; 1 decimal (td_int 2).
+      snap_pct / target_share: means over the games that have them (0-100). *_pg: per game (touches = carries +
+      rec). ypc, ypr, ypt, catch_rate (rec / targets, 0-100) from the span's totals. total_td: rush + rec + pass
+      TDs (season / week: total; last4: per game). td_rate: rush + rec TDs per touch (0-100). pass_ypg: null
+      without a pass yard, TD or INT. td_int: pass TD / INT; the TDs when no INT; null with neither.
 GET  .../players/{player_id}      {player: WireRow, weeks: [{week, played, team, opponent, away, bye, out, projection,
                                    points, ros_ppg, value, rank, pos_rank, expert_rank, news, defense,
                                    injury: Injury | null, usage: Usage | null, box: BoxLine | null}],
@@ -41,7 +49,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 from statistics import mean
 
-from services import replay_box, replay_defense, replay_state as rs, replay_waivers
+from services import replay_advanced, replay_box, replay_defense, replay_state as rs, replay_waivers
 from services.replay_pool import SKILL, Usage
 from services.replay_state import Team
 from services.replay_values import ReplayValue
@@ -51,7 +59,9 @@ AVAILABLE = "available"
 STATUSES = (AVAILABLE, *replay_waivers.STATUS_FILTERS)
 SORTS = ("value", "projection", "ros_ppg", "adp", "points", "name", "ppg", "last", "line_points",
          "line_projection", *replay_box.KEYS)
-LINE_SORTS = ("line_points", "line_projection", *replay_box.KEYS)    # the sorts that need every row's StatLine
+ADV_SORTS = tuple(f"adv_{key}" for key in replay_advanced.KEYS)
+SORTS = (*SORTS, *ADV_SORTS)
+LINE_SORTS = ("line_points", "line_projection", *replay_box.KEYS, *ADV_SORTS)    # sorts needing every StatLine
 ASCENDING = ("name", "adp")             # the sorts whose default direction is asc
 DIRECTIONS = ("asc", "desc")
 SPANS = ("season", "last4", "week")
@@ -109,20 +119,22 @@ def stat_line(game: Game, value: ReplayValue, weeks: Sequence[int], stats: str =
     """The StatLine of one player; `weeks` are the weeks he played (from `_played_weeks`). `known_then`: the
     pool as known before `stat_week` ("week" only), passed in when building many lines."""
     data, pid = game.data, value.player_id
+    span = [stat_week] if stats == "week" else weeks[-LINE_GAMES:] if stats == "last4" else weeks
+    boxes = [data.box[(pid, week)] for week in span if (pid, week) in data.box]
+    usages = [data.usage[(pid, week)] for week in span if (pid, week) in data.usage]
+    adv = replay_advanced.line(boxes, usages, stats == "last4") if value.position in SKILL else None
     if stats == "week":
         then = (known_then if known_then is not None else game.know_at(stat_week).by_id).get(pid)
         return {"span": stats, "week": stat_week, "games": int((pid, stat_week) in data.actual),
                 "points": data.actual.get((pid, stat_week)), "box": _box(data.box.get((pid, stat_week))),
-                "projection": round(then.projection, 2) if then else None}
-    span = weeks[-LINE_GAMES:] if stats == "last4" else weeks
+                "projection": round(then.projection, 2) if then else None, "adv": adv}
     points = [data.actual[(pid, week)] for week in span]
-    boxes = [data.box[(pid, week)] for week in span if (pid, week) in data.box]
     if stats == "last4":
         shown, box = (round(mean(points), 2) if points else None), replay_box.mean(boxes)
     else:
         shown, box = round(sum(points), 2), replay_box.total(boxes) if boxes else None
     return {"span": stats, "week": None, "games": len(span), "points": shown, "projection": None,
-            "box": _box(box if value.position in SKILL else None)}
+            "box": _box(box if value.position in SKILL else None), "adv": adv}
 
 
 def _wire_row(game: Game, player_id: int, owners: dict[int, Team], totals: dict[int, float],
@@ -140,6 +152,9 @@ def _sort_key(game: Game, sort: str, totals: dict[int, float], lines: dict[int, 
         if sort in replay_box.KEYS:
             box = lines[v.player_id]["box"]
             return box[sort] if box else None
+        if sort in ADV_SORTS:
+            adv = lines[v.player_id]["adv"]
+            return adv[sort.removeprefix("adv_")] if adv else None
         if sort in LINE_SORTS:
             return lines[v.player_id][sort.removeprefix("line_")]
         return {"value": lambda: -order[v.player_id], "projection": lambda: v.projection,

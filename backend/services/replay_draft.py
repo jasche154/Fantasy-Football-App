@@ -11,6 +11,9 @@ Hard rules sit on top: a roster must always be able to end legal (every starting
 included), position caps, kickers and defenses only in the last rounds, no backup QB or TE before round
 10 of 15, never a reach of more than a round of picks in rounds 1-4, a round and a half in rounds 5-9 and
 25 picks later (never more than 25), and at least two bench backs and two bench receivers.
+In a superflex league a CPU drafts from the 2-QB ADP list (replay_adp_format), else through
+replay_chart.superflex_view (QB ADP x SUPERFLEX_QB_ADP), and counts the SUPERFLEX slots as QB starters (so it
+drafts two QBs early and may back them up).
 The user may pick anyone as long as the roster can still end legal. Players without an ADP come after
 everyone who has one, by their own week-1 projection.
 
@@ -23,10 +26,10 @@ from collections.abc import Sequence
 from dataclasses import replace
 from functools import lru_cache
 
-from services import replay_personas, replay_state as rs
+from services import replay_chart, replay_personas, replay_slots, replay_state as rs
 from services.replay_pool import ALL_POSITIONS, PoolPlayer, SeasonData
 from services.replay_state import Pick, Settings, State, Team
-from services.replay_values import lineup_holes, position_cap
+from services.replay_values import lineup_holes, missing_slots, position_cap
 
 log = logging.getLogger(__name__)
 
@@ -143,10 +146,14 @@ def _caps(settings: Settings) -> dict[str, int]:
     return {**caps, "RB": caps["RB"] + spare // 2, "WR": caps["WR"] + spare - spare // 2}
 
 
+def _starting(position: str, settings: Settings) -> int:
+    """Starting slots a CPU fills with this position: its own, and every SUPERFLEX for a QB."""
+    return settings.starters.get(position, 0) + (replay_slots.superflex(settings.starters) if position == "QB" else 0)
+
+
 def _floors(settings: Settings) -> dict[str, int]:
     """Fewest players a CPU ends with per position: its starters plus two bench backs and receivers."""
-    return {position: settings.starters.get(position, 0) + BENCH_FLOORS.get(position, 0)
-            for position in ALL_POSITIONS}
+    return {position: _starting(position, settings) + BENCH_FLOORS.get(position, 0) for position in ALL_POSITIONS}
 
 
 def _gated(position: str, counts: Counter, round_: int, settings: Settings) -> bool:
@@ -154,7 +161,7 @@ def _gated(position: str, counts: Counter, round_: int, settings: Settings) -> b
     starters = settings.starters
     if position in ("K", "DST"):
         return round_ <= settings.rounds - starters.get("K", 0) - starters.get("DST", 0)
-    if position in ("QB", "TE") and counts[position] >= starters.get(position, 0):
+    if position in ("QB", "TE") and counts[position] >= _starting(position, settings):
         share, of = BACKUP_GATE
         return round_ < -(-settings.rounds * share // of)             # ceiling
     return False
@@ -179,7 +186,7 @@ def _positions(mine: Sequence[str], round_: int, settings: Settings) -> list[str
 
 def _need(position: str, counts: Counter, round_: int, settings: Settings) -> float:
     """Multiplier on a player's ADP: below 1 the team wants the position sooner, above 1 later."""
-    have, starting = counts[position], settings.starters.get(position, 0)
+    have, starting = counts[position], _starting(position, settings)
     if position in ("RB", "WR"):
         if have < starting:
             return OPEN_STARTER_NEED[_band(round_)]
@@ -227,6 +234,8 @@ def cpu_pick(state: State, settings: Settings, data: SeasonData, seed: int) -> i
     if team_id is None:
         raise ValueError("The draft is over.")
     team, known, overall = rs.team(state, team_id), data.as_of(0), len(state.picks) + 1
+    if replay_slots.superflex(settings.starters):
+        known = replay_chart.superflex_view(known)
     round_ = _slot(state, overall)[0]
     mine = [known.players[pid].position for pid in team.roster]
     players, ranked = _candidates(state, known, _positions(mine, round_, settings), round_, overall)
@@ -238,14 +247,6 @@ def cpu_pick(state: State, settings: Settings, data: SeasonData, seed: int) -> i
 
 
 # ---------------- making picks ----------------
-
-def _open_slots(positions: Sequence[str], settings: Settings) -> list[str]:
-    """The starting slots these positions leave unfilled, by name."""
-    have = Counter(positions)
-    slots = [slot for slot, wanted in settings.starters.items() if slot != "FLEX"
-             for _ in range(max(0, wanted - have[slot]))]
-    return slots + ["FLEX"] * (lineup_holes(positions, settings) - len(slots))
-
 
 def _picker(state: State, on_clock: Team, team_id: int | None) -> None:
     """ValueError unless the team making the pick (None = the user's) is the one on the clock."""
@@ -274,7 +275,7 @@ def make_pick(state: State, settings: Settings, data: SeasonData, player_id: int
     if player_id in rs.rostered(state):
         raise ValueError(f"{player.name} has already been drafted.")
     positions = [*(data.players[pid].position for pid in team.roster), player.position]
-    left, still_open = settings.rounds - len(positions), _open_slots(positions, settings)
+    left, still_open = settings.rounds - len(positions), missing_slots(positions, settings)
     if len(still_open) > left:
         raise ValueError(f"{team.name} can't draft {player.name}: {len(still_open)} starting spots would still "
                          f"be open ({', '.join(still_open)}) with only {left} picks left.")

@@ -68,7 +68,8 @@ GET  /games                       {results: [{id, name, season, phase, week, tea
 GET  /games/{id}                  Summary
       Summary {id, name, season, phase: draft | waivers | open | complete, week, end_week, user_team_id,
                settings: {teams, scoring, starters: {slot: n}, bench, roster_size, draft_slot, waiver_mode,
-                          difficulty, regular_season_weeks, playoff_teams, trade_deadline_week},
+                          difficulty, regular_season_weeks, playoff_teams, trade_deadline_week,
+                          scoring_rules: {reception, te_premium, pass_td, turnover} | null (null = the preset)},
                teams: TeamRef[], on_the_clock: team_id | null,
                next_action: {step: pick | wednesday | play | done, label},
                record: Record, matchup: {week, playoff, label, you: Side, opponent: Side} | null,
@@ -114,7 +115,7 @@ GET  .../team?team_id=&week=      Team {team: TeamRef, week, played, manual_line
                                         bench_total, bench_recorded,
                                         ir: [PlayerRow + {slot: "IR", starting: false}]}
       ir: the team's IR players, current week only (else []). results never holds an IR player.
-      slot: QB | RB | WR | TE | FLEX | K | DST | BN, starters first in slot order. A played week lists its bench as
+      slot: QB | RB | WR | TE | FLEX | SUPERFLEX | K | DST | BN, starters first in slot order. A played week lists its bench as
       saved: bench_recorded false (no BN rows, bench_total null) for weeks played before benches were saved.
       bench_total: real points left on the bench, null unless played and recorded. An empty starting slot has
       no row: compare with settings.starters.
@@ -148,7 +149,7 @@ GET  .../trades                   {open, deadline_week, max_players, offers: [Of
       and a note saying why it cannot be accepted as is). results: every other offer and trade, newest first.
 """
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from functools import cached_property
 
 from services import (
@@ -427,7 +428,8 @@ def summary(game: Game) -> dict:
     return {
         "id": game.id, "name": game.name, "season": settings.season, "phase": state.phase, "week": state.week,
         "end_week": settings.end_week, "user_team_id": game.user.id,
-        "settings": {**{key: getattr(settings, key) for key in SETTING_KEYS}, "starters": dict(settings.starters)},
+        "settings": {**{key: getattr(settings, key) for key in SETTING_KEYS}, "starters": dict(settings.starters),
+                     "scoring_rules": asdict(settings.scoring_rules) if settings.scoring_rules else None},
         "teams": [team_ref(game, t) for t in state.teams],
         "on_the_clock": replay_draft.on_the_clock(state, settings), "next_action": _next_action(game),
         "record": record(game, game.user.id), "matchup": _headline(game),

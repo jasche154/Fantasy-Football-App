@@ -16,6 +16,7 @@ from services.replay_views import (
 from services.replay_views_players import (  # noqa: F401 - re-exported: the wire and a player's page live there
     AVAILABLE, SORTS, STATUSES, USAGE_GAMES, player, players,
 )
+from services.replay_views_playoffs import playoffs  # noqa: F401 - re-exported: the bracket view lives there
 
 EVENT_KINDS = ("draft", "add", "drop", "claim", "trade", "ir", "result", "playoffs", "champion")
 

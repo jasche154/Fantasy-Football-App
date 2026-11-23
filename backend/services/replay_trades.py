@@ -9,7 +9,7 @@ lists its reasons. Every CPU team in the deal must pass both of these, on point-
    against another CPU.
 2. Never stupid. On neutral chart values it gets back at least MARKET_GUARD of what it gives
    (`replay_trade_value.market_ok`), whatever its persona.
-3. One accepted trade per CPU per week; a CPU blocked by its IR (`replay_ir.blocked_reason`) declines all.
+3. At most `replay_state.MAX_TRADES_PER_WEEK` (3) accepted trades per CPU per week; a CPU blocked by its IR (`replay_ir.blocked_reason`) declines all.
 
 And for both teams: at most MAX_PLAYERS_PER_SIDE players a side, nobody traded in the last two weeks, a roster
 within the limit (the user names who to drop; a CPU cuts its lowest healthy-chart skill players, never its
@@ -17,8 +17,9 @@ only kicker or defense), and the one position rule: every starting slot the deal
 (`replay_values.missing_slots`) has its own eligible player to fill it (`free_agents`: unrostered, not out,
 and free once waivers clear). Positions need not match: a CPU sends its only tight end and picks one up
 (`replay_cover.cpu_cover`, at once in the open phase, when waivers clear in the waivers phase).
-Every drop goes through `replay_state.release`. An out player on the active roster may be traded; one in an
-IR slot can't be, but still counts for a team's lineup gain.
+Every drop goes through `replay_state.release`. Out players may be traded, from the active roster or an IR slot:
+one leaving an IR slot frees it, and one arriving from an IR slot takes the receiver's free IR slot, else a
+roster spot (`_landing`; a team blocked by a stale IR player can't trade, so every IR player dealt is eligible).
 
 The user is always the proposer in `evaluate`: to look at a CPU's offer, mirror it (`respond` does).
 """
@@ -40,7 +41,6 @@ CPU_TRADE_MULTIPLE = 0.95       # between two CPUs: each needs back at least thi
 SUGGEST_WITHIN = 1.5            # a player suggested to close a value gap is worth at most this x what is missing
 VALUE_REASON = "Value is too far apart"     # every value decline starts so (a counter-offer answers only those)
 DEPTH_HINT = "They'd rather have fewer, better players: offer one stronger player in place of several."
-FLEX_ELIGIBLE = ("RB", "WR", "TE")
 
 
 @dataclass(frozen=True)
@@ -128,15 +128,21 @@ def _check(state: State, settings: Settings, know: Knowledge, from_team: int, to
         raise ValueError(f"A trade can include at most {MAX_PLAYERS_PER_SIDE} players on each side.")
     if len({*give, *get}) != len(give) + len(get):
         raise ValueError("A player is listed more than once in the trade.")
-    hurt = [pid for owner, ids in ((sender, give), (receiver, get)) for pid in ids if pid in owner.ir]
-    if hurt:
-        raise ValueError(f"On IR, so not tradable until activated: {_names(know, hurt)}.")
     for owner, ids in ((sender, give), (receiver, get)):
-        missing = [pid for pid in ids if pid not in owner.roster]
+        missing = [pid for pid in ids if pid not in rs.held(owner)]
         if missing:
             known = [know.by_id[pid].name if pid in know.by_id else f"Player {pid}" for pid in missing]
             raise ValueError(f"Not on {owner.name}'s roster: {', '.join(known)}.")
     return sender, receiver
+
+
+def _landing(team: Team, other: Team, sends: tuple[int, ...], receives: tuple[int, ...]) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """(active roster, IR) after the deal, before drops: a player from `other`'s IR slot takes a free IR slot."""
+    roster = [pid for pid in team.roster if pid not in sends]
+    ir = [pid for pid in team.ir if pid not in sends]
+    for pid in receives:
+        (ir if pid in other.ir and len(ir) < replay_ir.IR_SLOTS else roster).append(pid)
+    return tuple(roster), tuple(ir)
 
 
 def _user_drops(team: Team, settings: Settings, kept: Sequence[int], drops: tuple[int, ...]) -> tuple[int, ...]:
@@ -184,7 +190,7 @@ def cover(know: Knowledge, settings: Settings, roster: Sequence[int], pool: Sequ
     when a slot has nobody eligible. () for a legal roster."""
     picked: list[int] = []
     for slot in rv.missing_slots(_positions(know, roster), settings):
-        eligible = FLEX_ELIGIBLE if slot == "FLEX" else (slot,)
+        eligible = rv.eligible(slot)
         found = next((pid for pid in pool if pid not in used and pid not in picked
                       and know.by_id[pid].position in eligible), None)
         if found is None:
@@ -218,7 +224,7 @@ def clear_cache() -> None:
 def _side(state: State, settings: Settings, know: Knowledge, team: Team, other: Team, sends: tuple[int, ...],
           receives: tuple[int, ...], drops: tuple[int, ...], pool: Sequence[int],
           used: frozenset[int] = frozenset()) -> _Side:
-    after = (*(pid for pid in team.roster if pid not in sends), *receives)
+    after, ir = _landing(team, other, sends, receives)
     if team.is_user:
         cut = _user_drops(team, settings, after, drops)
     elif drops:
@@ -227,9 +233,9 @@ def _side(state: State, settings: Settings, know: Knowledge, team: Team, other: 
         cut = _cpu_drops(settings, know, after)
     roster = tuple(pid for pid in after if pid not in (cut or ()))
     filled = cover(know, settings, roster, pool, used)
-    gain = round(_season(settings, know, (*roster, *(filled or ()), *team.ir))
+    gain = round(_season(settings, know, (*roster, *(filled or ()), *ir))
                  - _season(settings, know, rs.held(team)), 2)
-    kept = tuple(pid for pid in receives if pid in roster)     # a throw-in it cuts at once is worth nothing
+    kept = tuple(pid for pid in receives if pid in roster or pid in ir)   # a throw-in it cuts is worth nothing
     side = _Side(team, sends, receives, cut, roster, kept, filled, gain)
     if team.is_user:
         return side
@@ -246,8 +252,9 @@ def _rule_reasons(state: State, know: Knowledge, sender: Team, receiver: Team, m
     if locked:
         reasons.append(f"Traded in the last {rs.RETRADE_LOCK_WEEKS} weeks, so not yet tradable again: "
                        f"{_names(know, locked)}.")
-    reasons.extend(f"{team.name} has already made a trade this week." for team in (sender, receiver)
-                   if not team.is_user and rs.has_traded_this_week(state, team.id))
+    reasons.extend(f"{team.name} has already made {rs.MAX_TRADES_PER_WEEK} trades this week."
+                   for team in (sender, receiver)
+                   if not team.is_user and rs.trades_this_week(state, team.id) >= rs.MAX_TRADES_PER_WEEK)
     reasons.extend(reason for team in (sender, receiver)
                    if not team.is_user and (reason := replay_ir.blocked_reason(state, know, team.id)))
     return reasons
@@ -366,10 +373,12 @@ def _with_status(state: State, offer_id: int, status: str) -> State:
 
 def _apply(state: State, settings: Settings, know: Knowledge, from_team: int, to_team: int, give: tuple[int, ...],
            get: tuple[int, ...], verdict: Verdict, offer_id: int | None = None, counter_to: int | None = None) -> State:
-    """An accepted deal carried out: rosters swapped, re-trade lock set, Offer "accepted", event, forced drops."""
+    """An accepted deal carried out: rosters (and IR slots) swapped, re-trade lock set, Offer "accepted", event,
+    forced drops."""
     sender, receiver = rs.team(state, from_team), rs.team(state, to_team)
-    state = rs.with_team(state, replace(sender, roster=(*(p for p in sender.roster if p not in give), *get)))
-    state = rs.with_team(state, replace(receiver, roster=(*(p for p in receiver.roster if p not in get), *give)))
+    for team, other, sends, receives in ((sender, receiver, give, get), (receiver, sender, get, give)):
+        roster, ir = _landing(team, other, sends, receives)
+        state = rs.with_team(state, replace(team, roster=roster, ir=ir))
     state = replace(state, traded={**state.traded, **dict.fromkeys((*give, *get), state.week)})
     state = (record_offer(state, from_team, to_team, give, get, "accepted", counter_to) if offer_id is None
              else _with_status(state, offer_id, "accepted"))

@@ -46,7 +46,7 @@ def _cover_move(state: State, settings: Settings, know: Knowledge, team_id: int)
     cuts = sorted((v for v in roster if v.position in SKILL),
                   key=lambda v: (v.healthy_chart, v.healthy_value, v.ros_ppg, v.player_id))
     for slot in missing:
-        eligible = rv.FLEX_POSITIONS if slot == "FLEX" else (slot,)
+        eligible = rv.eligible(slot)
         add = max((v for v in free if v.position in eligible), key=_by_chart, default=None)
         if add is None:
             continue

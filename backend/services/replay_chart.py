@@ -8,6 +8,10 @@ floored at pick KDST_FIRST_PICK + N (the ADP source takes them rounds too early)
 depends on the weeks left: values move with injuries, form, expert ranks and a small bump once a player's
 bye is behind him.
 
+- Superflex leagues (`superflex_view`): the season's 2-QB ADP list when it is loaded (data.adp_format ==
+  "2qb", replay_adp_format), used as is. Without it every QB's ADP (and its spread) is multiplied by
+  SUPERFLEX_QB_ADP before anything above reads it: QB1 goes about pick 10 instead of 25, QB12 about 45
+  instead of 110, close to real superflex drafts. The chart, pre_rank and the CPU draft all use it.
 - pre_rank: overall order of preseason picks (the slot of his preseason expert rank, else of his ADP);
   star = clamp((STAR_TOP - pre_rank) / STAR_SPAN, 0, 1).
 - model_ppg: ros_ppg + k x (mean of his last <= FORM_GAMES real games - ros_ppg), k = n / FORM_GAMES x
@@ -28,11 +32,12 @@ import math
 from bisect import bisect_left, bisect_right
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from functools import lru_cache
 from types import MappingProxyType
 
-from services import replay_news
-from services.replay_pool import SeasonData
+from services import replay_news, replay_role
+from services.replay_pool import PoolPlayer, SeasonData
 
 TAU = 40.0                     # pick_value decay: 1 -> 1000, 12 -> 760, 24 -> 563, 50 -> 294, 100 -> 84
 CHART_MAX = 1000.0
@@ -51,6 +56,7 @@ UNLISTED_GAP = 10              # missing from an existing snapshot: last listed 
 BYE_BUMP = 1.03                # once his bye is behind him
 AVAILABILITY_SHARE = 0.9       # chart x share_played x this, when a news report exists
 DAYS_PER_WEEK = 7
+SUPERFLEX_QB_ADP = 0.4         # superflex without a 2-QB ADP list: a QB's ADP x this
 
 
 @lru_cache(maxsize=64)
@@ -67,7 +73,23 @@ def slot_curve(data: SeasonData) -> Mapping[str, tuple[float, ...]]:
     return MappingProxyType({position: tuple(found) for position, found in curve.items() if found})
 
 
+@lru_cache(maxsize=64)
+def superflex_view(data: SeasonData) -> SeasonData:
+    """The season as a superflex league sees it: every QB's ADP and spread x SUPERFLEX_QB_ADP (cached, so
+    the curves built on it are cached too). A season read with the 2-QB ADP list already prices QBs so."""
+    if data.adp_format == "2qb":
+        return data
+
+    def scaled(p: PoolPlayer) -> PoolPlayer:
+        if p.position != "QB" or p.adp is None:
+            return p
+        stdev = p.adp_stdev * SUPERFLEX_QB_ADP if p.adp_stdev is not None else None
+        return replace(p, adp=p.adp * SUPERFLEX_QB_ADP, adp_stdev=stdev)
+    return replace(data, players=MappingProxyType({pid: scaled(p) for pid, p in data.players.items()}))
+
+
 def clear_cache() -> None:
+    superflex_view.cache_clear()
     slot_curve.cache_clear()
     _by_week.cache_clear()
     replay_news.clear_cache()
@@ -233,9 +255,9 @@ def base_charts(data: SeasonData, rows: Sequence[dict], priors: Mapping[int, flo
         source = "experts" if w > 0 else source
         last = max(ranks, default=0)
         stars = {r["player_id"]: star(overall.get(r["player_id"])) for r in group}
-        model = fractional_ranks({r["player_id"]: model_ppg(r["ros_ppg"], priors.get(r["player_id"], 0.0),
-                                                            r["recent_points"], stars[r["player_id"]])
-                                  for r in group})
+        form = {r["player_id"]: model_ppg(r["ros_ppg"], priors.get(r["player_id"], 0.0), r["recent_points"],
+                                          stars[r["player_id"]]) for r in group}
+        model = fractional_ranks(replay_role.model_scores(data, group, form, week))
         plain = fractional_ranks({r["player_id"]: r["ros_ppg"] for r in group})
         for row in group:
             pid = row["player_id"]

@@ -24,7 +24,7 @@ const STATUS: Readonly<Record<ReplayOffer['status'], { label: string; tone: stri
 function rulesText(game: ReplaySummary): string {
   const extra = game.settings.difficulty === 'hard' ? ' (on Hard they want about 8% more than they give)' : '';
   return `CPU managers accept a trade that is worth it to them on the 0-1000 trade chart${extra}; each one has its own `
-    + 'trading style. A CPU that turns you down may counter, and you can counter its offers. Each CPU team trades at most once a week.';
+    + 'trading style. A CPU that turns you down may counter, and you can counter its offers. Each CPU team makes at most 3 trades a week.';
 }
 
 function closedText(game: ReplaySummary, trades: ReplayTrades): string {
@@ -110,7 +110,7 @@ export function TradesView({ game, version, act, isBusy, openPlayer }: ReplayVie
             {trades.open && (
               <Card title={<span ref={builderTitleRef} tabIndex={-1}>{countering ? `Counter ${countering.from_team.name}'s offer` : 'Propose a trade'}</span>}
                 eyebrow={`Open through week ${trades.deadline_week}'s waivers`}>
-                <TradeBuilder key={counteringId ?? 'new'} game={game} version={version} roster={mine.results}
+                <TradeBuilder key={counteringId ?? 'new'} game={game} version={version} roster={mine.results} ir={mine.ir}
                   maxPlayers={trades.max_players} counterTo={countering} onCounterDone={() => setCounteringId(null)}
                   initialPartner={parsePositiveInt(query.with)} initialWant={parsePositiveInt(query.want)}
                   actions={actions} openPlayer={openPlayer} />

@@ -58,7 +58,7 @@ def knowledge(state: State, settings: Settings, data: SeasonData, *, seed: int) 
 
 def _check_fits(settings: Settings, data: SeasonData) -> None:
     """ValueError unless this league can be played on that season."""
-    if (data.season, data.scoring) != (settings.season, settings.scoring):
+    if (data.season, data.scoring, data.rules) != (settings.season, settings.scoring, settings.scoring_rules):
         raise ValueError(f"This league plays the {settings.season} season with {settings.scoring} scoring, "
                          f"but the data loaded is {data.season} with {data.scoring} scoring.")
     if settings.end_week > data.last_week:

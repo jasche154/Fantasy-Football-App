@@ -5,7 +5,7 @@ import pytest
 
 from services import replay_counter as rc, replay_state as rs, replay_trades as rt
 from tests import replay_fakes as fakes
-from tests.test_replay_trades import chart_knowledge, league, star, with_persona
+from tests.test_replay_trades import chart_knowledge, league, star, with_persona, with_trades
 
 P = fakes.player_id
 SETTINGS = fakes.fake_settings()
@@ -60,10 +60,10 @@ def test_it_counters_once_and_only_as_often_as_its_persona_does(always, monkeypa
 
 def test_no_counter_when_value_was_not_the_only_problem(always):
     base, know = league()
-    traded, _ = rt.propose(base, SETTINGS, know, NEEDS_RB, [P("RB", 14)], [P("TE", 7)])
-    state, _, mine = declined(traded, (NEEDS_RB, [SCRUB], [P("TE", 6)]))
+    capped = with_trades(base, NEEDS_RB, rs.MAX_TRADES_PER_WEEK)
+    state, _, mine = declined(capped, (NEEDS_RB, [SCRUB], [P("TE", 6)]))
 
-    assert any("already made a trade" in reason for reason in rt.evaluate(
+    assert any("trades this week" in reason for reason in rt.evaluate(
         state, SETTINGS, know, USER, NEEDS_RB, mine.give, mine.get).reasons)
     assert rc.counter_offer(state, SETTINGS, know, mine, seed=0) is state
 

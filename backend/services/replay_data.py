@@ -7,6 +7,7 @@ prepare_season makes one season playable, skipping whatever is already stored (u
    ("snaps") its snap counts into the shared player_snap_counts_weekly (optional: a failure never blocks);
 2. the 32 team-defense pseudo-players;
 3. preseason ADP (Fantasy Football Calculator, then MyFantasyLeague for the players it lacks) into replay_adp,
+   one list per draft format (ppr, half, std, 2qb; the league's settings pick one, services/replay_adp_format),
    then ("experts") FantasyPros position ranks into replay_expert_ranks (services/replay_experts.py; 2020 on;
    optional: a failure never blocks);
 4. ESPN's and Sleeper's pre-game projections for every regular-season week into replay_projections;
@@ -207,17 +208,34 @@ def adp_rows(season: int, ffc: Sequence[tuple[AdpEntry, int | None]],
     return rows
 
 
-def load_adp(session: Session, season: int, client: HistoryClient, force: bool = False) -> dict:
-    """Step 3. FFC is required (its failure changes nothing). A season is complete once it has MFL rows;
-    until then every run fetches again. If MFL or the id crosswalk fails, a stored season is left exactly
-    as it is (never shrunk) and the error reported; with nothing stored, FFC alone is stored for now."""
-    stored = dict(session.execute(select(ReplayAdp.source, func.count()).where(
-        ReplayAdp.season == season).group_by(ReplayAdp.source)).all())
-    total = sum(stored.values())
-    if stored.get(adp_history.MFL) and not force:
-        return {"rows": total, "skipped": True}
-    ffc = adp_history.fetch_ffc(client, season)
+def _ffc_lists(client: HistoryClient, season: int) -> tuple[dict[str, list[AdpEntry]], dict[str, str]]:
+    """({format: FFC's list}, errors). PPR is required (HistoryError); another format FFC cannot give is
+    reported and left out, so whatever is stored for it stays (replay_pool reads the nearest format)."""
+    lists = {"ppr": adp_history.fetch_ffc(client, season)}
     errors: dict[str, str] = {}
+    for adp_format in adp_history.FFC_FORMATS:
+        if adp_format != "ppr":
+            try:
+                lists[adp_format] = adp_history.fetch_ffc(client, season, adp_format)
+            except HistoryError as exc:
+                errors[f"adp ffc {adp_format}"] = type(exc).__name__
+    return lists, errors
+
+
+def load_adp(session: Session, season: int, client: HistoryClient, force: bool = False) -> dict:
+    """Step 3. One list per format in adp_history.FFC_FORMATS (see _ffc_lists), each followed by MFL's tail.
+    A format is complete once it has MFL rows; until every one is, every run fetches again. If MFL or the id
+    crosswalk fails, a stored season is left exactly as it is (never shrunk) and the error reported; with
+    nothing stored, FFC alone is stored for now. The summary's counts are the PPR list's, plus rows per format.
+    shortcut: MFL's PPR real-draft list fills every format's tail (past FFC's last pick the order barely
+    differs); fetch MFL per format (IS_PPR=0, 2-QB leagues) if the tail ever matters."""
+    stored = {(fmt, source): rows for fmt, source, rows in session.execute(
+        select(ReplayAdp.format, ReplayAdp.source, func.count()).where(ReplayAdp.season == season)
+        .group_by(ReplayAdp.format, ReplayAdp.source))}
+    ppr_stored = sum(rows for (fmt, _), rows in stored.items() if fmt == "ppr")
+    if {fmt for fmt, source in stored if source == adp_history.MFL} >= set(adp_history.FFC_FORMATS) and not force:
+        return {"rows": ppr_stored, "skipped": True}
+    lists, errors = _ffc_lists(client, season)
     mfl: list[AdpEntry] = []
     crosswalk: dict[str, str] = {}
     try:
@@ -226,27 +244,34 @@ def load_adp(session: Session, season: int, client: HistoryClient, force: bool =
     except HistoryError as exc:                         # MFL rows without ids would be matched by name alone
         errors["adp crosswalk" if mfl else "adp mfl"] = type(exc).__name__
         mfl = []
-    if errors and total:
-        return {"rows": total, "kept": True, "errors": errors}
+    if not mfl and stored:
+        return {"rows": ppr_stored, "kept": True, "errors": errors}
     created = create_drafted_players(session, mfl, crosswalk)
     matcher = SeasonMatcher(session, season)
     mfl_pairs = [(e, _adp_player(matcher, e, crosswalk, {})) for e in mfl]
     via_mfl = {(name_key(e.name), e.position): pid for e, pid in mfl_pairs if pid is not None}
-    ffc_pairs = [(e, _adp_player(matcher, e, crosswalk, via_mfl)) for e in ffc]
-    rows = adp_rows(season, ffc_pairs, mfl_pairs)
-    session.execute(delete(ReplayAdp).where(ReplayAdp.season == season))
+    pairs = {fmt: [(e, _adp_player(matcher, e, crosswalk, via_mfl)) for e in entries] for fmt, entries in lists.items()}
+    by_format = {fmt: adp_rows(season, fmt_pairs, mfl_pairs) for fmt, fmt_pairs in pairs.items()}
+    session.execute(delete(ReplayAdp).where(ReplayAdp.season == season, ReplayAdp.format.in_(list(by_format))))
+    rows = [{**row, "format": fmt} for fmt, fmt_rows in by_format.items() for row in fmt_rows]
     if rows:
         session.execute(insert(ReplayAdp), rows)
     session.commit()
-    unmatched = [f"{e.name} ({e.position}, {e.source} {e.adp})" for e, pid in (*ffc_pairs, *mfl_pairs) if pid is None]
+    missed: dict[tuple[str, str], str] = {}             # one line per player, the PPR list's first
+    for e, pid in (*(pair for fmt_pairs in pairs.values() for pair in fmt_pairs), *mfl_pairs):
+        if pid is None:
+            missed.setdefault((e.name, e.position), f"{e.name} ({e.position}, {e.source} {e.adp})")
+    unmatched = list(missed.values())
     if unmatched:
         log.info("ADP %s: %d unmatched: %s", season, len(unmatched), "; ".join(unmatched))
-    by_source = Counter(row["source"] for row in rows)
+    by_source = Counter(row["source"] for row in by_format["ppr"])
     positions = dict(session.execute(select(Player.position, func.count()).join(
-        ReplayAdp, ReplayAdp.player_id == Player.id).where(ReplayAdp.season == season).group_by(Player.position)).all())
-    return {"rows": len(rows), "ffc": by_source[adp_history.FFC], "mfl": by_source[adp_history.MFL],
-            "ffc_matched": f"{sum(pid is not None for _, pid in ffc_pairs)}/{len(ffc)}",
+        ReplayAdp, ReplayAdp.player_id == Player.id).where(ReplayAdp.season == season, ReplayAdp.format == "ppr")
+        .group_by(Player.position)).all())
+    return {"rows": len(by_format["ppr"]), "ffc": by_source[adp_history.FFC], "mfl": by_source[adp_history.MFL],
+            "ffc_matched": f"{sum(pid is not None for _, pid in pairs['ppr'])}/{len(lists['ppr'])}",
             "mfl_matched": f"{sum(pid is not None for _, pid in mfl_pairs)}/{len(mfl)}",
+            "formats": {fmt: len(fmt_rows) for fmt, fmt_rows in by_format.items()},
             "positions": positions, "players_created": created,
             "unmatched": unmatched[:UNMATCHED_SHOWN], "errors": errors}
 

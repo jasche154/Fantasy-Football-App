@@ -20,8 +20,8 @@ from api.deps import Scoring
 from database.db import get_session
 from database.models import ReplayLeague
 from services import (
-    replay_data, replay_game as rg, replay_pool, replay_state as rs, replay_views as views,
-    replay_views_league as league_views,
+    replay_data, replay_game as rg, replay_pool, replay_scoring, replay_slots, replay_state as rs,
+    replay_views as views, replay_views_league as league_views,
 )
 from services.replay_pool import SeasonData
 from services.replay_state import Settings, State
@@ -59,13 +59,19 @@ def errors() -> Iterator[None]:
         raise HTTPException(422, str(exc)) from exc
 
 
+def _season_data(session: Session, settings: Settings) -> SeasonData:
+    """The season as this league sees it (its scoring and its ADP list, replay_adp_format)."""
+    return replay_pool.load_season_data(session, settings.season, settings.scoring, settings.scoring_rules,
+                                        settings.starters)
+
+
 def _game(row: ReplayLeague, settings: Settings, state: State, data: SeasonData) -> views.Game:
     return views.Game(row.id, row.name, settings, state, data, row.updated_at.isoformat(), row.seed)
 
 
 def open_game(session: Session, game_id: int) -> views.Game:
     row, settings, state = rs.load(session, game_id)
-    return _game(row, settings, state, replay_pool.load_season_data(session, settings.season, settings.scoring))
+    return _game(row, settings, state, _season_data(session, settings))
 
 
 def show(session: Session, game_id: int, build: Callable[[views.Game], dict]) -> dict:
@@ -109,7 +115,7 @@ def turn(session: Session, game_id: int, week: int | None = None, overall: int |
             raise HTTPException(409, f"This league is in week {state.week}, not week {week}. Reload it.")
         if overall is not None and overall != len(state.picks) + 1:
             raise HTTPException(409, f"The draft is at pick {len(state.picks) + 1}, not pick {overall}. Reload it.")
-        data = replay_pool.load_season_data(session, settings.season, settings.scoring)
+        data = _season_data(session, settings)
         yield Turn(session, row, settings, state, data)
 
 
@@ -131,6 +137,14 @@ def prepare_season(season: int, force: bool = False, session: Session = Depends(
 
 # ---------------- games ----------------
 
+class RulesBody(BaseModel):
+    """A league's custom key settings (replay_scoring.ScoringRules; the allowed values are checked there)."""
+    reception: float = Field(..., ge=0, le=replay_scoring.RECEPTION_MAX)
+    te_premium: float = 0.0
+    pass_td: float = replay_scoring.BASE_PASS_TD
+    turnover: float = replay_scoring.BASE_TURNOVER
+
+
 class CreateBody(BaseModel):
     season: int | Literal["random"]
     name: str | None = Field(None, max_length=MAX_NAME_LENGTH)
@@ -142,6 +156,21 @@ class CreateBody(BaseModel):
     waiver_mode: Literal["wednesday", "faab", "none"] = "wednesday"
     difficulty: Literal["normal", "hard"] = "normal"
     seed: int | None = Field(None, ge=0, le=MAX_SEED)
+    starters: dict[str, int] | None = Field(None, max_length=len(replay_slots.SLOTS))   # slot -> count; None: standard
+    scoring_rules: RulesBody | None = None              # None: the `scoring` preset as is
+
+
+def _lineup_and_scoring(body: CreateBody) -> tuple[dict[str, int], str, replay_scoring.ScoringRules | None]:
+    """(starters, scoring, rules) from the body; ValueError (422) for a lineup or rules outside the bounds."""
+    starters = dict(body.starters) if body.starters is not None else dict(rs.DEFAULT_STARTERS)
+    problem = replay_slots.problem(starters)
+    if problem:
+        raise ValueError(problem)
+    rules = replay_scoring.ScoringRules(**body.scoring_rules.model_dump()) if body.scoring_rules else None
+    problem = rules and replay_scoring.problem(rules)
+    if problem:
+        raise ValueError(problem)
+    return (starters, *replay_scoring.normalize(body.scoring, rules))
 
 
 def _season(session: Session, wanted: int | str, seed: int, end_week: int) -> int:
@@ -169,13 +198,15 @@ def create_game(body: CreateBody, session: Session = Depends(get_session)) -> di
     """A new league, drafted up to the user's first pick. Season "random": a seeded choice of a ready one."""
     seed = body.seed if body.seed is not None else secrets.randbelow(MAX_SEED + 1)
     with errors():
+        starters, scoring, rules = _lineup_and_scoring(body)        # 422 before any season lookup
         season = _season(session, body.season, seed, body.playoff_end_week)
         slot = body.draft_slot or int(rs.rng(seed, "slot").integers(1, body.teams + 1))
         playoff_teams = body.playoff_teams or rs.default_playoff_teams(body.teams)
-        settings = Settings(season=season, teams=body.teams, scoring=body.scoring, draft_slot=slot,
+        settings = Settings(season=season, teams=body.teams, scoring=scoring, draft_slot=slot,
                             waiver_mode=body.waiver_mode, difficulty=body.difficulty, playoff_teams=playoff_teams,
-                            regular_season_weeks=body.playoff_end_week - rs.playoff_rounds(playoff_teams))
-        data = replay_pool.load_season_data(session, season, body.scoring)
+                            regular_season_weeks=body.playoff_end_week - rs.playoff_rounds(playoff_teams),
+                            starters=starters, scoring_rules=rules)
+        data = replay_pool.load_season_data(session, season, scoring, rules, starters)
         state = rg.create_game(settings, data, seed)
         name = (body.name or "").strip() or f"{season} Replay"
         game = _game(rs.create(session, name, settings, state, seed), settings, state, data)
@@ -224,6 +255,11 @@ def scoreboard(game_id: GameId, week: int | None = Week, session: Session = Depe
 @router.get("/games/{game_id}/standings")
 def standings(game_id: GameId, session: Session = Depends(get_session)) -> dict:
     return show(session, game_id, league_views.standings)
+
+
+@router.get("/games/{game_id}/playoffs")
+def playoffs(game_id: GameId, session: Session = Depends(get_session)) -> dict:
+    return show(session, game_id, league_views.playoffs)
 
 
 @router.get("/games/{game_id}/schedule")

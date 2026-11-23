@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 
 from database.models import League, Roster, Team
 from integrations.weekly_sources import normalize_name
-from services.league import DEFAULT_STARTERS, LeagueSettings
+from services.league import DEFAULT_STARTERS, LeagueSettings, superflex_slots
 from services.trade_finder import TradeOffer, find_trades
 from services import game_locks
 from services.valuation import Valuation, build_valuation
@@ -184,7 +184,7 @@ def rosters(session: Session, league: League) -> dict[int, list[RosterSpot]]:
 def _slots(settings: LeagueSettings) -> list[str]:
     slots = []
     for key in SLOT_ORDER:
-        count = settings.starters.get(key, 0) if key != "SUPERFLEX" else (1 if settings.superflex else 0)
+        count = settings.starters.get(key, 0) if key != "SUPERFLEX" else superflex_slots(settings)
         slots.extend([key] * count)
     return slots
 

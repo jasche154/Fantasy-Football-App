@@ -14,7 +14,7 @@ from tests.test_replay_data import (  # noqa: F401  (db and loaders are fixtures
 
 def sources(session) -> dict[str, int]:
     return dict(session.execute(select(ReplayAdp.source, func.count()).where(
-        ReplayAdp.season == SEASON).group_by(ReplayAdp.source)).all())
+        ReplayAdp.season == SEASON, ReplayAdp.format == "ppr").group_by(ReplayAdp.source)).all())
 
 
 def broken_crosswalk():
