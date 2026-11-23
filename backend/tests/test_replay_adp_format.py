@@ -108,18 +108,35 @@ def ffc_paths(sites: Sites) -> list[str]:
     return [r.url.path.rsplit("/", 1)[1] for r in sites.requests if "fantasyfootballcalculator" in r.url.host]
 
 
+NO_DATA = {"status": "Error", "errors": "No ADP data found."}     # FFC's answer for a list it does not have
+NO_LIST = "FfcNoDataError"
+
+
 def test_a_format_ffc_has_no_list_for_is_not_asked_for_again_until_a_forced_run(db):
-    sites = Sites(formats={"2qb": {"status": "Error"}})
+    sites = Sites(formats={"2qb": NO_DATA})
     first = replay_data.load_adp(db, SEASON, HistoryClient(sites.client(), pause=0))
     sites.requests.clear()
 
     again = replay_data.load_adp(db, SEASON, HistoryClient(sites.client(), pause=0))
     forced = replay_data.load_adp(db, SEASON, HistoryClient(sites.client(), pause=0), force=True)
 
-    assert first["errors"] == {"adp ffc 2qb": "HistoryError"} and set(first["formats"]) == {"ppr", "half", "std"}
+    assert first["errors"] == {"adp ffc 2qb": NO_LIST} and set(first["formats"]) == {"ppr", "half", "std"}
     assert again == {"rows": 7, "skipped": True}
     assert ffc_paths(sites) == ["ppr", "half-ppr", "standard", "2qb"]              # only the forced run asked
-    assert forced["errors"] == {"adp ffc 2qb": "HistoryError"}
+    assert forced["errors"] == {"adp ffc 2qb": NO_LIST}
+
+
+@pytest.mark.parametrize("glitch", [{"status": "Error", "errors": "Too many requests"}, {"status": "Error"},
+                                    {k: v for k, v in FFC_PAYLOAD.items() if k != "meta"}])  # throttled, bare, no type
+def test_an_ffc_glitch_is_not_remembered_as_no_list_and_is_asked_again(db, glitch):
+    sites = Sites(formats={"2qb": glitch})
+    first = replay_data.load_adp(db, SEASON, HistoryClient(sites.client(), pause=0))
+    sites.requests.clear()
+
+    again = replay_data.load_adp(db, SEASON, HistoryClient(sites.client(), pause=0))
+
+    assert set(first["errors"]) == {"adp ffc 2qb"} and first["errors"]["adp ffc 2qb"] == "HistoryError"
+    assert "2qb" in ffc_paths(sites) and "skipped" not in again
 
 
 def test_a_failed_request_for_a_format_is_retried_on_the_next_run(db):

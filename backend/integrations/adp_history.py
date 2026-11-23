@@ -46,6 +46,10 @@ class HistoryError(SourceError):
     """A historical source could not be fetched or parsed. The message never carries a URL."""
 
 
+class FfcNoDataError(HistoryError):
+    """FFC answered that it has no list for that season and format (not a glitch: worth remembering)."""
+
+
 class HistoryClient:
     """One shared httpx client: a pause between requests, a timeout, one retry, then HistoryError."""
 
@@ -124,6 +128,17 @@ def _ffc_entry(row: dict) -> AdpEntry | None:
     return AdpEntry(FFC, str(row["name"]), position, adp, _number(row.get("stdev")), team_code(row.get("team")))
 
 
+def _ffc_says_no_data(payload: Any) -> bool:
+    """FFC's own "no data" answers: status "Error" with a "no ... data" message, or "Success" with no players.
+    Any other failure (throttling, an outage page, a malformed or wrong-format list) is retried next run."""
+    if not isinstance(payload, dict):
+        return False
+    if payload.get("status") == "Success":
+        return payload.get("players") in (None, [])
+    text = str(payload.get("errors") or "").lower()
+    return payload.get("status") == "Error" and "no" in text.split() and "data" in text
+
+
 def parse_ffc(payload: Any, adp_format: str = "ppr") -> list[AdpEntry]:
     """FFC answers HTTP 200 with status "Error", or "Success" with no players, when it has no data. A list of
     another format (FFC's meta "type") is refused rather than stored under the wrong one; so is a list without
@@ -133,9 +148,11 @@ def parse_ffc(payload: Any, adp_format: str = "ppr") -> list[AdpEntry]:
     kind = meta.get("type") if isinstance(meta, dict) else None
     if ok and (kind is not None or adp_format != "ppr") and kind != FFC_FORMATS[adp_format][1]:
         raise HistoryError("Fantasy Football Calculator returned ADP for another format.")
+    if _ffc_says_no_data(payload):
+        raise FfcNoDataError("Fantasy Football Calculator has no ADP for that season.")
     entries = parse_rows("Fantasy Football Calculator ADP", payload["players"], _ffc_entry) if ok else []
     if not entries:                     # an empty list too: a forced load would replace the season with MFL alone
-        raise HistoryError("Fantasy Football Calculator has no ADP for that season.")
+        raise HistoryError("Fantasy Football Calculator returned no usable ADP rows.")
     return sorted(entries, key=lambda e: e.adp)
 
 

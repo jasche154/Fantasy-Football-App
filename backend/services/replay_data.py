@@ -223,10 +223,10 @@ def _ffc_lists(client: HistoryClient, season: int, formats: Iterable[str]
             continue
         try:
             lists[adp_format] = adp_history.fetch_ffc(client, season, adp_format)
-        except HistoryError as exc:
+        except HistoryError as exc:                     # the type says why: FfcNoDataError or a glitch
             errors[f"adp ffc {adp_format}"] = type(exc).__name__
             log.warning("ADP %s: no %s list from FFC (%s)", season, adp_format, type(exc).__name__)
-            if exc.__cause__ is None:                   # FFC answered, without a list (not a network failure)
+            if isinstance(exc, adp_history.FfcNoDataError):   # FFC said it has none; anything else is retried
                 no_data.add(adp_format)
     return lists, errors, no_data
 

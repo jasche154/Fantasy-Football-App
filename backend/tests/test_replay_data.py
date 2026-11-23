@@ -568,7 +568,7 @@ def test_prepare_season_reports_a_missing_ffc_season_by_error_type_and_still_loa
 
     summary = replay_data.prepare_season(db, SEASON, http=sites.client())
 
-    assert summary["errors"] == {"adp": "HistoryError"} and adp_by_gsis(db) == {}
+    assert summary["errors"] == {"adp": "FfcNoDataError"} and adp_by_gsis(db) == {}
     assert summary["projections"]["espn"]["rows"] == {1: 4, 2: 4}
 
 
