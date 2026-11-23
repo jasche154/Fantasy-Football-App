@@ -93,7 +93,9 @@ only *explains* numbers that came back from a tool call. Every output is labeled
   can be moved there, which frees his roster spot, and can trade places with another injured player. When
   he loses the tag you must activate him (dropping someone if the roster is full) or drop him before you
   can add, claim or trade for anyone. The Players screen shows each player's recent usage (snap %, targets,
-  target share, carries).
+  target share, carries). Two simulated seasons can be played too: the season in progress (real weeks so
+  far, the rest simulated, with a full-season or "jump in now" draft) and next season, simulated whole
+  (see [Simulated seasons](#simulated-seasons-replay-league)).
 - **Integrations:** Sleeper trending adds/drops, FantasyPros ROS rankings (with your key), and Yahoo league and roster import (OAuth)
 - **AI assistant and agent tools:** 17 validated tools that any agent can call over REST
   or MCP (Claude Desktop / Claude Code), plus a built-in Groq-powered chat
@@ -168,7 +170,8 @@ The Replay League page does the same from the browser: a season that is not read
 injury reports and weekly roster status (nflverse). A season prepared before that existed is topped up
 by running the same command again (without `--force`), or with the **Add &lt;season&gt; injury reports**
 button. The same goes for snap counts (the "snaps" step): a season prepared before it existed gets them on
-its next Prepare.
+its next Prepare. The season in progress is prepared the same way (`--seasons 2026`), again each time a week
+finishes (see [Simulated seasons](#simulated-seasons-replay-league)).
 
 A season only replaces existing rows after its download succeeds, so a network hiccup
 never wipes data. `populate_stats` also brings the schema up to date first, and it works on
@@ -215,7 +218,7 @@ Open <http://localhost:5173>. The UI talks to `http://localhost:8000` by default
 | **Player page** | Weekly chart of actual vs expected points, game log, NGS stats, projection, signals. **Position percentiles** rank his season stats against his position (green = good, red = bad, grey for context stats like aDOT; "Small sample" until he has enough volume). **What changed** compares his last 3 games with the earlier games (snap share, target share, air-yard share, targets, carries, pass attempts) and flags big moves |
 | **Odds & Props** | Pick a week: every game's kickoff, closing spread and total, and each team's implied total. **Show props** opens the player props stored for that game (expected passing/rushing/receiving yards, receptions, TDs implied by the lines) with how long before kickoff they were bought. Props appear game by game on game day; before that the page says why they're missing |
 | **Ask AI** | Ask questions in plain English; each answer shows which tools it used |
-| **Replay League** | A game: replay a past season against CPU managers. **Start:** under **New league** pick a season (or Random), 4–16 teams, the **league format** (Standard, Superflex or Double flex as a start, then 0–3 starters per slot: QB, RB, WR, TE, FLEX, SFLX (superflex: a QB, RB, WR or TE), K, DST; at least one QB or SFLX, at most 12 starters; in superflex the CPUs value and draft quarterbacks much earlier), the **scoring** (PPR, half or standard as a base, then points per reception 0–1.5, a TE premium of +0.5 or +1 per catch, 4 or 6 points per passing TD and −1 or −2 per turnover; played games always score exactly, but with custom settings the pre-game projections are estimates converted from the sites' PPR and standard numbers), your draft slot, the playoff weeks (14–16, 15–17 by default, or 16–18 when the season has a week 18) and how many teams make the playoffs (4–8, default 4 under 10 teams, 6 under 14, else 8), waivers (Wednesday waivers; FAAB bidding: $100 per team, blind bids, the highest bid wins, ties go by waiver priority, winning bids show in the activity log; or free agency only) and difficulty, then **Create league and draft**. Saved leagues are listed above the form (Resume, Delete). **Draft:** the board lists who is left by **Rank** (the preseason expert rank, or the ADP order for 2018–2019, as Yahoo shows a rank next to ADP), with the round that rank implies (**Rd**), ADP and the preseason projection (points a game); sort by Rank, ADP or Proj. Press **Draft** next to a player on your turn, or auto-pick one pick or the rest; the CPUs pick in between. **The week loop:** the one primary button at the top says what comes next. **Play week N** scores the week with the real results; then every unrostered player is on waivers, you put in claims on the Players tab (with a bid in a FAAB league), and **Sim to Wednesday** settles them (by priority, or by bid in FAAB) and lets the CPUs move; then lineups, free-agent adds and trades are open again until you play the next week. **Tabs:** My Team (set your lineup with Move, drop players, look at any team or past week), Matchup (your game and the week's scoreboard), Players (the waiver wire with each player's usage over his last 3 games, adds and claims), Trades (CPU offers, and a builder that shows the CPU's verdict before you propose) and League (standings, schedule, scoreboard, activity). The regular season runs until the playoff weeks you chose; then the top seeds play a title bracket (top seeds get a bye when it has 5–7 teams) and everyone else plays for the places below. **No hindsight:** nothing on screen comes from a week you have not played. Before a week is played you see only its pre-game projection; points, records and standings stop at the last week played, the My Team and Matchup week pickers end at the current week, and later weeks on the League scoreboard show the pairings only |
+| **Replay League** | A game: replay a past season against CPU managers. **Start:** under **New league** pick what to play (a past season, or a simulated one: the live season with **Full season** or **Jump in now**, or next season), then a season (or Random), 4–16 teams, the **league format** (Standard, Superflex or Double flex as a start, then 0–3 starters per slot: QB, RB, WR, TE, FLEX, SFLX (superflex: a QB, RB, WR or TE), K, DST; at least one QB or SFLX, at most 12 starters; in superflex the CPUs value and draft quarterbacks much earlier), the **scoring** (PPR, half or standard as a base, then points per reception 0–1.5, a TE premium of +0.5 or +1 per catch, 4 or 6 points per passing TD and −1 or −2 per turnover; played games always score exactly, but with custom settings the pre-game projections are estimates converted from the sites' PPR and standard numbers), your draft slot, the playoff weeks (14–16, 15–17 by default, or 16–18 when the season has a week 18) and how many teams make the playoffs (4–8, default 4 under 10 teams, 6 under 14, else 8), waivers (Wednesday waivers; FAAB bidding: $100 per team, blind bids, the highest bid wins, ties go by waiver priority, winning bids show in the activity log; or free agency only) and difficulty, then **Create league and draft**. Saved leagues are listed above the form (Resume, Delete). **Draft:** the board lists who is left by **Rank** (the preseason expert rank, or the ADP order for 2018–2019, as Yahoo shows a rank next to ADP), with the round that rank implies (**Rd**), ADP and the preseason projection (points a game); sort by Rank, ADP or Proj. Press **Draft** next to a player on your turn, or auto-pick one pick or the rest; the CPUs pick in between. **The week loop:** the one primary button at the top says what comes next. **Play week N** scores the week with the real results; then every unrostered player is on waivers, you put in claims on the Players tab (with a bid in a FAAB league), and **Sim to Wednesday** settles them (by priority, or by bid in FAAB) and lets the CPUs move; then lineups, free-agent adds and trades are open again until you play the next week. **Tabs:** My Team (set your lineup with Move, drop players, look at any team or past week), Matchup (your game and the week's scoreboard), Players (the waiver wire with each player's usage over his last 3 games, adds and claims), Trades (CPU offers, and a builder that shows the CPU's verdict before you propose) and League (standings, schedule, scoreboard, activity). The regular season runs until the playoff weeks you chose; then the top seeds play a title bracket (top seeds get a bye when it has 5–7 teams) and everyone else plays for the places below. **No hindsight:** nothing on screen comes from a week you have not played. Before a week is played you see only its pre-game projection; points, records and standings stop at the last week played, the My Team and Matchup week pickers end at the current week, and later weeks on the League scoreboard show the pairings only |
 | **Settings** | League scoring, size, superflex, and TE premium (used everywhere); connect Yahoo; check integrations. **System** shows when the auto-update last ran and what it did, Odds API credits left, data freshness and the last backup, with **Back up now**. **API access** takes the token when the backend has `API_TOKEN` set |
 
 ## How the numbers work
@@ -844,7 +847,8 @@ implied by each player's lines, bought once per game within 2 hours of kickoff. 
 when each game's props were fetched relative to kickoff.
 
 ### Replay League
-A game against the computer on a past season (`services/replay_*.py`, API under `/api/replay`).
+A game against the computer on a past season (`services/replay_*.py`, API under `/api/replay`), or on a
+simulated one ([Simulated seasons](#simulated-seasons-replay-league), below).
 One rule runs through it: **no hindsight**. CPU managers and every number shown before a week is
 played use only what existed then: preseason ADP (Fantasy Football Calculator, with MyFantasyLeague
 for the deep end) and each week's pre-game projection (ESPN, Sleeper where ESPN has none). The
@@ -1101,6 +1105,142 @@ and the API sends no result of an unplayed week. The look ("Game Night", `styles
   `replay_views_players.py` (the players list and player card; `replay_views_league` re-exports them).
   Bad `sort`, `dir`, `stats` or `stat_week` values on the players endpoint answer 422.
 
+### Simulated seasons (Replay League)
+Besides the finished seasons (2018-2025), a Replay League can be played on two seasons that have not
+happened yet, or not all of it: the **live** season (the one in progress, 2026) and the **future** one
+(2027). Under **New league**, **What to play** lists **Past season** and each simulated season; a simulated
+season that can't be played yet is greyed out with the reason. The rules of the game (draft, waivers,
+trades, IR, playoffs, no hindsight) are the same as in a past season. A new league's default name is
+"&lt;season&gt; Sim", and building its season takes about 10 seconds.
+
+- **The live season:** real results through week N, the last week in which every game is final and the
+  app's player and team stats are loaded (`services/replay_live.py`; the stats come from the app's normal
+  stats load, not from Prepare); weeks N+1 to 18 are simulated. It must be prepared like a past season, and
+  prepared again each time a week finishes: until weeks 1 to N all have their projections, the season is
+  not ready and a **Prepare 2026 data** button shows under the new-league form, or run
+  `python -m services.replay_data --seasons 2026`. A re-run only fetches the new weeks' projections, reloads
+  the injury tags and expert ranks when N has grown, and never re-downloads the game results. Fantasy
+  Football Calculator has no ADP for a season in progress, so its preseason ADP is MyFantasyLeague's PPR
+  list alone (real 12-team drafts from August 15 on; `services/replay_live_data.py`), which the other
+  formats use as their nearest list until FFC has one.
+- **Two ways to start a live league** (**Start**): **Full season** drafts in week 0 on the preseason ADP
+  and plays weeks 1 to N with the real results, then the simulated rest. **Jump in now** drafts today and
+  plays from week N+1: the draft knows everything through week N (results, the week N+1 injury tags,
+  projections and the latest expert ranks), and the ADP is today's market (what a draft held under the
+  current public view would look like, below), not August's. Its defaults: 4 playoff teams (the smallest
+  bracket, so the longest regular season), the trade deadline two thirds of the way through the weeks
+  left, and at least 3 regular-season weeks must be left (otherwise pick a later championship week or
+  fewer playoff teams). The form shows the plan ("plays weeks 12-15 (4 weeks), then the playoffs in weeks
+  16-17. Trade deadline: week 13."). Weeks before N+1 are history, not league weeks: the schedule,
+  scoreboard, standings and week pickers start at N+1, while a player's game log still shows his real
+  earlier games. A CPU's tendency hint shows after 3 league weeks.
+- **The future season** (2027) is simulated whole, starting from what is known today: the public view of
+  every player at the end of the newest season so far (2026 through its last finished week, so it moves as
+  2026 is played), carried through an offseason (below). It needs that season prepared first.
+- **Every league is frozen:** each new simulated league rolls its own rest of the season from its seed,
+  so two leagues on 2026 play out differently, and the whole season (the real weeks too) is saved with the
+  league (table `replay_season_data`, `services/replay_blob.py`, compressed versioned JSON). New real data
+  (a finished week, an updated offseason file) only reaches leagues created after it; deleting a league
+  deletes its season.
+- **How the UI marks it:** the saved-leagues list puts a **Live 2026** or **Simulated** chip after the
+  name; the game screen shows "2026 · simulated from week 12" or "2027 · simulated season" under the
+  scorebug; on a player's card every simulated week in the game log and the weeks ahead carries a small
+  **Sim** mark, with a line saying from which week the season is simulated.
+
+**How a week is simulated** (`services/sim_*.py`). The simulator keeps two pictures of the league: the
+**truth** (how good every player and team really is this season) and the **public belief** (what the
+games so far say). Only the games (and the buzz, below) read the truth; projections, expert ranks, ADP and every CPU decision
+read the belief, so, as in a real season, the public learns the truth only from results.
+
+- **Games are played top-down,** so box scores always add up (`services/sim_game.py`): first each
+  team's targets and carries (its volume, a shared game draw for shootouts, the leader running more and the
+  trailer passing more), then they are split among the active players by their roles (an injured player's
+  work goes to his teammates, a rookie takes some from everyone), then catches, yards and touchdowns per
+  player. The quarterback's passing line is the sum of his receivers' lines, so a QB's yards and TDs always
+  match his receivers'. If he leaves hurt, his backup throws part of each receiver's catches. Kickers get an
+  extra point try for each of their team's TDs and field goal tries that rise with the team's yards and fall
+  with its TDs (drives that stall); a defense's sacks and interceptions are the opposing offense's, and its
+  points allowed are the opponent's points. Points use the league's own scoring, custom settings included.
+- **Injuries** come from what really happened to fantasy-relevant players in 2018-2025
+  (`services/sim_injuries.py`, rates in `sim_injuries.json`): by position, the chance a player who plays a
+  game gets hurt in it, how many games he then misses (the real lengths, season-enders included), how much
+  of the game he finished, the body part, how often he comes back listed Q, and how often a healthy starter
+  is listed Q or D and plays anyway. A long absence is tagged IR, like the real reports. Defenses are never
+  hurt. A player already out when the simulation starts sits a fitting number of further games.
+- **Hidden talent:** every player's true role and efficiency differ from his reputation by a random draw,
+  widest for rookies and players with few games, smallest for veterans with a full season
+  (`services/sim_talent.py`); teams' volume and defenses move the same way. During the season some
+  players **break out** (a backup's role grows), some **bust** (a lead player's shrinks) and some starting
+  quarterbacks are **benched** (a poor passer more often; in a whole simulated season a team with a promising rookie behind its
+  starter usually turns to him before the season is out). These spreads and rates are tuned so a
+  simulated season reshuffles like a real one (preseason rank against final rank, breakouts, busts).
+- **Buzz:** before the week a breakout, bust or benching starts, a news line is published for 60% of
+  them ("Beat reporters say his role is growing; expect more work.", "Reports say his snaps and touches are
+  shrinking.", "Reports say his starting job is in danger."), and false lines about other starters are added
+  so only about 60% of all lines are true. It shows as a small **Buzz** chip ("Rumor: ...") on player rows
+  and the draft board, and under **News** on his card. It is the only way the truth reaches the screen
+  before the games, and it is right only some of the time.
+- **Projections, expert ranks and ADP** are computed from the belief each week (`services/sim_market.py`):
+  the belief is refitted from the games played so far (recent games count more), a projection is a
+  player's expected points in that week's game with the players ruled out removed (so their teammates
+  rise), expert ranks are each position ordered by expected value with a little noise (about 8%), and ADP is
+  a 12-team PPR draft by points over replacement; kickers and defenses take the real average ADP of the Nth
+  one drafted.
+
+**2027 specifics:**
+
+- **Aging:** each veteran's role grows or fades by his position's curve for his years in the league (1, 2,
+  3, 4-5, 6-8, 9+), big and small roles move partway back toward the usual one, and each team's
+  returning players are rescaled so the curve moves work between teammates without changing the team's
+  total. Efficiency regresses toward the position norm. All of it is measured from real seasons 2019-2025
+  (`sim_next_year.json`). On each team the QB who started the most games last season is the starter again in August.
+- **Rookies** get the role a player taken at that pick and position really had as a rookie, and the widest
+  talent draw. A rookie QB starts week 1 when his team has no starter, or when his pick makes it likely and
+  the incumbent is a below-average passer; otherwise he is next in line.
+- **The offseason file** `backend/sim_data/offseason_2027.json` is meant to be edited by hand. `rookies`:
+  one entry per player with `name`, `position` (QB/RB/WR/TE/K), `team` (schedule code, e.g. MIA, LA, LV,
+  WAS), `pick` (projected overall pick, 1-262) and `college`. `moves`: `name` (as the app spells him),
+  `position`, `team` (the new team, or `null` for retired / out of the league) and a `note`. Names must be
+  unique across both lists; everyone else stays on his team. A bad entry greys out the 2027 card with the
+  file name and the problem; a move whose name matches nobody is skipped (logged as a warning). Saved
+  leagues keep the offseason they were built with.
+- **Schedule:** until the real 2027 schedule is in the database, it is built by the NFL's rotation
+  formula (`services/sim_schedule.py`: 6 division games, a division of each conference, two same-place
+  games and the 17th game), seeded by the season so every 2027 league shares it; the same-place games use
+  the 2026 standings so far. One bye per team in weeks 5-14 and division games only in week 18. Once the
+  real schedule is loaded, new leagues use it.
+
+**Known limits** (the modules' `shortcut:` notes):
+
+- A player's years in the league count from his first season in the database (2018), so a veteran who
+  started before 2018 ages as a younger player until the oldest bucket.
+- The generated schedule picks home and away within a rotation at random (not the real alternation), puts
+  the weeks in a random valid order, and plays every game on Sunday (no Thursday or Monday games).
+- A simulated injury's first missed week is always tagged O or IR, never a game-day Q/D ruling or PUP
+  (every screen treats them the same).
+- The live season's preseason ADP is MyFantasyLeague's PPR list for every format until Fantasy Football
+  Calculator has one.
+- The rookies and moves in the 2027 file are a snapshot of mock drafts and reports (dated in the file), not
+  facts.
+
+**Commands** (all read-only on the database; the fits rewrite the JSON files the simulator reads;
+`sim_next_year_fit` and `sim_eval`'s full mode download nflverse draft picks):
+
+```bash
+python -m services.sim_eval [--seasons 2021-2025] [--seeds 3] [--mode mid|full|both] [--out report.json]
+                                                     # realism check: simulated vs real seasons
+python -m services.sim_eval --set talent.role_sd=0.4 --save-tuned   # try a value; save it as tuned
+python -m services.sim_eval --fit [--seasons 2021-2025]             # refit the game model (sim_params.json)
+python -m services.sim_injuries --fit --seasons 2018-2025 [--check] # refit injuries (sim_injuries.json)
+python -m services.sim_next_year_fit --fit [--seasons 2019-2025]    # refit the offseason (sim_next_year.json)
+```
+
+`sim_eval`'s **mid** mode takes a real season as known before week 12, simulates the rest and compares it
+with what really happened (weekly point ranges, projection error, QB-receiver correlation, players sitting
+out, K and D/ST points); **full** builds a season exactly like the future one, from the season before with
+that year's real rookies, moves and schedule, and compares the whole season (preseason rank against final
+rank, breakouts, busts, games missed, how its ADP agrees with the real ADP).
+
 ## API reference
 
 All JSON. Errors use `{"detail": ...}` with a real status code (404, 422, 502, 503).
@@ -1156,10 +1296,10 @@ League parameters accepted by every valuation endpoint: `scoring=ppr|half|std`,
 | POST | `/api/agent/tools/{name}` | Body `{"arguments": {...}}`; run one tool |
 | POST | `/api/agent/chat` | Body `{"messages": [{"role": "user", "content": "..."}]}`; answer plus tool trace |
 | GET | `/api/rankings/rushing` | Original rushing endpoint (kept for compatibility; now uses the fixed leaderboard math) |
-| GET | `/api/replay/seasons` | Which past seasons can be replayed (readiness per season, with its `last_week`) and the running data import |
+| GET | `/api/replay/seasons` | Which past seasons can be replayed (readiness per season, with its `last_week`), the simulated ones (`simulated`: the live and future season, `through`, `ready`, `can_start_now`, `reason`) and the running data import |
 | POST | `/api/replay/seasons/{season}/prepare?force=` | Import that season's results, ADP, pre-game projections and injury tags in the background |
 | GET | `/api/replay/games` | Saved replay leagues, most recently played first |
-| POST | `/api/replay/games` | Body `{"season": 2019, "teams": 12, "scoring": "half", "draft_slot": 6, "waiver_mode": "wednesday", "difficulty": "normal", "playoff_end_week": 17, "playoff_teams": 6, "name": "...", "seed": 1}` (only `season` is required; it may be `"random"`; teams 4/6/8/10/12/14/16; `playoff_end_week` 16/17/18 (default 17; 422 when the season is shorter; a random season is drawn from the ready seasons that long), `playoff_teams` 4-8 (default by league size), the regular season is what the playoff rounds leave before the final; `waiver_mode` `"wednesday"`, `"faab"` (blind bids from $100) or `"none"` (free agency only); `difficulty` `"hard"`); a new league, drafted up to your first pick |
+| POST | `/api/replay/games` | Body `{"season": 2019, "teams": 12, "scoring": "half", "draft_slot": 6, "waiver_mode": "wednesday", "difficulty": "normal", "playoff_end_week": 17, "playoff_teams": 6, "name": "...", "seed": 1}` (only `season` is required; it may be `"random"`; teams 4/6/8/10/12/14/16; `playoff_end_week` 16/17/18 (default 17; 422 when the season is shorter; a random season is drawn from the ready seasons that long), `playoff_teams` 4-8 (default by league size), the regular season is what the playoff rounds leave before the final; `waiver_mode` `"wednesday"`, `"faab"` (blind bids from $100) or `"none"` (free agency only); `difficulty` `"hard"`; `start` `"full"` (default) or `"now"`, the live season only: draft today and play from the next week); `season` may also be the live or future season, whose simulated season is built and saved with the league; a new league, drafted up to your first pick |
 | GET | `/api/replay/games/{id}` | Game summary: phase, week, your record and matchup, what to do next, champion |
 | POST | `/api/replay/games/{id}/delete` | Delete the league |
 | GET | `/api/replay/games/{id}/draft?position=&search=&sort=&direction=&limit=&offset=` | Draft room: picks, order, your roster, players left by preseason rank (`sort` `rank`, `adp` or `projection`; `direction` `asc`/`desc`, default asc, desc for projection; unknowns last), each with the round his rank implies |
@@ -1546,7 +1686,11 @@ backend/
   services/                 tested business logic (scoring, projections, valuation, schedule strength,
                             weekly model and rankings, props math, leaderboards, players, trade, insights, agent)
     replay_*.py             Replay League: pool, values and state (data), draft, season, waivers, trades
-                            (engine), game (week flow), views (JSON), data (season import CLI)
+                            (engine), game (week flow), views (JSON), data (season import CLI),
+                            blob (a simulated league's frozen season), live (the season in progress)
+    sim_*.py                simulated seasons: setup (the only DB read), season, world (belief), talent
+                            (truth), game + draw, market, injuries, next year, schedule, offseason, eval + fits
+  sim_data/                 offseason_<season>.json: hand-edited rookies and moves for a simulated season
   integrations/             sleeper, fantasypros, yahoo, yahoo experts, espn, the odds api, token encryption,
                             past-season ADP and projections (adp_history, espn_history, sleeper_projections)
   tools/                    agent tool registry and definitions
