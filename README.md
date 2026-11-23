@@ -938,6 +938,24 @@ that week's games on; only scoring a week reads its real points.
   (2021-2025, weeks 2-11, against real points from that week on): per-position rank correlation 0.475 ->
   0.478, better in 4 of 5 seasons. A usage-share signal (a back's share of his team's touches) was tried and
   left out: it moved players the wrong way more often than the right one.
+- **Market reaction (hype):** trade values model what managers would pay, not only the forecast, and CPUs
+  price deals with the same values, so you can buy before or sell into a move. `services/replay_shocks.py`
+  detects events the market reacts to on little or no game sample, from point-in-time data only: a teammate
+  at his position ranked inside the top 36 RB / 48 WR / 18 TE goes out for at least a quarter of the games
+  left (the injury news counts, "out for the season" fully) or leaves for another team (the next back or
+  receiver in line gains); that teammate comes back after two or more weeks out (the stand-in loses); a
+  player's week 1-2 share of his team's work is well above or below what his preseason rank implies (role
+  won / lost). One game's points never move anything. Each event pulls his chart rank part of the way
+  toward the rank it points to (the lost starter's, his old one, the one his share implies), fading over 4
+  weeks and shrinking as the experts and projections catch up, so nothing counts twice. The size of each
+  pull is calibrated (`python -m services.replay_shock_eval`, 2018-25, leave one season out) on how far the
+  market really moved in the 1-3 weeks after: the expert ranks and the projections, minus the drift every
+  other player saw. Honest result: the chart already moves at the event week about as far as that market
+  later does (median gap about 0), so most pulls are small: the fill-in's drop when the starter returns is
+  the largest (RB 0.38 of the gap), a back's gain from a lost starter 0.15, role won 0.02-0.05, role lost
+  0 for RB/WR. Javonte Williams in 2025 week 2 goes 166 -> 181 (RB26 -> RB25; the experts reached RB16-20
+  only in weeks 3-5). Lead: mean distance to the market's later rank 11.3 -> 11.3 ranks. Forecast cost:
+  mean Spearman against real points from then on moves -0.009 to +0.001 per season (2022 worst).
 - **Injury news:** a player who is out carries a report of when he is due back (`services/replay_news.py`).
   It is built from the week he really returned, blurred by seeded noise (off by up to two weeks, a few
   false "out for the season" calls, season-ending injuries first reported as a return weeks out) that

@@ -36,7 +36,7 @@ from dataclasses import replace
 from functools import lru_cache
 from types import MappingProxyType
 
-from services import replay_news, replay_role
+from services import replay_news, replay_role, replay_shocks
 from services.replay_pool import PoolPlayer, SeasonData
 
 TAU = 40.0                     # pick_value decay: 1 -> 1000, 12 -> 760, 24 -> 563, 50 -> 294, 100 -> 84
@@ -93,6 +93,7 @@ def clear_cache() -> None:
     slot_curve.cache_clear()
     _by_week.cache_clear()
     replay_news.clear_cache()
+    replay_shocks.clear_cache()
 
 
 def pick_value(pick: float) -> float:
@@ -281,10 +282,41 @@ def base_charts(data: SeasonData, rows: Sequence[dict], priors: Mapping[int, flo
 
 def with_news(data: SeasonData, rows: Mapping[int, dict], fields: Mapping[int, dict], parts: Parts, week: int,
               end_week: int, seed: int) -> dict[int, dict]:
-    """{id: fields} for the players in `parts` only: their seeded news report and the chart it gives."""
+    """{id: fields} for the players in `parts` (their seeded news report and the chart it gives) and the
+    players an opportunity shock moves (replay_shocks: the market's reaction, which reads that news)."""
     out: dict[int, dict] = {}
     for pid, (expert, model_part, (since, back, tag)) in parts.items():
         news = replay_news.report(seed, pid, since, back, week, tag)
         chart, extra = _injured(data, rows[pid], news, week, end_week, expert, model_part)
         out[pid] = {**fields[pid], **extra, "chart": round(chart, 1), "news": news}
+    return {**out, **_shocked(data, rows, fields, out, week)}
+
+
+def healthy_ranks(rows: Mapping[int, dict], healthy: Mapping[int, float]) -> dict[int, float]:
+    """{id: fractional position rank on the healthy chart} for the positions shocks move."""
+    by_position: dict[str, dict[int, float]] = defaultdict(dict)
+    for pid, row in rows.items():
+        if row["position"] in replay_shocks.POSITIONS and pid in healthy:
+            by_position[row["position"]][pid] = healthy[pid]
+    return {pid: rank for group in by_position.values() for pid, rank in fractional_ranks(group).items()}
+
+
+def _shocked(data: SeasonData, rows: Mapping[int, dict], fields: Mapping[int, dict], news: Mapping[int, dict],
+             week: int) -> dict[int, dict]:
+    """{id: fields} for the players an opportunity shock moves: healthy_chart by the shock, chart in proportion."""
+    if not replay_shocks.events(data, week):
+        return {}
+    availability = {pid: row["availability"] for pid, row in rows.items()}
+    availability.update({pid: f["availability"] for pid, f in news.items() if "availability" in f})
+    healthy = {pid: f["healthy_chart"] for pid, f in fields.items()}
+    curve = slot_curve(data)
+    out: dict[int, dict] = {}
+    found = replay_shocks.moves(data, week, availability, healthy, healthy_ranks(rows, healthy),
+                                lambda position, rank: value_at(curve, position, rank))
+    for pid, (delta, shock) in found.items():
+        now = news.get(pid, fields[pid])
+        moved = max(0.0, now["healthy_chart"] + delta)
+        chart = now["chart"] * moved / now["healthy_chart"] if now["healthy_chart"] > 0 else moved * availability[pid]
+        out[pid] = {**now, "healthy_chart": round(moved, 1), "chart": round(chart, 1),
+                    "shock_chart": round(delta, 1), "shock": shock.kind}
     return out
