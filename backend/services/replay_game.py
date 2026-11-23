@@ -5,6 +5,8 @@ each other.
     week, "wednesday"/"faab":   advance("wednesday") -> advance("play") -> ...
     week, no waivers:           advance("play") -> ...
 
+- Chat: a third CPU may react to any trade (`replay_chat.trade_reactions`) and every CPU offer to the user
+  carries its reason (`replay_chat.label_offers`).
 - `start_week`: CPU IR moves, CPU free agency, then CPU trades and a possible offer to the user, then every
   dropped player comes off waivers, the phase is "open" and each CPU covers any starting slot a trade left
   it unable to fill (`replay_cover.cpu_cover`). A trade accepted in the open phase is covered at once; one
@@ -14,7 +16,8 @@ each other.
   proposal may come back as the CPU's counter offer; the user may counter a CPU's offer too.
 - `advance("wednesday")` (phase "waivers"): CPU IR moves, then CPU claims plus the user's, awarded by rolling
   priority, then `start_week`.
-- `advance("play")` (phase "open"): the week is scored. With waivers the phase becomes "waivers" and the CPUs
+- `advance("play")` (phase "open"): the week is scored, the CPUs talk about it (`replay_chat.after_week`) and
+  worried CPUs shop a player to the user (`replay_mood.refresh_shops`, with a message each). With waivers the phase becomes "waivers" and the CPUs
   make their IR moves on the new week's tags (so none is blocked while the user acts); without them the
   next week starts at once (CPUs move first, then the user can take anyone left).
 
@@ -29,8 +32,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 
 from services import (
-    replay_counter, replay_draft, replay_ir, replay_season, replay_state as rs, replay_trade_ai, replay_trades,
-    replay_values as rv, replay_waiver_ai, replay_waivers,
+    replay_chat, replay_counter, replay_draft, replay_ir, replay_mood, replay_season, replay_state as rs,
+    replay_trade_ai, replay_trades, replay_values as rv, replay_waiver_ai, replay_waivers,
 )
 from services.replay_pool import SeasonData
 from services.replay_state import Offer, Settings, State
@@ -117,7 +120,10 @@ def start_week(state: State, settings: Settings, data: SeasonData, seed: int) ->
     know = knowledge(state, settings, data, seed=seed)
     state = replay_waiver_ai.cpu_ir(state, settings, know, seed)
     state = replay_waiver_ai.cpu_free_agency(state, settings, know, seed)
+    before = len(state.offers)
     state = replay_trade_ai.cpu_trades(state, settings, know, seed)
+    made = [offer.id for offer in state.offers[before:]]
+    state = replay_chat.label_offers(replay_chat.trade_reactions(state, made, know, seed), know, seed)
     state = replace(state, locked=(), phase="open")
     return replay_waiver_ai.cpu_cover(state, settings, know, [team.id for team in state.teams])
 
@@ -133,10 +139,19 @@ def _wednesday(state: State, settings: Settings, data: SeasonData, seed: int) ->
     return start_week(replay_waivers.process_claims(state, settings, know, claims), settings, data, seed)
 
 
+def _after_games(state: State, settings: Settings, data: SeasonData, seed: int) -> State:
+    """The chat about the week just scored, then this week's shops and the shopping managers' messages."""
+    know = knowledge(state, settings, data, seed=seed)
+    state = replay_chat.after_week(state, settings, know, seed)
+    state, opened = replay_mood.refresh_shops(state, settings, know, seed, state.results[-1].week)
+    return replay_chat.shop_lines(state, opened, know, seed)
+
+
 def _play(state: State, settings: Settings, data: SeasonData, seed: int) -> State:
     if state.phase != "open":
         raise ValueError(f"Run week {state.week}'s waivers before playing it.")
     played = replay_season.play_week(state, settings, data, knowledge(state, settings, data, seed=seed), seed)
+    played = _after_games(played, settings, data, seed)
     if played.phase == "waivers":       # CPUs' IR moves as the waiver phase opens: none is blocked while the user acts
         return replay_waiver_ai.cpu_ir(played, settings, knowledge(played, settings, data, seed=seed), seed)
     # Without waivers the next week starts right away: CPUs move first, then the user can grab anyone.
@@ -225,11 +240,13 @@ def _propose(state: State, settings: Settings, data: SeasonData, seed: int, to_t
     state, verdict = replay_trades.propose(state, settings, know, to_team, give, get, user_drops,
                                            counter_to=counter_to)
     if verdict.accepted:            # the CPU fills any starting slot the deal emptied (waivers phase: at start_week)
+        state = replay_chat.trade_reactions(state, [o.id for o in state.offers[before:]], know, seed)
         return replay_waiver_ai.cpu_cover(state, settings, know, [to_team]), verdict, None
     if len(state.offers) == before:                 # the same proposal was already declined this week
         return state, verdict, None
     declined = state.offers[-1]
     countered = replay_counter.counter_offer(state, settings, know, declined, seed, user_drops)
+    countered = replay_chat.label_offers(countered, know, seed)
     answer = next((o for o in countered.offers[len(state.offers):] if o.counter_to == declined.id), None)
     return countered, verdict, answer
 
@@ -259,4 +276,7 @@ def respond_offer(state: State, settings: Settings, data: SeasonData, offer_id: 
     know = knowledge(state, settings, data, seed=seed)
     state = replay_trades.respond(state, settings, know, offer_id, accept, user_drops)
     offer = next(o for o in state.offers if o.id == offer_id)
-    return replay_waiver_ai.cpu_cover(state, settings, know, [offer.from_team]) if accept else state
+    if not accept:
+        return state
+    state = replay_chat.trade_reactions(state, [offer_id], know, seed)
+    return replay_waiver_ai.cpu_cover(state, settings, know, [offer.from_team])
