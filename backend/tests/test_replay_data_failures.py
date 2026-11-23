@@ -1,6 +1,6 @@
 """Replay League data import when a source fails or sends malformed rows (no network)."""
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 
 from database.models import DataLoad, ReplayAdp, ReplayProjection
 from integrations import adp_history, espn_history, sleeper_projections
@@ -14,7 +14,7 @@ from tests.test_replay_data import (  # noqa: F401  (db and loaders are fixtures
 
 def sources(session) -> dict[str, int]:
     return dict(session.execute(select(ReplayAdp.source, func.count()).where(
-        ReplayAdp.season == SEASON).group_by(ReplayAdp.source)).all())
+        ReplayAdp.season == SEASON, ReplayAdp.format == "ppr").group_by(ReplayAdp.source)).all())
 
 
 def broken_crosswalk():
@@ -46,6 +46,37 @@ def test_forced_reload_with_mfl_down_keeps_every_stored_row_and_reports_the_erro
 
     assert forced == {"rows": 7, "kept": True, "errors": {"adp mfl": "HistoryError"}}
     assert adp_by_gsis(db) == before
+
+
+def formats(session) -> dict[str, set[str]]:
+    rows = session.execute(select(ReplayAdp.format, ReplayAdp.source).where(ReplayAdp.season == SEASON)).all()
+    return {fmt: {source for f, source in rows if f == fmt} for fmt in {f for f, _ in rows}}
+
+
+def test_a_ppr_only_season_gets_its_other_formats_from_ffc_while_mfl_is_down(db, caplog):
+    sites = Sites()
+    client = HistoryClient(sites.client(), pause=0)
+    replay_data.load_adp(db, SEASON, client)
+    db.execute(delete(ReplayAdp).where(ReplayAdp.season == SEASON, ReplayAdp.format != "ppr"))   # a legacy season
+    db.commit()
+    ppr = adp_by_gsis(db)
+    sites.broken = "myfantasyleague"
+
+    summary = replay_data.load_adp(db, SEASON, client)
+
+    assert summary["errors"] == {"adp mfl": "HistoryError"} and set(summary["formats"]) == {"half", "std", "2qb"}
+    assert formats(db) == {"ppr": {"ffc", "mfl"}, "half": {"ffc"}, "std": {"ffc"}, "2qb": {"ffc"}}
+    assert adp_by_gsis(db) == ppr                                       # the stored list is never touched
+    assert "no MFL tail" in caplog.text
+    sites.broken = ""
+    replay_data.load_adp(db, SEASON, client)                            # the tails come on the next normal run
+    assert formats(db) == {fmt: {"ffc", "mfl"} for fmt in ("ppr", "half", "std", "2qb")}
+
+
+def test_a_failed_ffc_format_is_logged_with_its_type_only(db, caplog):
+    replay_data.load_adp(db, SEASON, HistoryClient(Sites(broken="standard").client(), pause=0))
+
+    assert "no std list from FFC (HistoryError)" in caplog.text
 
 
 def test_a_failing_crosswalk_stores_no_mfl_rows_and_the_next_run_stores_them(db, monkeypatch):

@@ -1,6 +1,8 @@
 /** Replay League: the league, players, waivers and trades screens (the shared pieces are in ./replay). */
 import type {
   ReplayActionResult,
+  ReplayAdvKey,
+  ReplayAdvLine,
   ReplayBoxLine,
   ReplayDefenseRating,
   ReplayGameRow,
@@ -41,9 +43,56 @@ export interface ReplayStandings {
   /** How many top seeds skip the first playoff round. */
   byes: number;
   seeds_final: boolean;
-  /** One scoreboard per playoff week whose games are known. */
-  bracket: ReplayScoreboard[];
+}
+
+/** A team in the playoff picture, with its seed (regular-season standings; provisional until seeds_final). */
+export interface ReplaySeed extends ReplayTeamRef {
+  seed: number;
+}
+
+export interface ReplayBracketSide extends ReplaySeed {
+  /** Null until the week is reached / played. */
+  projected: number | null;
+  points: number | null;
+}
+
+/** One bracket slot: both teams null while they aren't decided. */
+export interface ReplayBracketGame {
+  label: string;
+  home: ReplayBracketSide | null;
+  away: ReplayBracketSide | null;
+  winner: number | null;
+}
+
+export interface ReplayBracketRound {
+  week: number;
+  name: 'Quarter-finals' | 'Semi-finals' | 'Final';
+  /** Round one drawn from the current seeds while the regular season is still going. */
+  projected: boolean;
+  /** Top seeds who skip this round (round one only). */
+  byes: ReplaySeed[];
+  /** The final round: the Championship, then the Third place game. */
+  games: ReplayBracketGame[];
+}
+
+export interface ReplayBracketPool {
+  name: string;
+  /** The places this pool decides, e.g. [7, 12]. */
+  places: [number, number];
+  first_week: number;
+  size: number;
+  /** Null until known (the round-one losers). */
+  teams: ReplaySeed[] | null;
+  /** known: that week's pairs are set (drawn week by week from the pool's own results). */
+  weeks: { week: number; known: boolean; games: ReplayBracketGame[] }[];
+}
+
+export interface ReplayPlayoffs {
+  weeks: number[];
+  seeds_final: boolean;
   champion: ReplayTeamRef | null;
+  title: ReplayBracketRound[];
+  pools: ReplayBracketPool[];
 }
 
 export interface ReplayScheduleRow {
@@ -85,7 +134,8 @@ export type ReplayPlayerSort =
   | 'last'
   | 'line_points'
   | 'line_projection'
-  | ReplayBoxKey;
+  | ReplayBoxKey
+  | `adv_${ReplayAdvKey}`;
 export type ReplaySortDir = 'asc' | 'desc';
 export type ReplayStatsSpan = 'season' | 'last4' | 'week';
 
@@ -101,6 +151,8 @@ export interface ReplayStatLine {
   projection: number | null;
   /** Same rules as points; null for K/DST. */
   box: ReplayBoxLine | null;
+  /** Advanced rates, same span and rules as box. */
+  adv: ReplayAdvLine | null;
 }
 
 export interface ReplayWireRow extends ReplayPlayerRow {

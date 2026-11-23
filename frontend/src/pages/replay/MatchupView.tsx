@@ -8,7 +8,7 @@ import { useAsync } from '../../hooks/useAsync';
 import { MatchupHero } from './MatchupHero';
 import { MatchupScoreboard } from './MatchupScoreboard';
 import { formatPoints, ReplayPlayerCell, type ReplayViewProps } from './shared';
-import { BENCH_NOT_SAVED, lineupSpots, weekOptions, type LineupSpot } from './teamLineup';
+import { BENCH_NOT_SAVED, lineupSpots, slotLabel, weekOptions, type LineupSpot } from './teamLineup';
 
 interface SideTableProps {
   side: ReplayTeam;
@@ -22,7 +22,7 @@ function SideTable({ side, spots, openPlayer }: SideTableProps) {
   const bench = spots.filter((spot) => spot.slot === 'BN');
   const spotRow = ({ key, slot, row }: LineupSpot) => (
     <tr key={key}>
-      <td className="td--pos"><span className="replay-slot">{slot}</span></td>
+      <td className="td--pos"><span className="replay-slot">{slotLabel(slot)}</span></td>
       <td className="td--player">
         {row ? <ReplayPlayerCell player={row.player} info={row} onOpen={openPlayer} /> : <span className="muted">Empty</span>}
       </td>

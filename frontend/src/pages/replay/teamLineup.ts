@@ -6,8 +6,14 @@ import { isHardTag } from './shared';
 type StartingSlot = Exclude<ReplaySlot, 'BN'>;
 
 /** The order the backend lists starters in (replay_state.SLOTS). */
-const STARTING_SLOTS: readonly StartingSlot[] = ['QB', 'RB', 'WR', 'TE', 'FLEX', 'K', 'DST'];
+export const STARTING_SLOTS: readonly StartingSlot[] = ['QB', 'RB', 'WR', 'TE', 'FLEX', 'SUPERFLEX', 'K', 'DST'];
 const FLEX_POSITIONS: readonly ReplayPosition[] = ['RB', 'WR', 'TE'];
+const SUPERFLEX_POSITIONS: readonly ReplayPosition[] = ['QB', 'RB', 'WR', 'TE'];
+
+/** The short name tables show for a slot: SUPERFLEX is "SFLX". */
+export function slotLabel(slot: string): string {
+  return slot === 'SUPERFLEX' ? 'SFLX' : slot;
+}
 
 /** A played week from a save made before the bench was stored has only its starters. */
 export const BENCH_NOT_SAVED = 'The bench wasn’t saved for weeks played before this update.';
@@ -26,7 +32,8 @@ export function weekOptions(currentWeek: number): SelectOption[] {
 
 export function slotAccepts(slot: ReplaySlot, position: ReplayPosition): boolean {
   if (slot === 'BN') return true;
-  return slot === 'FLEX' ? FLEX_POSITIONS.includes(position) : slot === position;
+  if (slot === 'FLEX') return FLEX_POSITIONS.includes(position);
+  return slot === 'SUPERFLEX' ? SUPERFLEX_POSITIONS.includes(position) : slot === position;
 }
 
 /** Starters in slot order, padded with empty spots up to the league's lineup, then the bench. */
@@ -71,7 +78,7 @@ const TAG_WARNINGS: Record<ReplayInjuryTag, string> = {
 
 /** One starter's problem, or null: bye, then out (worded by a hard tag), then a Q or D tag. */
 function starterWarning(row: ReplayRosterRow, slot: ReplaySlot): string | null {
-  const who = `${row.player.name} (${slot})`;
+  const who = `${row.player.name} (${slotLabel(slot)})`;
   const { injury } = row.player;
   if (row.bye) return `${who} is on bye.`;
   if (row.out) return `${who} ${injury && isHardTag(injury) ? TAG_WARNINGS[injury.tag] : 'is out'}.`;
@@ -82,7 +89,7 @@ function starterWarning(row: ReplayRosterRow, slot: ReplaySlot): string | null {
 /** What is wrong with the starting lineup: empty slots, starters on bye, out, or tagged Q or D. */
 export function lineupWarnings(spots: readonly LineupSpot[]): string[] {
   return spots.filter((spot) => spot.slot !== 'BN').flatMap((spot) => {
-    const warning = spot.row ? starterWarning(spot.row, spot.slot) : `The ${spot.slot} slot is empty.`;
+    const warning = spot.row ? starterWarning(spot.row, spot.slot) : `The ${slotLabel(spot.slot)} slot is empty.`;
     return warning ? [warning] : [];
   });
 }

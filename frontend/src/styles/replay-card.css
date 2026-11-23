@@ -4,6 +4,7 @@
 .replay-card__head { display: grid; gap: var(--space-1); }
 .replay-card__head .replay-drawer__status { margin: 0; }
 .replay-card__injury { margin: 0; font-weight: 700; color: var(--color-neg); }
+.replay-card__hype { margin: 0; color: var(--color-warn); }
 .replay-card__news { margin: 0; max-width: 60ch; color: var(--game-ink-dim, var(--color-text-muted)); font-size: var(--text-sm); }
 /* Five stat tiles: one quiet band, the number the loudest thing, the label under it. */
 .replay-card__tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(5.5rem, 1fr)); gap: var(--space-3); margin: 0;

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { ReplayDraft, ReplayDraftPick, ReplayPosition, ReplaySettings } from '../../api/types';
 import { Card } from '../../components/Card';
 import { ReplayPlayerCell, ReplayPositionChip } from './shared';
+import { slotLabel, STARTING_SLOTS } from './teamLineup';
 
 const POSITIONS: readonly ReplayPosition[] = ['QB', 'RB', 'WR', 'TE', 'K', 'DST'];
 
@@ -14,7 +15,8 @@ interface DraftRosterProps {
 /** The user's picks by position, each against how many of that position start. */
 export function DraftRoster({ roster, settings, openPlayer }: DraftRosterProps) {
   const drafted = POSITIONS.reduce((count, position) => count + roster[position].length, 0);
-  const lineup = Object.entries(settings.starters).map(([slot, count]) => `${count} ${slot}`).join(', ');
+  const lineup = STARTING_SLOTS.filter((slot) => (settings.starters[slot] ?? 0) > 0)
+    .map((slot) => `${settings.starters[slot]} ${slotLabel(slot)}`).join(', ');
   return (
     <Card title="My roster" eyebrow={`${drafted} of ${settings.roster_size} picks made`}>
       <dl className="replay-draft__roster">

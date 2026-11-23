@@ -1,6 +1,6 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ReplayClaim, ReplayClaims, ReplayPlayerRef, ReplaySummary, ReplayWireRow } from '../../api/types';
 import { json, mockFetch, type MockReply, type MockRoute } from '../../test/mockFetch';
 import { META_ROUTE, renderWithProviders } from '../../test/render';
@@ -91,8 +91,8 @@ describe('PlayersView table', () => {
   it('never shows points that were not scored', async () => {
     renderPlayers(summary(), [{ path: PLAYERS, reply: json(wire([wireRow(MOSTERT, { games: 0, ppg: 0, line: statLine({ games: 0, points: 0 }) })])) }]);
     const cells = (await row('Raheem Mostert')).getAllByRole('cell').map((cell) => cell.textContent);
-    // Opp, Pts, PPG, GP, ROS, five box columns (no box yet), Value.
-    expect(cells.slice(2, 13)).toEqual(['DEN', '0.00', '—', '0', '13.80', '—', '—', '—', '—', '—', '31.5']);
+    // Opp, Pts, PPG, GP, ROS, seven box columns (no box yet), Value.
+    expect(cells.slice(2, 15)).toEqual(['DEN', '0.00', '—', '0', '13.80', '—', '—', '—', '—', '—', '—', '—', '31.5']);
   });
 
   it('shows the box columns that fit the position, and the matchup in words as well as colour', async () => {
@@ -100,7 +100,7 @@ describe('PlayersView table', () => {
       wireRow(MOSTERT, { line: statLine({ box: boxLine() }), defense: defense('easy', 3) }), wireRow(COLLINS, { defense: defense('tough', 29) }),
     ])) }]);
     const mostert = await row('Raheem Mostert');
-    expect(mostert.getAllByRole('cell').slice(7, 12).map((cell) => cell.textContent)).toEqual(['15', '72', '4', '3', '21']);
+    expect(mostert.getAllByRole('cell').slice(7, 14).map((cell) => cell.textContent)).toEqual(['15', '72', '1', '4', '3', '21', '0']);
     expect(mostert.getByText('Easy · 3rd')).toHaveClass('game-chip--easy');
     expect((await row('Nico Collins')).getByText('Tough · 29th')).toHaveClass('game-chip--tough');
     expect(screen.getByRole('columnheader', { name: /RuYd/ })).toHaveAttribute('title', 'Rushing yards, this season');
@@ -108,6 +108,35 @@ describe('PlayersView table', () => {
     await user.click(within(screen.getByRole('group', { name: 'Filter by position' })).getByRole('button', { name: 'QB' }));
     expect(await screen.findByRole('columnheader', { name: /PaYd/ })).toBeInTheDocument();
     expect(screen.queryByRole('columnheader', { name: /Car/ })).not.toBeInTheDocument();
+  });
+
+  it('switches to the Advanced columns, sorts by one on the server, and falls back to Value on Box score', async () => {
+    const adv = { snap_pct: 71.2, target_share: 12.5, targets_pg: 3.1, carries_pg: 14, touches_pg: 16.5, ypc: 4.8, ypr: 7.9, ypt: 6.2,
+      catch_rate: 78.6, total_td: 9, td_rate: 4.1, pass_ypg: null, td_int: null };
+    const { user, lastQuery } = renderPlayers(summary(), [{ path: PLAYERS, reply: json(wire([wireRow(MOSTERT, { line: statLine({ adv }) })])) }]);
+    await row('Raheem Mostert');
+    const views = screen.getByRole('group', { name: 'Stat columns' });
+    expect(within(views).getByRole('button', { name: 'Box score' })).toHaveAttribute('aria-pressed', 'true');
+
+    await user.click(within(views).getByRole('button', { name: 'Advanced' }));
+    const mostert = await row('Raheem Mostert');
+    expect(screen.getByRole('columnheader', { name: /Snap%/ })).toHaveAttribute('title', 'Share of his team’s offensive snaps, this season');
+    expect(mostert.getByText('71.2%')).toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: /RuYd/ })).not.toBeInTheDocument();
+
+    await user.click(within(screen.getByRole('columnheader', { name: /YPC/ })).getByRole('button'));
+    await waitFor(() => expect(lastQuery().get('sort')).toBe('adv_ypc'));
+    await user.click(within(views).getByRole('button', { name: 'Box score' }));
+    await waitFor(() => expect(lastQuery().get('sort')).toBe('value'));
+  });
+
+  it('pins Player on the left and Value with the row action on the right', async () => {
+    renderPlayers(summary());
+    const mostert = await row('Raheem Mostert');
+    const cells = mostert.getAllByRole('cell');
+    expect(cells[0]).toHaveClass('replay-players__pin-start');
+    expect(cells.at(-2)).toHaveClass('replay-players__pin-value');
+    expect(cells.at(-1)).toHaveClass('replay-players__pin-action');
   });
 
   it('keeps the old headers over the old rows until the new tab rows arrive', async () => {
@@ -286,11 +315,12 @@ describe('PlayersView adding a free agent', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  it('shows the server\'s reason next to the button when the add is refused', async () => {
+  it('shows the server\'s reason in a full-width row under the player when the add is refused', async () => {
     const { user } = renderPlayers(summary(), [post(ADD_DROP, json({ detail: 'Raheem Mostert was just dropped and is on waivers until next week.' }, 422))]);
     await user.click(await ready('Add Raheem Mostert'));
-    expect(await (await row('Raheem Mostert')).findByText('Raheem Mostert was just dropped and is on waivers until next week.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Add Raheem Mostert' })).toBeEnabled();
+    const reason = (await screen.findByText('Raheem Mostert was just dropped and is on waivers until next week.')).closest('tr')!;
+    expect(within(reason.previousElementSibling as HTMLElement).getByRole('button', { name: 'Add Raheem Mostert' })).toBeEnabled();
+    expect(reason.querySelector('td')).toHaveAttribute('colspan', String(reason.previousElementSibling!.children.length));
   });
 
   it('asks who to drop when the roster is full, least valuable first', async () => {
@@ -424,5 +454,31 @@ describe('PlayersView while an IR player has lost his tag', () => {
     const claimButton = (await row('Nico Collins')).getByRole('button', { name: 'Claim Nico Collins' });
     expect(claimButton).toBeDisabled();
     expect(claimButton).toHaveAttribute('title', BANNER);
+  });
+});
+
+describe('PlayersView pinned-column shadows', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('watches the table too, so a wider table (another stats view) shows the right-edge shadow', async () => {
+    const observers: { callback: () => void; targets: Element[] }[] = [];
+    vi.stubGlobal('ResizeObserver', class {
+      targets: Element[] = [];
+      constructor(callback: () => void) { observers.push({ callback, targets: this.targets }); }
+      observe(target: Element) { this.targets.push(target); }
+      disconnect() { this.targets.length = 0; }
+    });
+    renderPlayers(summary());
+    const table = await screen.findByRole('table', { name: 'Players, week 5' });
+    const box = table.parentElement!;
+    const watcher = observers.find((o) => o.targets.includes(table));
+    expect(watcher?.targets).toContain(box);
+    expect(box).not.toHaveAttribute('data-overflow-end');
+
+    Object.defineProperty(box, 'clientWidth', { configurable: true, value: 320 });
+    Object.defineProperty(box, 'scrollWidth', { configurable: true, value: 900 });   // the table grew; the box did not
+    act(() => watcher!.callback());
+
+    expect(box).toHaveAttribute('data-overflow-end', 'true');
   });
 });

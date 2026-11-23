@@ -14,12 +14,11 @@ import { ReplayPlayerCell, TeamSelect } from './shared';
 const EVALUATE_DELAY_MS = 300;
 const PROPOSE_KEY = 'propose';
 
-/** A partner's IR players are listed too, but can't be ticked. */
+/** Both teams' IR players are listed and tradable. */
 type PickerRow = ReplayRosterRow | ReplayIrRow;
 
 /** Why he can't be in a deal with the user (the rules in backend/services/replay_trades.py), or null. */
 function blockedReason(row: PickerRow): string | null {
-  if (row.slot === 'IR') return 'on IR';
   return row.trade_locked ? 'traded in the last two weeks' : null;
 }
 
@@ -39,7 +38,7 @@ interface RosterPickerProps {
   openPlayer: (playerId: number) => void;
 }
 
-/** One roster with a checkbox per player; IR or trade-locked players and a full side can't be ticked. */
+/** One roster with a checkbox per player; trade-locked players and a full side can't be ticked. */
 function RosterPicker({ title, caption, verb, rows, selected, max, onToggle, openPlayer }: RosterPickerProps) {
   return (
     <div>
@@ -86,6 +85,8 @@ interface TradeBuilderProps {
   version: number;
   /** The user's roster now. */
   roster: readonly ReplayRosterRow[];
+  /** The user's IR players now. */
+  ir: readonly ReplayIrRow[];
   maxPlayers: number;
   /** A CPU offer being countered: the builder starts from its deal and sends the user's version back. */
   counterTo: ReplayPendingOffer | null;
@@ -98,7 +99,7 @@ interface TradeBuilderProps {
 }
 
 /** Pick a partner and players from both rosters; the verdict follows the selection, then propose it. */
-export function TradeBuilder({ game, version, roster, maxPlayers, counterTo, onCounterDone, initialPartner, initialWant, actions, openPlayer }: TradeBuilderProps) {
+export function TradeBuilder({ game, version, roster, ir, maxPlayers, counterTo, onCounterDone, initialPartner, initialWant, actions, openPlayer }: TradeBuilderProps) {
   const partners = game.teams.filter((team) => !team.is_user);
   const linked = partners.find((team) => team.team_id === (counterTo?.from_team.team_id ?? initialPartner));
   const [partnerId, setPartnerId] = useState(linked?.team_id ?? partners[0]?.team_id ?? 0);
@@ -113,9 +114,13 @@ export function TradeBuilder({ game, version, roster, maxPlayers, counterTo, onC
   // While another partner's roster loads, the previous one must not be offered.
   const theirRows: PickerRow[] = theirs.data?.team.team_id === partnerId ? [...theirs.data.results, ...theirs.data.ir] : [];
 
-  const giveIds = tradableIds(roster, give);
+  const myRows: PickerRow[] = [...roster, ...ir];
+  const giveIds = tradableIds(myRows, give);
   const getIds = tradableIds(theirRows, get);
-  const over = overLimit(roster, giveIds.length, getIds.length, game.settings.roster_size);
+  const isIn = (rows: readonly PickerRow[]) => (id: number) => rows.some((row) => row.player.id === id);
+  const freeIr = game.settings.ir_slots - ir.filter((row) => !giveIds.includes(row.player.id)).length;
+  const toIr = Math.min(Math.max(freeIr, 0), getIds.filter(isIn(theirRows.filter((row) => row.slot === 'IR'))).length);
+  const over = overLimit(roster, giveIds.filter(isIn(roster)).length, getIds.length - toIr, game.settings.roster_size);
   const spare = roster.filter((row) => !giveIds.includes(row.player.id));
   const drops = over > 0 ? picked.filter((id) => spare.some((row) => row.player.id === id)) : [];
   const isReady = giveIds.length > 0 && getIds.length > 0 && drops.length === Math.max(over, 0);
@@ -165,7 +170,7 @@ export function TradeBuilder({ game, version, roster, maxPlayers, counterTo, onC
       </div>
       {tendency && <p className="hint">{tendency}</p>}
       <div className="replay-trade__sides">
-        <RosterPicker title="You give" caption="Your roster" verb="Give" rows={roster} selected={giveIds} max={maxPlayers}
+        <RosterPicker title="You give" caption="Your roster" verb="Give" rows={myRows} selected={giveIds} max={maxPlayers}
           onToggle={(id) => change(() => setGive(toggleId(giveIds, id)))} openPlayer={openPlayer} />
         <AsyncView state={theirs} loading={<TableSkeleton rows={8} columns={3} label={`Loading ${partner}'s roster…`} />} errorTitle={`Couldn't load ${partner}'s roster`}>
           {() => (theirRows.length === 0 ? <TableSkeleton rows={8} columns={3} label={`Loading ${partner}'s roster…`} /> : (
@@ -175,7 +180,7 @@ export function TradeBuilder({ game, version, roster, maxPlayers, counterTo, onC
         </AsyncView>
       </div>
       <p className="hint">
-        {`Up to ${maxPlayers} players a side. A player on IR or traded in the last two weeks can't be dealt. `
+        {`Up to ${maxPlayers} players a side. A player traded in the last two weeks can't be dealt; one on IR goes to your free IR slot, else your roster. `
           + 'Values are on a 0-1000 trade chart; an injured player counts for the games he is expected to play.'}
       </p>
       {counterTo && (

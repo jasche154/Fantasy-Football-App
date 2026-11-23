@@ -42,6 +42,11 @@ def _bracket_round(alive: Sequence[int]) -> Matchups:
     return tuple((alive[i], alive[-1 - i]) for i in range(len(alive) // 2))
 
 
+def reseeded_pairs(alive: Sequence[int]) -> Matchups:
+    """Public: a round's pairs for the teams left, best seed first (the playoffs view draws round one early)."""
+    return _bracket_round(alive)
+
+
 def _title_rounds(state: State, settings: Settings) -> list[Matchups]:
     """The title bracket's games round by round, as far as the played weeks decide them."""
     if _result(state, settings.regular_season_weeks) is None:
@@ -113,6 +118,11 @@ def _pools(state: State, settings: Settings) -> list[tuple[tuple[int, ...], int]
         pools.append((tuple(losers), first + 1))
     pools.append((seeds[settings.playoff_teams:], first))
     return pools
+
+
+def pools(state: State, settings: Settings) -> list[tuple[tuple[int, ...], int]]:
+    """Public: [(teams, first week)] of the consolation pools known so far (see `_pools`)."""
+    return _pools(state, settings)
 
 
 def _pool_table(state: State, members: Sequence[int], weeks: range, seeds: Sequence[int]) -> list[int]:

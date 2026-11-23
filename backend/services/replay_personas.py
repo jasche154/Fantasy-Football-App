@@ -8,6 +8,9 @@
 - steady: trusts draft day (0.35 x star x (pre_chart - chart)): won't sell a slumping star cheap.
 - gambler: chases hot streaks (0.5 x a positive form_chart) and pays more for the best player in a deal.
 - shark: the chart, but wants a SHARK_MARGIN edge; hunts buy-low stars and offers the user the most.
+Emotion: panicky and gambler managers are emotional (`hype_for`, stored once as Team.hype): they price an
+opportunity shock (replay_shocks, ReplayValue.shock_chart) at HYPE x its calibrated move, at most HYPE_CAP
+chart points beyond it, both when buying and when holding. Calm managers (and old saves) use 1.0.
 Pure.
 """
 from collections.abc import Sequence
@@ -21,6 +24,9 @@ TENDENCY_WEEKS = 3             # no tendency shown before this many weeks played
 PANIC_FORM = 0.8
 STEADY_STAR = 0.35
 GAMBLER_FORM = 0.5
+HYPE = 1.25                    # an emotional manager's multiple on a shock's chart move (calm: 1.0)
+HYPE_CAP = 8.0                 # at most this many chart points beyond the calibrated move
+EMOTIONAL = ("panicky", "gambler")
 OFFER_RATE = {"balanced": 0.08, "panicky": 0.12, "shark": 0.30, "steady": 0.05, "gambler": 0.12}
 COUNTER_RATE = {"balanced": 0.5, "panicky": 0.4, "shark": 0.8, "steady": 0.3, "gambler": 0.6}
 TENDENCY = {
@@ -42,7 +48,18 @@ def assign(seed: int, cpu_ids: Sequence[int]) -> dict[int, str]:
     return {team_id: picked[team_id] for team_id in cpu_ids}
 
 
-def private_value(value: ReplayValue, persona: str) -> float:
+def hype_for(persona: str) -> float:
+    """The shock multiple a CPU with this persona keeps for the season (Team.hype)."""
+    return HYPE if persona in EMOTIONAL else 1.0
+
+
+def hyped(value: ReplayValue, hype: float) -> float:
+    """Signed chart points an emotional manager adds to a shocked player beyond the calibrated move."""
+    extra = (hype - 1.0) * value.shock_chart
+    return min(max(extra, -HYPE_CAP), HYPE_CAP)
+
+
+def private_value(value: ReplayValue, persona: str, hype: float = 1.0) -> float:
     chart = value.chart
     if persona == "panicky":
         nudged = chart + PANIC_FORM * min(0.0, value.form_chart)
@@ -52,7 +69,7 @@ def private_value(value: ReplayValue, persona: str) -> float:
         nudged = chart + GAMBLER_FORM * max(0.0, value.form_chart)
     else:
         nudged = chart
-    return min(max(nudged, chart * (1 - PRIVATE_CLAMP)), chart * (1 + PRIVATE_CLAMP))
+    return min(max(nudged, chart * (1 - PRIVATE_CLAMP)), chart * (1 + PRIVATE_CLAMP)) + hyped(value, hype)
 
 
 def offer_rate(persona: str) -> float:

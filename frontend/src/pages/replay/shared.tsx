@@ -17,7 +17,7 @@
  *   openPlayer  opens the hub's player drawer for a player id
  * POSTs that answer something else (evaluateReplayTrade) are called directly, not through `act`.
  *
- * Pieces: ReplayPlayerCell, ReplayInjuryBadge (+ isHardTag, canGoOnIr, injuryLabel), ReplayIrBlockedNotice, ReplayPositionChip, PositionTabs (+ positionParam), TeamSelect, ConfirmButton,
+ * Pieces: ReplayPlayerCell, ReplayHypeStar (+ hypeLabel), ReplayInjuryBadge (+ isHardTag, canGoOnIr, injuryLabel), ReplayIrBlockedNotice, ReplayPositionChip, PositionTabs (+ positionParam), TeamSelect, ConfirmButton,
  * useKeyedAct (act with a pending state and a refusal per button), ReplayDrawer (the dialog frame, in ReplayDrawer.tsx),
  * EventList (+ groupEvents), formatPoints, formatRecord, ordinal, viewHash, REPLAY_VIEWS.
  */
@@ -137,6 +137,22 @@ export function ReplayInjuryBadge({ injury }: { injury: ReplayInjury }) {
   );
 }
 
+/** "Hype: role jumped after he won the backfield". */
+export function hypeLabel(player: ReplayPlayerRef): string | null {
+  return player.hype ? `Hype: role jumped after ${player.hype.reason}` : null;
+}
+
+/** A small star after the name of a player the trade market is hyping; the reason on hover and for screen readers. */
+export function ReplayHypeStar({ player }: { player: ReplayPlayerRef }) {
+  const label = hypeLabel(player);
+  if (!label) return null;
+  return (
+    <span className="replay-hype" title={label}>
+      <span aria-hidden="true">★</span><span className="sr-only">{label}</span>
+    </span>
+  );
+}
+
 /** The plain Out badge, unless a hard tag already says so. */
 export function showsOut(out: boolean | undefined, injury: ReplayInjury | null | undefined): boolean {
   return !!out && !isHardTag(injury);
@@ -157,7 +173,7 @@ export function ReplayIrBlockedNotice({ game }: { game: ReplaySummary }) {
 /** The backend takes roster moves in these phases only (replay_waivers.ROSTER_PHASES, replay_ir.IR_PHASES). */
 export const EDIT_PHASES: readonly string[] = ['open', 'waivers'];
 
-/** Name, position chip, NFL team, opponent or Bye, injury tag, and Out / Trade-locked badges. */
+/** Name, hype star, position chip, NFL team, opponent or Bye, injury tag, and Out / Trade-locked badges. */
 export function ReplayPlayerCell({ player, info = {}, onOpen }: ReplayPlayerCellProps) {
   return (
     <span className="player-cell">
@@ -166,6 +182,7 @@ export function ReplayPlayerCell({ player, info = {}, onOpen }: ReplayPlayerCell
       ) : (
         <span className="replay-player__name">{player.name}</span>
       )}
+      <ReplayHypeStar player={player} />
       <span className="player-cell__meta">
         <ReplayPositionChip position={player.position} />
         {player.team && <span className="player-cell__team">{player.team}</span>}

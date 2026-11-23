@@ -10,12 +10,13 @@ from services import replay_season, replay_state as rs, replay_trades
 from services.replay_state import Offer, Team
 from services.replay_trades import Verdict
 from services.replay_views import (
-    DEFAULT_PAGE, Game, event_row, page, player_ref, player_row, record, refs, result_of, scoreboard, team_ref,
+    DEFAULT_PAGE, Game, event_row, page, player_ref, player_row, record, refs, result_of, team_ref,
     winner,
 )
 from services.replay_views_players import (  # noqa: F401 - re-exported: the wire and a player's page live there
     AVAILABLE, SORTS, STATUSES, USAGE_GAMES, player, players,
 )
+from services.replay_views_playoffs import playoffs  # noqa: F401 - re-exported: the bracket view lives there
 
 EVENT_KINDS = ("draft", "add", "drop", "claim", "trade", "ir", "result", "playoffs", "champion")
 
@@ -32,7 +33,7 @@ def listing(row: ReplayLeague) -> dict:
 # ---------------- standings, schedule, activity ----------------
 
 def standings(game: Game) -> dict:
-    """The table (final order once the season is over, else by seed) and the playoff games known so far."""
+    """The table (final order once the season is over, else by seed); the bracket is replay_views_playoffs'."""
     state, settings = game.state, game.settings
     teams = {t.id: t for t in state.teams}
     playoff_weeks = range(settings.regular_season_weeks + 1, settings.end_week + 1)
@@ -41,10 +42,7 @@ def standings(game: Game) -> dict:
     return {"results": rows, "regular_season_weeks": settings.regular_season_weeks,
             "playoff_teams": settings.playoff_teams, "playoff_weeks": list(playoff_weeks),
             "byes": 2 ** rs.playoff_rounds(settings.playoff_teams) - settings.playoff_teams,
-            "seeds_final": result_of(state, settings.regular_season_weeks) is not None,
-            "bracket": [scoreboard(game, week) for week in playoff_weeks
-                        if state.phase != "draft" and replay_season.matchups_for_week(state, settings, week)],
-            "champion": team_ref(game, teams[state.champion]) if state.champion in teams else None}
+            "seeds_final": result_of(state, settings.regular_season_weeks) is not None}
 
 
 def _schedule_row(game: Game, owner: Team, week: int) -> dict:

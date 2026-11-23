@@ -1,11 +1,9 @@
 import { getReplayStandings } from '../../api/replay';
 import type { ReplayStandings } from '../../api/types';
 import { AsyncView } from '../../components/AsyncView';
-import { Icon } from '../../components/Icon';
 import { TableSkeleton } from '../../components/StatusViews';
 import { useAsync } from '../../hooks/useAsync';
 import { TeamBadge } from './gameUi';
-import { GameTiles } from './LeagueScoreboard';
 import { formatPoints, formatRecord, type ReplayViewProps } from './shared';
 
 function StandingsTable({ standings }: { standings: ReplayStandings }) {
@@ -54,59 +52,13 @@ function StandingsTable({ standings }: { standings: ReplayStandings }) {
   );
 }
 
-const TITLE_GAMES: readonly (string | null)[] = ['Quarter-final', 'Semi-final', 'Championship', 'Third place'];
-
-/** The playoff weeks cut to the title games or to the rest (the consolation games that decide the places below). */
-function PlayoffWeeks({ bracket, isTitle, kind }: { bracket: ReplayStandings['bracket']; isTitle: boolean; kind: string }) {
-  return bracket.map((board) => {
-    const results = board.results.filter((game) => TITLE_GAMES.includes(game.label) === isTitle);
-    if (results.length === 0) return null;
-    return (
-      <div key={board.week}>
-        <h3 className="replay-bracket__week">Week {board.week}</h3>
-        <GameTiles caption={`Week ${board.week} ${kind} games`} board={{ ...board, results }} />
-      </div>
-    );
-  });
-}
-
-/** The playoff games known so far (quarter- and semi-finals, then the championship and third place), the champion, then the consolation games. */
-function Bracket({ standings }: { standings: ReplayStandings }) {
-  const { bracket, champion } = standings;
-  if (bracket.length === 0) return null;
-  const hasConsolation = bracket.some((board) => board.results.some((game) => !TITLE_GAMES.includes(game.label)));
-  return (
-    <>
-      <section aria-label="Playoff bracket">
-        <h2 className="section-title">Playoffs</h2>
-        {champion && (
-          <p className="replay-bracket__champion"><Icon name="trophy" size={18} /> Champion: <strong>{champion.name}</strong></p>
-        )}
-        <PlayoffWeeks bracket={bracket} isTitle kind="playoff" />
-      </section>
-      {hasConsolation && (
-        <section aria-label="Consolation games">
-          <h2 className="section-title">Consolation</h2>
-          <p className="hint">Teams out of the title race play for the places below it; the final standings follow these games.</p>
-          <PlayoffWeeks bracket={bracket} isTitle={false} kind="consolation" />
-        </section>
-      )}
-    </>
-  );
-}
-
-/** The table by seed (final order once the season is over) and, once they start, the playoffs. */
+/** The table by seed (final order once the season is over). The bracket is on the Playoffs page. */
 export function LeagueStandings({ game, version }: ReplayViewProps) {
   const standings = useAsync((signal) => getReplayStandings(game.id, signal), [game.id, version]);
   return (
     <AsyncView state={standings} loading={<TableSkeleton rows={game.settings.teams} columns={5} label="Loading the standings…" />}
       errorTitle="Couldn't load the standings">
-      {(data) => (
-        <>
-          <StandingsTable standings={data} />
-          <Bracket standings={data} />
-        </>
-      )}
+      {(data) => <StandingsTable standings={data} />}
     </AsyncView>
   );
 }

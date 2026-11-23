@@ -11,7 +11,8 @@ from functools import lru_cache
 import pytest
 
 from services import (
-    replay_game as rg, replay_state as rs, replay_trades, replay_views as views, replay_views_league as league,
+    replay_game as rg, replay_ir, replay_state as rs, replay_trades, replay_views as views,
+    replay_views_league as league,
 )
 from services.replay_news import Report
 from tests import replay_fakes as fakes
@@ -25,12 +26,12 @@ PLAYER_ROW = {"player", "opponent", "bye", "out", "projection", "points", "ros_p
 WIRE_ROW = PLAYER_ROW | {"status", "owner", "season_points", "last_points", "usage", "line"}
 SIDE = {"team_id", "name", "is_user", "tendency", "projected", "points", "record"}
 RECORD = {"wins", "losses", "ties", "rank", "points_for", "points_against", "place"}
-PLAYER_REF = {"id", "name", "position", "team", "injury"}
+PLAYER_REF = {"id", "name", "position", "team", "injury", "hype"}
 SUMMARY = {"id", "name", "season", "phase", "week", "end_week", "user_team_id", "settings", "teams", "on_the_clock",
            "next_action", "record", "matchup", "pending", "champion", "updated_at", "ir_blocked", "has_injuries",
            "trades_open", "rank_source"}
 SETTING_KEYS = {"teams", "scoring", "starters", "bench", "roster_size", "draft_slot", "waiver_mode", "difficulty",
-                "regular_season_weeks", "playoff_teams", "trade_deadline_week"}
+                "regular_season_weeks", "playoff_teams", "trade_deadline_week", "scoring_rules", "ir_slots"}
 PAGE = {"total", "limit", "offset", "results"}
 
 
@@ -67,7 +68,7 @@ def every_view(state: rs.State, data=DATA) -> dict[str, str]:
         "teams": [views.team(shown, team.id, w) for team in state.teams for w in range(min(1, week), week + 1)],
         "matchups": [views.matchup(shown, w) for w in range(1, week + 1)],
         "scoreboards": [views.scoreboard(shown, w) for w in weeks],
-        "standings": league.standings(shown), "schedule": league.schedule(shown),
+        "standings": league.standings(shown), "playoffs": league.playoffs(shown), "schedule": league.schedule(shown),
         "activity": league.activity(shown, limit=10_000),
         "players": [league.players(shown, status="all", sort=sort, limit=10_000) for sort in league.SORTS],
         "stat_lines": [league.players(shown, status="all", sort=sort, direction=direction, stats=stats,
@@ -151,6 +152,7 @@ def test_summary_follows_the_game_from_the_draft_to_the_champion():
                                                                            finished()))
 
     assert set(draft) == SUMMARY and set(draft["record"]) == RECORD and set(open_["settings"]) == SETTING_KEYS
+    assert open_["settings"]["ir_slots"] == replay_ir.IR_SLOTS
     assert (draft["ir_blocked"], draft["has_injuries"], open_["ir_blocked"], open_["has_injuries"]) == ([], True,
                                                                                                        [], True)
     assert (draft["phase"], draft["on_the_clock"], draft["matchup"]) == ("draft", USER, None)
@@ -354,25 +356,23 @@ def test_matchup_and_scoreboard_show_both_sides_and_the_winner_once_played():
 
 # ---------------- standings, schedule, activity ----------------
 
-def test_standings_run_from_seeds_to_the_final_order_with_the_bracket():
+def test_standings_run_from_seeds_to_the_final_order():
     early, done = league.standings(game(at(4))), league.standings(game(finished()))
 
-    assert set(early) == {"results", "regular_season_weeks", "playoff_teams", "playoff_weeks", "byes", "seeds_final",
-                          "bracket", "champion"}
+    assert set(early) == {"results", "regular_season_weeks", "playoff_teams", "playoff_weeks", "byes", "seeds_final"}
     assert (early["playoff_weeks"], early["byes"], early["playoff_teams"]) == ([15, 16], 0, 4)
     assert [row["in_playoffs"] for row in early["results"]] == [True] * 4 + [False] * 8
     assert set(early["results"][0]) == RECORD | {"team_id", "name", "is_user", "tendency", "seed", "in_playoffs"}
     assert [row["seed"] for row in early["results"]] == list(range(1, 13))
-    assert (early["seeds_final"], early["bracket"], early["champion"]) == (False, [], None)
+    assert early["seeds_final"] is False
     assert all(row["place"] is None for row in early["results"])
     assert [row["place"] for row in done["results"]] == list(range(1, 13)) and done["seeds_final"] is True
-    assert done["results"][0]["team_id"] == done["champion"]["team_id"] == finished().champion
+    assert done["results"][0]["team_id"] == finished().champion
     assert sorted(row["seed"] for row in done["results"][:4]) == [1, 2, 3, 4]
-    assert [board["week"] for board in done["bracket"]] == [15, 16]
-    assert [row["label"] for row in done["bracket"][0]["results"]] == ["Semi-final"] * 2 + ["Consolation"] * 4
-    assert [row["label"] for row in done["bracket"][1]["results"]] == ["Championship", "Third place"] + [
-        "Consolation"] * 4
-    assert done["bracket"][1]["results"][0]["winner"] == finished().champion
+    semis, final = (views.scoreboard(game(finished()), week)["results"] for week in done["playoff_weeks"])
+    assert [row["label"] for row in semis] == ["Semi-final"] * 2 + ["Consolation"] * 4
+    assert [row["label"] for row in final] == ["Championship", "Third place"] + ["Consolation"] * 4
+    assert final[0]["winner"] == finished().champion
 
 
 def test_schedule_lists_every_week_with_results_so_far():
@@ -660,15 +660,14 @@ def test_an_ir_player_without_his_tag_blocks_the_user():
     assert still_hurt == []
 
 
-def test_an_offer_for_a_player_since_moved_to_ir_says_why_it_cannot_be_accepted():
+def test_an_offer_for_a_player_since_moved_to_ir_is_still_priced():
     state = at(3)
     mine, theirs = _swap(state, 9)
     offered = _on_ir(replay_trades.record_offer(state, 9, USER, theirs, mine, "pending"), mine[0])     # IR-26
 
     offer = league.trades(game(offered))["offers"][0]
 
-    name = rg.knowledge(state, SETTINGS, DATA, seed=SEED).by_id[mine[0]].name
-    assert (offer["verdict"], offer["note"]) == (None, f"On IR, so not tradable until activated: {name}.")
+    assert offer["verdict"] is not None and offer["note"] is None
 
 
 def test_draft_board_gives_no_round_past_the_last_round_of_the_draft():

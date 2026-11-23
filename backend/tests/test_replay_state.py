@@ -376,6 +376,7 @@ def test_a_league_saved_before_personas_and_counters_loads_with_their_defaults()
     saved = json.loads(rs.to_json(make_state()))
     for team in saved["teams"]:
         team.pop("persona")
+        team.pop("hype")
     for offer in saved["offers"]:
         offer.pop("counter_to")
 
@@ -383,6 +384,13 @@ def test_a_league_saved_before_personas_and_counters_loads_with_their_defaults()
 
     assert restored == make_state()
     assert all(t.persona == "balanced" for t in restored.teams) and restored.offers[0].counter_to is None
+    assert all(t.hype == 1.0 for t in restored.teams)                     # no emotion saved: calm
+
+
+def test_a_cpus_hype_round_trips():
+    state = rs.with_team(make_state(), replace(rs.team(make_state(), 2), persona="gambler", hype=1.25))
+
+    assert rs.team(rs.state_from_json(rs.to_json(state)), 2).hype == 1.25
 
 
 def test_held_and_rostered_include_ir_players():
@@ -405,14 +413,15 @@ def test_release_drops_a_player_from_ir():
         rs.release(state, Settings(season=2021), 1, 25)
 
 
-def test_a_team_has_traded_this_week_only_with_an_accepted_offer_from_this_week():
+def test_trades_this_week_counts_accepted_offers_from_this_week_on_either_side():
     offers = (Offer(1, 2, 2, 1, (21,), (12,), "accepted"), Offer(2, 1, 3, 4, (31,), (), "accepted"),
-              Offer(3, 2, 3, 4, (31,), (), "declined"), Offer(4, 2, 4, 3, (), (31,), "pending"))
+              Offer(3, 2, 3, 4, (31,), (), "declined"), Offer(4, 2, 4, 3, (), (31,), "pending"),
+              Offer(5, 2, 1, 4, (12,), (), "accepted"))
     state = make_state(offers=offers)
 
-    assert rs.has_traded_this_week(state, 1) and rs.has_traded_this_week(state, 2)      # either side
-    assert not rs.has_traded_this_week(state, 3) and not rs.has_traded_this_week(state, 4)
-    assert rs.has_traded_this_week(replace(state, week=1), 3) and not rs.has_traded_this_week(replace(state, week=3), 1)
+    assert [rs.trades_this_week(state, team_id) for team_id in (1, 2, 3, 4)] == [2, 1, 0, 1]
+    assert rs.trades_this_week(replace(state, week=1), 3) == 1 and rs.trades_this_week(replace(state, week=3), 1) == 0
+    assert rs.MAX_TRADES_PER_WEEK == 3
 
 
 def test_a_traded_player_is_locked_for_two_weeks():

@@ -40,6 +40,18 @@ def test_private_values_nudge_the_chart_within_fifteen_percent(persona, fields, 
     assert rp.private_value(player(**fields), persona) == pytest.approx(expected)
 
 
+def test_emotional_managers_overreact_to_a_shock_and_calm_ones_keep_the_chart():
+    lifted, dropped = player(shock_chart=20.0), player(shock_chart=-20.0)
+
+    assert rp.hype_for("panicky") == rp.hype_for("gambler") == rp.HYPE > 1.0
+    assert {rp.hype_for(p) for p in ("balanced", "shark", "steady", "unknown")} == {1.0}
+    assert rp.private_value(lifted, "balanced") == rp.private_value(lifted, "balanced", 1.0) == 500.0
+    assert rp.private_value(lifted, "balanced", rp.HYPE) == pytest.approx(500.0 + (rp.HYPE - 1) * 20)
+    assert rp.private_value(dropped, "balanced", rp.HYPE) == pytest.approx(500.0 - (rp.HYPE - 1) * 20)
+    assert rp.private_value(player(shock_chart=900.0), "balanced", rp.HYPE) == 500.0 + rp.HYPE_CAP   # a few points at most
+    assert rp.private_value(player(), "gambler", rp.HYPE) == 500.0                                   # no shock, no hype
+
+
 def test_rates_and_tendencies():
     assert rp.offer_rate("shark") == max(rp.offer_rate(p) for p in rp.PERSONAS) == 0.30
     assert rp.offer_rate("steady") == 0.05 and rp.offer_rate("unknown") == rp.offer_rate("balanced")

@@ -1,7 +1,7 @@
 """Replay League trade scoring: one CPU's net on the 1000 chart scale for a deal (`tally`).
 
 score = in + premium + spot + 0.5 x lineup - out x multiple x 1.03 (a shark also wants SHARK_MARGIN x out):
-- out: what it sends, at its persona's private value; an out player it sends the user counts at least
+- out: what it sends, at its persona's private value (an emotional CPU's `hype` included); an out player it sends the user counts at least
   OUT_SELL_SHARE of his healthy chart (the user may know he is back soon).
 - in: what it receives and keeps, minus its own players it must cut to make room. Depth is worth less than
   quality: when it keeps more players than it sends pieces that matter (worth >= DEPTH_SHARE x its best
@@ -66,10 +66,10 @@ def depth_counted(worth: Sequence[float], sent: Sequence[float]) -> float:
 
 
 def tally(know: Knowledge, persona: str, sends: Sequence[int], kept: Sequence[int], drops: Sequence[int],
-          gain_per_week: float, multiple: float, to_user: bool) -> Tally:
+          gain_per_week: float, multiple: float, to_user: bool, hype: float = 1.0) -> Tally:
     """The CPU sends `sends`, keeps `kept` of what it receives and cuts `drops` (its own players)."""
     def private(pid: int) -> float:
-        return replay_personas.private_value(know.by_id[pid], persona)
+        return replay_personas.private_value(know.by_id[pid], persona, hype)
 
     def sell(pid: int) -> float:
         value = know.by_id[pid]

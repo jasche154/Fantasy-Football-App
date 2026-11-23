@@ -215,7 +215,7 @@ Open <http://localhost:5173>. The UI talks to `http://localhost:8000` by default
 | **Player page** | Weekly chart of actual vs expected points, game log, NGS stats, projection, signals. **Position percentiles** rank his season stats against his position (green = good, red = bad, grey for context stats like aDOT; "Small sample" until he has enough volume). **What changed** compares his last 3 games with the earlier games (snap share, target share, air-yard share, targets, carries, pass attempts) and flags big moves |
 | **Odds & Props** | Pick a week: every game's kickoff, closing spread and total, and each team's implied total. **Show props** opens the player props stored for that game (expected passing/rushing/receiving yards, receptions, TDs implied by the lines) with how long before kickoff they were bought. Props appear game by game on game day; before that the page says why they're missing |
 | **Ask AI** | Ask questions in plain English; each answer shows which tools it used |
-| **Replay League** | A game: replay a past season against CPU managers. **Start:** under **New league** pick a season (or Random), 4–16 teams, scoring, your draft slot, the playoff weeks (14–16, 15–17 by default, or 16–18 when the season has a week 18) and how many teams make the playoffs (4–8, default 4 under 10 teams, 6 under 14, else 8), waivers (Wednesday waivers; FAAB bidding: $100 per team, blind bids, the highest bid wins, ties go by waiver priority, winning bids show in the activity log; or free agency only) and difficulty, then **Create league and draft**. Saved leagues are listed above the form (Resume, Delete). **Draft:** the board lists who is left by **Rank** (the preseason expert rank, or the ADP order for 2018–2019, as Yahoo shows a rank next to ADP), with the round that rank implies (**Rd**), ADP and the preseason projection (points a game); sort by Rank, ADP or Proj. Press **Draft** next to a player on your turn, or auto-pick one pick or the rest; the CPUs pick in between. **The week loop:** the one primary button at the top says what comes next. **Play week N** scores the week with the real results; then every unrostered player is on waivers, you put in claims on the Players tab (with a bid in a FAAB league), and **Sim to Wednesday** settles them (by priority, or by bid in FAAB) and lets the CPUs move; then lineups, free-agent adds and trades are open again until you play the next week. **Tabs:** My Team (set your lineup with Move, drop players, look at any team or past week), Matchup (your game and the week's scoreboard), Players (the waiver wire with each player's usage over his last 3 games, adds and claims), Trades (CPU offers, and a builder that shows the CPU's verdict before you propose) and League (standings, schedule, scoreboard, activity). The regular season runs until the playoff weeks you chose; then the top seeds play a title bracket (top seeds get a bye when it has 5–7 teams) and everyone else plays for the places below. **No hindsight:** nothing on screen comes from a week you have not played. Before a week is played you see only its pre-game projection; points, records and standings stop at the last week played, the My Team and Matchup week pickers end at the current week, and later weeks on the League scoreboard show the pairings only |
+| **Replay League** | A game: replay a past season against CPU managers. **Start:** under **New league** pick a season (or Random), 4–16 teams, the **league format** (Standard, Superflex or Double flex as a start, then 0–3 starters per slot: QB, RB, WR, TE, FLEX, SFLX (superflex: a QB, RB, WR or TE), K, DST; at least one QB or SFLX, at most 12 starters; in superflex the CPUs value and draft quarterbacks much earlier), the **scoring** (PPR, half or standard as a base, then points per reception 0–1.5, a TE premium of +0.5 or +1 per catch, 4 or 6 points per passing TD and −1 or −2 per turnover; played games always score exactly, but with custom settings the pre-game projections are estimates converted from the sites' PPR and standard numbers), your draft slot, the playoff weeks (14–16, 15–17 by default, or 16–18 when the season has a week 18) and how many teams make the playoffs (4–8, default 4 under 10 teams, 6 under 14, else 8), waivers (Wednesday waivers; FAAB bidding: $100 per team, blind bids, the highest bid wins, ties go by waiver priority, winning bids show in the activity log; or free agency only) and difficulty, then **Create league and draft**. Saved leagues are listed above the form (Resume, Delete). **Draft:** the board lists who is left by **Rank** (the preseason expert rank, or the ADP order for 2018–2019, as Yahoo shows a rank next to ADP), with the round that rank implies (**Rd**), ADP and the preseason projection (points a game); sort by Rank, ADP or Proj. Press **Draft** next to a player on your turn, or auto-pick one pick or the rest; the CPUs pick in between. **The week loop:** the one primary button at the top says what comes next. **Play week N** scores the week with the real results; then every unrostered player is on waivers, you put in claims on the Players tab (with a bid in a FAAB league), and **Sim to Wednesday** settles them (by priority, or by bid in FAAB) and lets the CPUs move; then lineups, free-agent adds and trades are open again until you play the next week. **Tabs:** My Team (set your lineup with Move, drop players, look at any team or past week), Matchup (your game and the week's scoreboard), Players (the waiver wire with each player's usage over his last 3 games, adds and claims), Trades (CPU offers, and a builder that shows the CPU's verdict before you propose) and League (standings, schedule, scoreboard, activity). The regular season runs until the playoff weeks you chose; then the top seeds play a title bracket (top seeds get a bye when it has 5–7 teams) and everyone else plays for the places below. **No hindsight:** nothing on screen comes from a week you have not played. Before a week is played you see only its pre-game projection; points, records and standings stop at the last week played, the My Team and Matchup week pickers end at the current week, and later weeks on the League scoreboard show the pairings only |
 | **Settings** | League scoring, size, superflex, and TE premium (used everywhere); connect Yahoo; check integrations. **System** shows when the auto-update last ran and what it did, Odds API credits left, data freshness and the last backup, with **Back up now**. **API access** takes the token when the backend has `API_TOKEN` set |
 
 ## How the numbers work
@@ -860,6 +860,20 @@ that week's games on; only scoring a week reads its real points.
   regular season: one missing week would zero it). It also reports `injury_weeks` (weeks with tags
   stored), which `ready` does not require, and `last_week` (17 or 18: a week-18 final needs 18). A re-run of Prepare fetches the MyFantasyLeague ADP
   tail again while a season has none.
+  **ADP per draft format:** `replay_adp` holds one list per `format`: `ppr`, `half`, `std` and `2qb`
+  (Fantasy Football Calculator's 12-team PPR, half-PPR, non-PPR and 2-QB mock drafts, every season
+  2018-2025; MyFantasyLeague's PPR real drafts fill each list's tail past FFC's last pick). A league drafts
+  from its own list (`services/replay_adp_format.py`): a superflex league (a SFLX slot or 2+ QB slots) the
+  2-QB list, otherwise its scoring's list, and custom scoring the preset nearest its points per reception
+  (0.75 -> PPR, 0.25 -> half). The list is chosen once, at creation, and saved with the league
+  (`Settings.adp_format`; leagues saved before there were several lists keep PPR), so a league never
+  switches lists mid-season. A season missing that list uses the nearest one stored (2-QB -> the
+  scoring's list; PPR <-> half <-> standard), and a superflex league without a 2-QB list falls back to
+  scaling QB ADP (`replay_chart.SUPERFLEX_QB_ADP`). A re-run of Prepare fetches only the formats a season
+  lacks. A format FFC cannot give is reported and leaves what is stored; when FFC answered without a list
+  (rather than failing to answer) the format is remembered as having none and not asked for again until
+  a forced Prepare. While MyFantasyLeague is down, a format with nothing stored is saved from FFC alone
+  (its tail comes on the next run) and every stored format stays exactly as it is.
   The "experts" step (2020 on) stores FantasyPros position ranks from the nflverse archive in
   `replay_expert_ranks` (`services/replay_experts.py`): the last preseason cheatsheet and every in-season
   rest-of-season snapshot. Week W uses the latest snapshot taken before week W's first Sunday kickoff; the
@@ -915,7 +929,42 @@ that week's games on; only scoring a week reads its real points.
   else of his ADP at his position. The rank blends this
   week's expert rank (weight 0.65 for a fresh snapshot, less as it ages) with the app's model rank
   (`ros_ppg` nudged by his last three real games), and an injured player is priced by the share of his
-  team's remaining games he is expected to play.
+  team's remaining games he is expected to play. Two extras keep the model rank from trailing the news
+  (`services/replay_role.py`): from week 2 his newest projection counts half its gap to `ros_ppg` (a back
+  the site re-rates after he wins the job moves now, not a quarter at a time), and when a teammate at his
+  position is expected to miss games, a player with no projection since then (out or on a bye himself,
+  e.g. Mike Evans when Chris Godwin went down in 2024) gains his share of the missed work (75% of a back's
+  stays with the backs, 60% for receivers, 50% for tight ends, split by rate). Judged out of sample
+  (2021-2025, weeks 2-11, against real points from that week on): per-position rank correlation 0.475 ->
+  0.478, better in 4 of 5 seasons. A usage-share signal (a back's share of his team's touches) was tried and
+  left out: it moved players the wrong way more often than the right one.
+- **Market reaction (hype):** trade values model what managers would pay, not only the forecast, and CPUs
+  price deals with the same values, so you can buy before or sell into a move. `services/replay_shocks.py`
+  detects events the market reacts to on little or no game sample, from point-in-time data only: a teammate
+  at his position ranked inside the top 36 RB / 48 WR / 18 TE goes out for at least a quarter of the games
+  left (the injury news counts, "out for the season" fully) or leaves for another team (the next back or
+  receiver in line gains); that teammate comes back after two or more weeks out with an injury tag (the
+  stand-in loses; an untagged absence is a scratch, trade or release, e.g. Cam Akers' 2023 first game for
+  Minnesota, which used to cut Kyren Williams); a
+  player's week 1-2 share of his team's work is well above or below what his preseason rank implies (role
+  won / lost). One game's points never move anything. Each event pulls his chart rank part of the way
+  toward the rank it points to (the lost starter's, his old one, the one his share implies), fading over 4
+  weeks and shrinking as the experts and projections catch up, so nothing counts twice. The size of each
+  pull is calibrated (`python -m services.replay_shock_eval`, 2018-25, leave one season out) on how far the
+  market really moved in the 1-3 weeks after: the expert ranks and the projections, minus the drift every
+  other player saw (no Vegas player props exist for past seasons: the app holds props for 2026 only). A
+  (kind, position) with fewer than 20 events uses its kind's pooled fit (smaller fits made role_lost TE and
+  teammate_left TE worse out of sample). Honest result: the chart already moves at the event week about as
+  far as that market later does (median gap about 0), so most pulls are small: the fill-in's drop when the
+  starter returns is the largest (RB 0.48 of the gap), a back's gain from a lost starter 0.15, a teammate
+  traded away 0.17, role won 0.02-0.05, role lost about 0. Javonte Williams in 2025 week 2 goes 166 -> 181
+  (RB26 -> RB25; the experts reached RB16-20 only in weeks 3-5). Lead: mean distance to the market's later
+  rank 11.3 -> 11.2 ranks. Forecast cost: mean Spearman against real points from then on moves -0.009 to
+  +0.002 per season (2022 worst). A trade is seen only after the player's first game for his new team (no
+  stored source is point-in-time before it), so a teammate_left pull comes a week late.
+  A player a shock lifts by at least 1 chart point gets a **hype star** next to his name wherever player
+  rows show, with the public reason ("Hype: role jumped after Puka Nacua went out for the season", "... he
+  won the backfield").
 - **Injury news:** a player who is out carries a report of when he is due back (`services/replay_news.py`).
   It is built from the week he really returned, blurred by seeded noise (off by up to two weeks, a few
   false "out for the season" calls, season-ending injuries first reported as a return weeks out) that
@@ -954,20 +1003,25 @@ that week's games on; only scoring a week reads its real points.
   smallest pieces past the first extra one count at
   `replay_trade_value.DEPTH_SHARE` (35%), so five bench players worth twice a starter on the chart still
   don't buy him, while a fair 2-for-1 is unchanged. It also refuses a deal
-  that loses it 20% of market value (counted with the same depth discount). Declines come with the reasons. A player on IR can't be traded; a CPU
+  that loses it 20% of market value (counted with the same depth discount). Declines come with the reasons. A player on IR can be traded: he takes the receiving team's free IR slot, else a
+  roster spot (which may force a drop). A CPU
   sells you an out player only for at least half his healthy chart value. After a deal each starting slot
   the CPU can no longer fill needs a player it can add (unrostered, not out, not on waivers; in the waiver
   phase, when everyone unrostered is on waivers, anyone you haven't claimed), and it adds him
   (`replay_cover.cpu_cover`): right away, or in the waiver phase once waivers clear. Each CPU has a hidden **persona** (balanced, panicky, shark, steady,
   gambler: `services/replay_personas.py`, assigned from the league's seed at creation) that nudges what it
   thinks a player is worth by up to 15% and how often it offers and counters; after 3 weeks a one-line
-  tendency hint is shown, never the persona. **Counters:** a CPU that turns down a deal on value alone may
+  tendency hint is shown, never the persona. Panicky and gambler CPUs are also **emotional**: they price a
+  hype move at 1.25x its calibrated size (`replay_personas.HYPE`, at most 8 chart points more), both when
+  buying and when holding; the rest stay calm. Small on purpose: Javonte Williams' week-2 jump of 15 points
+  becomes about 19 to an emotional CPU. **Counters:** a CPU that turns down a deal on value alone may
   answer with a counter offer it would take (`services/replay_counter.py`; one roll and at most one counter
   per CPU per week), shown under Offers for you;
   you can counter a CPU's offer from the trade builder (the offer is marked "countered"). The **deadline**:
   trades are open through week 11 and its waiver phase, and close when you press Sim to Wednesday after
   week 11's games (in a league without waivers, once week 11 is played). CPUs also trade with each other
-  and send you offers.
+  and send you offers. A CPU makes at most 3 trades a week (`replay_state.MAX_TRADES_PER_WEEK`, either
+  side; a fourth is declined); you have no cap.
 - **Season:** the user picks the championship week (16, 17 or 18; 18 only when the season has a week 18)
   and the playoff teams P (4-8, at most the league size; default 4 under 10 teams, 6 under 14, else 8).
   The playoffs last 2 weeks for P = 4 and 3 weeks for 5-8, and the regular season is the weeks before
@@ -984,6 +1038,13 @@ that week's games on; only scoring a week reads its real points.
   sizes existed keep their title games. Their consolation games may pair differently (by the pool table rather than
   seeds 5 v 8, 6 v 7): an 8-team league saved before its first playoff week, and a league of 10 or more
   teams saved before its last playoff week. A finished one may reorder places from 5th down.
+  The League tab's **Playoffs** page (`GET /api/replay/games/{id}/playoffs`; the League tab opens on it once
+  the regular season is over) draws this as a bracket: one column per playoff week with every slot, seed
+  numbers, byes, scores, the winner of each game marked and the Championship on the bracket's midline, the
+  user's games outlined; slots not decided yet say "To be decided". Until the seeds lock, round one is drawn
+  from the current standings and marked Projected. Below it, each consolation pool (the places it decides,
+  its teams, or who will join it) with its games week by week; a week not paired yet says when it will be.
+  On a phone the columns stack.
 - **Limits of "no hindsight":** a week's projection is the sites' final pre-game number, and it is
   already visible at that week's Wednesday waiver run. An expert snapshot taken on a Friday already knows
   that week's Thursday game. Injury news is built from the real return week (noisy, see above). A player appears on the board and the wire once
@@ -1018,8 +1079,11 @@ and the API sends no result of an unplayed week. The look ("Game Night", `styles
   box-score totals), Last 4 avg (points and box score a game over his last 4 games, and snap share over
   his last 3) or Week N (that week's pre-game projection and, once played, his points and box line). The
   box-score columns follow the position tab (QB passing; RB carries and catches; WR/TE targets and
-  receiving; none for K/DST). Click a column header to sort on the server (again to flip); players
-  without the number come last either way.
+  receiving; none for K/DST). Each row also carries advanced rates over the same span
+  (`services/replay_advanced.py`): snap % and target share (means over his games), targets, carries and
+  touches a game, yards per carry / catch / target, catch rate, total TDs, TD rate per touch, passing
+  yards a game and TD:INT, each blank when there is nothing to divide by. Click a column header to sort
+  on the server (again to flip); players without the number come last either way.
 - **Player card:** his status, five stat tiles, a game log of played weeks (opponent, projection, points,
   box line) and the weeks to come: opponent (@ when away), a **matchup chip** and an **Est.**, his
   rest-of-season rate x the opponent's defense factor (not a site projection; none on a bye or while the
@@ -1105,7 +1169,8 @@ League parameters accepted by every valuation endpoint: `scoring=ppr|half|std`,
 | POST | `/api/replay/games/{id}/lineup` | Body `{"starters": {"QB": [id], ...}}`, or `{"starters": null}` for the best lineup |
 | GET | `/api/replay/games/{id}/matchup?week=&team_id=` | One game's two lineups side by side |
 | GET | `/api/replay/games/{id}/scoreboard?week=` | Every game of a week |
-| GET | `/api/replay/games/{id}/standings` | The table with seeds, the playoff weeks and byes, and the playoff bracket once known |
+| GET | `/api/replay/games/{id}/standings` | The table with seeds, the playoff weeks and byes (the bracket: `.../playoffs`) |
+| GET | `/api/replay/games/{id}/playoffs` | The bracket for the Playoffs page: every title round (open slots until decided, round one projected from today's seeds), byes, and the consolation pools week by week |
 | GET | `/api/replay/games/{id}/schedule?team_id=` | A team's opponents and results |
 | GET | `/api/replay/games/{id}/activity?kind=&limit=&offset=` | The league log (picks, moves, trades, results), newest first |
 | GET | `/api/replay/games/{id}/players?position=&search=&status=&sort=&dir=&stats=&stat_week=&limit=&offset=` | The player pool (default: unrostered) with status, projection, value, points so far, usage over his last 3 games, the opponent's matchup rating and a stat line (`stats` `season`, `last4` or `week` with `stat_week` 1..current); `sort` any column (`value`, `projection`, `ros_ppg`, `adp`, `points`, `name`, `ppg`, `last`, `line_points`, `line_projection` or a box key such as `rec_yds`), `dir` `asc`/`desc`; 422 on a bad value |

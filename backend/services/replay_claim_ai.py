@@ -20,7 +20,7 @@ from collections.abc import Mapping
 from functools import lru_cache
 from types import MappingProxyType, SimpleNamespace
 
-from services import replay_state as rs, replay_values as rv
+from services import replay_pool, replay_state as rs, replay_values as rv
 from services.replay_pool import SKILL
 from services.replay_values import Knowledge, ReplayValue
 
@@ -74,6 +74,9 @@ class HotProjector(rv.ReplayProjector):
 
     def healthy_rate(self, value) -> float:
         return self.rates.get(value.player_id, value.ros_ppg)
+
+
+replay_pool.EVICT_HOOKS.append(hot_rates.cache_clear)
 
 
 def hot_candidates(know: Knowledge, available: list[ReplayValue], listed: list[ReplayValue]) -> list[ReplayValue]:

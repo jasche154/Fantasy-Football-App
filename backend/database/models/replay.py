@@ -24,14 +24,16 @@ class ReplayLeague(Base):
 
 
 class ReplayAdp(Base):
-    """Preseason average draft position for a past season (PPR, 12 teams), as drafted before week 1."""
+    """Preseason average draft position for a past season (12 teams) in one draft format, as drafted before week 1."""
 
     __tablename__ = "replay_adp"
-    __table_args__ = (Index("ux_replay_adp_season_player", "season", "player_id", unique=True),)
+    __table_args__ = (Index("ux_replay_adp_season_player_format", "season", "player_id", "format", unique=True),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     season: Mapped[int]
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id"))
+    # "ppr" | "half" | "std" | "2qb" (2-QB/superflex drafts, PPR); rows from before formats existed are "ppr"
+    format: Mapped[str] = mapped_column(default="ppr", server_default="ppr")
     adp: Mapped[float]
     stdev: Mapped[float | None]
     source: Mapped[str]                        # "ffc" or "mfl"

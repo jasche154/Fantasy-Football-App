@@ -42,7 +42,7 @@
   color: var(--color-text);
 }
 
-.btn--ghost:hover:not(:disabled) {
+.btn--ghost:hover:not(:disabled, [aria-disabled='true']) {
   border-color: var(--color-accent);
   color: var(--color-text);
 }

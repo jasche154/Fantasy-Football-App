@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from services.projections import load_player_seasons
 from services.schedule_strength import _solve, load_schedule, team_position_points
-from services.scoring import scoring_for
+from services.scoring import ScoringSettings, scoring_for
 
 if TYPE_CHECKING:
     from services.replay_pool import SeasonData
@@ -49,10 +49,11 @@ def _solve_all(points: Points) -> tuple[dict[tuple[str, str], tuple[float, int]]
     return solved, averages
 
 
-def load_prior(session: Session, season: int, scoring: str) -> Mapping[tuple[str, str], float]:
+def load_prior(session: Session, season: int, scoring: str | ScoringSettings) -> Mapping[tuple[str, str], float]:
     """(defense, position) -> last season's factor, plus (AVERAGE, position) -> its average points per
-    team-game; empty when last season's stats or schedule aren't loaded."""
-    players = load_player_seasons(session, season - 1, scoring_for(scoring))
+    team-game; empty when last season's stats or schedule aren't loaded. `scoring`: a preset or full rules."""
+    rules = scoring_for(scoring) if isinstance(scoring, str) else scoring
+    players = load_player_seasons(session, season - 1, rules)
     schedule = load_schedule(session, season - 1)
     if not players or not schedule.games:
         return {}

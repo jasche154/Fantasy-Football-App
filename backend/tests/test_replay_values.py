@@ -710,8 +710,20 @@ NEWS_FIELDS = {"news": None, "availability": 0, "expected_missed": 0, "chart": 0
                "trade_value": 0, "rank": 0, "pos_rank": ""}
 
 
+SHOCK_FIELDS = {"chart": 0, "healthy_chart": 0, "trade_value": 0, "shock_chart": 0, "shock": None, "hype_reason": None,
+                "rank": 0, "pos_rank": ""}
+
+
 def hard_tagged(data, week: int) -> set[int]:
     return {pid for (pid, w), tag in data.injuries.items() if w == week and tag.hard}
+
+
+def _ignored(pid: int, tagged: set[int], *knows) -> dict:
+    """What the news may change: a tagged player's report, and the market's reaction to a tagged teammate's."""
+    if pid in tagged:
+        return NEWS_FIELDS
+    lifted = any(know.by_id[pid].shock == "teammate_out" for know in knows)
+    return SHOCK_FIELDS if lifted else {"rank": 0, "pos_rank": ""}
 
 
 @pytest.mark.parametrize("week", [6, 8, 9, 12])
@@ -722,7 +734,7 @@ def test_changing_returns_moves_only_players_hard_tagged_now(week):
 
     assert tagged and any(real.by_id[pid] != other.by_id[pid] for pid in tagged)
     for v in real.values:
-        ignored = NEWS_FIELDS if v.player_id in tagged else {"rank": 0, "pos_rank": ""}
+        ignored = _ignored(v.player_id, tagged, real, other)
         assert replace(v, **ignored) == replace(other.by_id[v.player_id], **ignored)
 
 
@@ -735,7 +747,7 @@ def test_the_seed_moves_only_the_news():
     assert len({know.by_id[fakes.INJURED_STAR_ID].news for know in reports.values()}) > 1
     for know in reports.values():
         for v in know.values:
-            ignored = NEWS_FIELDS if v.player_id in hard_tagged(data, 7) else {"rank": 0, "pos_rank": ""}
+            ignored = _ignored(v.player_id, hard_tagged(data, 7), know, reports[0])
             assert replace(v, **ignored) == replace(reports[0].by_id[v.player_id], **ignored)
 
 

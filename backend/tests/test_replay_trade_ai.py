@@ -140,14 +140,36 @@ def test_every_cpu_trade_passes_the_acceptance_test_for_both_sides(seasons):
             assert verdict.value_get >= verdict.value_give * 0.8 and verdict.value_give >= verdict.value_get * 0.8
 
 
-def test_a_cpu_trades_at_most_once_a_week_and_never_moves_the_users_players(seasons):
+def test_a_cpu_trades_at_most_the_cap_a_week_and_never_moves_the_users_players(seasons):
     for season in seasons.values():
         for week in season:
-            dealt = [team for offer in week.made if offer.status == "accepted"
-                     for team in (offer.from_team, offer.to_team)]
+            dealt = Counter(team for offer in week.made if offer.status == "accepted"
+                            for team in (offer.from_team, offer.to_team))
 
-            assert len(dealt) == len(set(dealt)) <= 2 * ai.CPU_ATTEMPTS and USER not in dealt
+            assert sum(dealt.values()) <= 2 * ai.CPU_ATTEMPTS and USER not in dealt
+            assert max(dealt.values(), default=0) <= rs.MAX_TRADES_PER_WEEK
             assert rs.user_team(week.after).roster == rs.user_team(week.before).roster
+
+
+def test_a_cpu_that_traded_this_week_may_trade_again_until_the_cap(monkeypatch):
+    """Every pair finds a deal (stubbed) and every attempt runs: with three CPUs each deals more than once,
+    but none past the cap, and once all are capped the attempts stop dealing."""
+    monkeypatch.setattr(ai, "EXTRA_ATTEMPT_CHANCE", 1.0)
+    monkeypatch.setattr(ai, "CPU_ATTEMPTS", 10)
+    monkeypatch.setattr(ai, "_best_deal", lambda *args: ((), ()))
+    monkeypatch.setattr(ai.rt, "execute", lambda state, settings, know, first, second, give, get:
+                        rt.record_offer(state, first, second, give, get, "accepted"))
+    monkeypatch.setattr(ai, "_user_offer", lambda state, *args: state)
+    state = fakes.drafted_state()
+    cpus = [t.id for t in state.teams if not t.is_user][:3]
+    few = replace(state, teams=tuple(t for t in state.teams if t.is_user or t.id in cpus))
+
+    after = ai.cpu_trades(few, SETTINGS, knowledge(1), seed=0)
+
+    dealt = Counter(team for offer in after.offers for team in (offer.from_team, offer.to_team))
+    assert set(dealt) <= set(cpus) and len(after.offers) == 4          # 3 CPUs x a cap of 3, 2 a deal
+    assert all(1 < count <= rs.MAX_TRADES_PER_WEEK for count in dealt.values())
+    assert len(ai._free_cpus(after)) == 1 and ai.cpu_trades(few, SETTINGS, knowledge(1), seed=0) == after
 
 
 def test_trades_are_carried_out_and_leave_every_roster_legal(seasons):

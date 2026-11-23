@@ -3,8 +3,9 @@
 `cpu_trades` makes up to CPU_ATTEMPTS attempts at a CPU-CPU deal (the first always, each later one with
 probability EXTRA_ATTEMPT_CHANCE) and then at most one CPU sends the user an offer: the free CPUs, in seeded
 order, each roll their persona's `replay_personas.offer_rate`, and the first that hits searches for one (a
-shark rolls highest). An attempt asks up to MAX_PAIRS seeded pairs of CPUs that have not traded this week and
-makes the first pair's deal that it finds. Each pair is searched within fixed bounds:
+shark rolls highest). An attempt asks up to MAX_PAIRS seeded pairs of CPUs below the weekly cap
+(`replay_state.MAX_TRADES_PER_WEEK`) and makes the first pair's deal that it finds, so a CPU may deal in more
+than one attempt; the re-trade lock keeps it from moving the same players again. Each pair is searched within fixed bounds:
 
 1. Each side's TOP_SKILL tradable skill players (out players too, from the active roster), most valuable
    first; a shark looks first at the other side's slumping stars (star x a negative form_chart: buy low)
@@ -106,11 +107,13 @@ def _best_deal(state: State, settings: Settings, know: Knowledge, sender: Team, 
 
 
 def _free_cpus(state: State) -> list[Team]:
-    return [team for team in state.teams if not team.is_user and not rs.has_traded_this_week(state, team.id)]
+    """CPUs below the weekly trade cap."""
+    return [team for team in state.teams
+            if not team.is_user and rs.trades_this_week(state, team.id) < rs.MAX_TRADES_PER_WEEK]
 
 
 def _cpu_attempt(state: State, settings: Settings, know: Knowledge, dice: np.random.Generator) -> State:
-    """Up to MAX_PAIRS seeded pairs of CPUs that have not traded this week: the first with a deal makes it."""
+    """Up to MAX_PAIRS seeded pairs of CPUs below the weekly trade cap: the first with a deal makes it."""
     pairs = list(combinations(_free_cpus(state), 2))
     for index in dice.permutation(len(pairs))[:MAX_PAIRS]:
         first, second = pairs[int(index)]

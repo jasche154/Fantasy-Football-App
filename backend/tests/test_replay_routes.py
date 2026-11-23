@@ -326,7 +326,7 @@ def test_every_week_is_played_to_a_champion(story):
     assert played[-1]["events"][-1]["kind"] == "champion" and played[-1]["game"]["phase"] == "complete"
     summary, table = final["summary"], final["standings"]
     assert summary["next_action"] == {"step": "done", "label": "Season complete"}
-    assert summary["champion"] == table["champion"] and table["results"][0]["team_id"] == summary["champion"]["team_id"]
+    assert table["results"][0]["team_id"] == summary["champion"]["team_id"]
     assert all(row["played"] and row["result"] in "WLT" for row in final["schedule"]["results"])
     assert summary["record"]["place"] == next(r["place"] for r in table["results"] if r["is_user"])
 
@@ -338,7 +338,7 @@ def test_responses_have_the_documented_keys(story):
     assert set(final["matchup"]) == {"week", "played", "playoff", "label", "winner", "home", "away"}
     assert set(final["scoreboard"]["results"][0]["home"]) == SIDE
     assert set(final["standings"]) == {"results", "regular_season_weeks", "playoff_teams", "playoff_weeks", "byes",
-                                       "seeds_final", "bracket", "champion"}
+                                       "seeds_final"}
     assert (final["standings"]["playoff_weeks"], final["standings"]["byes"]) == ([15, 16], 0)
     assert set(final["activity"]) == {"total", "limit", "offset", "results"} and final["activity"]["limit"] == 50
     assert set(final["players"]["results"][0]) == WIRE_ROW and final["players"]["week"] == 16

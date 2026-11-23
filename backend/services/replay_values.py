@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from types import MappingProxyType, SimpleNamespace
 
-from services import lineup_gain, my_team as mt, replay_chart, replay_state
+from services import lineup_gain, my_team as mt, replay_chart, replay_slots, replay_state
 from services.league import LeagueSettings, replacement_levels
 from services.replay_news import Report
 from services.replay_pool import SKILL, Injury, PoolPlayer, SeasonData
@@ -42,7 +42,8 @@ RECENCY_WEIGHTS = (4, 3, 2, 1)                        # newest first: the projec
 OUT_SHARE = {1: 0.45, 2: 0.55, 3: 0.60, 4: 0.65, 5: 0.75}    # share of remaining games missed, by weeks out so far
 OUT_SHARE_LONG = 0.90                                 # six or more weeks out (measured, RB/WR/TE 2021-25)
 IR_OUT_SHARE = 0.80                                   # least share missed when tagged IR or PUP (measured 2018-25)
-FLEX_POSITIONS = ("RB", "WR", "TE")
+FLEX_POSITIONS = replay_slots.FLEX_POSITIONS
+eligible = replay_slots.eligible                      # slot -> the positions that can play there
 BACKUPS = {"QB": 1, "RB": 3, "WR": 4, "TE": 1}        # most a CPU carries behind its starters (no spare K or DST)
 RECENT_GAMES = 3                                      # recent_points: his last games before this week
 
@@ -80,6 +81,9 @@ class ReplayValue:
     star: float = 0.0              # 0-1, replay_chart.star(pre_rank)
     form_chart: float = 0.0        # signed chart points from his recent real games
     news: Report | None = None     # injury report while he is out (replay_news)
+    shock_chart: float = 0.0       # signed chart points from an opportunity shock (replay_shocks)
+    shock: str | None = None       # its kind: teammate_out, teammate_left, starter_back, role_won, role_lost
+    hype_reason: str | None = None  # why his role jumped (replay_shocks.reason), when a shock lifts him STAR_MIN+
 
 
 @dataclass(frozen=True, eq=False)
@@ -219,7 +223,8 @@ def _base(data: SeasonData, league: LeagueSettings, week: int, end_week: int) ->
     teams = {pid: data.team_at(pid, week) for pid in data.players}
     rows = [_row(data, player, priors[pid], week, teams[pid], games_left(teams[pid]))
             for pid, player in data.players.items()]
-    charts, parts, source = replay_chart.base_charts(data, rows, priors, week, end_week)
+    chart_data = replay_chart.superflex_view(data) if replay_slots.two_qb(league.starters) else data  # QBs go earlier
+    charts, parts, source = replay_chart.base_charts(chart_data, rows, priors, week, end_week)
     rows = [{**row, **charts[row["player_id"]]} for row in rows]
     replacement = replacement_levels(((r["position"], r["ros_ppg"]) for r in rows if r["position"] in SKILL), league)
     return _Base(MappingProxyType({r["player_id"]: _valued(r, replacement) for r in rows}), parts,
@@ -265,7 +270,8 @@ def league_settings(settings: "replay_state.Settings") -> LeagueSettings:
     """The app's LeagueSettings for a replay league (K and DST slots included, the playoff weeks set)."""
     playoffs = tuple(range(settings.regular_season_weeks + 1, settings.end_week + 1))
     return LeagueSettings(scoring=settings.scoring, teams=settings.teams, starters=settings.starters,
-                          playoff_weeks=playoffs, bench=settings.bench)
+                          playoff_weeks=playoffs, bench=settings.bench,
+                          superflex=replay_slots.superflex(settings.starters) > 0)
 
 
 @lru_cache(maxsize=64)
@@ -283,22 +289,24 @@ def horizon(know: Knowledge, settings: "replay_state.Settings") -> lineup_gain.H
 
 
 def lineup_holes(positions: Sequence[str], settings) -> int:
-    """How many starting slots (QB/RB/WR/TE/FLEX/K/DST) players at these positions cannot fill.
+    """How many starting slots (QB/RB/WR/TE/FLEX/SUPERFLEX/K/DST) players at these positions cannot fill.
 
     `settings` is anything with `.starters`. A roster can still become legal while the holes are no more
     than the picks or roster spots it has left."""
-    have, starters = Counter(positions), settings.starters
-    holes = sum(max(0, wanted - have[slot]) for slot, wanted in starters.items() if slot != "FLEX")
-    spare = sum(max(0, have[position] - starters.get(position, 0)) for position in FLEX_POSITIONS)
-    return holes + max(0, starters.get("FLEX", 0) - spare)
+    return len(missing_slots(positions, settings))
 
 
 def missing_slots(positions: Sequence[str], settings) -> list[str]:
-    """The starting slots players at these positions cannot fill, once per missing starter (FLEX last)."""
+    """The starting slots players at these positions cannot fill, once per missing starter (FLEX, then
+    SUPERFLEX last). FLEX takes the spare backs, receivers and tight ends first; SUPERFLEX what is left of
+    them plus the spare quarterbacks (FLEX's positions are a subset of SUPERFLEX's, so this is optimal)."""
     have, starters = Counter(positions), settings.starters
-    missing = [slot for slot, wanted in starters.items() if slot != "FLEX" for _ in range(wanted - have[slot])]
+    missing = [slot for slot, wanted in starters.items() if slot not in replay_slots.ELIGIBLE
+               for _ in range(wanted - have[slot])]
+    flex, superflex = starters.get("FLEX", 0), starters.get("SUPERFLEX", 0)
     spare = sum(max(0, have[position] - starters.get(position, 0)) for position in FLEX_POSITIONS)
-    return [*missing, *["FLEX"] * max(0, starters.get("FLEX", 0) - spare)]
+    left = max(0, spare - flex) + max(0, have["QB"] - starters.get("QB", 0))
+    return [*missing, *["FLEX"] * max(0, flex - spare), *["SUPERFLEX"] * max(0, superflex - left)]
 
 
 def can_field_lineup(positions: Sequence[str], settings) -> bool:
@@ -308,8 +316,10 @@ def can_field_lineup(positions: Sequence[str], settings) -> bool:
 
 def position_cap(position: str, settings) -> int:
     """The most a CPU carries at a position, the limits its draft keeps: its starting slots (a FLEX counts
-    for backs and receivers) plus BACKUPS. 2 QB, 6 RB, 7 WR, 2 TE, 1 K and 1 DST on the default lineup."""
+    for backs and receivers, a SUPERFLEX for quarterbacks) plus BACKUPS. 2 QB, 6 RB, 7 WR, 2 TE, 1 K and
+    1 DST on the default lineup."""
     flex = settings.starters.get("FLEX", 0) if position in ("RB", "WR") else 0
+    flex += settings.starters.get("SUPERFLEX", 0) if position == "QB" else 0
     return settings.starters.get(position, 0) + flex + BACKUPS.get(position, 0)
 
 

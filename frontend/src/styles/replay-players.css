@@ -8,7 +8,6 @@
 .replay-players__action { text-align: end; }
 .replay-players__error,
 .replay-claims__error { margin: var(--space-1) 0 0; white-space: normal; }
-.replay-players__error { min-width: 12rem; }
 .replay-players__pager { display: flex; align-items: center; justify-content: center; gap: var(--space-3); margin-top: var(--space-3); }
 
 /* ---------- Waiver claims ---------- */
@@ -42,3 +41,38 @@
 /* ---------- Table ---------- */
 .replay-players__opp { white-space: nowrap; }
 .replay-players__opp .game-chip { margin-inline-start: var(--space-2); }
+
+/* ---------- Pinned columns ----------
+   Player stays on the left, Value and the row's action on the right; only the stats scroll between them.
+   A soft edge shadow shows on a pinned side only while columns are hidden under it (data-overflow-*); in the
+   header it keeps the cells' bottom rule. Below 600px only Player is pinned (all three are wider than a phone).
+   scroll-padding keeps a focused cell out from under the pinned ones (WCAG 2.4.11). */
+.replay-players__wrap { --pin-bg: var(--game-panel, var(--color-surface-1)); --pin-hover: var(--game-panel-2, var(--color-surface-2));
+  --pin-start: 9rem; --pin-value: 4.5rem; --pin-action: 6.75rem; --pin-rule: var(--game-line-strong, var(--color-border-strong));
+  --pin-shadow: light-dark(rgb(0 0 0 / 0.14), rgb(0 0 0 / 0.5));
+  scroll-padding-inline-start: var(--pin-start);
+  scrollbar-width: thin; scrollbar-color: var(--game-line, var(--color-border-strong)) transparent; }
+.replay-players__pin-start { position: sticky; left: 0; z-index: 1; background: var(--pin-bg); transition: box-shadow var(--duration-fast) var(--ease-out); }
+.replay-players__wrap thead .replay-players__pin-start { z-index: 3; }
+.replay-players__pin-action { width: var(--pin-action); min-width: var(--pin-action); }
+.replay-players__pin-value { width: var(--pin-value); min-width: var(--pin-value); }
+.replay-players__wrap tbody tr:hover > .replay-players__pin-start,
+.replay-players__wrap tbody tr:hover > .replay-players__pin-value,
+.replay-players__wrap tbody tr:hover > .replay-players__pin-action { background: var(--pin-hover); }
+.replay-players__wrap[data-overflow-start] tbody .replay-players__pin-start { box-shadow: 10px 0 12px -12px var(--pin-shadow); }
+.replay-players__wrap[data-overflow-start] thead .replay-players__pin-start { box-shadow: inset 0 -1px 0 var(--pin-rule), 10px 0 12px -12px var(--pin-shadow); }
+@media (min-width: 600px) {
+  .replay-players__wrap { scroll-padding-inline-end: calc(var(--pin-value) + var(--pin-action)); }
+  .replay-players__pin-value,
+  .replay-players__pin-action { position: sticky; z-index: 1; background: var(--pin-bg); transition: box-shadow var(--duration-fast) var(--ease-out); }
+  .replay-players__wrap thead .replay-players__pin-value,
+  .replay-players__wrap thead .replay-players__pin-action { z-index: 3; }
+  .replay-players__pin-action { right: 0; }
+  .replay-players__pin-value { right: var(--pin-action); }
+  .replay-players__wrap[data-overflow-end] tbody .replay-players__pin-value { box-shadow: -10px 0 12px -12px var(--pin-shadow); }
+  .replay-players__wrap[data-overflow-end] thead .replay-players__pin-value { box-shadow: inset 0 -1px 0 var(--pin-rule), -10px 0 12px -12px var(--pin-shadow); }
+}
+/* An add's error under its row: held in view at the left edge however far the stats are scrolled. */
+.replay-players__error-row > td { padding-block-start: 0; }
+.replay-players__error { position: sticky; left: var(--space-3); width: fit-content; max-width: min(40rem, calc(100vw - 4rem)); margin: 0; }
+.replay-players__views { flex: none; }

@@ -146,7 +146,8 @@ def _bars(roster: Sequence[ReplayValue], ctx: _Context) -> tuple[float, dict[int
 
     The bar is the weakest starter in the newcomer's group, or 0 while one of its slots is unfilled."""
     starters = ctx.settings.starters
-    slots = {"QB": starters.get("QB", 0), "FLEX": sum(starters.get(slot, 0) for slot in ("FLEX", *rv.FLEX_POSITIONS))}
+    slots = {"QB": starters.get("QB", 0) + starters.get("SUPERFLEX", 0),     # a superflex usually starts a QB
+             "FLEX": sum(starters.get(slot, 0) for slot in ("FLEX", *rv.FLEX_POSITIONS))}
     by_id = {v.player_id: v for v in roster}
     base, bars = 0.0, {}
     for week, weight in ctx.horizon.weights.items():
@@ -295,7 +296,7 @@ def _cover(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: _Con
     # use up crowded's allowance for it (two QBs on bye and one on IR would leave the slot empty).
     bare = replace(ctx, stash=())
     for slot in idle:
-        eligible = rv.FLEX_POSITIONS if slot == "FLEX" else (slot,)
+        eligible = rv.eligible(slot)
         best = (_top(v for v in free if v.position == position and v.projection > 0) for position in eligible)
         for add in sorted(filter(None, best), key=_this_week):
             own = _worst_own(roster, add)
@@ -394,10 +395,12 @@ def cpu_free_agency(state: State, settings: Settings, know: Knowledge, seed: int
 
 # ---------------- the IR slot ----------------
 
-def _stash_pick(roster: Sequence[ReplayValue], ctx: _Context) -> ReplayValue | None:
-    """The best eligible skill player the team would never spare (top player, or above replacement)."""
-    keep = [v for v in roster if v.position in SKILL and replay_ir.eligible(ctx.know, v.player_id)
-            and (v.player_id in ctx.protected or v.last_projection > ctx.know.replacement[v.position])]
+def _stash_pick(group: Sequence[ReplayValue], ctx: _Context) -> ReplayValue | None:
+    """The best eligible skill player the team would never spare (top player, or above replacement), and only
+    one the rest of `group` can field a lineup without (a QB-heavy superflex roster may lack a spare back)."""
+    keep = [v for v in group if v.position in SKILL and replay_ir.eligible(ctx.know, v.player_id)
+            and (v.player_id in ctx.protected or v.last_projection > ctx.know.replacement[v.position])
+            and rv.can_field_lineup([o.position for o in group if o is not v], ctx.settings)]
     return max(keep, key=lambda v: (v.healthy_value, v.ros_ppg, -v.player_id), default=None)
 
 
@@ -407,11 +410,10 @@ def _bring_back(state: State, ctx: _Context, team: rs.Team, player_id: int) -> S
     settings, know = ctx.settings, ctx.know
     if len(team.roster) < settings.roster_size:
         return replay_ir.activate(state, settings, know, team.id, player_id)
-    roster = [know.by_id[pid] for pid in team.roster]
-    pick = _stash_pick(roster, ctx)
+    group = [*(know.by_id[pid] for pid in team.roster), know.by_id[player_id]]
+    pick = _stash_pick(group, ctx)                  # never him: he lost his tag
     if pick is not None:
         return replay_ir.activate(state, settings, know, team.id, player_id, swap=pick.player_id)
-    group = [*roster, know.by_id[player_id]]
     for cut in _spare(group, know, ctx.protected):
         if rv.can_field_lineup([v.position for v in group if v is not cut], settings):
             if cut.player_id == player_id:

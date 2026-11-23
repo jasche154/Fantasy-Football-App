@@ -450,3 +450,5 @@ def test_each_cpu_gets_a_seeded_persona_once_and_the_user_none():
 
     assert [t.persona for t in teams if t.is_user] == ["balanced"] and {"shark", "panicky"} <= set(cpus)
     assert set(cpus) <= set(replay_personas.PERSONAS) and teams == rd.new_game(settings, 4).teams
+    assert all(t.hype == replay_personas.hype_for(t.persona) for t in teams)     # panicky and gambler: emotional
+    assert [t.hype for t in teams if t.is_user] == [1.0] and max(t.hype for t in teams) == replay_personas.HYPE

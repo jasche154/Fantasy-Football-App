@@ -16,6 +16,8 @@ interface SortableHeaderProps<K extends string> {
   tag?: string;
   align?: 'start' | 'end';
   title?: string;
+  /** Extra classes on the <th> (e.g. a pinned column). */
+  className?: string;
 }
 
 function ariaSortFor(isActive: boolean, direction: SortDirection): 'ascending' | 'descending' | 'none' {
@@ -31,6 +33,7 @@ export function SortableHeader<K extends string>({
   tag,
   align = 'end',
   title,
+  className,
 }: SortableHeaderProps<K>) {
   const isActive = sort.key === columnKey;
   const arrow = isActive ? (sort.direction === 'asc' ? '▲' : '▼') : '↕';
@@ -38,7 +41,7 @@ export function SortableHeader<K extends string>({
     <th
       scope="col"
       aria-sort={ariaSortFor(isActive, sort.direction)}
-      className={`th-sortable th--${align}${isActive ? ' is-sorted' : ''}`}
+      className={`th-sortable th--${align}${isActive ? ' is-sorted' : ''}${className ? ` ${className}` : ''}`}
       title={title}
     >
       <button type="button" className="th-sortable__button" onClick={() => onSort(columnKey)}>

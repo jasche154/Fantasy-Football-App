@@ -5,7 +5,17 @@ import type { Scoring } from './core';
 export type ReplayPosition = 'QB' | 'RB' | 'WR' | 'TE' | 'K' | 'DST';
 /** The `position` query param: one position or the RB/WR/TE group. */
 export type ReplayPositionFilter = ReplayPosition | 'FLEX';
-export type ReplaySlot = ReplayPosition | 'FLEX' | 'BN';
+export type ReplaySlot = ReplayPosition | 'FLEX' | 'SUPERFLEX' | 'BN';
+/** {slot: how many start}; SUPERFLEX takes a QB, RB, WR or TE. */
+export type ReplayStarters = Partial<Record<Exclude<ReplaySlot, 'BN'>, number>>;
+/** A league's custom key settings on top of its scoring preset (backend/services/replay_scoring.py). */
+export interface ReplayScoringRules {
+  reception: number;
+  te_premium: number;
+  pass_td: number;
+  /** INT and fumble lost. */
+  turnover: number;
+}
 export type ReplayPhase = 'draft' | 'waivers' | 'open' | 'complete';
 export type ReplayWaiverMode = 'wednesday' | 'faab' | 'none';
 export type ReplayDifficulty = 'normal' | 'hard';
@@ -38,6 +48,13 @@ export interface ReplayPlayerRef {
   team: string | null;
   /** His tag in the current week (a row built for another week: that week's); always null in the draft room. */
   injury: ReplayInjury | null;
+  /** The trade market is hyping him (an opportunity shock lifted his value that week); null otherwise. */
+  hype: ReplayHype | null;
+}
+
+/** reason: public words for why his role jumped, e.g. "Puka Nacua went out for the season", "he won the backfield". */
+export interface ReplayHype {
+  reason: string;
 }
 
 /** One game's (or a sum or average of games') box score; K/DST have none. Whole numbers, averages 1 decimal. */
@@ -53,6 +70,32 @@ export interface ReplayBoxLine {
   rec_yds: number;
   rec_td: number;
 }
+
+/** Advanced rates over a stat span's games; each null when its denominator is 0 or its data is missing.
+ *  Percents are 0-100, everything 1 decimal except td_int (2). */
+export interface ReplayAdvLine {
+  /** Mean snap % over the games that have snap counts. */
+  snap_pct: number | null;
+  /** Mean share of his team's targets, 0-100. */
+  target_share: number | null;
+  targets_pg: number | null;
+  carries_pg: number | null;
+  /** Carries + receptions per game. */
+  touches_pg: number | null;
+  ypc: number | null;
+  ypr: number | null;
+  ypt: number | null;
+  catch_rate: number | null;
+  /** Rushing + receiving + passing TDs: the span's total (per game for last4). */
+  total_td: number | null;
+  /** Rushing + receiving TDs per touch, 0-100. */
+  td_rate: number | null;
+  /** Null without a pass thrown. */
+  pass_ypg: number | null;
+  /** Pass TD / INT; just the TDs when he threw no INT; null without a TD or INT. */
+  td_int: number | null;
+}
+export type ReplayAdvKey = keyof ReplayAdvLine;
 
 export type ReplayDefenseTier = 'easy' | 'neutral' | 'tough';
 
@@ -257,6 +300,10 @@ export interface ReplayCreateBody {
   /** 4..min(8, teams); left out: the default for the league size. */
   playoff_teams?: number;
   seed?: number;
+  /** Left out: the standard lineup. */
+  starters?: ReplayStarters;
+  /** Left out: the scoring preset as is. */
+  scoring_rules?: ReplayScoringRules;
 }
 
 export type ReplayPlayoffEndWeek = 16 | 17 | 18;
@@ -270,12 +317,16 @@ export interface ReplaySettings {
   starters: Partial<Record<Exclude<ReplaySlot, 'BN'>, number>>;
   bench: number;
   roster_size: number;
+  /** IR spots per team: a player traded off IR takes a free one, else a roster spot. */
+  ir_slots: number;
   draft_slot: number;
   waiver_mode: ReplayWaiverMode;
   difficulty: ReplayDifficulty;
   regular_season_weeks: number;
   playoff_teams: number;
   trade_deadline_week: number;
+  /** null: the scoring preset as is. Optional: answers saved before custom scoring. */
+  scoring_rules?: ReplayScoringRules | null;
 }
 
 export type ReplayStep = 'pick' | 'wednesday' | 'play' | 'done';

@@ -1,3 +1,4 @@
+import { Fragment, useEffect, useRef, useState } from 'react';
 import type { ReplayPlayerSort, ReplaySummary, ReplayWireRow } from '../../api/types';
 import { SortableHeader, type SortState } from '../../components/SortableHeader';
 import { EMPTY_VALUE, formatNumber } from '../../lib/format';
@@ -58,6 +59,35 @@ function RowAction({ game, row, hasClaim, moves, onAdd, onClaim }: RowActionProp
   );
 }
 
+type Overflow = { start: boolean; end: boolean };
+
+/** Which sides of a scroller hide columns, so the pinned columns cast a shadow only when something is under them. */
+function useOverflow() {
+  const ref = useRef<HTMLDivElement>(null);
+  const [overflow, setOverflow] = useState<Overflow>({ start: false, end: false });
+  useEffect(() => {
+    const box = ref.current;
+    if (!box) return undefined;
+    const measure = () => {
+      const start = box.scrollLeft > 1;
+      const end = box.scrollLeft + box.clientWidth < box.scrollWidth - 1;
+      setOverflow((now) => (now.start === start && now.end === end ? now : { start, end }));
+    };
+    measure();
+    box.addEventListener('scroll', measure, { passive: true });
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    observer?.observe(box);
+    // The table changes width on its own (Box score / Advanced, another page) while the box keeps its size.
+    const table = box.querySelector('table');
+    if (table) observer?.observe(table);
+    return () => {
+      box.removeEventListener('scroll', measure);
+      observer?.disconnect();
+    };
+  }, []);
+  return { ref, overflow };
+}
+
 interface PlayersTableProps {
   game: ReplaySummary;
   week: number;
@@ -76,16 +106,18 @@ interface PlayersTableProps {
 
 /**
  * The waiver wire. Clicking a header sorts on the server (every page, not just this one). The stat columns
- * follow the Stats picker; Opp carries how that defense treats his position. Scrolls inside its wrapper on a phone.
+ * follow the Stats picker and view; Opp carries how that defense treats his position. Player stays pinned on the
+ * left and Value + the row's action on the right, so only the stats scroll sideways when they don't fit.
  */
 export function PlayersTable({ game, week, rows, columns, sort, onSort, claimedIds, moves, onAdd, onClaim, openPlayer }: PlayersTableProps) {
+  const { ref, overflow } = useOverflow();
   return (
-    <div className="table-wrap">
+    <div ref={ref} className="table-wrap replay-players__wrap" data-overflow-start={overflow.start || undefined} data-overflow-end={overflow.end || undefined}>
       <table className="data-table data-table--compact replay-players__table">
         <caption className="sr-only">Players, week {week}</caption>
         <thead>
           <tr>
-            <SortableHeader columnKey="name" sort={sort} onSort={onSort} align="start">Player</SortableHeader>
+            <SortableHeader columnKey="name" sort={sort} onSort={onSort} align="start" className="replay-players__pin-start">Player</SortableHeader>
             <th scope="col">Status</th>
             <th scope="col" title={`Week ${week} opponent and how that defense treats his position`}>Opp</th>
             {columns.map((column) => (column.sort
@@ -93,32 +125,38 @@ export function PlayersTable({ game, week, rows, columns, sort, onSort, claimedI
                   {column.label}<span className="sr-only">{`, ${column.title}`}</span>
                 </SortableHeader>
               : <th key={column.id} scope="col" className="num th--end"><abbr title={column.title}>{column.label}</abbr><span className="sr-only">{`, ${column.title}`}</span></th>))}
-            <SortableHeader columnKey="value" sort={sort} onSort={onSort} title="Trade chart value, 0-1000">Value</SortableHeader>
-            <th scope="col"><span className="sr-only">Action</span></th>
+            <SortableHeader columnKey="value" sort={sort} onSort={onSort} title="Trade chart value, 0-1000" className="replay-players__pin-value">Value</SortableHeader>
+            <th scope="col" className="replay-players__pin-action"><span className="sr-only">Action</span></th>
           </tr>
         </thead>
         <tbody>
           {rows.map((row) => {
             const error = moves.errorFor(addKey(row.player.id));
             return (
-              <tr key={row.player.id} className={row.owner?.is_user ? 'row--mine' : undefined}>
-                <td className="td--player">
-                  <ReplayPlayerCell player={row.player} info={{ out: row.out, trade_locked: row.trade_locked }} onOpen={openPlayer} />
-                  {row.news && <p className="hint">{row.news.text}</p>}
-                </td>
-                <td><StatusCell row={row} /></td>
-                <td className="replay-players__opp">
-                  {row.bye ? 'BYE' : (row.opponent ?? EMPTY_VALUE)}
-                  {!row.bye && <DefenseChip rating={row.defense} position={row.player.position} />}
-                </td>
-                {columns.map((column) => <td key={column.id} className="num">{column.text(row)}</td>)}
-                <td className="num">{formatNumber(row.value)}</td>
-                <td className="replay-players__action">
-                  <RowAction game={game} row={row} hasClaim={claimedIds.has(row.player.id)} moves={moves} onAdd={onAdd} onClaim={onClaim} />
-                  {/* The hub's alert announces it; this copy sits where the user is looking. */}
-                  {error && <p className="error-text replay-players__error">{error}</p>}
-                </td>
-              </tr>
+              <Fragment key={row.player.id}>
+                <tr className={row.owner?.is_user ? 'row--mine' : undefined}>
+                  <td className="td--player replay-players__pin-start">
+                    <ReplayPlayerCell player={row.player} info={{ out: row.out, trade_locked: row.trade_locked }} onOpen={openPlayer} />
+                    {row.news && <p className="hint">{row.news.text}</p>}
+                  </td>
+                  <td><StatusCell row={row} /></td>
+                  <td className="replay-players__opp">
+                    {row.bye ? 'BYE' : (row.opponent ?? EMPTY_VALUE)}
+                    {!row.bye && <DefenseChip rating={row.defense} position={row.player.position} />}
+                  </td>
+                  {columns.map((column) => <td key={column.id} className="num">{column.text(row)}</td>)}
+                  <td className="num replay-players__pin-value">{formatNumber(row.value)}</td>
+                  <td className="replay-players__action replay-players__pin-action">
+                    <RowAction game={game} row={row} hasClaim={claimedIds.has(row.player.id)} moves={moves} onAdd={onAdd} onClaim={onClaim} />
+                  </td>
+                </tr>
+                {/* The hub's alert announces it; this copy sits under the row, where the user is looking, full width. */}
+                {error && (
+                  <tr className="replay-players__error-row">
+                    <td colSpan={columns.length + 5}><p className="error-text replay-players__error">{error}</p></td>
+                  </tr>
+                )}
+              </Fragment>
             );
           })}
         </tbody>

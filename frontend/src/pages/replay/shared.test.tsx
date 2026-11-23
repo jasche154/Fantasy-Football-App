@@ -15,6 +15,20 @@ describe('formatting', () => {
   });
 });
 
+describe('hype star', () => {
+  it('stars a hyped player with the reason for hover and screen readers, and nobody else', () => {
+    const hyped = { ...MOSTERT, hype: { reason: 'he won the backfield' } };
+    const { unmount } = render(<ReplayPlayerCell player={hyped} />);
+    const star = screen.getByTitle('Hype: role jumped after he won the backfield');
+    expect(star).toHaveClass('replay-hype');
+    expect(within(star).getByText('★')).toHaveAttribute('aria-hidden', 'true');
+    expect(within(star).getByText('Hype: role jumped after he won the backfield')).toHaveClass('sr-only');
+    unmount();
+    render(<ReplayPlayerCell player={MOSTERT} />);
+    expect(screen.queryByText('★')).not.toBeInTheDocument();
+  });
+});
+
 describe('injury tags', () => {
   it('labels, tones and classifies every tag', () => {
     const cases = (['Q', 'D', 'O', 'IR', 'PUP', 'SUS'] as const).map((tag) => {

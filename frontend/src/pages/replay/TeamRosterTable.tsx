@@ -2,7 +2,7 @@ import type { ReplayPlayerRow, ReplayTeam } from '../../api/types';
 import { EMPTY_VALUE, formatNumber } from '../../lib/format';
 import { DefenseChip } from './gameUi';
 import { canGoOnIr, ConfirmButton, formatPoints, ReplayPlayerCell } from './shared';
-import { canSwap, spotState, type LineupSpot } from './teamLineup';
+import { canSwap, slotLabel, spotState, type LineupSpot } from './teamLineup';
 import { lineupDragProps } from './useLineupDrag';
 
 /** Lineup editing, passed only when the user may change this roster. */
@@ -37,7 +37,7 @@ function moveButton(spot: LineupSpot, source: LineupSpot | null): { text: string
   if (!source) return name ? { text: 'Move', label: `Move ${name}`, pressed: false } : null;
   if (spot.key === source.key) return { text: 'Cancel', label: `Cancel moving ${moving}`, pressed: true };
   if (!canSwap(source, spot)) return null;
-  return name ? { text: 'Swap', label: `Swap ${moving} with ${name}` } : { text: 'Move here', label: `Move ${moving} to the empty ${spot.slot} slot` };
+  return name ? { text: 'Swap', label: `Swap ${moving} with ${name}` } : { text: 'Move here', label: `Move ${moving} to the empty ${slotLabel(spot.slot)} slot` };
 }
 
 interface IrButtonProps {
@@ -122,7 +122,7 @@ function SpotRow({ spot, openPlayer, editing, irName }: SpotRowProps) {
     row?.starting && (row.bye || row.out || row.player.injury) ? 'replay-roster__row--warn' : ''].filter(Boolean).join(' ');
   return (
     <tr className={className || undefined} {...lineupDragProps(spot, editing)}>
-      <td className="td--pos"><span className="replay-slot">{spot.slot}</span></td>
+      <td className="td--pos"><span className="replay-slot">{slotLabel(spot.slot)}</span></td>
       {rowCells(row, state === 'dim' ? undefined : openPlayer)}
       {editing && <Actions spot={spot} editing={editing} irName={irName} />}
     </tr>

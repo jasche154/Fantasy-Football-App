@@ -48,7 +48,7 @@ export function teamRef(teamId: number): ReplayTeamRef {
 
 export function playerRef(id: number, name: string, position: ReplayPosition, team: string | null,
   injury: ReplayInjury | null = null): ReplayPlayerRef {
-  return { id, name, position, team, injury };
+  return { id, name, position, team, injury, hype: null };
 }
 
 /** A tagged copy of a player (the shared constants stay untagged): `tagged(OLAVE, 'IR', null, 'Knee')`. */
@@ -102,7 +102,7 @@ export function usage(overrides: Partial<ReplayUsage> = {}): ReplayUsage {
 
 /** A season stat line: 4 games, no box score unless overridden. */
 export function statLine(overrides: Partial<ReplayStatLine> = {}): ReplayStatLine {
-  return { span: 'season', week: null, games: 4, points: 60.4, projection: null, box: null, ...overrides };
+  return { span: 'season', week: null, games: 4, points: 60.4, projection: null, box: null, adv: null, ...overrides };
 }
 
 /** A waiver-wire row: a free agent with no usage yet unless overridden. */
@@ -141,7 +141,7 @@ export function summary(overrides: Partial<ReplaySummary> = {}): ReplaySummary {
     settings: {
       teams: 12, scoring: 'half', starters: { QB: 1, RB: 2, WR: 2, TE: 1, FLEX: 1, K: 1, DST: 1 }, bench: 6, roster_size: 15,
       draft_slot: 4, waiver_mode: 'wednesday', difficulty: 'normal', regular_season_weeks: 14, playoff_teams: 4,
-      trade_deadline_week: 11,
+      trade_deadline_week: 11, ir_slots: 1,
     },
     teams: TEAMS, on_the_clock: null, next_action: nextAction('play'), record: record(),
     matchup: {

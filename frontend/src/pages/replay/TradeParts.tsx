@@ -4,7 +4,7 @@ import type { ReplayPlayerRef, ReplayPricedPlayer, ReplayRosterRow, ReplayVerdic
 import { formatNumber, formatSigned, pluralize } from '../../lib/format';
 import { BalanceMeter } from '../trade/BalanceMeter';
 import { VERDICT_COPY } from '../trade/TradeResultView';
-import { ReplayPlayerCell, useKeyedAct, type KeyedAct, type ReplayAct } from './shared';
+import { ReplayHypeStar, ReplayPlayerCell, useKeyedAct, type KeyedAct, type ReplayAct } from './shared';
 
 export interface TradeNotice {
   text: string;
@@ -49,6 +49,7 @@ export function PlayerNames({ players, onOpen }: { players: readonly ReplayPlaye
         <Fragment key={player.id}>
           {index > 0 && ', '}
           <button type="button" className="replay-player__name" onClick={() => onOpen(player.id)}>{player.name}</button>
+          {player.hype && <> <ReplayHypeStar player={player} /></>}
         </Fragment>
       ))}
     </>

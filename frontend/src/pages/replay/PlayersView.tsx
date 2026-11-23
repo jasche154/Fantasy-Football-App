@@ -10,7 +10,7 @@ import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { ClaimsPanel } from './ClaimsPanel';
 import { DIALOG_KEY, PlayersDropDialog, type DropTarget } from './PlayersDropDialog';
 import { usePlayerMoves } from './PlayersMoves';
-import { DEFAULT_SORT, sortDirection, statColumns, visibleSort } from './playerColumns';
+import { DEFAULT_SORT, sortDirection, statColumns, visibleSort, type StatsView } from './playerColumns';
 import { addKey, PlayersTable } from './PlayersTable';
 import { SEASON_STATS, StatsPicker, type StatsChoice } from './StatsPicker';
 import { positionParam, PositionTabs, ReplayIrBlockedNotice, type ReplayPositionTab, type ReplayViewProps } from './shared';
@@ -39,6 +39,25 @@ function phaseNote({ phase, week, settings }: ReplaySummary): string {
     + `A player dropped now waits on waivers, and once week ${week} is played everyone unrostered goes on waivers until the next “Sim to Wednesday”.`;
 }
 
+const VIEWS: readonly { value: StatsView; label: string }[] = [
+  { value: 'box', label: 'Box score' },
+  { value: 'advanced', label: 'Advanced' },
+];
+
+/** Box score or Advanced (usage and efficiency) columns; the rows and the stats span stay as they are. */
+function ViewSwitch({ value, onChange }: { value: StatsView; onChange: (value: StatsView) => void }) {
+  return (
+    <div className="segmented replay-segmented replay-players__views" role="group" aria-label="Stat columns">
+      {VIEWS.map((view) => (
+        <button key={view.value} type="button" className={`segmented__option${view.value === value ? ' is-active' : ''}`}
+          aria-pressed={view.value === value} onClick={() => onChange(view.value)}>
+          {view.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 interface PagerProps {
   total: number;
   offset: number;
@@ -63,11 +82,12 @@ export function PlayersView({ game, version, act, isBusy, openPlayer }: ReplayVi
   const [status, setStatus] = useState<ReplayStatusFilter>('available');
   const [chosenSort, setSort] = useState<SortState<ReplayPlayerSort>>(DEFAULT_SORT);
   const [stats, setStats] = useState<StatsChoice>(SEASON_STATS);
+  const [view, setView] = useState<StatsView>('box');
   const [search, setSearch] = useState('');
   const query = useDebouncedValue(search.trim(), SEARCH_DELAY_MS);
   // A week past the current one can't be asked for (a new game after a reload): fall back to the season.
   const shown = stats.span === 'week' && (stats.week ?? 0) > game.week ? SEASON_STATS : stats;
-  const columns = statColumns(shown.span, shown.week, tab);
+  const columns = statColumns(shown.span, shown.week, tab, view);
   const sort = visibleSort(chosenSort, columns);       // a hidden column never sorts the table
   if (sort !== chosenSort) setSort(sort);              // ...nor comes back when its column does
   const filterKey = [tab, status, sort.key, sort.direction, shown.span, shown.week, query].join('|');
@@ -85,7 +105,7 @@ export function PlayersView({ game, version, act, isBusy, openPlayer }: ReplayVi
     (signal) => getReplayPlayers(game.id, {
       position: positionParam(tab), search: query, status, sort: sort.key, dir: sort.direction, stats: shown.span,
       stat_week: shown.week ?? undefined, limit: PAGE_SIZE, offset,
-    }, signal).then((data) => ({ ...data, columns })),  // headers come with their rows, never over a stale page
+    }, signal).then((data) => ({ ...data, shown, tab })),  // headers come from their rows' span, never over a stale page
     [game.id, version, filterKey, offset],
   );
   const claims = useAsync(showClaims ? (signal) => getReplayClaims(game.id, signal) : null, [game.id, version]);
@@ -132,6 +152,7 @@ export function PlayersView({ game, version, act, isBusy, openPlayer }: ReplayVi
         <PositionTabs value={tab} onChange={setTab} withFlex />
         <SelectField label="Show" isInline value={status} options={STATUS_OPTIONS} onChange={(value) => setStatus(value as ReplayStatusFilter)} />
         <StatsPicker game={game} value={shown} onChange={setStats} />
+        <ViewSwitch value={view} onChange={setView} />
         <div className="field field--inline replay-players__search">
           <label className="field__label" htmlFor={searchId}>Search</label>
           <input id={searchId} type="search" className="input" placeholder="Player name" maxLength={MAX_SEARCH_LENGTH} value={search} onChange={(event) => setSearch(event.target.value)} />
@@ -144,7 +165,7 @@ export function PlayersView({ game, version, act, isBusy, openPlayer }: ReplayVi
             {data.results.length === 0
               ? <EmptyState title="No players match">Try another position, status or name.</EmptyState>
               : (
-                <PlayersTable game={game} week={data.week} rows={data.results} columns={data.columns} sort={sort}
+                <PlayersTable game={game} week={data.week} rows={data.results} columns={statColumns(data.shown.span, data.shown.week, data.tab, view)} sort={sort}
                   onSort={(key) => setSort(nextSort(sort, key, sortDirection))} claimedIds={claimedIds} moves={moves}
                   onAdd={add} onClaim={(row) => setTarget({ row, kind: 'claim' })} openPlayer={openPlayer} />
               )}

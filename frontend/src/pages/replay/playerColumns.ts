@@ -1,11 +1,16 @@
 /**
  * Which stat columns the Players table shows: a set per stats span (Season, Last 4 avg, Week N) plus box-score
- * columns that fit the position tab. Pure, so the choice of columns and sort keys is tested on its own.
+ * columns that fit the position tab, or (the Advanced view) usage and efficiency columns. Pure, so the choice of
+ * columns and sort keys is tested on its own.
  */
 import type { SortDirection, SortState } from '../../components/SortableHeader';
 import type { ReplayBoxKey, ReplayBoxLine, ReplayPlayerSort, ReplayPosition, ReplayStatsSpan, ReplayWireRow } from '../../api/types';
 import { EMPTY_VALUE, formatNumber, formatPercentValue } from '../../lib/format';
+import { advColumns, advSort, advText } from './advancedColumns';
 import { formatPoints, type ReplayPositionTab } from './shared';
+
+/** Which family of stat columns the table shows. */
+export type StatsView = 'box' | 'advanced';
 
 export interface StatColumn {
   id: string;
@@ -37,11 +42,11 @@ const BOX: Record<ReplayBoxKey, BoxColumn> = {
 };
 
 const RECEIVER: readonly ReplayBoxKey[] = ['targets', 'rec', 'rec_yds', 'rec_td'];
-const MIXED: readonly ReplayBoxKey[] = ['carries', 'rush_yds', 'targets', 'rec', 'rec_yds'];
+const MIXED: readonly ReplayBoxKey[] = ['carries', 'rush_yds', 'rush_td', 'targets', 'rec', 'rec_yds', 'rec_td'];
 const BOX_KEYS: Record<ReplayPositionTab, readonly ReplayBoxKey[]> = {
   ALL: MIXED,
   FLEX: MIXED,
-  QB: ['pass_yds', 'pass_td', 'pass_int', 'rush_yds'],
+  QB: ['pass_yds', 'pass_td', 'pass_int', 'rush_yds', 'rush_td'],
   RB: MIXED,
   WR: RECEIVER,
   TE: RECEIVER,
@@ -87,8 +92,15 @@ function spanColumns(span: ReplayStatsSpan, week: number | null): StatColumn[] {
 
 const SPAN_NAME: Record<ReplayStatsSpan, string> = { season: 'this season', last4: 'a game, last 4 games', week: 'that week' };
 
-/** The stat columns between Opp and Value for a span and position tab. */
-export function statColumns(span: ReplayStatsSpan, week: number | null, tab: ReplayPositionTab): StatColumn[] {
+/** The stat columns between Opp and Value for a span and position tab: box score (default) or Advanced. */
+export function statColumns(span: ReplayStatsSpan, week: number | null, tab: ReplayPositionTab, view: StatsView = 'box'): StatColumn[] {
+  if (view === 'advanced') {
+    const games: StatColumn = { id: 'gp', label: 'GP', title: `Games played, ${SPAN_NAME[span]}`, sort: null, text: (row) => String(row.line.games) };
+    return [games, ...advColumns(tab).map((column): StatColumn => ({
+      id: column.key, label: column.label, title: `${column.title}, ${SPAN_NAME[span]}`, sort: advSort(column.key),
+      text: (row) => advText(row.line.adv, column, span === 'last4'),
+    }))];
+  }
   const box = boxColumns(tab).map(({ key, label, title }): StatColumn => ({
     id: key, label, title: `${title}, ${SPAN_NAME[span]}`, sort: key,
     text: (row) => boxText(row.line.box, key, span === 'last4'),

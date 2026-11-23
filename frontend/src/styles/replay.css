@@ -12,6 +12,8 @@
 .replay-player__name { padding: 0; border: 0; background: none; font: inherit; font-weight: 650; color: var(--color-text); text-align: start; }
 button.replay-player__name { cursor: pointer; }
 button.replay-player__name:hover { color: var(--color-accent); text-decoration: underline; }
+/* The hype star: an opportunity shock lifted his trade value (the label says why). */
+.replay-hype { margin-inline-start: calc(-1 * var(--space-1)); color: var(--color-warn); font-size: var(--text-xs); line-height: 1; cursor: help; }
 
 /* Segmented controls with many options wrap instead of pushing the page wide. */
 .replay-segmented { flex-wrap: wrap; }
@@ -38,6 +40,12 @@ button.replay-player__name:hover { color: var(--color-accent); text-decoration: 
 .replay-saved__play { min-width: 6rem; min-height: 40px; }
 .replay-setup__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: var(--space-3); align-items: end; }
 .replay-prepare { display: grid; gap: var(--space-2); }
+/* League format: one compact stepper per lineup slot (light and dark through the theme tokens). */
+.replay-slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: var(--space-2); }
+.replay-stepper { display: grid; grid-template-columns: 3.25rem 32px 1.75rem 32px; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface-1); }
+.replay-stepper__label { font-size: var(--text-xs); font-weight: 700; letter-spacing: 0.03em; color: var(--color-text-muted); }
+.replay-stepper__btn { min-width: 32px; min-height: 32px; padding: 0; font-size: var(--text-base); line-height: 1; }
+.replay-stepper__value { text-align: center; font-family: var(--font-mono); font-size: var(--text-base); font-weight: 650; font-variant-numeric: tabular-nums; }
 .replay-prepare > p { margin: 0; }
 .replay-prepare__list { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: var(--space-2); }
 

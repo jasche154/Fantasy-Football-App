@@ -2,14 +2,15 @@ import { useEffect, useId, useState, type FormEvent } from 'react';
 import { errorMessage } from '../../api/client';
 import { createReplayGame, getReplaySeasons, prepareReplaySeason } from '../../api/replay';
 import type {
-  ReplayDifficulty, ReplayPlayoffEndWeek, ReplayPrepareStatus, ReplayReadiness, ReplaySeasons, ReplaySummary, ReplayWaiverMode, Scoring,
+  ReplayDifficulty, ReplayPlayoffEndWeek, ReplayPrepareStatus, ReplayReadiness, ReplayScoringRules, ReplaySeasons, ReplaySummary,
+  ReplayWaiverMode, Scoring,
 } from '../../api/types';
 import { AsyncView } from '../../components/AsyncView';
 import { SelectField } from '../../components/SelectField';
 import { Skeleton } from '../../components/StatusViews';
 import { useAction } from '../../hooks/useAction';
 import { useAsync, type AsyncResult } from '../../hooks/useAsync';
-import { SCORING_OPTIONS } from '../../state/leagueSettings';
+import { LeagueFormatFields, presetRules, sameStarters, ScoringFields, STANDARD_STARTERS, startersBody } from './LeagueRulesFields';
 
 const POLL_MS = 3000;
 const RANDOM = 'random';
@@ -20,6 +21,7 @@ const DEFAULT_PLAYOFF_END: ReplayPlayoffEndWeek = 17;
 const MIN_PLAYOFF_TEAMS = 4;
 const MAX_PLAYOFF_TEAMS = 8;
 const MAX_NAME_LENGTH = 60;
+const BENCH = 6;                 // backend Settings.bench: not configurable yet
 const STEP_LABELS: Record<string, string> = { starting: 'starting', game_results: 'game results', adp: 'ADP', projections: 'projections',
   injuries: 'injury reports', snaps: 'snap counts' };
 
@@ -155,6 +157,8 @@ export function SetupForm({ onCreated }: { onCreated: (game: ReplaySummary) => v
   const [slot, setSlot] = useState(RANDOM);
   const [waiverMode, setWaiverMode] = useState<ReplayWaiverMode>('wednesday');
   const [difficulty, setDifficulty] = useState<ReplayDifficulty>('normal');
+  const [starters, setStarters] = useState(STANDARD_STARTERS);
+  const [rules, setRules] = useState<ReplayScoringRules>(presetRules('half'));
 
   const { data: loaded, reload } = seasons;
   // Every settled answer (or failed poll) while an import runs books the next poll. Not while one is in
@@ -185,6 +189,8 @@ export function SetupForm({ onCreated }: { onCreated: (game: ReplaySummary) => v
         const chosenEnd = endWeeks.includes(playoffEnd) ? playoffEnd : DEFAULT_PLAYOFF_END;
         const chosenPlayoffTeams = playoffTeams ?? defaultPlayoffTeams(teams);
         const playoffCounts = Array.from({ length: Math.min(MAX_PLAYOFF_TEAMS, teams) - MIN_PLAYOFF_TEAMS + 1 }, (_, index) => MIN_PLAYOFF_TEAMS + index);
+        const preset = presetRules(scoring);
+        const isCustom = (Object.keys(preset) as (keyof ReplayScoringRules)[]).some((key) => preset[key] !== rules[key]);
         const submit = async (event: FormEvent) => {
           event.preventDefault();
           const result = await create.run({
@@ -197,6 +203,9 @@ export function SetupForm({ onCreated }: { onCreated: (game: ReplaySummary) => v
             difficulty,
             playoff_end_week: chosenEnd,
             playoff_teams: playoffTeams ?? undefined,       // untouched: the server's default for the league size
+            // Left out when standard / equal to the preset: the server's defaults.
+            starters: sameStarters(starters, STANDARD_STARTERS) ? undefined : startersBody(starters),
+            scoring_rules: isCustom ? rules : undefined,
           });
           if (result) onCreated(result.game);
         };
@@ -215,7 +224,6 @@ export function SetupForm({ onCreated }: { onCreated: (game: ReplaySummary) => v
               </div>
               <SelectField label="Teams" value={teams} onChange={(value) => { setTeams(Number(value)); setPlayoffTeams(null); }}
                 options={TEAM_COUNTS.map((count) => ({ value: count, label: `${count} teams` }))} />
-              <SelectField label="Scoring" value={scoring} onChange={(value) => setScoring(value as Scoring)} options={SCORING_OPTIONS} />
               <SelectField label="Draft slot" value={chosenSlot} onChange={setSlot}
                 options={[{ value: RANDOM, label: 'Random' }, ...Array.from({ length: teams }, (_, index) => ({ value: String(index + 1), label: `Pick ${index + 1}` }))]} />
               <SelectField label="Playoffs" value={chosenEnd} onChange={(value) => setPlayoffEnd(Number(value) as ReplayPlayoffEndWeek)}
@@ -227,6 +235,8 @@ export function SetupForm({ onCreated }: { onCreated: (game: ReplaySummary) => v
               wasStartedHere={prepare.status === 'success'} onPrepare={startPrepare} />
             {isPollFailure && <p className="hint" role="status">Couldn't check the progress just now. Trying again…</p>}
             {prepare.status === 'error' && <p className="error-text" role="alert">{errorMessage(prepare.error)}</p>}
+            <LeagueFormatFields starters={starters} bench={BENCH} onChange={setStarters} />
+            <ScoringFields scoring={scoring} rules={rules} onScoring={setScoring} onRules={setRules} />
             <RadioCards legend="Waivers" options={WAIVER_MODES} value={waiverMode} onChange={setWaiverMode} />
             <RadioCards legend="Difficulty" options={DIFFICULTIES} value={difficulty} onChange={setDifficulty} />
             <div className="settings-form__footer">
