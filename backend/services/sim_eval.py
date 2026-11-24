@@ -21,7 +21,7 @@
 
 - --workers: each (mode, season) runs in its own process (default: one per CPU, at most one per case; 1 = all
   in this process, for debugging); the report is the same either way (`run`). The draft picks full mode needs
-  are cached in backend/data/cache/ (sim_next_year_fit.draft_picks): the network is needed the first time, or
+  are cached in backend/data/cache/ (sim_draft_picks): the network is needed the first time, or
   with --refresh.
 
 Read-only on the database; the report is logged (and written as JSON with --out).
@@ -218,14 +218,18 @@ def run(seasons: list[int], seeds: list[int], mode: str, workers: int = 1, overr
 
     kinds = [kind for kind in ("mid", "full") if mode in (kind, "both")]
     cases = [(kind, season) for kind in reversed(kinds) for season in seasons]
+    workers = min(workers, len(cases))
     with SessionLocal() as session:
         offseason = _offseason(session, seasons, refresh) if "full" in kinds else {}
         if workers <= 1:
             results = {key: case(key, seeds, session, offseason) for key in cases}
     if workers > 1:
-        with ProcessPoolExecutor(min(workers, len(cases)), initializer=_start,
-                                 initargs=(overrides or {}, offseason)) as pool:
-            results = dict(zip(cases, pool.map(partial(case, seeds=seeds), cases)))
+        with ProcessPoolExecutor(workers, initializer=_start, initargs=(overrides or {}, offseason)) as pool:
+            try:
+                results = dict(zip(cases, pool.map(partial(case, seeds=seeds), cases)))
+            except BaseException:
+                pool.shutdown(cancel_futures=True)      # a case failed: don't wait for the queued ones
+                raise
     report = {}
     for kind in kinds:
         pairs = [results[(kind, season)] for season in seasons]

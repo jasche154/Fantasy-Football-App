@@ -1,6 +1,7 @@
 """sim_eval / sim_metrics: the realism gate measures real and simulated seasons the same way (no database)."""
 import math
 from dataclasses import replace
+from datetime import date
 from types import MappingProxyType
 
 import pytest
@@ -103,34 +104,38 @@ def test_constants_are_read_only_overrides_apply_and_a_missing_file_says_how_to_
 
 
 def fake_case(case: tuple[str, int], seeds: list[int], session=None, offseason=None) -> tuple[dict, dict]:
-    """sim_eval._case on the fake season (no database): mid mode, the season number shifting the seeds; the sim
-    side also reports the role_sd the process sees, to show --set overrides reach the workers."""
+    """sim_eval._case on the fake season (no database), whatever the mode: the season number shifts the seeds;
+    the real side reports season / 10 (its mean depends on the order it is summed in) and the sim side the
+    role_sd and the number of draft picks the process sees, to show the overrides and offseason reach workers."""
     _, season = case
+    offseason = sim_eval._worker["offseason"] if session is None else offseason    # as _case: a worker's own
     data = fakes.fake_season()
     weeks = range(sim_eval.MID_WEEK, data.last_week + 1)
     base = sim_eval.cut(data, sim_eval.MID_WEEK)
     sims = [sim_eval._rest(sim_season.simulate(base, 10 * season + seed, sim_eval.MID_WEEK), weeks) for seed in seeds]
-    role_sd = sim_world.params()["talent"]["role_sd"]
-    return {**sim_eval._rest(data, weeks), "season": float(season)}, {**sim_eval._mean(sims), "role_sd": role_sd}
+    seen = {"role_sd": sim_world.params()["talent"]["role_sd"], "picks": float(len(offseason["picks"]))}
+    return {**sim_eval._rest(data, weeks), "season": season / 10}, {**sim_eval._mean(sims), **seen}
 
 
 def test_the_parallel_report_equals_the_serial_one_and_workers_get_the_overrides(monkeypatch):
     from services import sim_constants
 
     monkeypatch.setattr(sim_constants, "_overrides", {})
+    monkeypatch.setattr(sim_eval, "_offseason", lambda *_: {"picks": [{}] * 7, "first": {}})
     try:
         overrides = sim_eval.apply_overrides(["talent.role_sd=0.41"])
-        serial = sim_eval.run([1, 2], [1], "mid", 1, overrides, case=fake_case)
-        parallel = sim_eval.run([1, 2], [1], "mid", 2, overrides, case=fake_case)
+        serial = sim_eval.run([1, 2, 3], [1], "full", 1, overrides, case=fake_case)
+        parallel = sim_eval.run([1, 2, 3], [1], "full", 2, overrides, case=fake_case)
     finally:
         monkeypatch.undo()
         sim_world.params.cache_clear()
     assert parallel == serial
-    assert serial["mid"]["sim"]["role_sd"] == 0.41 and serial["mid"]["real"]["season"] == 1.5
+    assert serial["full"]["real"]["season"] == (0.1 + 0.2 + 0.3) / 3          # summed in season order
+    assert serial["full"]["sim"]["role_sd"] == 0.41 and serial["full"]["sim"]["picks"] == 7
 
 
 def test_draft_picks_are_cached_and_downloaded_again_only_when_needed(tmp_path, monkeypatch):
-    from services import sim_next_year_fit as fit
+    from services import sim_draft_picks as fit
 
     calls: list[list[int]] = []
 
@@ -141,6 +146,7 @@ def test_draft_picks_are_cached_and_downloaded_again_only_when_needed(tmp_path, 
 
     monkeypatch.setattr(fit, "PICKS_CACHE", tmp_path / "cache" / "draft_picks.json")
     monkeypatch.setattr(fit, "_download", download)
+    monkeypatch.setattr(fit, "_today", lambda: date(2023, 5, 1))
 
     first = fit.draft_picks(range(2020, 2023))
     assert calls == [[2020, 2021, 2022]] and len(first) == 6 and first[0]["college"] == "-"
@@ -148,5 +154,14 @@ def test_draft_picks_are_cached_and_downloaded_again_only_when_needed(tmp_path, 
     assert fit.draft_picks(range(2020, 2023)) == first and len(calls) == 1
     fit.draft_picks([2023])                                 # a season not in the file: download it and the rest
     assert calls[-1] == [2020, 2021, 2022, 2023]
+    fit.draft_picks([2023])                                 # drafted, but in May: its ids may not be in yet
+    assert len(calls) == 3
+    monkeypatch.setattr(fit, "_today", lambda: date(2023, 9, 1))
+    fit.draft_picks([2023])
+    fit.draft_picks([2023])                                 # settled from September on
+    assert len(calls) == 4
     fit.draft_picks([2021], refresh=True)
-    assert calls[-1] == [2021] and len(calls) == 3
+    assert calls[-1] == [2021] and len(calls) == 5
+    fit.PICKS_CACHE.write_text("null")                      # unreadable: download again
+    fit.draft_picks([2021])
+    assert len(calls) == 6
