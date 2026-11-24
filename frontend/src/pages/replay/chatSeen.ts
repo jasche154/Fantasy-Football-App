@@ -1,31 +1,49 @@
-import { useSyncExternalStore } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 
 /** How many league-chat lines the user has seen per game, for the unread dot. localStorage when it works,
- * else this page's memory (a private window or blocked storage just shows the dot again after a reload). */
+ * else this page's memory (a private window or blocked storage just shows the dot again after a reload).
+ * League ids can come back after a delete (SQLite reuses the highest one), so deleting a league forgets its
+ * count, and a count above the league's chat (left by a deleted league) counts as nothing seen. */
 const EVENT = 'replay-chat-seen';
 const memory = new Map<number, number>();
+const reading = new Set<number>();
+const READING = -1;
 const key = (gameId: number): string => `replay-chat-seen:${gameId}`;
 
-export function readChatSeen(gameId: number): number {
-  let stored = 0;
-  try {
-    const raw = Number(window.localStorage.getItem(key(gameId)));
-    if (Number.isFinite(raw) && raw > 0) stored = raw;
-  } catch {
-    // storage blocked: memory only
-  }
-  return Math.max(stored, memory.get(gameId) ?? 0);
+function changed(): void {
+  window.dispatchEvent(new Event(EVENT));
 }
 
+export function readChatSeen(gameId: number): number {
+  try {
+    const raw = Number(window.localStorage.getItem(key(gameId)));
+    return Math.max(Number.isFinite(raw) && raw > 0 ? raw : 0, memory.get(gameId) ?? 0);
+  } catch {
+    return memory.get(gameId) ?? 0;              // storage blocked: memory only
+  }
+}
+
+/** The user has seen `count` lines (the chat's total as just loaded). */
 export function markChatSeen(gameId: number, count: number): void {
-  if (readChatSeen(gameId) >= count) return;
+  if (readChatSeen(gameId) === count && memory.get(gameId) === count) return;
   memory.set(gameId, count);
   try {
     window.localStorage.setItem(key(gameId), String(count));
   } catch {
     // storage blocked: memory only
   }
-  window.dispatchEvent(new Event(EVENT));
+  changed();
+}
+
+/** The league is gone: its id may be reused by the next one. */
+export function forgetChatSeen(gameId: number): void {
+  memory.delete(gameId);
+  try {
+    window.localStorage.removeItem(key(gameId));
+  } catch {
+    // storage blocked: memory only
+  }
+  changed();
 }
 
 function subscribe(onChange: () => void): () => void {
@@ -37,8 +55,21 @@ function subscribe(onChange: () => void): () => void {
   };
 }
 
+/** While the chat is on screen no dot shows anywhere: its newest lines are loading and get marked seen. */
+export function useChatReading(gameId: number): void {
+  useEffect(() => {
+    reading.add(gameId);
+    changed();
+    return () => {
+      reading.delete(gameId);
+      changed();
+    };
+  }, [gameId]);
+}
+
 /** True when the league chat has lines the user has not opened yet. */
 export function useChatUnread(gameId: number, total: number): boolean {
-  const seen = useSyncExternalStore(subscribe, () => readChatSeen(gameId), () => 0);
-  return total > seen;
+  const seen = useSyncExternalStore(subscribe, () => (reading.has(gameId) ? READING : readChatSeen(gameId)), () => 0);
+  if (seen === READING) return false;
+  return total > (seen > total ? 0 : seen);
 }

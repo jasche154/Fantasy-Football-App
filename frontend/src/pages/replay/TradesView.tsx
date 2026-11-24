@@ -68,9 +68,16 @@ function TradeHistory({ offers, openPlayer }: { offers: readonly ReplayOffer[]; 
   );
 }
 
+interface ShoppingStripProps {
+  game: ReplaySummary;
+  shops: readonly ReplayShop[];
+  openPlayer: (playerId: number) => void;
+  onPick: (shop: ReplayShop) => void;
+}
+
 /** Players worried CPU managers are shopping to the user this week, each with his message and a link that opens
- * the builder with that manager and player picked. */
-function ShoppingStrip({ game, shops, openPlayer }: { game: ReplaySummary; shops: readonly ReplayShop[]; openPlayer: (playerId: number) => void }) {
+ * the builder with that manager and player picked (`onPick`; the href is for opening it elsewhere). */
+function ShoppingStrip({ game, shops, openPlayer, onPick }: ShoppingStripProps) {
   if (shops.length === 0) return null;
   return (
     <section className="game-shops" aria-labelledby="game-shops-title">
@@ -84,7 +91,8 @@ function ShoppingStrip({ game, shops, openPlayer }: { game: ReplaySummary; shops
             </p>
             {shop.message && <blockquote className="game-quote" data-team={shop.team.team_id}><p>{shop.message}</p></blockquote>}
             <a className="btn btn--primary btn--sm game-shops__go"
-              href={buildHash(paths.play, { game: game.id, view: 'trades', with: shop.team.team_id, want: shop.player.id })}>
+              href={buildHash(paths.play, { game: game.id, view: 'trades', with: shop.team.team_id, want: shop.player.id })}
+              onClick={(event) => { event.preventDefault(); onPick(shop); }}>
               Make an offer <span className="sr-only">to {shop.team.name} for {shop.player.name}</span>
             </a>
           </li>
@@ -113,10 +121,17 @@ export function TradesView({ game, version, act, isBusy, openPlayer }: ReplayVie
   // The offer being countered, by id: it is looked up among the pending offers, so it ends once that offer is answered.
   // The id also keys the builder, which stays mounted after a declined counter to show why.
   const [counteringId, setCounteringId] = useState<number | null>(null);
+  // A shop's "Make an offer": a fresh builder on that manager and player each press (`n` re-keys it).
+  const [shopPick, setShopPick] = useState<{ partner: number; want: number; n: number } | null>(null);
   const builderTitleRef = useRef<HTMLSpanElement>(null);
   useEffect(() => {
-    if (counteringId !== null) builderTitleRef.current?.focus();
-  }, [counteringId]);
+    if (counteringId !== null || shopPick !== null) builderTitleRef.current?.focus();
+  }, [counteringId, shopPick]);
+  const pickShop = (shop: ReplayShop) => {
+    setCounteringId(null);
+    setShopPick((last) => ({ partner: shop.team.team_id, want: shop.player.id, n: (last?.n ?? 0) + 1 }));
+  };
+  const builderKey = counteringId ?? (shopPick ? `shop-${shopPick.n}` : `new-${query.with ?? ''}-${query.want ?? ''}`);
   return (
     <>
       <ReplayIrBlockedNotice game={game} />
@@ -131,16 +146,17 @@ export function TradesView({ game, version, act, isBusy, openPlayer }: ReplayVie
           return (
           <>
             {!trades.open && <p className="notice">{closedText(game, trades)}</p>}
-            {trades.open && <ShoppingStrip game={game} shops={trades.shops} openPlayer={openPlayer} />}
+            {trades.open && <ShoppingStrip game={game} shops={trades.shops} openPlayer={openPlayer} onPick={pickShop} />}
             <h2 className="section-title">Offers for you</h2>
             <TradeOffers game={game} version={version} offers={trades.offers} roster={mine.results} isOpen={trades.open}
               actions={actions} openPlayer={openPlayer} onCounter={(offer) => setCounteringId(offer.id)} isCountering={countering !== null} />
             {trades.open && (
               <Card title={<span ref={builderTitleRef} tabIndex={-1}>{countering ? `Counter ${countering.from_team.name}'s offer` : 'Propose a trade'}</span>}
                 eyebrow={`Open through week ${trades.deadline_week}'s waivers`}>
-                <TradeBuilder key={counteringId ?? `new-${query.with ?? ''}-${query.want ?? ''}`} game={game} version={version} roster={mine.results} ir={mine.ir}
+                <TradeBuilder key={builderKey} game={game} version={version} roster={mine.results} ir={mine.ir}
                   maxPlayers={trades.max_players} counterTo={countering} onCounterDone={() => setCounteringId(null)}
-                  initialPartner={parsePositiveInt(query.with)} initialWant={parsePositiveInt(query.want)}
+                  initialPartner={shopPick?.partner ?? parsePositiveInt(query.with)}
+                  initialWant={shopPick?.want ?? parsePositiveInt(query.want)}
                   actions={actions} openPlayer={openPlayer} />
               </Card>
             )}

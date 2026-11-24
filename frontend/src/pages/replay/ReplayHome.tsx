@@ -12,6 +12,7 @@ import { EMPTY_VALUE } from '../../lib/format';
 import { buildHash, paths } from '../../router/routes';
 import { navigate } from '../../router/useHashLocation';
 import { scoringLabel } from '../../state/leagueSettings';
+import { forgetChatSeen } from './chatSeen';
 import { SetupForm } from './SetupForm';
 import { ConfirmButton } from './shared';
 
@@ -84,6 +85,7 @@ export function ReplayHome() {
   const noticeRef = useRef<HTMLParagraphElement>(null);
   const onDelete = async (game: ReplayGameListing) => {
     if (!(await remove.run(game.id))) return;
+    forgetChatSeen(game.id);            // the next league may get the same id
     setDeleted({ name: game.name });
     games.reload();
   };

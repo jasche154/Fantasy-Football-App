@@ -160,6 +160,9 @@ export function TradeBuilder({ game, version, roster, ir, maxPlayers, counterTo,
   };
   const chosen = partners.find((team) => team.team_id === partnerId);
   const tendency = chosen?.tendency;
+  // A link asked for a player who has left that roster since (traded or dropped): say so instead of a silent blank.
+  const wanted = counterTo === null && linked?.team_id === partnerId ? initialWant : null;
+  const isWantGone = wanted !== null && theirRows.length > 0 && !theirRows.some((row) => row.player.id === wanted);
   const error = actions.errorFor(PROPOSE_KEY);
 
   return (
@@ -171,6 +174,9 @@ export function TradeBuilder({ game, version, roster, ir, maxPlayers, counterTo,
       </div>
       {tendency && <p className="hint">{tendency}</p>}
       {chosen?.mood && <p className="game-mood"><span className="game-mood__label">Mood</span> {chosen.mood}</p>}
+      <div role="status">
+        {isWantGone && <p className="notice">That player is no longer on {partner}'s roster: pick from who they have now.</p>}
+      </div>
       <div className="replay-trade__sides">
         <RosterPicker title="You give" caption="Your roster" verb="Give" rows={myRows} selected={giveIds} max={maxPlayers}
           onToggle={(id) => change(() => setGive(toggleId(giveIds, id)))} openPlayer={openPlayer} />

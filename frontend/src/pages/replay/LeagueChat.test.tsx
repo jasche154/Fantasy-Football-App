@@ -1,12 +1,14 @@
-import { screen, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ReplayChat, ReplayPage } from '../../api/types';
-import { json, mockFetch } from '../../test/mockFetch';
+import { AppProviders } from '../../App';
+import { json, mockFetch, type MockRoute } from '../../test/mockFetch';
 import { META_ROUTE, renderWithProviders } from '../../test/render';
-import { readChatSeen } from './chatSeen';
+import { forgetChatSeen, markChatSeen, readChatSeen } from './chatSeen';
 import { GAME_ID, MOSTERT, OPPONENT_TEAM_ID, summary, teamRef, viewProps } from './fixtures';
 import { GameNav } from './GameNav';
+import { LeagueChat } from './LeagueChat';
 import { LeagueView } from './LeagueView';
 
 const CHAT_PATH = `/api/replay/games/${GAME_ID}/chat`;
@@ -82,14 +84,84 @@ describe('GameNav unread dot', () => {
     expect(screen.queryByText('(new messages)')).not.toBeInTheDocument();
   });
 
-  it('still works when storage is blocked', () => {
-    const original = window.localStorage.getItem;
+  it('still works when storage is blocked, remembering what was read in memory', () => {
+    const { getItem, setItem } = window.localStorage;
     window.localStorage.getItem = () => { throw new Error('blocked'); };
+    window.localStorage.setItem = () => { throw new Error('blocked'); };
     try {
-      renderWithProviders(<GameNav game={summary({ chat: 99 })} view="team" />);
+      const blocked = GAME_ID + 500;            // a league no other test has marked in this page's memory
+      renderWithProviders(<GameNav game={summary({ id: blocked, chat: 99 })} view="team" />);
       expect(screen.getByText('(new messages)')).toBeInTheDocument();
+      act(() => markChatSeen(blocked, 99));
+      expect(screen.queryByText('(new messages)')).not.toBeInTheDocument();
     } finally {
-      window.localStorage.getItem = original;
+      window.localStorage.getItem = getItem;
+      window.localStorage.setItem = setItem;
     }
+  });
+
+  it("shows the dot in a new league that reuses a deleted league's id", () => {
+    window.localStorage.setItem(`replay-chat-seen:${GAME_ID}`, '140');
+    renderWithProviders(<GameNav game={summary({ chat: 3 })} view="team" />);
+    expect(screen.getByRole('link', { name: /League.*new messages/ })).toBeInTheDocument();
+  });
+
+  it("forgets a deleted league's count", () => {
+    window.localStorage.setItem(`replay-chat-seen:${GAME_ID}`, '12');
+    forgetChatSeen(GAME_ID);
+    expect(window.localStorage.getItem(`replay-chat-seen:${GAME_ID}`)).toBeNull();
+    expect(readChatSeen(GAME_ID)).toBe(0);
+  });
+
+  it('stays hidden on League while the chat is open and the newest lines are still loading', async () => {
+    window.localStorage.setItem(`replay-chat-seen:${GAME_ID}`, '5');
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    mockFetch([META_ROUTE, { path: CHAT_PATH, reply: async () => { await held; return json(page([line()], 7)); } }]);
+    const game = summary({ chat: 7 });
+    renderWithProviders(<><GameNav game={game} view="league" /><LeagueChat {...viewProps({ game })} /></>);
+
+    expect(screen.queryByText('(new messages)')).not.toBeInTheDocument();
+    release();
+    await waitFor(() => expect(readChatSeen(GAME_ID)).toBe(7));
+    expect(screen.queryByText('(new messages)')).not.toBeInTheDocument();
+  });
+});
+
+describe('League chat paging', () => {
+  const many = (offset: number) => Array.from({ length: 25 }, (_, n) => line({ id: 60 - offset - n, text: `Line ${60 - offset - n}` }));
+
+  function chatRoute(seen: number[]): MockRoute {
+    return { path: CHAT_PATH, reply: ({ url }) => {
+      const offset = Number(url.searchParams.get('offset'));
+      seen.push(offset);
+      return json({ total: 60, limit: 25, offset, results: many(offset) });
+    } };
+  }
+
+  it('keeps focus on a pager button when Newer reaches the first page', async () => {
+    mockFetch([META_ROUTE, chatRoute([])]);
+    renderWithProviders(<LeagueChat {...viewProps({ game: summary({ chat: 60 }) })} />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Older' }));
+    await screen.findByText('26–50 of 60');
+    await user.click(screen.getByRole('button', { name: 'Newer' }));
+    await screen.findByText('1–25 of 60');
+
+    expect(screen.getByRole('button', { name: 'Newer' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Older' })).toHaveFocus();
+  });
+
+  it('goes back to the newest lines when the game moves on', async () => {
+    const offsets: number[] = [];
+    mockFetch([META_ROUTE, chatRoute(offsets)]);
+    const { rerender } = renderWithProviders(<LeagueChat {...viewProps({ game: summary({ chat: 60 }) })} />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Older' }));
+    await screen.findByText('26–50 of 60');
+    rerender(<AppProviders><LeagueChat {...viewProps({ game: summary({ chat: 60 }), version: 1 })} /></AppProviders>);
+
+    expect(await screen.findByText('1–25 of 60')).toBeInTheDocument();
+    expect(offsets).toEqual([0, 25, 0]);
   });
 });

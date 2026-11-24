@@ -452,6 +452,29 @@ describe('TradesView manager voices', () => {
     expect(within(strip).queryByText(/%/)).not.toBeInTheDocument();
   });
 
+  it('opens the builder on the shopped player from the strip, moves focus there, and does it again on a second press', async () => {
+    const { user } = renderTrades(trades({ shops: [{ team: BRIGADE, player: MOSTERT, message: null }] }));
+    const go = await screen.findByRole('link', { name: /Make an offer to Blitz Brigade for Raheem Mostert/ });
+
+    await user.click(go);
+    await waitFor(() => expect(screen.getByText('Propose a trade')).toHaveFocus());
+    const wanted = await screen.findByRole('checkbox', { name: 'Get Raheem Mostert' });
+    expect(wanted).toBeChecked();
+    await user.click(wanted);
+    expect(wanted).not.toBeChecked();
+
+    await user.click(go);
+    await waitFor(() => expect(screen.getByText('Propose a trade')).toHaveFocus());
+    expect(await screen.findByRole('checkbox', { name: 'Get Raheem Mostert' })).toBeChecked();
+  });
+
+  it('says so when the shopped player is no longer on that roster', async () => {
+    const { user } = renderTrades(trades({ shops: [{ team: BRIGADE, player: OLAVE, message: null }] }));
+    await user.click(await screen.findByRole('link', { name: /Make an offer to Blitz Brigade for Chris Olave/ }));
+
+    expect(await screen.findByText(/no longer on Blitz Brigade's roster/)).toBeInTheDocument();
+  });
+
   it('shows the strip and an offer quote in a simulated league that started mid-season', async () => {
     const live = summary({ kind: 'live', sim_from: 6, start_week: 6, week: 9 });
     const shop = { team: BRIGADE, player: MOSTERT, message: 'Selling Raheem Mostert. Make an offer.' };

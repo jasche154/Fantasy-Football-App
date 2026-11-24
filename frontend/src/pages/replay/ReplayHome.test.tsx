@@ -38,6 +38,7 @@ describe('ReplayHome', () => {
       { path: GAMES_PATH, reply: () => json({ results: saved }) },
       { method: 'POST', path: `${GAMES_PATH}/3/delete`, reply: () => { saved = SAVED.filter((game) => game.id !== 3); return json({ deleted: 3 }); } },
     ]);
+    window.localStorage.setItem('replay-chat-seen:3', '140');      // its chat count must not reach a league that reuses id 3
     const row = (await screen.findByRole('rowheader', { name: /Class of 2019/ })).closest('tr') as HTMLElement;
 
     expect(screen.getByRole('status')).toBeEmptyDOMElement();
@@ -54,6 +55,7 @@ describe('ReplayHome', () => {
     const notice = screen.getByText('Deleted Class of 2019.');
     expect(notice).toHaveAttribute('role', 'status');
     expect(notice).toHaveFocus();
+    expect(window.localStorage.getItem('replay-chat-seen:3')).toBeNull();
   });
 
   it('keeps Delete off until the list without the deleted league has arrived', async () => {
