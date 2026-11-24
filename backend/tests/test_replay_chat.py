@@ -224,13 +224,47 @@ def test_the_cap_keeps_rare_news_first_and_shares_the_rest_fairly():
     assert firsts != lows                                       # not lowest team id first every time
 
 
-def test_rare_news_is_never_cut_for_a_plain_line():
-    for seed in range(4):
-        for state in season(seed):
-            found = candidates(state, seed)
-            kept, cut = found[:chat.MAX_WEEK_LINES], found[chat.MAX_WEEK_LINES:]
-            if cut:
-                assert max(rank for rank, *_ in kept) <= min(rank for rank, *_ in cut)
+def _talkative(monkeypatch) -> None:
+    """Every CPU with something to say says it, so a week has more lines than the cap."""
+    monkeypatch.setattr(chat, "OTHER_CHANCE", 1.0)
+    monkeypatch.setattr(chat, "POST_CHANCE", dict.fromkeys(chat.POST_CHANCE, 1.0))
+
+
+def test_rare_news_is_never_cut_for_a_plain_line(monkeypatch):
+    states = [(seed, state) for seed in range(3) for state in season(seed)]     # built before the patch
+    _talkative(monkeypatch)
+    crowded = 0
+    for seed, state in states:
+        week = state.results[-1].week
+        quiet = replace(state, chat=tuple(c for c in state.chat if c.week < week))
+        posted = {(c.team_id, c.kind) for c in talk(quiet, seed).chat if c.week == week}
+        opponent = next(a if b == user else b for a, b in state.results[-1].matchups
+                        if (user := rs.user_team(state).id) in (a, b))
+        ranks = {(team.id, kind): chat.priority(kind, team.id == opponent) for _, team, kind, _, _ in candidates(state, seed)}
+        if len(ranks) <= chat.MAX_WEEK_LINES:
+            continue
+        crowded += 1
+        assert len(posted) == chat.MAX_WEEK_LINES and posted <= set(ranks)
+        assert max(ranks[p] for p in posted) <= min(rank for key, rank in ranks.items() if key not in posted)
+    assert crowded >= 5
+
+
+@pytest.mark.parametrize("news", ["clinch", "eliminated"])
+def test_the_users_opponent_posts_his_playoff_news_as_well_as_his_line_to_the_user(monkeypatch, news):
+    state = season(0)[7]
+    week, user = state.results[-1].week, rs.user_team(state).id
+    opponent = next(a if b == user else b for a, b in state.results[-1].matchups if user in (a, b))
+    assert set(chat.bank()[news]) == set(chat.VOICES)               # every voice has the bucket
+    _talkative(monkeypatch)
+    newly = {"clinch": ({opponent}, set()), "eliminated": (set(), {opponent})}[news]
+    monkeypatch.setattr(chat, "_playoff_status", lambda s, _: newly if s.results == state.results else (set(), set()))
+    quiet = replace(state, chat=tuple(c for c in state.chat if c.week < week))
+    posted = [c for c in talk(quiet, 0).chat if c.week == week]
+
+    assert [(c.kind, c.to_team) for c in posted if c.team_id == opponent and c.kind == news] == [(news, None)]
+    assert [c.team_id for c in posted if c.to_team == user] == [opponent]
+    assert len(posted) <= chat.MAX_WEEK_LINES
+    assert posted[0].kind == news                                   # rare news first
 
 
 # ---------------- never mocking an injury ----------------

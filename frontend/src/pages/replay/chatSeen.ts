@@ -1,7 +1,8 @@
 import { useEffect, useSyncExternalStore } from 'react';
 
-/** How many league-chat lines the user has seen per game, for the unread dot. localStorage when it works,
- * else this page's memory (a private window or blocked storage just shows the dot again after a reload).
+/** How many league-chat lines the user has seen per game, for the unread dot. localStorage is the truth
+ * whenever it can be read (shared by every tab, so a delete in one tab is seen in the others); this page's
+ * memory is only the fallback when storage throws (then the dot shows again after a reload).
  * League ids can come back after a delete (SQLite reuses the highest one), so deleting a league forgets its
  * count, and a count above the league's chat (left by a deleted league) counts as nothing seen. */
 const EVENT = 'replay-chat-seen';
@@ -17,7 +18,7 @@ function changed(): void {
 export function readChatSeen(gameId: number): number {
   try {
     const raw = Number(window.localStorage.getItem(key(gameId)));
-    return Math.max(Number.isFinite(raw) && raw > 0 ? raw : 0, memory.get(gameId) ?? 0);
+    return Number.isFinite(raw) && raw > 0 ? raw : 0;
   } catch {
     return memory.get(gameId) ?? 0;              // storage blocked: memory only
   }

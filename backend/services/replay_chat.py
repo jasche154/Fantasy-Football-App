@@ -5,8 +5,8 @@ persona (replay_personas.PERSONAS), so a manager sounds the same all season. A l
 ones its kind provides (PLACEHOLDERS). The rendered text is copied into `State.chat`, so editing the bank
 never rewrites an old chat. Within a game a (kind, voice) bucket never repeats a line until every line in it
 has been used (`Chat.line`); the choice is seeded (`rs.rng`), so a reload never re-rolls. A line whose text
-runs past MAX_CHARS once long names are in gives way to the next least-used one that fits; when none does,
-the shortest is cut at a word.
+runs past MAX_CHARS once long names are in gives way to the next least-used one that fits (which may be one
+already used); when none does, the shortest is cut at a word.
 
 When lines are posted (replay_game calls these; each reads only what is known when it posts):
 - `after_week`, once a week is scored: every CPU may say one thing about the week just played, from that
@@ -18,9 +18,11 @@ When lines are posted (replay_game calls these; each reads only what is known wh
   (`thresholds`, from the median team score so far): close_* under CLOSE_SHARE of it, blowout_* from
   BLOWOUT_SHARE, and a boom needs BOOM_SHARE of it as well as BOOM_RATE x his rate (about 10, 25 and 25
   points in a half-PPR league). The user's opponent talks to the user (a kind that names him, by the nearer
-  margin when the game was in between); the others post with POST_CHANCE. At most MAX_WEEK_LINES a week,
-  rare news first (`priority`: champion / runner_up, clinch, eliminated, then lines to the user, then the
-  rest), ties in a seeded order so the same teams don't always get the slots.
+  margin when the game was in between) and may also post his clinch / elimination; the others post with
+  POST_CHANCE. At most MAX_WEEK_LINES a week from here, rare news first (`priority`: champion / runner_up,
+  clinch, eliminated, then lines to the user, then the rest), ties in a seeded order so the same teams don't
+  always get the slots. Shop messages and trade reactions come on top of the cap. Week 1 has no bust lines
+  (no earlier snap share to compare with, so everyone `might_be_hurt`).
 - `shop_lines`: a worried manager's direct message when he starts shopping a player to the user (replay_mood).
 - `trade_reactions`: a third manager may react to a new trade (at most MAX_REACTIONS a week).
 - `label_offers`: every new CPU offer to the user gets his one-line reason (Offer.message): worried about a
@@ -247,8 +249,9 @@ def priority(kind: str, to_user: bool) -> int:
     return RARE.get(kind, TO_USER_PRIORITY if to_user else OTHER_PRIORITY)
 
 
-def _candidate(week: _Week, pair: tuple[int, int], me_id: int, seed: int) -> Candidate | None:
-    """One CPU's line about his game this week, or None (nothing to say, or he stays quiet)."""
+def _candidates(week: _Week, pair: tuple[int, int], me_id: int, seed: int) -> list[Candidate]:
+    """One CPU's line about his game this week (none when he has nothing to say or stays quiet). The user's
+    opponent talks to the user and may also post his clinch / elimination, which is not a line to the user."""
     state, result = week.state, week.result
     me = rs.team(state, me_id)
     you_id = pair[0] if pair[1] == me_id else pair[1]
@@ -265,13 +268,17 @@ def _candidate(week: _Week, pair: tuple[int, int], me_id: int, seed: int) -> Can
     dice = rs.rng(seed, "chat", result.week, me_id)
     if lesser:
         kinds.append(lesser[int(dice.integers(len(lesser)))])
+    news = [k for k in kinds if k[0] in ("clinch", "eliminated")][:1] if to_user else []
     if to_user:                     # he talks to the user about their game (a tie: whatever he has)
         kinds = [k for k in (*kinds, *lesser) if k[0] in TO_OPPONENT] or kinds
     if not kinds:
-        return None
+        return []
     kind, picked, players = kinds[0]
     chance = 1.0 if to_user else POST_CHANCE.get(kind, OTHER_CHANCE)
-    return (priority(kind, to_user), me, kind, picked, players) if dice.random() < chance else None
+    found = [(priority(kind, to_user), me, kind, picked, players)] if dice.random() < chance else []
+    if news and news[0][0] != kind and dice.random() < POST_CHANCE[news[0][0]]:
+        found.append((priority(news[0][0], False), me, *news[0]))
+    return found
 
 
 def _game_lines(state: State, settings: Settings, know: Knowledge, played: SeasonData, before: State,
@@ -284,7 +291,7 @@ def _game_lines(state: State, settings: Settings, know: Knowledge, played: Seaso
                  frozenset(now_out - was_out), state.phase == "complete" and state.champion is not None,
                  *thresholds(state))
     found = [line for pair in result.matchups for me_id in pair if not rs.team(state, me_id).is_user
-             if (line := _candidate(week, pair, me_id, seed)) is not None]
+             for line in _candidates(week, pair, me_id, seed)]
     shuffle = rs.rng(seed, "chat-cap", result.week).permutation(len(found))
     return [found[i] for i in sorted(range(len(found)), key=lambda i: (found[i][0], shuffle[i]))]
 

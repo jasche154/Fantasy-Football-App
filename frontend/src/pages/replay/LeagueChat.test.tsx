@@ -106,6 +106,16 @@ describe('GameNav unread dot', () => {
     expect(screen.getByRole('link', { name: /League.*new messages/ })).toBeInTheDocument();
   });
 
+  it("sees another tab's delete when the league id comes back", () => {
+    markChatSeen(GAME_ID, 5);                                   // this tab read the old league's 5 lines
+    window.localStorage.removeItem(`replay-chat-seen:${GAME_ID}`);  // another tab deleted it
+    act(() => { window.dispatchEvent(new StorageEvent('storage')); });
+
+    expect(readChatSeen(GAME_ID)).toBe(0);
+    renderWithProviders(<GameNav game={summary({ chat: 5 })} view="team" />);
+    expect(screen.getByRole('link', { name: /League.*new messages/ })).toBeInTheDocument();
+  });
+
   it("forgets a deleted league's count", () => {
     window.localStorage.setItem(`replay-chat-seen:${GAME_ID}`, '12');
     forgetChatSeen(GAME_ID);
@@ -129,15 +139,52 @@ describe('GameNav unread dot', () => {
 });
 
 describe('League chat paging', () => {
-  const many = (offset: number) => Array.from({ length: 25 }, (_, n) => line({ id: 60 - offset - n, text: `Line ${60 - offset - n}` }));
+  const many = (offset: number, total = 60) => Array.from({ length: Math.min(25, total - offset) },
+    (_, n) => line({ id: total - offset - n, text: `Line ${total - offset - n}` }));
 
-  function chatRoute(seen: number[]): MockRoute {
+  function chatRoute(seen: number[], total = 60): MockRoute {
     return { path: CHAT_PATH, reply: ({ url }) => {
       const offset = Number(url.searchParams.get('offset'));
       seen.push(offset);
-      return json({ total: 60, limit: 25, offset, results: many(offset) });
+      return json({ total, limit: 25, offset, results: many(offset, total) });
     } };
   }
+
+  it('keeps focus on the pager in a two-page chat, both ways', async () => {
+    mockFetch([META_ROUTE, chatRoute([], 30)]);
+    renderWithProviders(<LeagueChat {...viewProps({ game: summary({ chat: 30 }) })} />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Older' }));
+    await screen.findByText('26–30 of 30');
+
+    expect(screen.getByRole('button', { name: 'Older' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Newer' })).toHaveFocus();
+
+    await user.click(screen.getByRole('button', { name: 'Newer' }));
+    await screen.findByText('1–25 of 30');
+
+    expect(screen.getByRole('button', { name: 'Newer' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Older' })).toHaveFocus();
+  });
+
+  it('moves no focus on first load or when the game moves on', async () => {
+    mockFetch([META_ROUTE, chatRoute([], 30)]);
+    const { rerender } = renderWithProviders(<LeagueChat {...viewProps({ game: summary({ chat: 30 }) })} />);
+    await screen.findByText('1–25 of 30');
+    expect(document.body).toHaveFocus();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Older' }));
+    await screen.findByText('26–30 of 30');
+    act(() => {
+      const newer = screen.getByRole('button', { name: 'Newer' });     // jsdom keeps focus on a disabled button
+      newer.focus();
+      newer.blur();
+    });
+    rerender(<AppProviders><LeagueChat {...viewProps({ game: summary({ chat: 30 }), version: 1 })} /></AppProviders>);
+    await screen.findByText('1–25 of 30');
+
+    expect(document.body).toHaveFocus();
+  });
 
   it('keeps focus on a pager button when Newer reaches the first page', async () => {
     mockFetch([META_ROUTE, chatRoute([])]);

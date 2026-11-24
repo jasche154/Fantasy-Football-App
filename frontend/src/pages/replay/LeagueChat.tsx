@@ -23,10 +23,20 @@ export function LeagueChat({ game, version, openPlayer }: ReplayViewProps) {
   }, [game.id, total]);
   const newerRef = useRef<HTMLButtonElement>(null);
   const olderRef = useRef<HTMLButtonElement>(null);
-  // The pressed button turns off at either end: keep focus on the pager, on the button that still goes somewhere.
-  const turn = (next: number, isEnd: boolean) => {
+  // After a pager press, once the new page shows: if the pressed button turned off at an end, focus the other
+  // one (until then both buttons still reflect the old page). Never on first load or when a new week resets paging.
+  const pressed = useRef<{ version: number; offset: number; older: boolean } | null>(null);
+  const shownOffset = feed.status === 'success' ? feed.data.offset : null;
+  useEffect(() => {
+    const press = pressed.current;
+    if (!press || press.version !== version || press.offset !== shownOffset) return;
+    pressed.current = null;
+    const [button, other] = press.older ? [olderRef, newerRef] : [newerRef, olderRef];
+    if (button.current?.disabled) other.current?.focus();
+  }, [shownOffset, version]);
+  const turn = (next: number, older: boolean) => {
+    pressed.current = { version, offset: next, older };
     setPaging({ version, offset: next });
-    if (isEnd) (next === 0 ? olderRef : newerRef).current?.focus();
   };
   return (
     <AsyncView state={feed} loading={<Skeleton lines={8} label="Loading the chat…" />} errorTitle="Couldn't load the chat"
@@ -48,12 +58,12 @@ export function LeagueChat({ game, version, openPlayer }: ReplayViewProps) {
           </ol>
           <div className="replay-pager">
             <button ref={newerRef} type="button" className="btn btn--ghost btn--sm" disabled={data.offset === 0}
-              onClick={() => turn(Math.max(0, data.offset - PAGE_SIZE), data.offset <= PAGE_SIZE)}>Newer</button>
+              onClick={() => turn(Math.max(0, data.offset - PAGE_SIZE), false)}>Newer</button>
             <span className="hint" role="status">
               {data.results.length > 0 ? `${data.offset + 1}–${data.offset + data.results.length} of ${data.total}` : `0 of ${data.total}`}
             </span>
             <button ref={olderRef} type="button" className="btn btn--ghost btn--sm" disabled={data.offset + data.results.length >= data.total}
-              onClick={() => turn(data.offset + PAGE_SIZE, data.offset + 2 * PAGE_SIZE >= data.total)}>Older</button>
+              onClick={() => turn(data.offset + PAGE_SIZE, true)}>Older</button>
           </div>
         </>
       )}

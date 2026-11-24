@@ -1051,18 +1051,23 @@ that week's games on; only scoring a week reads its real points.
   the league's 4th week), a
   3+ game streak, a starter's huge game (22% of the league's median team score and 1.75x his rate) or dud
   (40% of a 10+ rate; never a player who scored 0 or might be hurt: a tag that week or the next, no
-  projection next week, a snap share under 60% of his season median, or no snap counts to tell), or the
+  projection next week, a snap share under 60% of his season median, or no snap counts to tell; so week 1
+  has no dud lines, with no earlier snap share to compare against), or the
   result itself (close under 9% of the median team score, a blowout from 22%: about 10 and 25 points in a
   half-PPR league, more in a high-scoring one). The final's champion and runner-up don't talk margins after
-  a tied final. Your opponent talks to you; the others post now and then, at most 5 lines a week, the rare
+  a tied final. Your opponent talks to you (and also posts his clinching or elimination when that game
+  settles it); the others post now and then, at most 5 of these after-the-games lines a week, the rare
   news kept first (title, clinching, elimination, then your opponent's line, then the rest in a seeded order),
   and a line that would run past 140 characters with long names gives way to one that fits. A third manager may react to a
-  trade (at most 2 a week), a shopping CPU messages you, and every CPU offer carries a one-line reason in
+  trade (at most 2 a week) and a shopping CPU messages you (at most 2 shops are open at once); these come on
+  top of the 5, so a week can show up to 9 lines. Every CPU offer carries a one-line reason in
   his voice (worried about a player, high on yours, short at a position, a counter, or a value pitch).
   In a league that started mid-season (or a simulated one) all of this counts the league's own weeks, and
   each line is dated with the real NFL week.
   Lines come from a bank of 1,400+ clean lines in five voices, one per persona, so a manager sounds the same
-  all season; a game never repeats a line until that bucket is used up, and the text is copied into the save.
+  all season; a game never repeats a line until that bucket is used up (except when every unused line runs
+  past 140 characters once the names are in: then the next one that fits is reused), and the text is copied
+  into the save.
 - **Season:** the user picks the championship week (16, 17 or 18; 18 only when the season has a week 18)
   and the playoff teams P (4-8, at most the league size; default 4 under 10 teams, 6 under 14, else 8).
   The playoffs last 2 weeks for P = 4 and 3 weeks for 5-8, and the regular season is the weeks before
