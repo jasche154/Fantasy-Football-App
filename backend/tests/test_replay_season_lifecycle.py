@@ -110,7 +110,8 @@ def test_a_cancelled_game_stops_holding_its_week_once_a_game_stale_days_later_ha
     assert replay_live.current_live(db) == (LIVE, THROUGH + 1)
 
 
-def test_a_cancelled_game_in_the_last_week_holds_the_season_until_a_postseason_game_has_its_score(db, monkeypatch):
+def test_a_cancelled_game_in_the_last_week_holds_the_season_until_a_postseason_game_has_its_score(db, monkeypatch,
+                                                                                                    caplog):
     play_through(db, LAST)
     _unscored(db, LAST, FULL.schedule.games[-1].home_team)
     _on(monkeypatch, _day_after(LAST, 30))
@@ -127,7 +128,9 @@ def test_a_cancelled_game_in_the_last_week_holds_the_season_until_a_postseason_g
 
     wild_card.away_score, wild_card.gameday = 24, "not a date"      # a date that can't be read frees nothing
     db.commit()
-    assert replay_live.current_live(db) == (LIVE, LAST - 1)
+    with caplog.at_level("WARNING", logger="services.replay_live"):
+        assert replay_live.current_live(db) == (LIVE, LAST - 1)
+    assert "unreadable gameday 'not a date'" in caplog.text          # and says why the season stalls
 
     wild_card.gameday = f"{_day_after(LAST, 6).isoformat()}T20:20:00"       # a time part is fine
     db.commit()

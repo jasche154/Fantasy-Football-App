@@ -12,6 +12,7 @@ import { useAction } from '../../hooks/useAction';
 import { useAsync, type AsyncResult } from '../../hooks/useAsync';
 import { LeagueFormatFields, presetRules, sameStarters, ScoringFields, STANDARD_STARTERS, startersBody } from './LeagueRulesFields';
 import { NOW_PLAYOFF_TEAMS, nowSummary, PAST, RadioCards, SeasonKind, StartChoice } from './SeasonChoice';
+import { adpSource } from './shared';
 
 const POLL_MS = 3000;
 const RANDOM = 'random';
@@ -261,7 +262,7 @@ export function SetupForm({ onCreated }: { onCreated: (game: ReplaySummary) => v
               </div>
               {create.status === 'error' && <p className="error-text" role="alert">{errorMessage(create.error)}</p>}
             </div>
-            <p className="hint attribution">ADP: Fantasy Football Calculator</p>
+            <p className="hint attribution">{adpSource(sim?.kind ?? 'replay', isNow)}</p>
           </form>
         );
       }}

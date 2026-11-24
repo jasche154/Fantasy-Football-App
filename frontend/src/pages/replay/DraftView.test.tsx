@@ -90,6 +90,14 @@ describe('DraftView', () => {
     expect(lastQuery()?.toString()).toBe(DEFAULT_QUERY);
   });
 
+  it.each([
+    ['drafts mid-season', { kind: 'live', sim_from: 10, start_week: 10 }],
+    ['plays a future season', { kind: 'future', sim_from: 1, start_week: 1 }],
+  ] as const)('says the ADP is the simulated market in a league that %s', async (_name, simulated) => {
+    renderDraft(draft(), [], vi.fn(), { ...draftSummary(), ...simulated });
+    expect(await screen.findByText('ADP: the simulated market for this league')).toBeInTheDocument();
+  });
+
   it('sorts by ADP or projection from the column headers, toggles direction and starts over at the first page', async () => {
     const { user, lastQuery } = renderDraft(draft({ total: 120 }));
     const rank = await screen.findByRole('columnheader', { name: /Rank/ });

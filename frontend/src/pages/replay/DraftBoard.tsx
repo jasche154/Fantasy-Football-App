@@ -19,6 +19,8 @@ interface DraftBoardProps {
   draft: ReplayDraft;
   /** Where the Rank column comes from: expert ranks, or ADP order when the season has none. */
   rankSource: ReplaySummary['rank_source'];
+  /** The ADP attribution line (shared.adpSource); real drafts when omitted. */
+  adpNote?: string;
   position: ReplayPositionTab;
   onPosition: (position: ReplayPositionTab) => void;
   search: string;
@@ -39,7 +41,7 @@ interface DraftBoardProps {
 
 /** Who is left, sorted by rank, ADP or projection, with a Draft button per row that works on the user's turn. */
 export function DraftBoard({
-  draft, rankSource, position, onPosition, search, onSearch, sort, onSort, onShowMore, canDraft, isBusy, pressedId, error, onDraft,
+  draft, rankSource, adpNote = 'ADP: Fantasy Football Calculator', position, onPosition, search, onSearch, sort, onSort, onShowMore, canDraft, isBusy, pressedId, error, onDraft,
   openPlayer,
 }: DraftBoardProps) {
   const searchId = useId();
@@ -107,7 +109,7 @@ export function DraftBoard({
         </p>
         {onShowMore && <button type="button" className="btn btn--ghost btn--sm" onClick={onShowMore}>Show more</button>}
       </div>
-      <p className="hint attribution">ADP: Fantasy Football Calculator</p>
+      <p className="hint attribution">{adpNote}</p>
     </Card>
   );
 }

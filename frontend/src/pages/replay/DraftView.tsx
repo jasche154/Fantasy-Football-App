@@ -8,7 +8,7 @@ import { useAsync } from '../../hooks/useAsync';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { DraftBoard } from './DraftBoard';
 import { DraftPicks, DraftRoster } from './DraftPicks';
-import { ConfirmButton, positionParam, type ReplayPositionTab, type ReplayViewProps } from './shared';
+import { adpSource, ConfirmButton, positionParam, type ReplayPositionTab, type ReplayViewProps } from './shared';
 
 const PAGE_SIZE = 50;
 // shortcut: "Show more" grows one request up to the backend's MAX_PAGE; past that the user filters or searches.
@@ -92,7 +92,7 @@ export function DraftView({ game, version, act, isBusy, actError, openPlayer }: 
                 label={isPending('rest') ? 'Drafting the rest…' : 'Auto-draft the rest'}
                 onConfirm={() => run('rest', () => replayDraftAuto(game.id, true, data.overall))} />
             </Clock>
-            <DraftBoard draft={data} rankSource={game.rank_source} position={position} search={search} sort={sort} canDraft={canAct} isBusy={isBusy}
+            <DraftBoard draft={data} rankSource={game.rank_source} adpNote={adpSource(game.kind, game.start_week > 1)} position={position} search={search} sort={sort} canDraft={canAct} isBusy={isBusy}
               pressedId={typeof pressed === 'number' ? pressed : null} error={actError} openPlayer={openPlayer}
               onPosition={(next) => { setPosition(next); setLimit(PAGE_SIZE); }}
               onSearch={(next) => { setSearch(next); setLimit(PAGE_SIZE); }}
