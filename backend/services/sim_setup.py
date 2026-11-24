@@ -195,12 +195,14 @@ def _future_base(session: Session, season: int, settings: Settings) -> tuple[Sea
     # shortcut: experience counts seasons since a player's first database season (2018 on), so a veteran from
     # before 2018 looks younger than he is until the cap bucket; store birth dates or draft years to fix it.
     experience = {pid: newest - first + 1 for pid, first in first_seasons(session).items() if first <= newest}
-    belief, pool = sim_next_year.next_year(world, data.players, experience, sim_next_year.rookie_ids(season, rookies),
+    drafted = sim_next_year.rookie_ids(season, rookies)
+    belief, pool = sim_next_year.next_year(world, data.players, experience, drafted,
                                            {matched[m.name]: m.team for m in moves if m.name in matched},
                                            sim_metrics.qb_starts(data))
     prior = _defense_prior(data)
     base = sim_next_year.season_base(season, belief, pool, _schedule(session, season, data), settings.scoring,
-                                     settings.scoring_rules, prior, settings.adp_format, sim_market.track_record(data))
+                                     settings.scoring_rules, prior, settings.adp_format, sim_market.track_record(data),
+                                     sim_next_year.rookie_premium(drafted))
     return base, belief
 
 

@@ -8,10 +8,16 @@ truth's dated role changes into a noisy hint.
   MIN_PROJECTION, like the real tables (a player out or on bye has none).
 - `values`: mean points a game over the games left against a league-average opponent: a player believed out
   (`out_weeks`) scores nothing in his first out_weeks games and his active teammates share his work meanwhile.
-- `expert_ranks`: position ranks by value x lognormal EXPERT_NOISE among the players known that week.
+- `expert_ranks`: position ranks by value x lognormal EXPERT_NOISE among the players known that week. The
+  preseason experts (week 0 of a season simulated from week 1, sim_season) share the preseason market instead:
+  given its ADP (`market`), the players it lists rank by ADP x the same noise (real experts and ADP agree as
+  closely: expert vs ADP position ranks of the real top 150, Spearman 0.98 in 2022-2025), the rest after them
+  by value x noise.
 - `adp`: a draft under the belief on the same values (so a draft room's expert order and ADP agree), in the
-  league's scoring. A preseason market also leans on what it saw: with a `record` (`track_record`: raw points
-  a game last season) each value is (1 - w) x value + w x record, w = the tuned `market.record_weight`. Skill
+  league's scoring, priced on `market_values`. A preseason market also leans on what it saw: with a `record`
+  (`track_record`: raw points a game last season) each value is (1 - w) x value + w x record, w = the tuned
+  `market.record_weight`; and it pays for a rookie's upside: with a `premium` ({player: multiplier},
+  sim_next_year.rookie_premium, fitted on real rookie ADPs) his value is multiplied by it. Skill
   players go by points over a replacement rank per position (the tuned `market.replacement`; for a superflex
   / 2-QB list the QB's is `market.two_qb_replacement`, set so QB1-QB12 go about where the real 2026 2-QB list
   takes them). The blend weight and replacement ranks maximize agreement with the real ADP lists 2022-2025
@@ -79,28 +85,52 @@ def values(belief: World, scoring: ScoringSettings, games_left: int = SEASON_GAM
 
 
 def expert_ranks(belief: World, known: Iterable[int], week: int, dice: np.random.Generator, scoring: ScoringSettings,
-                 games_left: int) -> dict[tuple[int, int], int]:
-    """{(player, week): position rank} among the `known` players the belief places on a team."""
+                 games_left: int, market: Mapping[int, float] | None = None) -> dict[tuple[int, int], int]:
+    """{(player, week): position rank} among the `known` players the belief places on a team. `market`: {player:
+    ADP} of a preseason market the experts share (see the module docstring), else they rank on the belief."""
     worth = values(belief, scoring, games_left)
     ids = sorted(pid for pid in set(known) if pid in belief.players)
-    noise = dice.lognormal(0.0, EXPERT_NOISE, len(ids))
-    opinion = {pid: worth.get(pid, 0.0) * n for pid, n in zip(ids, noise)}
+    noise = dict(zip(ids, dice.lognormal(0.0, EXPERT_NOISE, len(ids))))
+    market = market or {}
+
+    def opinion(pid: int) -> tuple:              # sorts best first: the listed by noisy pick, then the rest by value
+        return (False, market[pid] * noise[pid]) if pid in market else (True, -worth.get(pid, 0.0) * noise[pid])
+
     ranks = {}
     for position in ("QB", "RB", "WR", "TE", "K", "DST"):
-        order = sorted((pid for pid in ids if belief.players[pid].position == position), key=lambda pid: (-opinion[pid], pid))
+        order = sorted((pid for pid in ids if belief.players[pid].position == position), key=lambda pid: (opinion(pid), pid))
         ranks.update({(pid, week): rank for rank, pid in enumerate(order, start=1)})
     return ranks
 
 
+def market_values(world: World, scoring: ScoringSettings, games_left: int = SEASON_GAMES,
+                  record: Mapping[int, float] | None = None,
+                  premium: Mapping[int, float] | None = None) -> dict[int, float]:
+    """{player: the points a game a draft prices him on}: `values`, blended with his `record` (points a game last
+    season, `track_record`) when given, x his `premium` (a rookie's, sim_next_year.rookie_premium) when given."""
+    season = values(world, scoring, games_left)
+    if record:
+        weight = params()["market"]["record_weight"]
+        season = {pid: (1 - weight) * v + weight * record.get(pid, v) for pid, v in season.items()}
+    if premium:
+        season = {pid: v * premium.get(pid, 1.0) for pid, v in season.items()}
+    return season
+
+
 def adp(world: World, scoring: ScoringSettings | None = None, two_qb: bool = False,
-        games_left: int = SEASON_GAMES, record: Mapping[int, float] | None = None) -> dict[int, tuple[float, float]]:
+        games_left: int = SEASON_GAMES, record: Mapping[int, float] | None = None,
+        premium: Mapping[int, float] | None = None) -> dict[int, tuple[float, float]]:
     """{player: (adp, stdev)} for a draft held under `world` with `games_left` games to play (see the module
-    docstring): the league's `scoring` (default PPR), a superflex / 2-QB league's list when `two_qb`, each
-    value blended with his `record` (points a game last season, `track_record`) when given."""
+    docstring): the league's `scoring` (default PPR), a superflex / 2-QB league's list when `two_qb`, priced
+    on `market_values` (with `record` and `premium` when given)."""
+    season = market_values(world, scoring or scoring_for("ppr"), games_left, record, premium)
+    return draft_board(world, season, two_qb, games_left)
+
+
+def draft_board(world: World, season: Mapping[int, float], two_qb: bool = False,
+                games_left: int = SEASON_GAMES) -> dict[int, tuple[float, float]]:
+    """{player: (adp, stdev)} of a draft on `season` ({player: points a game}, `market_values`)."""
     market = params()["market"]
-    season = values(world, scoring or scoring_for("ppr"), games_left)
-    weight = market["record_weight"] if record else 0.0
-    season = {pid: (1 - weight) * v + weight * record.get(pid, v) if record else v for pid, v in season.items()}
     healthy = {pid: v * SEASON_GAMES for pid, v in season.items() if world.players[pid].out_weeks < games_left}
     intercept, slope = params()["adp_stdev"]
     board: dict[int, float] = {}

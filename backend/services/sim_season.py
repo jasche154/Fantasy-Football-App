@@ -16,8 +16,8 @@ backup QB stays in view before his first game).
      may carry return_tag's Q, and healthy regulars (PHANTOM_MIN_SNAP in the latest public belief, never the
      truth) may be listed Q/D (phantom) and play;
    - the public belief estimate(data so far, W) gives W's projections (hard-tagged players out), expert ranks
-     (when the week has none) and buzz notes (sim_market; false ones only in the weeks a true one can land,
-     sim_talent.change_weeks);
+     (when the week has none; the preseason ones, week 0, follow base's ADP: sim_market.expert_ranks) and buzz
+     notes (sim_market; false ones only in the weeks a true one can land, sim_talent.change_weeks);
    - the truth at W plays every game (sim_game.play). Players on the field are hurt with
      sim_injuries.hazard (scaled down below FULL_EXPOSURE_SNAP); a hurt player plays exit_share of the game,
      then misses games_out team games (tagged from W + 1, as real tags are known before the week).
@@ -182,9 +182,11 @@ def _market(tables: _Tables, base: SeasonData, belief: World, truth: World, seed
     for rank_week in ((0, week) if week == 1 else (week,)):
         if not any(w == rank_week for _, w in tables.expert_ranks):
             ids = known.players if rank_week else base.as_of(0).players
+            # preseason experts and the preseason market price players alike: the experts follow base's ADP
+            market = {} if rank_week else {pid: p.adp for pid, p in base.players.items() if p.adp is not None}
             tables.expert_ranks.update(sim_market.expert_ranks(
                 belief, ids, rank_week, replay_state.rng(seed, "sim", "experts", rank_week), scoring,
-                last - max(1, rank_week) + 1))
+                last - max(1, rank_week) + 1, market))
             tables.expert_age[rank_week] = sim_market.EXPERT_AGE["ros" if rank_week else "pre"]
     tables.notes.update(sim_market.buzz(truth.changes, belief, week, replay_state.rng(seed, "sim", "buzz", week),
                                         false_rate, out))

@@ -1201,8 +1201,12 @@ read the belief, so, as in a real season, the public learns the truth only from 
   the belief is refitted from the games played so far (recent games count more), a projection is a
   player's expected points in that week's game with the players ruled out removed (so their teammates
   rise), expert ranks are each position ordered by expected value with a little noise (about 8%), and ADP is
-  a 12-team PPR draft by points over replacement; kickers and defenses take the real average ADP of the Nth
-  one drafted.
+  a 12-team draft in the league's scoring by points over replacement; kickers and defenses take the real
+  average ADP of the Nth one drafted. Going into a whole simulated season the market also leans on last
+  season's points a game, and the **preseason expert ranks** (what the draft room's Rank order comes from)
+  follow that ADP with the same ~8% noise, because real August experts and ADP agree closely (rank
+  correlation 0.98 over the real top 150 in 2022-2025; the simulated ones now 0.99, from about 0.86 when the
+  experts ignored last season).
 
 **2027 specifics:**
 
@@ -1213,7 +1217,11 @@ read the belief, so, as in a real season, the public learns the truth only from 
   (`sim_next_year.json`). On each team the QB who started the most games last season is the starter again in August.
 - **Rookies** get the role a player taken at that pick and position really had as a rookie, and the widest
   talent draw. A rookie QB starts week 1 when his team has no starter, or when his pick makes it likely and
-  the incumbent is a below-average passer; otherwise he is next in line.
+  the incumbent is a below-average passer; otherwise he is next in line. Real drafters pay for a rookie's
+  upside, so the market (ADP and the preseason expert ranks, not his role or talent) multiplies his value by
+  a premium fitted on real rookie ADPs 2019-2025 (`rookie_premium` in `sim_next_year.json`; allowed to fall
+  with the pick but never to rise, and it came out flat): x1.22 for a running back, x1.10 for a receiver,
+  x1.05 for a tight end, none for a quarterback (rookie QBs already go where real ones do).
 - **The offseason file** `backend/sim_data/offseason_2027.json` is meant to be edited by hand. `rookies`:
   one entry per player with `name`, `position` (QB/RB/WR/TE/K), `team` (schedule code, e.g. MIA, LA, LV,
   WAS), `pick` (projected overall pick, 1-262) and `college`. `moves`: `name` (as the app spells him),
@@ -1250,14 +1258,15 @@ python -m services.sim_eval [--seasons 2021-2025] [--seeds 3] [--mode mid|full|b
 python -m services.sim_eval --set talent.role_sd=0.4 --save-tuned   # try a value; save it as tuned
 python -m services.sim_eval --fit [--seasons 2021-2025]             # refit the game model (sim_params.json)
 python -m services.sim_injuries --fit --seasons 2018-2025 [--check] # refit injuries (sim_injuries.json)
-python -m services.sim_next_year_fit --fit [--seasons 2019-2025]    # refit the offseason (sim_next_year.json)
+python -m services.sim_next_year_fit --fit [--seasons 2019-2025]    # refit the offseason + rookie premium (sim_next_year.json)
 ```
 
 `sim_eval`'s **mid** mode takes a real season as known before week 12, simulates the rest and compares it
 with what really happened (weekly point ranges, projection error, QB-receiver correlation, players sitting
 out, K and D/ST points); **full** builds a season exactly like the future one, from the season before with
 that year's real rookies, moves and schedule, and compares the whole season (preseason rank against final
-rank, breakouts, busts, games missed, how its ADP agrees with the real ADP).
+rank, breakouts, busts, games missed, how its ADP agrees with the real ADP, overall and for the rookies, and
+how its preseason expert ranks agree with its ADP).
 
 ## API reference
 

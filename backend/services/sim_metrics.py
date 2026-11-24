@@ -14,6 +14,8 @@ Tiers are preseason ADP position ranks (QB / TE: 1-12, 13-24; RB / WR: 1-12, 13-
   top-150 ADP player, and the leaderboard.
 - leaderboard(data, weeks): ADP-free: mean points per game played of the top 1 / 6 / 12 / 24 finishers by
   position (LEADERS), so a flat simulated season shows whether or not our ADP is right.
+- adp_agreement(data, real, rookies): our ADP vs the real ADP (Spearman: the real top 150; the real-drafted
+  rookies); expert_agreement(data): the week-0 expert position ranks vs the ADP position ranks (top 150).
 """
 from collections import defaultdict
 from collections.abc import Iterable
@@ -214,8 +216,24 @@ def rookies(data: SeasonData, ids: set[int]) -> dict[str, float]:
             "rookie QB later starters": float(len(later))}
 
 
-def adp_agreement(data: SeasonData, real: SeasonData, top: int = TOP_ADP_FOR_MISSED) -> dict[str, float]:
-    """Spearman of this season's ADP vs the real ADP among the real top `top` (no ADP here = last)."""
+def adp_agreement(data: SeasonData, real: SeasonData, rookies: Iterable[int] = (),
+                  top: int = TOP_ADP_FOR_MISSED) -> dict[str, float]:
+    """Spearman of this season's ADP vs the real ADP among the real top `top`, and among the `rookies` the real
+    list drafted (no ADP here = last)."""
+    def mine(pid: int) -> float:
+        return data.players[pid].adp if pid in data.players and data.players[pid].adp else 10 ** 4
+
     board = sorted((p.adp, pid) for pid, p in real.players.items() if p.adp and p.position in SKILL)[:top]
-    mine = [data.players[pid].adp if pid in data.players and data.players[pid].adp else 10 ** 4 for _, pid in board]
-    return {"ADP vs real ADP r (top-150)": spearman([adp for adp, _ in board], mine)}
+    drafted = sorted(pid for pid in rookies if pid in real.players and real.players[pid].adp)
+    return {"ADP vs real ADP r (top-150)": spearman([adp for adp, _ in board], [mine(pid) for _, pid in board]),
+            "rookie ADP vs real ADP r": spearman([real.players[p].adp for p in drafted], [mine(p) for p in drafted])}
+
+
+def expert_agreement(data: SeasonData, top: int = TOP_ADP_FOR_MISSED) -> dict[str, float]:
+    """Spearman of the preseason (week 0) expert position rank vs the ADP position rank among the top `top` ADP
+    skill players with both (nan without week-0 ranks)."""
+    ranks = adp_ranks(data)
+    experts = {pid: rank for (pid, week), rank in data.expert_ranks.items() if week == 0}
+    board = sorted((p.adp, pid) for pid, p in data.players.items() if p.adp and p.position in SKILL)[:top]
+    both = [pid for _, pid in board if pid in experts]
+    return {"expert vs ADP r (week 0)": spearman([ranks[p] for p in both], [experts[p] for p in both])}
