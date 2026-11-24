@@ -40,6 +40,19 @@ def test_every_bucket_has_enough_distinct_clean_lines(kind, voice):
         assert line.format_map({name: "X" for name in chat.PLACEHOLDERS[kind]})
 
 
+@pytest.mark.parametrize("kind", ["boom", "bust", "shop", "offer_worried", "offer_high"])
+def test_a_line_about_one_player_names_him(kind):
+    # The chat shows only the text: "5.2. A bad game is one game." leaves the league guessing who.
+    unnamed = [line for lines in chat.bank()[kind].values() for line in lines if "{player}" not in line]
+    assert unnamed == []
+
+
+def test_a_need_offer_never_says_the_player_it_asks_for_sits_on_the_bench():
+    # offer_need names the best player he asks for, usually one of the user's starters.
+    benched = [line for lines in chat.bank()["offer_need"].values() for line in lines if "bench" in line.lower()]
+    assert benched == []
+
+
 def test_quiet_voices_have_no_bucket_and_never_post_it():
     for kind, voices in chat.QUIET.items():
         assert not set(voices) & set(chat.bank()[kind])
