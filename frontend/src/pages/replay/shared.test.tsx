@@ -201,15 +201,25 @@ describe('the game screen', () => {
 });
 
 describe('buzz chip', () => {
-  it('shows a quiet Buzz chip with the rumor as its accessible name and tooltip, and nothing without one', () => {
-    const { unmount } = render(<ReplayPlayerCell player={MOSTERT} info={{ buzz: 'Named the starter' }} />);
-    const chip = screen.getByRole('img', { name: 'Rumor: Named the starter' });
+  it('is a quiet Buzz button named by the rumor that opens his card (whose News block has the full line)', async () => {
+    const onOpen = vi.fn();
+    const { unmount } = render(<ReplayPlayerCell player={MOSTERT} info={{ buzz: 'Named the starter' }} onOpen={onOpen} />);
+    const chip = screen.getByRole('button', { name: 'Rumor: Named the starter' });
     expect(chip).toHaveAttribute('title', 'Rumor: Named the starter');
+    expect(chip).toHaveAttribute('aria-haspopup', 'dialog');
     expect(chip).toHaveClass('replay-buzz');
     expect(chip).toHaveTextContent('Buzz');
     expect(chip).not.toHaveClass('status-badge--out');
+    await userEvent.setup().click(chip);
+    expect(onOpen).toHaveBeenCalledWith(MOSTERT.id);
     unmount();
-    render(<ReplayPlayerCell player={MOSTERT} info={{ buzz: null }} />);
+    render(<ReplayPlayerCell player={MOSTERT} info={{ buzz: null }} onOpen={onOpen} />);
     expect(screen.queryByText('Buzz')).not.toBeInTheDocument();
+  });
+
+  it('without a card to open, shows the rumor as text for screen readers', () => {
+    render(<ReplayPlayerCell player={MOSTERT} info={{ buzz: 'Named the starter' }} />);
+    expect(screen.queryByRole('button', { name: /Rumor/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Rumor: Named the starter' })).toHaveTextContent('Buzz');
   });
 });

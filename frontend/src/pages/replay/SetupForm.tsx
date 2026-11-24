@@ -130,6 +130,7 @@ export function SetupForm({ onCreated }: { onCreated: (game: ReplaySummary) => v
   const [kind, setKind] = useState(PAST);                  // PAST, or a simulated season's number
   const [start, setStart] = useState<ReplayStart>('full');
   const isSubmitting = useRef(false);                      // a second press before the first re-render sends nothing
+  const submitRef = useRef<HTMLButtonElement>(null);
   const [name, setName] = useState('');
   const [teams, setTeams] = useState(12);
   const [playoffEnd, setPlayoffEnd] = useState<ReplayPlayoffEndWeek>(DEFAULT_PLAYOFF_END);
@@ -183,6 +184,8 @@ export function SetupForm({ onCreated }: { onCreated: (game: ReplaySummary) => v
           event.preventDefault();
           if (isSubmitting.current) return;
           isSubmitting.current = true;
+          // The fields are disabled while the league is built: keep focus on the (still focusable) button, not <body>.
+          submitRef.current?.focus();
           const result = await create.run({
             season: sim ? sim.season : chosen === RANDOM ? RANDOM : Number(chosen),
             name: name.trim() || undefined,
@@ -209,8 +212,15 @@ export function SetupForm({ onCreated }: { onCreated: (game: ReplaySummary) => v
                 <p className="notice" role="status">No season is ready to play yet. Prepare one with a button below, then set up your league.</p>
               )}
               {data.simulated.length > 0 && <SeasonKind simulated={data.simulated} value={sim ? kind : PAST} onChange={setKind} />}
-              {isLive && <StartChoice live={sim} value={start} onChange={setStart} />}
-              {isNow && <p className="hint replay-setup__now" role="status">{nowSummary(sim.through, chosenEnd, chosenPlayoffTeams)}</p>}
+              {isLive && (
+                <div>
+                  <StartChoice live={sim} value={start} onChange={setStart} />
+                  {/* Mounted empty with the choice, then filled: a live region that arrives already filled is often skipped. */}
+                  <div role="status">
+                    {isNow && <p className="hint replay-setup__now">{nowSummary(sim.through, chosenEnd, chosenPlayoffTeams)}</p>}
+                  </div>
+                </div>
+              )}
               <div className="replay-setup__grid">
                 {!sim && (
                   <SelectField label="Season" value={chosen} disabled={ready.length === 0} onChange={setSeason}
@@ -240,12 +250,15 @@ export function SetupForm({ onCreated }: { onCreated: (game: ReplaySummary) => v
               <RadioCards legend="Difficulty" options={DIFFICULTIES} value={difficulty} onChange={setDifficulty} />
             </fieldset>
             <div className="settings-form__footer">
-              <button type="submit" className="btn btn--primary" disabled={!canCreate || isCreating}>
+              {/* Busy: aria-disabled, not disabled, so it keeps focus; the isSubmitting guard makes it inert. */}
+              <button ref={submitRef} type="submit" className="btn btn--primary" disabled={!canCreate} aria-disabled={isCreating}>
                 {isCreating ? (sim ? 'Simulating the season…' : 'Creating your league…') : 'Create league and draft'}
               </button>
-              {isCreating && sim && (
-                <p className="hint" role="status">Simulating the {sim.season} season for your league. This takes about 10 seconds.</p>
-              )}
+              <div role="status">
+                {isCreating && sim && (
+                  <p className="hint">Simulating the {sim.season} season for your league. This takes about 10 seconds.</p>
+                )}
+              </div>
               {create.status === 'error' && <p className="error-text" role="alert">{errorMessage(create.error)}</p>}
             </div>
             <p className="hint attribution">ADP: Fantasy Football Calculator</p>

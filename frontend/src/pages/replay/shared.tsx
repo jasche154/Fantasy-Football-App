@@ -159,15 +159,15 @@ export function buzzLabel(text: string): string {
   return `Rumor: ${text}`;
 }
 
-/** A small "Buzz" chip for a simulated season's news line about his role; the line on hover and for screen readers.
- * Quiet on purpose: it is a rumor, not an injury or a fact. */
-export function ReplayBuzzChip({ text }: { text: string | null | undefined }) {
+/** A small "Buzz" chip for a simulated season's news line about his role: a button that opens his card, whose News
+ * block shows the full line (the line is also its name and tooltip). Quiet on purpose: a rumor, not an injury or a fact. */
+export function ReplayBuzzChip({ text, onOpen }: { text: string | null | undefined; onOpen?: () => void }) {
   if (!text) return null;
   const label = buzzLabel(text);
+  const content = <><Icon name="news" size={12} /><span aria-hidden="true">Buzz</span></>;
+  if (!onOpen) return <span className="replay-buzz" role="img" aria-label={label} title={label}>{content}</span>;
   return (
-    <span className="replay-buzz" role="img" aria-label={label} title={label}>
-      <Icon name="news" size={12} /><span aria-hidden="true">Buzz</span>
-    </span>
+    <button type="button" className="replay-buzz" aria-label={label} aria-haspopup="dialog" title={label} onClick={onOpen}>{content}</button>
   );
 }
 
@@ -208,7 +208,7 @@ export function ReplayPlayerCell({ player, info = {}, onOpen }: ReplayPlayerCell
         {info.bye && <span className="status-badge status-badge--missing">Bye</span>}
         {player.injury && <ReplayInjuryBadge injury={player.injury} />}
         {showsOut(info.out, player.injury) && <span className="status-badge status-badge--out">Out</span>}
-        <ReplayBuzzChip text={info.buzz} />
+        <ReplayBuzzChip text={info.buzz} onOpen={onOpen && (() => onOpen(player.id))} />
         {info.trade_locked && (
           <span className="status-badge status-badge--missing" title="Traded in the last two weeks, so he can't be traded yet">Trade-locked</span>
         )}

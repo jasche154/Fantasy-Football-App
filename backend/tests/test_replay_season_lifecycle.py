@@ -188,3 +188,14 @@ def test_a_finished_season_is_listed_and_played_like_any_past_season(complete_ap
     drawn = post(client, "/games", {"season": "random", "seed": 3})["game"]
     assert (game["kind"], game["sim_from"], game["name"]) == ("replay", None, f"{LIVE} Replay")
     assert (drawn["season"], drawn["kind"]) == (LIVE, "replay")
+
+
+def test_a_badly_shaped_offseason_file_is_the_future_seasons_reason_not_a_500(complete_app, monkeypatch, tmp_path):
+    from services import sim_offseason
+
+    monkeypatch.setattr(sim_offseason, "DATA_DIR", tmp_path)
+    sim_offseason.path(NEXT).write_text("[]", encoding="utf-8")
+
+    future = get(complete_app, "/seasons")["simulated"][-1]
+    assert (future["season"], future["ready"]) == (NEXT, False)
+    assert future["reason"] == f"offseason_{NEXT}.json: the file must be a JSON object with 'rookies' and 'moves' lists."

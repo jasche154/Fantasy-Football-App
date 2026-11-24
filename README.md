@@ -1195,7 +1195,7 @@ read the belief, so, as in a real season, the public learns the truth only from 
   shrinking.", "Reports say his starting job is in danger."), and false lines about other starters are added
   so only about 60% of all lines are true, in the same weeks a change can start (never the first simulated
   week or the last two). It shows as a small **Buzz** chip ("Rumor: ...") on player rows
-  and the draft board, and under **News** on his card. It is the only way the truth reaches the screen
+  and the draft board (press it to open his card), and under **News** on his card. It is the only way the truth reaches the screen
   before the games, and it is right only some of the time.
 - **Projections, expert ranks and ADP** are computed from the belief each week (`services/sim_market.py`):
   the belief is refitted from the games played so far (recent games count more), a projection is a
