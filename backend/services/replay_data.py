@@ -131,6 +131,11 @@ def load_game_results(session: Session, season: int, force: bool = False) -> dic
         advanced_stats.load_advanced_stats(session, [season], index)    # also creates the kickers
         loaded.append("kicker_games, team_game_stats")
     if loaded and season >= ps.FIRST_SEASON:            # older seasons feed no live model: keep its caches
+        if "nfl_games" not in loaded:
+            # A load stamp says the schedule was read again in the same run: replay_live's rule for a game
+            # that never got a score ("the loader saw it stale") relies on that.
+            ps.load_schedules(session, [season])
+            renamed += rename_game_teams(session, season)
         ps.record_load(session, [season])               # cached valuations notice the new rows
     counts = table_counts(session, season)
     missing = [name for name, rows in counts.items() if not rows]
@@ -156,6 +161,8 @@ def load_snaps(session: Session, season: int, force: bool = False) -> dict:
         ps.load_snap_counts(session, [season], ps.PlayerIndex(session))     # keeps the old rows if it fails
         rows = stored()
         if rows and season >= ps.FIRST_SEASON:
+            ps.load_schedules(session, [season])        # a stamp always comes with a fresh schedule (replay_live)
+            rename_game_teams(session, season)
             ps.record_load(session, [season])
         return {"rows": rows, "errors": {} if rows else {"snaps": "NoRows"}}
     except Exception as exc:                            # optional data: the season stays playable without it

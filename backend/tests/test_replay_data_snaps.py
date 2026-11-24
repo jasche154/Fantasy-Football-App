@@ -70,6 +70,8 @@ def test_only_a_season_the_live_model_reads_stamps_a_data_load_for_its_snaps(db,
 
     assert snap_rows(db, season) == 1
     assert db.scalar(select(func.count()).select_from(DataLoad)) == int(live)
+    # a stamp always comes with a fresh schedule: replay_live reads it as "the loader saw the season's games"
+    assert loaders == (["snaps", "schedules"] if live else ["snaps"])
 
 
 def test_force_never_reloads_a_live_seasons_snaps(db, loaders):
@@ -78,4 +80,5 @@ def test_force_never_reloads_a_live_seasons_snaps(db, loaders):
     replay_data.load_snaps(db, ps.FIRST_SEASON)
     forced = replay_data.load_snaps(db, ps.FIRST_SEASON, force=True)
 
-    assert forced["skipped"] == "already loaded" and loaders == ["snaps"]     # the live loader owns those rows
+    # the live loader owns those rows: the forced run loads nothing (the first one read the schedule with its stamp)
+    assert forced["skipped"] == "already loaded" and loaders == ["snaps", "schedules"]
