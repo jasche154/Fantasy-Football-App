@@ -59,46 +59,72 @@ def _unscored(session: Session, week: int, home_team: str) -> None:
                     .values(home_score=None, away_score=None))
 
 
-def _loaded(session: Session, day: date, seasons: str = f"{LIVE - 1},{LIVE}") -> None:
-    """The stats loader finished a run over `seasons` on `day`."""
-    session.add(DataLoad(seasons=seasons, finished_at=datetime.combine(day, time(12))))
+def _first_home(week: int) -> str:
+    return next(g for g in FULL.schedule.games if g.week == week).home_team
+
+
+def _dated(session: Session, week: int, day: date) -> None:
+    session.execute(update(NflGame).where(NflGame.season == LIVE, NflGame.week == week)
+                    .values(gameday=day.isoformat()))
     session.commit()
 
 
 # ---------------- a cancelled game never freezes the season ----------------
 
-def test_a_game_without_a_score_holds_its_week_back_only_while_it_can_still_be_played(db, monkeypatch):
-    _unscored(db, 3, next(g for g in FULL.schedule.games if g.week == 3).home_team)
-    _loaded(db, _day_after(THROUGH))
+def test_a_game_without_a_score_holds_its_week_back_until_later_games_have_scores(db, monkeypatch):
+    _unscored(db, 3, _first_home(3))
 
-    assert replay_live.current_live(db) == (LIVE, THROUGH)          # weeks ago: it was never played
-    _on(monkeypatch, _day_after(3))                                 # the Monday after: it may still be
+    assert replay_live.current_live(db) == (LIVE, THROUGH)          # weeks 4 and 5 have scores: never played
+    _on(monkeypatch, _day_after(3))                                 # the Monday after: later dates aren't real yet
     assert replay_live.current_live(db) == (LIVE, 2)
 
 
-def test_a_cancelled_game_in_the_last_week_does_not_keep_the_season_live(db, monkeypatch):
-    play_through(db, LAST)
-    _unscored(db, LAST, FULL.schedule.games[-1].home_team)
-    _loaded(db, _day_after(LAST, replay_live.STALE_DAYS + 1))
-    _on(monkeypatch, _day_after(LAST))
-    assert replay_live.current_live(db) == (LIVE, LAST - 1)
+def test_a_load_stamp_without_newer_scores_never_makes_a_game_look_cancelled(db, monkeypatch):
+    """The app sat idle since before week THROUGH's last game; a run loaded stats but the schedule download failed
+    (it keeps the old rows) and stamped anyway: no later game has a score, so that game still holds its week."""
+    _unscored(db, THROUGH, _first_home(THROUGH))
+    db.add(DataLoad(seasons=f"{LIVE - 1},{LIVE}", finished_at=datetime.combine(_day_after(THROUGH, 20), time(12))))
+    db.commit()
+    _on(monkeypatch, _day_after(THROUGH, 21))
 
-    _on(monkeypatch, _day_after(LAST, replay_live.STALE_DAYS + 1))
-    assert replay_live.current_live(db) is None and replay_live.complete_season(db) == LIVE
-
-
-def test_an_unscored_game_counts_as_cancelled_only_once_the_loader_has_run_well_after_it(db, monkeypatch):
-    """Week THROUGH's stats loaded before one game was in, then the app sat idle for days: that game still holds
-    its week back (a new league would otherwise freeze its two teams with no points), until the stats loader
-    has finished a run covering the season STALE_DAYS after the game."""
-    _unscored(db, THROUGH, next(g for g in FULL.schedule.games if g.week == THROUGH).home_team)
-    _loaded(db, _day_after(THROUGH))                                # Monday: before that game was in
-    _loaded(db, _day_after(THROUGH, 9), seasons=str(LIVE - 1))      # a later run, of another season only
-    _on(monkeypatch, _day_after(THROUGH, 10))
     assert replay_live.current_live(db) == (LIVE, THROUGH - 1)
 
-    _loaded(db, _day_after(THROUGH, replay_live.STALE_DAYS + 1))
-    assert replay_live.current_live(db) == (LIVE, THROUGH)
+
+def test_without_a_later_scored_game_an_unscored_game_holds_its_week_however_old(db, monkeypatch):
+    _unscored(db, THROUGH, _first_home(THROUGH))
+    _on(monkeypatch, _day_after(THROUGH, 90))
+    assert replay_live.current_live(db) == (LIVE, THROUGH - 1)
+
+    db.execute(update(NflGame).values(home_score=None, away_score=None))      # no score anywhere: nothing is final
+    assert replay_live.progress(db, LIVE) == (0, LAST)
+
+
+def test_a_cancelled_game_stops_holding_its_week_once_a_game_stale_days_later_has_its_score(db, monkeypatch):
+    play_through(db, THROUGH + 1)
+    _unscored(db, THROUGH, _first_home(THROUGH))
+    _on(monkeypatch, _day_after(THROUGH + 1, 3))
+    _dated(db, THROUGH + 1, _day_after(THROUGH, replay_live.STALE_DAYS - 1))
+    assert replay_live.current_live(db) == (LIVE, THROUGH - 1)
+
+    _dated(db, THROUGH + 1, _day_after(THROUGH, replay_live.STALE_DAYS))
+    assert replay_live.current_live(db) == (LIVE, THROUGH + 1)
+
+
+def test_a_cancelled_game_in_the_last_week_holds_the_season_until_a_postseason_game_has_its_score(db, monkeypatch):
+    play_through(db, LAST)
+    _unscored(db, LAST, FULL.schedule.games[-1].home_team)
+    _on(monkeypatch, _day_after(LAST, 30))
+    wild_card = NflGame(game_id=f"{LIVE}_{LAST + 1:02d}_BUF_KC", season=LIVE, week=LAST + 1, game_type="WC",
+                        home_team="KC", away_team="BUF", gameday=_day_after(LAST, 6).isoformat())
+    db.add(wild_card)
+    db.commit()
+    assert replay_live.current_live(db) == (LIVE, LAST - 1)
+    assert replay_live.progress(db, LIVE) == (LAST - 1, LAST)       # the postseason row adds no week
+
+    wild_card.home_score, wild_card.away_score = 27, 24
+    db.commit()
+    assert replay_live.current_live(db) is None and replay_live.complete_season(db) == LIVE
+    assert LIVE in replay_live.replay_seasons(db)
 
 
 def test_a_week_is_final_only_when_every_scored_game_has_both_teams_stats(db):
