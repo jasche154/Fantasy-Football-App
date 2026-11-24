@@ -365,3 +365,58 @@ def test_cpu_trades_are_identical_when_the_future_is_different(seasons, week):
         played = season[week - 1]
 
         assert rs.to_json(ai.cpu_trades(played.before, SETTINGS, know, seed)) == rs.to_json(played.after)
+
+
+# ---------------- a shopping CPU's offer to the user ----------------
+
+def _shop_offer(state: rs.State, know, monkeypatch, rate) -> rs.State:
+    """_user_offer for this week with each persona's offer rate from `rate` (0 = the rolls never pick him)."""
+    from tests.test_replay_mood import SETTINGS as MOOD_SETTINGS
+    monkeypatch.setattr(replay_personas, "offer_rate", rate)
+    return ai._user_offer(state, MOOD_SETTINGS, know, rs.rng(0, "offer", state.week))
+
+
+def test_a_shopping_cpu_offers_its_shopped_player_first_without_a_roll(monkeypatch):
+    from tests.test_replay_mood import WEEK, shop_league
+    state, know, cpu, star = shop_league()
+    state = replace(state, shops=(rs.Shop(cpu.id, star.player_id, WEEK, 0.15),))
+    after = _shop_offer(state, know, monkeypatch, lambda persona: 0.0)
+    offer = after.offers[-1]
+
+    assert (offer.from_team, offer.to_team, offer.status) == (cpu.id, rs.user_team(state).id, "pending")
+    assert star.player_id in offer.give
+
+
+def test_the_second_shopper_offers_when_the_first_has_no_deal(monkeypatch):
+    from tests.test_replay_mood import WEEK, best_skill, shop_league, slumping, with_values
+    state, know, cpu, star = shop_league()
+    second = rs.team(state, 3)
+    other = slumping(best_skill(know, second), 0.1)
+    know = with_values(know, other)
+    state = replace(state, shops=(rs.Shop(cpu.id, star.player_id, WEEK, 0.15),
+                                  rs.Shop(second.id, other.player_id, WEEK, 0.15)))
+    real = ai._best_deal
+    monkeypatch.setattr(ai, "_best_deal", lambda state, settings, know, sender, receiver, *rest, **kw:
+                        None if receiver.id == cpu.id else real(state, settings, know, sender, receiver, *rest, **kw))
+    offer = _shop_offer(state, know, monkeypatch, lambda persona: 0.0).offers[-1]
+
+    assert offer.from_team == second.id and other.player_id in offer.give
+
+
+def test_a_declined_shop_offer_is_not_repeated_and_another_cpu_can_offer(monkeypatch):
+    from tests.test_replay_mood import WEEK, knowledge as mood_knowledge, shop_league, slumping, with_values
+    state, know, cpu, star = shop_league()
+    state = replace(state, shops=(rs.Shop(cpu.id, star.player_id, WEEK, 0.15),))
+    rate = lambda persona: 0.0 if persona == "panicky" else 1.0         # noqa: E731 - only the shopper never rolls
+    first = _shop_offer(state, know, monkeypatch, rate)
+    assert first.offers[-1].from_team == cpu.id and star.player_id in first.offers[-1].give
+    declined = replace(first, offers=tuple(replace(o, status="declined") for o in first.offers))
+
+    nxt = replace(declined, week=WEEK + 1, shops=(rs.Shop(cpu.id, star.player_id, WEEK + 1, 0.15),))   # still open
+    week_after = mood_knowledge(WEEK + 1)
+    later = _shop_offer(nxt, with_values(week_after, slumping(week_after.by_id[star.player_id], 0.1)), monkeypatch, rate)
+    made = later.offers[len(nxt.offers):]
+
+    assert rs.markdowns(later, cpu.id) == {star.player_id: 0.15}       # the user may still buy him at the discount
+    assert not any(o.from_team == cpu.id and star.player_id in o.give for o in made)
+    assert [o.from_team != cpu.id for o in made] == [True]             # another CPU's offer comes through
