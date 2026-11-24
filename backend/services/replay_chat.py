@@ -4,8 +4,8 @@ Lines come from the checked-in bank `replay_chat_lines.json`: {kind: {voice: [li
 persona (replay_personas.PERSONAS), so a manager sounds the same all season. A line's placeholders are the
 ones its kind provides (PLACEHOLDERS). The rendered text is copied into `State.chat`, so editing the bank
 never rewrites an old chat. Within a game a (kind, voice) bucket never repeats a line until every line in it
-has been used (`Chat.line`); the choice is seeded (`rs.rng`), so a reload never re-rolls. A fresh line whose
-text runs past MAX_CHARS once long names are in gives way to the next fresh one that fits; when none does,
+has been used (`Chat.line`); the choice is seeded (`rs.rng`), so a reload never re-rolls. A line whose text
+runs past MAX_CHARS once long names are in gives way to the next least-used one that fits; when none does,
 the shortest is cut at a word.
 
 When lines are posted (replay_game calls these; each reads only what is known when it posts):
@@ -96,11 +96,11 @@ def _voice(team: Team, kind: str) -> str:
 
 def _render(lines: Sequence[str], used: Sequence[int], kind: str, values: Mapping[str, object],
             order: Sequence[int]) -> tuple[int, str]:
-    """(line index, text): the first least-used line in seeded `order` whose text fits MAX_CHARS; when none of
-    them fits, the shortest of all, cut at a word."""
+    """(line index, text): the least-used line, in seeded `order`, whose text fits MAX_CHARS; when none fits,
+    the shortest, cut at a word."""
     ranked = sorted(range(len(lines)), key=lambda n: (used[n], order[n]))
     texts = [(n, lines[n].format_map({key: values[key] for key in PLACEHOLDERS[kind]})) for n in ranked]
-    fits = next(((n, text) for n, text in texts if used[n] == used[ranked[0]] and len(text) <= MAX_CHARS), None)
+    fits = next(((n, text) for n, text in texts if len(text) <= MAX_CHARS), None)
     if fits is not None:
         return fits
     line, text = min(texts, key=lambda item: len(item[1]))
