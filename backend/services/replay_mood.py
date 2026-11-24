@@ -5,10 +5,12 @@ contradicts what he accepts:
 
 - signal = form_chart (his recent real games) + hype x shock_chart (an opportunity shock, `Team.hype` for an
   emotional manager), each side scaled by the persona's EMOTION: a panicky manager feels a slump hard, a
-  gambler a hot streak, a steady one shrugs bad weeks off (and stays high on a slumping star, his
-  STEADY_STAR x star x (pre_chart - chart) belief in draft day).
-- strength = signal / max(chart, CHART_FLOOR): worried at <= -WORRY, high at >= HIGH. Only his own healthy
-  skill players worth FEEL_MIN_CHART or more: an injured player is never something to be "worried" about.
+  gambler a hot streak, a steady one shrugs bad weeks off (and adds the signed STEADY_STAR x star x
+  (pre_chart - chart) his price carries: high on a slumping star, cooler on one who outran draft day).
+- strength = signal / max(chart, CHART_FLOOR): worried at <= -WORRY, high at >= HIGH, and only on the side of
+  the chart his own price is on (`private_value - chart`: worried only at or below it, high only at or above),
+  so the feeling and the price can never point different ways. Only his own healthy skill players worth
+  FEEL_MIN_CHART or more: an injured player is never something to be "worried" about.
 - `mood_line`: "Worried about X. High on Y." from his strongest feeling each way (None without one). Views
   show it from replay_personas.TENDENCY_WEEKS league weeks played; the persona's name stays hidden.
 
@@ -17,8 +19,10 @@ SHOP_TOP most valuable skill players, whose last game fell short of his rate, sh
 probability SHOP_RATE (panicky most; steady and shark never). At most one shop per CPU and MAX_SHOPS in the
 league. A shop holds a seeded `discount` (DISCOUNT_BASE by persona + worry, +- jitter, within
 DISCOUNT_RANGE) that `replay_trade_value.tally` takes off his price for the user only, via
-`replay_state.markdowns`. It stays open week to week while he stays that worried and the player is his; a good
-game, a trade or the deadline closes it. Nothing here posts chat: replay_game does, with replay_chat.
+`replay_state.markdowns`. While it is open the player is the user's to buy: no other CPU may trade for him
+(replay_trade_ai). It stays open week to week while he stays that worried and the player is on his active
+roster; a good game or the deadline closes it, and a trade, drop or IR move removes it at once
+(`replay_state.with_team`). Nothing here posts chat: replay_game does, with replay_chat.
 Pure: a Knowledge and the state in, new data out.
 """
 from collections.abc import Sequence
@@ -63,7 +67,7 @@ def strength(value: ReplayValue, persona: str, hype: float = 1.0) -> float:
     signal = value.form_chart + hype * value.shock_chart
     signal *= down if signal < 0 else up
     if persona == "steady":
-        signal += replay_personas.STEADY_STAR * value.star * max(0.0, value.pre_chart - value.chart)
+        signal += replay_personas.STEADY_STAR * value.star * (value.pre_chart - value.chart)
     return signal / max(value.chart, CHART_FLOOR)
 
 
@@ -72,7 +76,8 @@ def feeling(value: ReplayValue, persona: str, hype: float = 1.0) -> Feeling | No
     if value.position not in SKILL or value.out or value.injury is not None or value.healthy_chart < FEEL_MIN_CHART:
         return None
     felt = strength(value, persona, hype)
-    kind = "worried" if felt <= -WORRY else "high" if felt >= HIGH else None
+    lean = replay_personas.private_value(value, persona, hype) - value.chart     # the side of the chart he prices on
+    kind = "worried" if felt <= -WORRY and lean <= 0 else "high" if felt >= HIGH and lean >= 0 else None
     return None if kind is None else Feeling(value.player_id, kind, round(felt, 3))
 
 
@@ -120,7 +125,7 @@ def discount(seed: int, week: int, team: Team, worry: float) -> float:
 def _still_open(state: State, know: Knowledge, shop: Shop) -> bool:
     team = rs.team(state, shop.team_id)
     value = know.by_id.get(shop.player_id)
-    if value is None or shop.player_id not in team.roster:
+    if value is None or shop.player_id not in team.roster or rs.retrade_locked(state, shop.player_id):
         return False
     felt = feeling(value, team.persona, team.hype)
     return felt is not None and felt.strength <= -SHOP_WORRY and _slumping(value)
@@ -131,8 +136,8 @@ def refresh_shops(state: State, settings: Settings, know: Knowledge, seed: int,
     """(the state with this week's shops, the ones newly opened). Closes the shops that no longer hold, renews
     the rest for `state.week`, then lets worried CPUs (in seeded order, each rolling SHOP_RATE) open new ones
     up to MAX_SHOPS. No shops before TENDENCY_WEEKS league weeks (`weeks_played` = len(state.results)) are
-    played or once trades have closed."""
-    trading = state.phase in ("waivers", "open") and rs.trades_open(state, settings)
+    played or after the trade deadline week (from then on no CPU sends the user an offer)."""
+    trading = state.phase in ("waivers", "open") and state.week <= settings.trade_deadline_week
     if not trading or weeks_played < replay_personas.TENDENCY_WEEKS:
         return replace(state, shops=()), ()
     kept = tuple(replace(shop, week=state.week) for shop in state.shops if _still_open(state, know, shop))

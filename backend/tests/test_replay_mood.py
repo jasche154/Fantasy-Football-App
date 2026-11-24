@@ -208,3 +208,68 @@ def test_feelings_and_shops_never_see_the_future():
     for seed in range(5):
         assert rs.to_json(rm.refresh_shops(state, SETTINGS, now, seed, PLAYED)[0]) == rs.to_json(
             rm.refresh_shops(state, SETTINGS, later, seed, PLAYED)[0])
+
+
+# ---------------- what he says agrees with what he pays ----------------
+
+def test_a_feeling_never_contradicts_his_price_anywhere_in_the_season():
+    """High on a player: he values him at or above the chart; worried: at or below. Every week, persona, player."""
+    wrong = []
+    for week in range(1, SETTINGS.end_week + 1):
+        know = knowledge(week)
+        for value in know.values:
+            for persona in replay_personas.PERSONAS:
+                hype = replay_personas.hype_for(persona)
+                felt = rm.feeling(value, persona, hype)
+                lean = replay_personas.private_value(value, persona, hype) - value.chart
+                if felt is not None and (lean < -1e-9 if felt.kind == "high" else lean > 1e-9):
+                    wrong.append((week, persona, value.player_id, felt.kind, round(lean, 1)))
+    assert wrong == []
+
+
+def test_a_steady_manager_is_never_high_on_a_player_he_marks_below_the_chart():
+    base = best_skill(knowledge(), league().teams[1])
+    value = replace(base, form_chart=0.2 * base.chart, shock_chart=0.0, star=1.0,
+                    out=False, injury=None)
+    risen = replace(value, pre_chart=value.chart - 200.0)        # draft day thought less of him than today
+    felt = rm.feeling(risen, "steady")
+
+    assert replay_personas.private_value(risen, "steady") < risen.chart
+    assert felt is None or felt.kind == "worried"
+
+
+def test_no_shop_for_a_trade_locked_player_or_one_on_ir():
+    state, know, cpu, star = shop_league()
+    locked = replace(state, traded={star.player_id: WEEK - 1})
+    on_ir = rs.with_team(state, replace(cpu, roster=tuple(p for p in cpu.roster if p != star.player_id),
+                                        ir=(*cpu.ir, star.player_id)))
+
+    assert any(shops for _, _, shops in open_shops(state, know))
+    assert not any(shops for _, _, shops in open_shops(locked, know))
+    assert not any(shops for _, _, shops in open_shops(on_ir, know))
+
+
+def test_a_shop_leaves_the_state_when_his_player_leaves_the_active_roster():
+    state, know, cpu, star = shop_league()
+    state = replace(state, shops=(rs.Shop(cpu.id, star.player_id, WEEK, 0.1),))
+    gone = rs.with_team(state, replace(cpu, roster=tuple(p for p in cpu.roster if p != star.player_id),
+                                       ir=(*cpu.ir, star.player_id)))
+
+    assert gone.shops == () and rs.markdowns(gone, cpu.id) == {}
+    assert rs.with_team(state, cpu).shops == state.shops
+
+
+def test_the_trade_eval_tally_counts_a_shop_discount_like_replay_trades():
+    from services import replay_trade_eval as te
+    state, know, cpu, star = shop_league()
+    give, get = _deal(state, know, star), (star.player_id,)
+    user = rs.user_team(state).id
+    shopped = replace(state, shops=(rs.Shop(cpu.id, star.player_id, WEEK, 0.10),))
+
+    def tally(on: rs.State) -> float:
+        verdict = rt.evaluate(on, SETTINGS, know, user, cpu.id, give, get)
+        return te._tally(on, SETTINGS, know, cpu, get, give, verdict).score
+
+    price = replay_personas.private_value(star, cpu.persona, cpu.hype)
+    bar = rs.USER_TRADE_MULTIPLE[SETTINGS.difficulty] * rt.tv.OUT_MARGIN
+    assert tally(shopped) - tally(state) == pytest.approx(0.10 * price * bar, abs=0.05)

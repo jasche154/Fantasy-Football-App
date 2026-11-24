@@ -216,12 +216,12 @@ class Result:
 
 def _tally(state: State, settings: Settings, know: rv.Knowledge, cpu: Team, gives: tuple, gets: tuple,
            verdict: rt.Verdict) -> tv.Tally:
-    """The CPU's tally, rebuilt from the verdict exactly as replay_trades scores it."""
+    """The CPU's tally, rebuilt from the verdict exactly as replay_trades scores it (a shop discount included)."""
     kept = tuple(pid for pid in gets if pid not in verdict.their_drops)
     own_cuts = tuple(pid for pid in verdict.their_drops if pid not in gets)
     per_week = verdict.their_gain / max(1e-9, sum(rv.horizon(know, settings).weights.values()))
     return tv.tally(know, cpu.persona, gives, kept, own_cuts, per_week,
-                    rt.needed_multiple(settings, rs.user_team(state)), True, cpu.hype)
+                    rt.needed_multiple(settings, rs.user_team(state)), True, cpu.hype, rs.markdowns(state, cpu.id))
 
 
 def judge(data: SeasonData, case: dict, seed: int, personas=PERSONAS) -> list[Result]:

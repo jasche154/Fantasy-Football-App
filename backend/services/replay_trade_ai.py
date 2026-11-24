@@ -17,7 +17,8 @@ than one attempt; the re-trade lock keeps it from moving the same players again.
    CPUs only make a deal that nets both at least SEEK_SCORE.
 
 A CPU shopping a player to the user (`State.shops`, replay_mood) offers first: the best deal that includes
-that player, at his shop discount (no roll). Otherwise the persona rolls above decide.
+that player, at his shop discount (no roll). Otherwise the persona rolls above decide. While his shop is open
+a shopped player is the user's to buy: CPU-CPU deals never move him, though they run first.
 An offer to the user is stored as a pending Offer; nothing changes hands until `replay_trades.respond`.
 """
 from collections.abc import Sequence
@@ -51,11 +52,12 @@ def _order(value: ReplayValue, look: str) -> tuple:
     return -first, -value.chart, value.player_id
 
 
-def _tradable(state: State, know: Knowledge, team: Team, look: str = "") -> list[ReplayValue]:
-    """The team's TOP_SKILL skill players that may move (not re-trade locked; out players may: an IR slot is
-    not on the roster), in search order."""
+def _tradable(state: State, know: Knowledge, team: Team, look: str = "",
+              held_back: frozenset[int] = frozenset()) -> list[ReplayValue]:
+    """The team's TOP_SKILL skill players that may move (not re-trade locked, not `held_back`; out players may:
+    an IR slot is not on the roster), in search order."""
     values = [value for pid in team.roster if (value := know.by_id[pid]).position in SKILL
-              and not rs.retrade_locked(state, pid)]
+              and not rs.retrade_locked(state, pid) and pid not in held_back]
     return sorted(values, key=lambda v: _order(v, look))[:TOP_SKILL]
 
 
@@ -76,8 +78,9 @@ def _candidates(state: State, settings: Settings, know: Knowledge, sender: Team,
     def look(team: Team, other: Team) -> str:
         return "sell" if team.persona == "shark" and not team.is_user else "buy" if other.persona == "shark" else ""
 
-    mine = _packages(_tradable(state, know, sender, look(sender, receiver)))
-    theirs = _packages(_tradable(state, know, receiver, look(receiver, sender)))
+    shopped = frozenset() if sender.is_user else frozenset(shop.player_id for shop in state.shops)   # the user's to buy
+    mine = _packages(_tradable(state, know, sender, look(sender, receiver), shopped))
+    theirs = _packages(_tradable(state, know, receiver, look(receiver, sender), shopped))
     found = []
     for give in mine:
         for get in theirs:

@@ -365,10 +365,11 @@ def rostered(state: State) -> frozenset[int]:
 
 
 def with_team(state: State, team: Team) -> State:
-    """The state with that team replaced (matched by id)."""
+    """The state with that team replaced (matched by id); a shop whose player left its active roster closes."""
     if all(t.id != team.id for t in state.teams):
         raise ValueError(f"No team {team.id} in this league.")
-    return replace(state, teams=tuple(team if t.id == team.id else t for t in state.teams))
+    shops = tuple(shop for shop in state.shops if shop.team_id != team.id or shop.player_id in team.roster)
+    return replace(state, teams=tuple(team if t.id == team.id else t for t in state.teams), shops=shops)
 
 
 def add_event(state: State, kind: str, team_id: int | None, text: str, player_ids: Sequence[int] = ()) -> State:
@@ -386,10 +387,10 @@ def trades_open(state: State, settings: Settings) -> bool:
 
 
 def markdowns(state: State, team_id: int) -> dict[int, float]:
-    """{player id: discount} for the players this CPU is shopping to the user this week (and still holds)."""
+    """{player id: discount} for the players this CPU is shopping to the user this week (on his active roster)."""
     owner = team(state, team_id)
     return {shop.player_id: shop.discount for shop in state.shops
-            if shop.team_id == team_id and shop.week == state.week and shop.player_id in held(owner)}
+            if shop.team_id == team_id and shop.week == state.week and shop.player_id in owner.roster}
 
 
 def faab_left(state: State, team_id: int) -> int:
