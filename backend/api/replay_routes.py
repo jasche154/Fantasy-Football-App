@@ -75,7 +75,8 @@ def _season_data(session: Session, settings: Settings, league_id: int) -> Season
 
 
 def _game(row: ReplayLeague, settings: Settings, state: State, data: SeasonData) -> views.Game:
-    return views.Game(row.id, row.name, settings, state, data, row.updated_at.isoformat(), row.seed)
+    return views.Game(row.id, row.name, settings, state, data, row.updated_at.isoformat(), row.seed,
+                      row.created_at.isoformat())
 
 
 def open_game(session: Session, game_id: int) -> views.Game:

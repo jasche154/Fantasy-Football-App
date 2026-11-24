@@ -95,12 +95,13 @@ GET  /games/{id}                  Summary
                teams: TeamRef[], on_the_clock: team_id | null,
                next_action: {step: pick | wednesday | play | done, label},
                record: Record, matchup: {week, playoff, label, you: Side, opponent: Side} | null,
-               pending: {claims, offers}, champion: TeamRef | null, updated_at,
+               pending: {claims, offers}, champion: TeamRef | null, created_at, updated_at,
                ir_blocked: PlayerRef[], has_injuries: bool, trades_open: bool, rank_source: experts | model,
                kind: replay | live | future, sim_from: week | null, start_week, chat: int}
       kind, sim_from  a past season replayed, or a simulated one: its NFL weeks from sim_from on are simulated
       start_week    the first week the league plays (1, or later for a live league started "now")
       chat          lines in the league chat so far (GET .../chat total), for an unread dot
+      created_at    when the league was made (with its id, names this league even after an id is reused)
       ir_blocked    the USER's IR players who lost their tag (non-empty = adds, claims and trades refused)
       has_injuries  injury tags are loaded for this season
       trades_open   trades can be made now: through the deadline week, and its waiver phase (the deadline
@@ -212,6 +213,7 @@ class Game:
     full_season: SeasonData                 # never read directly: use `data` and `know_at`
     updated_at: str | None = None
     seed: int = 0                           # the game's seed (injury-news noise); never shown
+    created_at: str | None = None           # when the league was made: with its id, it names the league for good
 
     @property
     def played(self) -> int:
@@ -250,6 +252,11 @@ class Game:
         return rs.user_team(self.state)
 
     @cached_property
+    def moods(self) -> dict[int, str | None]:
+        """Each CPU's mood line now (replay_mood.mood_line), worked out once per request: team_ref asks per row."""
+        return {team.id: replay_mood.mood_line(self.know, team) for team in self.state.teams if not team.is_user}
+
+    @cached_property
     def table(self) -> list[dict]:
         """replay_season.final_standings: the regular-season rows in final (or seed) order, with "place"."""
         return replay_season.final_standings(self.state, self.settings)
@@ -260,7 +267,7 @@ class Game:
 def team_ref(game: Game, team: Team) -> dict:
     """tendency and mood: hints at a CPU's (hidden) persona and feelings, once it has played enough league weeks."""
     tendency = None if team.is_user else replay_personas.tendency(team.persona, game.weeks_played)
-    mood = None if tendency is None else replay_mood.mood_line(game.know, team)
+    mood = None if tendency is None else game.moods.get(team.id)
     return {"team_id": team.id, "name": team.name, "is_user": team.is_user, "tendency": tendency, "mood": mood}
 
 
@@ -492,7 +499,8 @@ def summary(game: Game) -> dict:
         "on_the_clock": replay_draft.on_the_clock(state, settings), "next_action": _next_action(game),
         "record": record(game, game.user.id), "matchup": _headline(game),
         "pending": {"claims": len(state.claims), "offers": len(replay_trades.offers_for_user(state))},
-        "champion": team_ref(game, champion) if champion else None, "updated_at": game.updated_at,
+        "champion": team_ref(game, champion) if champion else None,
+        "created_at": game.created_at, "updated_at": game.updated_at,
         "ir_blocked": refs(game, replay_ir.ineligible(state, game.know, game.user.id)),
         "has_injuries": game.has_injuries,
         "trades_open": state.phase in replay_trades.TRADE_PHASES and rs.trades_open(state, settings),

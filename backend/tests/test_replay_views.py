@@ -28,7 +28,7 @@ SIDE = {"team_id", "name", "is_user", "tendency", "mood", "projected", "points",
 RECORD = {"wins", "losses", "ties", "rank", "points_for", "points_against", "place"}
 PLAYER_REF = {"id", "name", "position", "team", "injury", "hype"}
 SUMMARY = {"id", "name", "season", "phase", "week", "end_week", "user_team_id", "settings", "teams", "on_the_clock",
-           "next_action", "record", "matchup", "pending", "champion", "updated_at", "ir_blocked", "has_injuries",
+           "next_action", "record", "matchup", "pending", "champion", "created_at", "updated_at", "ir_blocked", "has_injuries",
            "trades_open", "rank_source", "kind", "sim_from", "start_week", "chat"}
 SETTING_KEYS = {"teams", "scoring", "starters", "bench", "roster_size", "draft_slot", "waiver_mode", "difficulty",
                 "regular_season_weeks", "playoff_teams", "trade_deadline_week", "scoring_rules", "ir_slots"}
@@ -176,6 +176,24 @@ def test_a_cpus_tendency_shows_after_three_weeks_and_its_persona_never_does():
     assert all(team["tendency"] is None for team in early["teams"])
     assert [team["tendency"] is None for team in later["teams"]] == [team["is_user"] for team in later["teams"]]
     assert not any(persona in json.dumps(views.summary(game(at(4)))) for persona in personas - {"balanced"})
+
+
+def test_moods_are_worked_out_once_per_team_per_request(monkeypatch):
+    """team_ref names a CPU's mood on every row: the trades, chat and activity views ask once per row, so the
+    Game works each team's mood out once."""
+    calls: list[int] = []
+    real = views.replay_mood.mood_line
+    monkeypatch.setattr(views.replay_mood, "mood_line", lambda know, team: (calls.append(team.id), real(know, team))[1])
+    shown = game(at(8))
+    for screen in (views.summary, league.trades, league.activity, league.chat, league.standings):
+        screen(shown)
+
+    assert calls and len(calls) == len(set(calls))
+
+
+def test_the_summary_carries_the_leagues_creation_stamp():
+    shown = replace(game(at(2)), created_at="2026-01-01T00:00:00")
+    assert views.summary(shown)["created_at"] == "2026-01-01T00:00:00"
 
 
 def test_a_player_row_carries_his_injury_news_only_while_a_report_exists():
