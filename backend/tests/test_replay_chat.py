@@ -172,6 +172,28 @@ def test_a_shopped_player_in_an_offer_reads_as_worry():
     assert knowledge(state).by_id[pid].name in after.offers[0].message
 
 
+def test_a_shop_offer_that_also_sends_another_worrying_player_names_the_shopped_one():
+    from services import replay_mood
+    state = start()
+    user = rs.user_team(state)
+    cpu = replace(next(t for t in state.teams if not t.is_user), persona="panicky")
+    state = rs.with_team(state, cpu)
+    know = knowledge(state)
+    shopped, other = cpu.roster[1], cpu.roster[0]
+    worried = replace(know.by_id[other], form_chart=-0.5 * know.by_id[other].chart, shock_chart=0.0, out=False,
+                      injury=None, healthy_chart=max(know.by_id[other].healthy_chart, replay_mood.FEEL_MIN_CHART))
+    know = replace(know, by_id=MappingProxyType({**know.by_id, other: worried}))
+    played = DATA.as_of(state.week)
+    assert replay_mood.feeling(worried, "panicky").kind == "worried"
+    assert not replay_mood.might_be_hurt(know, played, other, state.week - 1)      # he could be named too
+    state = replace(state, shops=(rs.Shop(cpu.id, shopped, state.week, 0.1),))
+    offer = rs.Offer(61, state.week, cpu.id, user.id, (other, shopped), (user.roster[1],), "pending")
+    after = chat.label_offers(replace(state, offers=(offer,)), know, seed=2, played=played)
+
+    assert after.chat[-1].kind == "offer_worried" and after.chat[-1].player_ids == (shopped,)
+    assert know.by_id[shopped].name in after.offers[0].message
+
+
 def test_an_old_save_without_chat_shops_or_offer_messages_loads():
     state = season(0)[2]
     cpus = [t for t in state.teams if not t.is_user]

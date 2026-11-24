@@ -76,8 +76,9 @@ MAX_WEEK_LINES = 5
 MAX_REACTIONS = 2
 REACT_CHANCE = {"cpu": 0.35, "user": 0.75}      # a trade between two CPUs / with the user
 POST_CHANCE = {"champion": 1.0, "runner_up": 1.0, "clinch": 0.9, "eliminated": 0.6, "upset": 0.7,
-               "streak_win": 0.45, "streak_loss": 0.45}
-OTHER_CHANCE = 0.3              # boom, bust and plain results
+               "streak_win": 0.45, "streak_loss": 0.45,
+               "boom": 0.5, "bust": 0.5}    # real 2022-25 leagues: a boom or bust in ~64% of weeks (0.3: 50%)
+OTHER_CHANCE = 0.3              # plain results
 TO_OPPONENT = ("champion", "runner_up", "upset", "blowout_win", "close_win", "close_loss", "blowout_loss")
 TO_USER_PRIORITY, OTHER_PRIORITY = 0, 4         # his line to the user is never cut, not even by his own news
 RARE = MappingProxyType({"champion": 1, "runner_up": 1, "clinch": 2, "eliminated": 3})   # then these, under the cap
@@ -345,8 +346,8 @@ def _offer_kind(state: State, know: Knowledge, played: SeasonData, offer: Offer)
     worried = [pid for pid in offer.give if pid in shopped or (
         (felt := replay_mood.feeling(know.by_id[pid], cpu.persona, cpu.hype)) and felt.kind == "worried"
         and not might_be_hurt(know, played, pid, state.week - 1))]
-    if worried:
-        return "offer_worried", worried[0]
+    if worried:     # the player he is shopping first, so the offer names the one his shop message did
+        return "offer_worried", min(worried, key=lambda pid: pid not in shopped)
     if offer.counter_to is not None:
         return "offer_counter", None
     loved = [pid for pid in offer.get if (felt := replay_mood.feeling(know.by_id[pid], cpu.persona, cpu.hype))
