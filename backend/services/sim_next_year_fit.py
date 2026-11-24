@@ -1,6 +1,6 @@
 """Simulated seasons: fit sim_next_year.json (the offseason model, services/sim_next_year.py) from real seasons.
 
-    python -m services.sim_next_year_fit --fit [--seasons 2019-2025] [--dump rows.json]
+    python -m services.sim_next_year_fit --fit [--seasons 2019-2025] [--dump rows.json] [--refresh]
 
 For each season S, the public belief at the end of S-1 (sim_world.estimate over the whole season, with the
 belief at the end of S-2 as its prior when stored, as sim_setup builds a future season) and at the end of S
@@ -33,7 +33,8 @@ belief at the end of S-2 as its prior when stored, as sim_setup builds a future 
   premium step reads the model just fitted from memory (`_in_use`), so an interrupted run leaves the file alone.
 Experience = seasons through S-1 since his draft year (nflverse), else since his first database season.
 
-Needs the network (nflreadpy) and the database; never runs in the app.
+Needs the database, and the network (nflreadpy) for the draft picks until they are cached (draft_picks,
+backend/data/cache/; --refresh downloads them again); never runs in the app.
 """
 import argparse
 import json
@@ -47,7 +48,6 @@ from pathlib import Path
 import numpy as np
 from sqlalchemy import select
 
-from integrations.weekly_sources import TEAM_ALIASES
 from services import replay_pool, sim_next_year, sim_world
 from services.replay_adp_format import TWO_QB
 from services.sim_metrics import qb_starts
@@ -55,6 +55,7 @@ from services.replay_pool import SeasonData
 from services.sim_next_year import PATH, VOLUME_MIN, premium_at, volume
 from services.sim_offseason import Rookie
 from services.sim_schedule import TEAMS
+from services.sim_draft_picks import draft_picks
 from services.sim_eval import season_end
 from services.sim_setup import first_seasons
 
@@ -78,16 +79,6 @@ PREMIUM_MISSING = 300.0                         # premium fit: a rookie off an A
 # with the pick, fitting the few late picks real drafters took, and priced 3rd-round WRs above the first pick)
 PREMIUM_GRID = (np.linspace(-1.0, 1.5, 51), np.linspace(-0.3, 0.0, 7))
 PREMIUM_ROUNDS = 2
-
-
-def draft_picks(seasons: Iterable[int]) -> list[dict]:
-    """nflverse draft picks: season, pick, team (schedule code), gsis_id, position, name, college."""
-    import nflreadpy as nfl
-
-    rows = nfl.load_draft_picks(sorted(set(seasons))).to_dicts()
-    return [{"season": int(r["season"]), "pick": int(r["pick"]), "team": TEAM_ALIASES.get(r["team"], r["team"]),
-             "gsis_id": r["gsis_id"], "position": r["position"], "name": r["pfr_player_name"],
-             "college": r.get("college") or "-"} for r in rows if r.get("gsis_id")]
 
 
 def _ids(session, gsis: Iterable[str]) -> dict[str, int]:
@@ -347,6 +338,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--fit", action="store_true", help="measure and write sim_next_year.json")
     parser.add_argument("--seasons", default="2019-2025")
     parser.add_argument("--dump", help="also write the raw observations here (JSON)")
+    parser.add_argument("--refresh", action="store_true", help="download the draft picks again (else cached)")
     args = parser.parse_args(argv)
     if not args.fit:
         parser.print_help()
@@ -354,6 +346,8 @@ def main(argv: list[str] | None = None) -> None:
     from database.db import SessionLocal
 
     seasons = _seasons(args.seasons)
+    if args.refresh:
+        draft_picks(range(DRAFT_HISTORY_FROM, max(seasons) + 1), refresh=True)
     with SessionLocal() as session:
         rows = observations(session, seasons)
         if args.dump:

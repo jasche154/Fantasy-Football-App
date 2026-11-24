@@ -3,14 +3,15 @@
     python -m services.sim_eval --fit [--seasons 2021-2025]        # measure sim_params.json (sim_fit)
     python -m services.sim_eval [--seasons 2021-2025] [--seeds 3] [--mode mid|full|both]
                                 [--set talent.role_sd=0.4 ...] [--save-tuned] [--out report.json]
+                                [--workers N] [--refresh]
 
 - mid: base = the real season as known before week MID_WEEK (its as_of copy plus the full schedule); weeks
   MID_WEEK..last are simulated and compared with the real ones (sim_metrics.weekly). This is out of sample:
   the simulation never sees the weeks it is judged on.
 - full: season S built exactly the way a future season is (sim_setup._future_base): the belief at the end of
   S-1 (estimate, all of it, on the belief at the end of S-2 as its prior) through sim_next_year.next_year with
-  S's real rookies (nflverse draft picks of year S, landing on the drafting team; needs the network) and S's
-  real veteran moves (`real_moves`), S's real schedule, the market's ADP leaning on S-1's track record and
+  S's real rookies (nflverse draft picks of year S, landing on the drafting team; cached, see below) and
+  S's real veteran moves (`real_moves`), S's real schedule, the market's ADP leaning on S-1's track record and
   paying the rookie premium; the whole season is simulated and compared with the real one (sim_metrics.season
   with its leaderboard, weekly, rookies, how our ADP agrees with S's real ADP, all of it and the rookies':
   ours priced in the real list's format, PPR; and how the preseason experts agree with the ADP).
@@ -18,15 +19,24 @@
 - --set overrides a sim_params.json value for this run (section.key=value, JSON value); --save-tuned writes
   the overrides into the file's `tuned` section, which is how tuned constants get there.
 
+- --workers: each (mode, season) runs in its own process (default: one per CPU, at most one per case; 1 = all
+  in this process, for debugging); the report is the same either way (`run`). The draft picks full mode needs
+  are cached in backend/data/cache/ (sim_draft_picks): the network is needed the first time, or
+  with --refresh.
+
 Read-only on the database; the report is logged (and written as JSON with --out).
 """
 import argparse
 import json
 import logging
 import math
+import os
 import time
 from collections import defaultdict
+from collections.abc import Callable
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
 
 from services import replay_pool, sim_fit, sim_market, sim_metrics, sim_season, sim_world
@@ -119,10 +129,10 @@ def _mean(rows: list[dict[str, float]]) -> dict[str, float]:
     return {key: sum(v) / len(v) for key, v in sums.items()}
 
 
-def _offseason(session, seasons: list[int]) -> dict:
+def _offseason(session, seasons: list[int], refresh: bool = False) -> dict:
     from services import sim_next_year_fit as fit, sim_setup
 
-    return {"picks": fit.draft_picks(range(fit.DRAFT_HISTORY_FROM, max(seasons) + 1)),
+    return {"picks": fit.draft_picks(range(fit.DRAFT_HISTORY_FROM, max(seasons) + 1), refresh),
             "first": sim_setup.first_seasons(session)}
 
 
@@ -171,25 +181,62 @@ def apply_overrides(pairs: list[str]) -> dict[str, dict]:
     return dict(overrides)
 
 
-def run(seasons: list[int], seeds: list[int], mode: str) -> dict:
+def _start(overrides: dict[str, dict], offseason: dict) -> None:
+    """A worker process's setup (spawned: nothing is inherited): logging, the --set overrides, the offseason
+    inputs and its own database session."""
     from database.db import SessionLocal
 
-    report = {}
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    for section, values in overrides.items():
+        for key, value in values.items():
+            sim_world.override(section, key, value)
+    from multiprocessing.util import Finalize
+
+    session = SessionLocal()
+    Finalize(None, session.close, exitpriority=10)  # closed at worker exit, under fork (Linux) and spawn alike
+    _worker.update(offseason=offseason, session=session)
+
+
+_worker: dict = {}          # a worker process's offseason inputs and session (_start)
+
+
+def _case(case: tuple[str, int], seeds: list[int], session=None, offseason: dict | None = None) -> tuple[dict, dict]:
+    """(real, sim) of one (mode, season): every seed of it in one process, so its seasons load once."""
+    kind, season = case
+    if session is None:                             # in a worker: its own (_start)
+        session, offseason = _worker["session"], _worker["offseason"]
+    started = time.perf_counter()
+    result = _mid(session, season, seeds) if kind == "mid" else _full(session, season, seeds, offseason)
+    log.info("%s %s: %d seeds in %.1fs", kind, season, len(seeds), time.perf_counter() - started)
+    return result
+
+
+def run(seasons: list[int], seeds: list[int], mode: str, workers: int = 1, overrides: dict | None = None,
+        refresh: bool = False, case: Callable[..., tuple[dict, dict]] = _case) -> dict:
+    """The report. Each (mode, season) is one case; with workers > 1 the cases run in a process pool (each worker
+    gets the overrides and offseason inputs explicitly and opens its own session, see _start), full cases first
+    as they take longest. Results are gathered by case and averaged in the fixed mode / season / seed order, never
+    in completion order, so the report is identical to the serial one (workers = 1, all in this process). `case`
+    (a module-level function, so a worker can import it) is swappable for tests."""
+    from database.db import SessionLocal
+
+    kinds = [kind for kind in ("mid", "full") if mode in (kind, "both")]
+    cases = [(kind, season) for kind in reversed(kinds) for season in seasons]
+    workers = min(workers, len(cases))
     with SessionLocal() as session:
-        offseason = _offseason(session, seasons) if mode in ("full", "both") else {}
-        for kind, runner in (("mid", _mid), ("full", lambda *a: _full(*a, offseason))):
-            if mode not in (kind, "both"):
-                continue
-            reals, sims = [], []
-            for season in seasons:
-                started = time.perf_counter()
-                real, sim = runner(session, season, seeds)
-                reals.append(real)
-                sims.append(sim)
-                log.info("%s %s: %d seeds in %.1fs", kind, season, len(seeds), time.perf_counter() - started)
-            report[kind] = {"real": _mean(reals), "sim": _mean(sims)}
-            for line in _table(f"{kind} ({seasons[0]}-{seasons[-1]}, {len(seeds)} seeds)", *report[kind].values()):
-                log.info(line)
+        offseason = _offseason(session, seasons, refresh) if "full" in kinds else {}
+        if workers <= 1:
+            results = {key: case(key, seeds, session, offseason) for key in cases}
+    if workers > 1:
+        with ProcessPoolExecutor(workers, initializer=_start, initargs=(overrides or {}, offseason)) as pool:
+            # a case that fails raises here; map's own iterator cancels the queued ones
+            results = dict(zip(cases, pool.map(partial(case, seeds=seeds), cases)))
+    report = {}
+    for kind in kinds:
+        pairs = [results[(kind, season)] for season in seasons]
+        report[kind] = {"real": _mean([real for real, _ in pairs]), "sim": _mean([sim for _, sim in pairs])}
+        for line in _table(f"{kind} ({seasons[0]}-{seasons[-1]}, {len(seeds)} seeds)", *report[kind].values()):
+            log.info(line)
     return report
 
 
@@ -203,6 +250,9 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--set", action="append", default=[], help="section.key=value override (JSON value)")
     parser.add_argument("--save-tuned", action="store_true", help="write the --set overrides as tuned values")
     parser.add_argument("--out", help="write the report as JSON here")
+    parser.add_argument("--workers", type=int, default=os.cpu_count() or 1,
+                        help="processes for the (mode, season) cases (default: one per CPU; 1 = serial)")
+    parser.add_argument("--refresh", action="store_true", help="download the draft picks again (else cached)")
     args = parser.parse_args(argv)
     seasons = _seasons(args.seasons)
     if args.fit:
@@ -219,7 +269,7 @@ def main(argv: list[str] | None = None) -> None:
             tuned.setdefault(section, {}).update(values)
         sim_fit.write(stored, tuned)
         return
-    report = run(seasons, list(range(1, args.seeds + 1)), args.mode)
+    report = run(seasons, list(range(1, args.seeds + 1)), args.mode, args.workers, overrides, args.refresh)
     if args.out:
         Path(args.out).write_text(json.dumps(report, indent=1))
 
