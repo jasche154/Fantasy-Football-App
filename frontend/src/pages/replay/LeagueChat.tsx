@@ -32,7 +32,9 @@ export function LeagueChat({ game, version, openPlayer }: ReplayViewProps) {
     if (!press || press.version !== version || press.offset !== shownOffset) return;
     pressed.current = null;
     const [button, other] = press.older ? [olderRef, newerRef] : [newerRef, olderRef];
-    if (button.current?.disabled) other.current?.focus();
+    // only when focus is still where the press left it: never pull it from a control the user moved to meanwhile
+    const active = document.activeElement;
+    if (button.current?.disabled && (active === button.current || active === document.body)) other.current?.focus();
   }, [shownOffset, version]);
   const turn = (next: number, older: boolean) => {
     pressed.current = { version, offset: next, older };

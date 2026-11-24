@@ -1056,8 +1056,8 @@ that week's games on; only scoring a week reads its real points.
   result itself (close under 9% of the median team score, a blowout from 22%: about 10 and 25 points in a
   half-PPR league, more in a high-scoring one). The final's champion and runner-up don't talk margins after
   a tied final. Your opponent talks to you (and also posts his clinching or elimination when that game
-  settles it); the others post now and then, at most 5 of these after-the-games lines a week, the rare
-  news kept first (title, clinching, elimination, then your opponent's line, then the rest in a seeded order),
+  settles it); the others post now and then, at most 5 of these after-the-games lines a week: your
+  opponent's line to you is always kept, then the rare news (title, clinching, elimination), then the rest in a seeded order,
   and a line that would run past 140 characters with long names gives way to one that fits. A third manager may react to a
   trade (at most 2 a week) and a shopping CPU messages you (at most 2 shops are open at once); these come on
   top of the 5, so a week can show up to 9 lines. Every CPU offer carries a one-line reason in

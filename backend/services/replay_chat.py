@@ -19,8 +19,8 @@ When lines are posted (replay_game calls these; each reads only what is known wh
   BLOWOUT_SHARE, and a boom needs BOOM_SHARE of it as well as BOOM_RATE x his rate (about 10, 25 and 25
   points in a half-PPR league). The user's opponent talks to the user (a kind that names him, by the nearer
   margin when the game was in between) and may also post his clinch / elimination; the others post with
-  POST_CHANCE. At most MAX_WEEK_LINES a week from here, rare news first (`priority`: champion / runner_up,
-  clinch, eliminated, then lines to the user, then the rest), ties in a seeded order so the same teams don't
+  POST_CHANCE. At most MAX_WEEK_LINES a week from here (`priority`: the opponent's line to the user is always
+  kept, then the rare news: champion / runner_up, clinch, eliminated; then the rest), ties in a seeded order so the same teams don't
   always get the slots. Shop messages and trade reactions come on top of the cap. Week 1 has no bust lines
   (no earlier snap share to compare with, so everyone `might_be_hurt`).
 - `shop_lines`: a worried manager's direct message when he starts shopping a player to the user (replay_mood).
@@ -78,8 +78,8 @@ POST_CHANCE = {"champion": 1.0, "runner_up": 1.0, "clinch": 0.9, "eliminated": 0
                "streak_win": 0.45, "streak_loss": 0.45}
 OTHER_CHANCE = 0.3              # boom, bust and plain results
 TO_OPPONENT = ("champion", "runner_up", "upset", "blowout_win", "close_win", "close_loss", "blowout_loss")
-RARE = MappingProxyType({"champion": 0, "runner_up": 0, "clinch": 1, "eliminated": 2})   # kept first under the cap
-TO_USER_PRIORITY, OTHER_PRIORITY = 3, 4
+TO_USER_PRIORITY, OTHER_PRIORITY = 0, 4         # his line to the user is never cut, not even by his own news
+RARE = MappingProxyType({"champion": 1, "runner_up": 1, "clinch": 2, "eliminated": 3})   # then these, under the cap
 
 Candidate = tuple[int, Team, str, dict, tuple[int, ...]]        # (priority, team, kind, values, player ids)
 
@@ -246,7 +246,7 @@ def _big_kinds(week: _Week, pair: tuple[int, int], me_id: int, you_id: int, valu
 
 def priority(kind: str, to_user: bool) -> int:
     """Lower is kept first under the weekly cap."""
-    return RARE.get(kind, TO_USER_PRIORITY if to_user else OTHER_PRIORITY)
+    return TO_USER_PRIORITY if to_user else RARE.get(kind, OTHER_PRIORITY)
 
 
 def _candidates(week: _Week, pair: tuple[int, int], me_id: int, seed: int) -> list[Candidate]:

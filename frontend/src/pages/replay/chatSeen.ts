@@ -15,7 +15,10 @@ function changed(): void {
   window.dispatchEvent(new Event(EVENT));
 }
 
+const unsaved = new Set<number>();            // games whose last write failed (quota): memory is newer than storage
+
 export function readChatSeen(gameId: number): number {
+  if (unsaved.has(gameId)) return memory.get(gameId) ?? 0;
   try {
     const raw = Number(window.localStorage.getItem(key(gameId)));
     return Number.isFinite(raw) && raw > 0 ? raw : 0;
@@ -30,8 +33,9 @@ export function markChatSeen(gameId: number, count: number): void {
   memory.set(gameId, count);
   try {
     window.localStorage.setItem(key(gameId), String(count));
+    unsaved.delete(gameId);
   } catch {
-    // storage blocked: memory only
+    unsaved.add(gameId);                          // readable but not writable: this tab trusts its memory
   }
   changed();
 }
@@ -39,6 +43,7 @@ export function markChatSeen(gameId: number, count: number): void {
 /** The league is gone: its id may be reused by the next one. */
 export function forgetChatSeen(gameId: number): void {
   memory.delete(gameId);
+  unsaved.delete(gameId);
   try {
     window.localStorage.removeItem(key(gameId));
   } catch {

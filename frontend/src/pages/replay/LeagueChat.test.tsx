@@ -100,6 +100,20 @@ describe('GameNav unread dot', () => {
     }
   });
 
+  it('clears the dot when storage can be read but not written (a full quota)', () => {
+    const { setItem } = window.localStorage;
+    const full = GAME_ID + 600;                 // a league no other test has marked
+    window.localStorage.setItem = () => { throw new Error('quota'); };
+    try {
+      renderWithProviders(<GameNav game={summary({ id: full, chat: 7 })} view="team" />);
+      expect(screen.getByText('(new messages)')).toBeInTheDocument();
+      act(() => markChatSeen(full, 7));
+      expect(screen.queryByText('(new messages)')).not.toBeInTheDocument();
+    } finally {
+      window.localStorage.setItem = setItem;
+    }
+  });
+
   it("shows the dot in a new league that reuses a deleted league's id", () => {
     window.localStorage.setItem(`replay-chat-seen:${GAME_ID}`, '140');
     renderWithProviders(<GameNav game={summary({ chat: 3 })} view="team" />);

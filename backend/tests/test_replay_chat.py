@@ -56,10 +56,9 @@ def test_the_users_opponent_always_talks_to_him_and_a_week_is_capped():
             user = rs.user_team(state).id
             opponent = next(b if a == user else a for a, b in result.matchups if user in (a, b))
             week = lines_of(state, result.week)
-            rare = sum(chat.priority(c.kind, False) < chat.TO_USER_PRIORITY for c in week)
             assert 1 <= len(week) <= chat.MAX_WEEK_LINES
-            assert [(c.team_id, c.to_team) for c in week if c.to_team is not None] == [(opponent, user)] or (
-                rare == chat.MAX_WEEK_LINES)                    # only rare news can crowd him out
+            # nothing crowds him out, not even a week full of rare news (his own included)
+            assert [(c.team_id, c.to_team) for c in week if c.to_team is not None] == [(opponent, user)]
             assert all(not rs.team(state, c.team_id).is_user for c in week)
 
 
@@ -215,7 +214,8 @@ def test_the_cap_keeps_rare_news_first_and_shares_the_rest_fairly():
             assert ranks == sorted(ranks)
             opponent = next(a if b == user else b for a, b in state.results[-1].matchups
                             if (user := rs.user_team(state).id) in (a, b))
-            assert [chat.priority(kind, team.id == opponent) for _, team, kind, _, _ in found] == ranks
+            assert [chat.priority(kind, team.id == opponent and kind in chat.TO_OPPONENT)
+                    for _, team, kind, _, _ in found] == ranks
             rest = [team.id for rank, team, *_ in found if rank == chat.OTHER_PRIORITY]
             if len(rest) >= 2:
                 firsts.append(rest[0])
@@ -238,9 +238,7 @@ def test_rare_news_is_never_cut_for_a_plain_line(monkeypatch):
         week = state.results[-1].week
         quiet = replace(state, chat=tuple(c for c in state.chat if c.week < week))
         posted = {(c.team_id, c.kind) for c in talk(quiet, seed).chat if c.week == week}
-        opponent = next(a if b == user else b for a, b in state.results[-1].matchups
-                        if (user := rs.user_team(state).id) in (a, b))
-        ranks = {(team.id, kind): chat.priority(kind, team.id == opponent) for _, team, kind, _, _ in candidates(state, seed)}
+        ranks = {(team.id, kind): rank for rank, team, kind, _, _ in candidates(state, seed)}
         if len(ranks) <= chat.MAX_WEEK_LINES:
             continue
         crowded += 1
@@ -264,7 +262,9 @@ def test_the_users_opponent_posts_his_playoff_news_as_well_as_his_line_to_the_us
     assert [(c.kind, c.to_team) for c in posted if c.team_id == opponent and c.kind == news] == [(news, None)]
     assert [c.team_id for c in posted if c.to_team == user] == [opponent]
     assert len(posted) <= chat.MAX_WEEK_LINES
-    assert posted[0].kind == news                                   # rare news first
+    # his line to the user is kept ahead of everything, then the rare news: his own news never crowds it out
+    assert (posted[0].team_id, posted[0].to_team) == (opponent, user)
+    assert posted[1].kind == news
 
 
 # ---------------- never mocking an injury ----------------
