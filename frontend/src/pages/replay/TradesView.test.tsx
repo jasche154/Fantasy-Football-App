@@ -19,6 +19,8 @@ const RESPOND_PATH = `${TRADES_PATH}/offers/61/respond`;
 /** The partner the builder starts on (the first CPU team) and the one that made the offer. */
 const GHOSTS = teamRef(1);
 const BRIGADE = teamRef(2);
+/** A player on neither the user's roster nor a CPU roster here (traded or dropped elsewhere since). */
+const WADDLE = playerRef(190, 'Jaylen Waddle', 'WR', 'MIA');
 
 function verdict(overrides: Partial<ReplayVerdict> = {}): ReplayVerdict {
   return {
@@ -512,9 +514,56 @@ describe('TradesView manager voices', () => {
     expect(await screen.findByRole('checkbox', { name: 'Get Raheem Mostert' })).not.toBeChecked();
   });
 
+  it("says nothing about the linked player once the user accepts that manager's offer for him", async () => {
+    let accepted = false;
+    const roster = ({ url }: MockRequest): MockReply => {
+      const teamId = Number(url.searchParams.get('team_id'));
+      const mine = team();
+      if (teamId === USER_TEAM_ID) {
+        return json(accepted ? { ...mine, results: [...mine.results.filter((row) => row.player.id !== ETIENNE.id), rosterRow(MOSTERT, 'RB')] } : mine);
+      }
+      const rows = [rosterRow(MOSTERT, 'RB', { value: 35 }), rosterRow(COLLINS, 'WR', { trade_locked: true })];
+      return json(team({ team: teamRef(teamId), results: accepted ? rows.slice(1) : rows }));
+    };
+    const accept = () => { accepted = true; return json({ ...actionResult(), accepted: true, expired: false, message: null, verdict: null }); };
+    mockFetch([META_ROUTE, { method: 'POST', path: RESPOND_PATH, reply: accept },
+      { path: TRADES_PATH, reply: () => json(trades({ offers: accepted ? [] : [offer()] })) }, { path: `${PATH}/team`, reply: roster }]);
+    function Hub() {
+      return <TradesView {...viewProps(useTestHub())} />;
+    }
+    renderWithProviders(<Hub />, { hash: `#/play?game=${GAME_ID}&view=trades&with=2&want=${MOSTERT.id}` });
+    const user = userEvent.setup();
+    expect(await screen.findByRole('checkbox', { name: 'Get Raheem Mostert' })).toBeChecked();
+    await user.click(await screen.findByRole('button', { name: 'Accept offer from Blitz Brigade' }));
+
+    expect(await screen.findByText('Trade executed with Blitz Brigade.')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('checkbox', { name: 'Get Raheem Mostert' })).not.toBeInTheDocument());
+    expect(await screen.findByRole('checkbox', { name: 'Give Raheem Mostert' })).toBeInTheDocument();
+    expect(screen.queryByText(/no longer on Blitz Brigade's roster/)).not.toBeInTheDocument();
+  });
+
+  it("keeps the linked player's notice after a trade with another manager", async () => {
+    const executed = { ...actionResult(), verdict: verdict(), executed: true };
+    const { user } = renderTrades(trades(), [
+      { method: 'POST', path: EVALUATE_PATH, reply: json({ verdict: verdict() }) },
+      { method: 'POST', path: PROPOSE_PATH, reply: json(executed) },
+    ], { hash: `#/play?game=${GAME_ID}&view=trades&with=2&want=${WADDLE.id}` });
+    expect(await screen.findByText(/no longer on Blitz Brigade's roster/)).toBeInTheDocument();
+    const partner = screen.getByRole('combobox', { name: 'Trade with' });
+
+    await user.selectOptions(partner, 'Gridiron Ghosts');
+    await tickBothSides(user);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Propose trade' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Propose trade' }));
+    expect(await screen.findByText('Trade executed with Gridiron Ghosts.')).toBeInTheDocument();
+    await user.selectOptions(partner, 'Blitz Brigade');
+
+    expect(await screen.findByText(/no longer on Blitz Brigade's roster/)).toBeInTheDocument();
+  });
+
   it('says so when the shopped player is no longer on that roster', async () => {
-    const { user } = renderTrades(trades({ shops: [{ team: BRIGADE, player: OLAVE, message: null }] }));
-    await user.click(await screen.findByRole('link', { name: /Make an offer to Blitz Brigade for Chris Olave/ }));
+    const { user } = renderTrades(trades({ shops: [{ team: BRIGADE, player: WADDLE, message: null }] }));
+    await user.click(await screen.findByRole('link', { name: /Make an offer to Blitz Brigade for Jaylen Waddle/ }));
 
     expect(await screen.findByText(/no longer on Blitz Brigade's roster/)).toBeInTheDocument();
   });

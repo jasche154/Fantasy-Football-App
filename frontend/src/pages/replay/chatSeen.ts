@@ -42,7 +42,8 @@ export function readChatSeen(league: ChatLeague): number {
 /** The user has seen `count` lines (the chat's total as just loaded). */
 export function markChatSeen(league: ChatLeague, count: number): void {
   const value = `${league.created_at}:${count}`;
-  if (readChatSeen(league) === count && memory.get(league.id) === value) return;
+  // After a failed write memory already holds it: try storage again, or a reload would bring the dot back.
+  if (!unsaved.has(league.id) && readChatSeen(league) === count && memory.get(league.id) === value) return;
   memory.set(league.id, value);
   try {
     window.localStorage.setItem(key(league.id), value);

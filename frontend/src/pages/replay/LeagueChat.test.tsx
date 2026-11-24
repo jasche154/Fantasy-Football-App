@@ -1,6 +1,6 @@
 import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ReplayChat, ReplayPage } from '../../api/types';
 import { AppProviders } from '../../App';
 import { json, mockFetch, type MockRoute } from '../../test/mockFetch';
@@ -89,9 +89,8 @@ describe('GameNav unread dot', () => {
   });
 
   it('still works when storage is blocked, remembering what was read in memory', () => {
-    const { getItem, setItem } = window.localStorage;
-    window.localStorage.getItem = () => { throw new Error('blocked'); };
-    window.localStorage.setItem = () => { throw new Error('blocked'); };
+    const blockedRead = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('blocked'); });
+    const blockedWrite = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('blocked'); });
     try {
       const blocked = GAME_ID + 500;            // a league no other test has marked in this page's memory
       renderWithProviders(<GameNav game={summary({ id: blocked, chat: 99 })} view="team" />);
@@ -99,23 +98,37 @@ describe('GameNav unread dot', () => {
       act(() => markChatSeen({ id: blocked, created_at: LEAGUE.created_at }, 99));
       expect(screen.queryByText('(new messages)')).not.toBeInTheDocument();
     } finally {
-      window.localStorage.getItem = getItem;
-      window.localStorage.setItem = setItem;
+      blockedRead.mockRestore();
+      blockedWrite.mockRestore();
     }
   });
 
   it('clears the dot when storage can be read but not written (a full quota)', () => {
-    const { setItem } = window.localStorage;
     const full = GAME_ID + 600;                 // a league no other test has marked
-    window.localStorage.setItem = () => { throw new Error('quota'); };
+    const quota = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota'); });
     try {
       renderWithProviders(<GameNav game={summary({ id: full, chat: 7 })} view="team" />);
       expect(screen.getByText('(new messages)')).toBeInTheDocument();
       act(() => markChatSeen({ id: full, created_at: LEAGUE.created_at }, 7));
       expect(screen.queryByText('(new messages)')).not.toBeInTheDocument();
     } finally {
-      window.localStorage.setItem = setItem;
+      quota.mockRestore();
     }
+  });
+
+  it('writes the count once storage works again after a failed write', () => {
+    const retry = { id: GAME_ID + 700, created_at: LEAGUE.created_at };     // a league no other test has marked
+    // jsdom's Storage takes `localStorage.setItem = ...` as an item: spy on the prototype to make writes throw
+    const full = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota'); });
+    try {
+      markChatSeen(retry, 4);
+      expect(window.localStorage.getItem(`replay-chat-seen:${retry.id}`)).toBeNull();
+    } finally {
+      full.mockRestore();
+    }
+    markChatSeen(retry, 4);
+
+    expect(window.localStorage.getItem(`replay-chat-seen:${retry.id}`)).toBe(seen(4));
   });
 
   it("shows the dot in a new league that reuses a deleted league's id", () => {
