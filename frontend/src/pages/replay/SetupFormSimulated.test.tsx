@@ -161,6 +161,17 @@ describe('SetupForm simulated seasons', () => {
     expect(regions).toContain(screen.getByText(nowSummary(9, 17, 4)).closest('[role="status"]'));
   });
 
+  it('names where the draft ADP comes from for each kind of league', async () => {
+    const { user } = renderForm([{ path: SEASONS_PATH, reply: json(BOTH) }]);
+    expect(await screen.findByText('ADP: Fantasy Football Calculator')).toBeInTheDocument();
+    await user.click(screen.getByRole('radio', { name: /2026 · live/ }));
+    expect(screen.getByText('ADP: MyFantasyLeague / Fantasy Football Calculator')).toBeInTheDocument();
+    await user.click(screen.getByRole('radio', { name: /Jump in now/ }));
+    expect(screen.getByText('ADP: the simulated market for this league')).toBeInTheDocument();
+    await user.click(screen.getByRole('radio', { name: /2027 · simulated season/ }));
+    expect(screen.getByText('ADP: the simulated market for this league')).toBeInTheDocument();
+  });
+
   it('offers no live season when there is none: a finished season is an ordinary past season, next to the future one', async () => {
     renderForm([{ path: SEASONS_PATH, reply: json(seasons({
       results: [readiness(2024), readiness(2025), readiness(2026)],
