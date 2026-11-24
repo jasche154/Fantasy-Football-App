@@ -50,8 +50,8 @@ def _last_scored(session: Session, season: int) -> date | None:
     try:
         return date.fromisoformat(day[:10]) if day else None
     except ValueError:
-        if (season, day) not in _warned:
-            _warned.add((season, day))
+        if (season, day[:40]) not in _warned:
+            _warned.add((season, day[:40]))
             log.warning("unreadable gameday %r in season %s: no unscored game is treated as not played", day[:40], season)
         return None
 
