@@ -7,7 +7,9 @@ takes its default, an unknown one is ignored. Each mapping is stored as columns 
 "v": [...]}; a record value as one list per field), which compresses far better than objects.
 
 `load` returns ONE object per league (SeasonData is hashed by identity and several caches key on it), kept in
-a small LRU that replay_pool.clear_cache() empties too; a season dropped from it frees those caches.
+a small LRU that replay_pool.clear_cache() empties too; a season dropped from it frees those caches. A league's
+season enters the cache only once its row is committed (`remember`), replacing whatever a deleted league with
+the same id left there. A save that can't be decoded is an UnreadableSeason (a server-side fault, never bad input).
 """
 import json
 import types
@@ -28,10 +30,14 @@ from services.replay_pool import SeasonData
 from services.schedule_strength import Game, Schedule
 from services.valuation import NoDataError
 
-VERSION = 1                     # the "v" of a stored season; a newer one is refused, an older one read
+VERSION = 1                     # the "v" of a stored season (1..VERSION); a newer one is refused, an older one read
 CACHED = 4                      # decoded seasons kept, least recent out
 _HINTS = typing.get_type_hints(SeasonData)
 _SCHEDULE = {"games": tuple[Game, ...], "opponents": Mapping[tuple[str, int], str]}
+
+
+class UnreadableSeason(RuntimeError):
+    """A league's saved season can't be decoded (truncated, garbled, or saved by a newer app)."""
 
 
 # ---------------- codec ----------------
@@ -101,7 +107,7 @@ def _decode(kind, value):
                  else [_tuples(item) for item in value["v"]])
         return MappingProxyType(dict(zip(keys, items, strict=True)))
     if is_dataclass(kind):
-        return kind(**{spec.name: value[spec.name] for spec in fields(kind) if spec.name in value})
+        return kind(**{spec.name: _tuples(value[spec.name]) for spec in fields(kind) if spec.name in value})
     return value
 
 
@@ -113,19 +119,27 @@ def dumps(data: SeasonData) -> bytes:
 
 
 def loads(blob: bytes) -> SeasonData:
-    """A stored season. ValueError when it is not one, or was saved by a newer app."""
+    """A stored season. UnreadableSeason (the exception's type in its text) when it is not one, or was saved by
+    a newer app."""
     try:
         payload = json.loads(zlib.decompress(blob))
         version = payload.get("v")
-    except (zlib.error, json.JSONDecodeError, UnicodeDecodeError, AttributeError) as exc:
-        raise ValueError(f"Not a stored replay season: {type(exc).__name__}") from exc
-    if not isinstance(version, int) or version > VERSION:
-        raise ValueError(f"This league's season was saved in format version {version}; this app reads {VERSION}.")
-    try:
+        if isinstance(version, bool) or not isinstance(version, int) or not 1 <= version <= VERSION:
+            raise UnreadableSeason(f"This league's season was saved in format version {version}; this app reads "
+                                   f"1 to {VERSION}.")
         return SeasonData(**{spec.name: _decode(_HINTS[spec.name], payload[spec.name])
                              for spec in fields(SeasonData) if spec.name in payload})
-    except (KeyError, TypeError, ValueError, StopIteration) as exc:
-        raise ValueError(f"Not a stored replay season: {type(exc).__name__}") from exc
+    except UnreadableSeason:
+        raise
+    except Exception as exc:                            # any decode failure: one clean error, never a 500 trace
+        raise UnreadableSeason(f"This league's saved season can't be read ({type(exc).__name__}).") from exc
+
+
+def freeze(data: SeasonData) -> tuple[bytes, SeasonData]:
+    """(the save's bytes, the season as the save holds it: plain floats where the engine made numpy ones), so a
+    new league plays the same numbers before and after it is next loaded. One encode, one decode."""
+    blob = dumps(data)
+    return blob, loads(blob)
 
 
 # ---------------- store ----------------
@@ -146,11 +160,12 @@ def _key(session: Session, league_id: int) -> tuple[str, int]:
     return str(session.get_bind().url), league_id
 
 
-def _keep(key: tuple[str, int], data: SeasonData) -> SeasonData:
-    """The cached season for `key`: the one already there (a parallel request decoded it first), else `data`."""
+def _keep(key: tuple[str, int], data: SeasonData, replace: bool = False) -> SeasonData:
+    """The cached season for `key`: the one already there (a parallel request decoded it first) unless `replace`,
+    else `data`."""
     with _cache_lock:
         found = _cache.get(key)
-        if found is None:
+        if found is None or replace:
             found = _cache[key] = data
         _cache.move_to_end(key)
         evicted = len(_cache) > CACHED
@@ -161,14 +176,17 @@ def _keep(key: tuple[str, int], data: SeasonData) -> SeasonData:
     return found
 
 
-def store(session: Session, league_id: int, kind: str, known_through: int, data: SeasonData) -> SeasonData:
-    """Add a new league's frozen season to the session (the caller commits it with the league row) and cache
-    `data` itself as that league's season; returns it."""
-    session.add(ReplaySeasonData(league_id=league_id, kind=kind, known_through=known_through, blob=dumps(data)))
+def store(session: Session, league_id: int, kind: str, known_through: int, blob: bytes) -> None:
+    """Add a new league's frozen season (`freeze`'s bytes) to the session; the caller commits it with the league
+    row, then `remember`s the decoded season."""
+    session.add(ReplaySeasonData(league_id=league_id, kind=kind, known_through=known_through, blob=blob))
     session.flush()
-    with _cache_lock:
-        _cache.pop(_key(session, league_id), None)      # a deleted league's id may be reused
-    return _keep(_key(session, league_id), data)
+
+
+def remember(session: Session, league_id: int, data: SeasonData) -> None:
+    """Cache a just-committed league's season as `data` itself, over anything a deleted league with the same id
+    (or a request that read it before the delete) left there."""
+    _keep(_key(session, league_id), data, replace=True)
 
 
 def load(session: Session, league_id: int) -> SeasonData:

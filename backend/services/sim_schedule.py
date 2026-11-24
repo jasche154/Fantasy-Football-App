@@ -142,7 +142,8 @@ def _match(teams: set[str], left: list[tuple[str, str]], dice: np.random.Generat
         budget[0] -= 1
         if budget[0] < 0:
             return None
-        team = min(free, key=lambda t: sum(1 for i in options[t] if set(left[i]) <= free))
+        # sorted: ties go to the first team code, never to str hash order (which differs per process)
+        team = min(sorted(free), key=lambda t: sum(1 for i in options[t] if set(left[i]) <= free))
         for i in options[team]:
             pair = set(left[i])
             if pair <= free:

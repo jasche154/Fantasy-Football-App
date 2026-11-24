@@ -151,7 +151,7 @@ def apply_overrides(pairs: list[str]) -> dict[str, dict]:
         name, value = pair.split("=", 1)
         section, key = name.split(".", 1)
         overrides[section][key] = json.loads(value)
-        sim_world.params().setdefault(section, {})[key] = json.loads(value)
+        sim_world.override(section, key, json.loads(value))
     return dict(overrides)
 
 

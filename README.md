@@ -171,7 +171,7 @@ injury reports and weekly roster status (nflverse). A season prepared before tha
 by running the same command again (without `--force`), or with the **Add &lt;season&gt; injury reports**
 button. The same goes for snap counts (the "snaps" step): a season prepared before it existed gets them on
 its next Prepare. The season in progress is prepared the same way (`--seasons 2026`), again each time a week
-finishes (see [Simulated seasons](#simulated-seasons-replay-league)).
+finishes, and once more when it is over (see [Simulated seasons](#simulated-seasons-replay-league)).
 
 A season only replaces existing rows after its download succeeds, so a network hiccup
 never wipes data. `populate_stats` also brings the schema up to date first, and it works on
@@ -1106,9 +1106,9 @@ and the API sends no result of an unplayed week. The look ("Game Night", `styles
   Bad `sort`, `dir`, `stats` or `stat_week` values on the players endpoint answer 422.
 
 ### Simulated seasons (Replay League)
-Besides the finished seasons (2018-2025), a Replay League can be played on two seasons that have not
-happened yet, or not all of it: the **live** season (the one in progress, 2026) and the **future** one
-(2027). Under **New league**, **What to play** lists **Past season** and each simulated season; a simulated
+Besides the finished seasons (2018 through the newest complete one: 2025 today), a Replay League can be
+played on two seasons that have not happened yet, or not all of it: the **live** season (the one in
+progress, 2026) and the **future** one (2027). Under **New league**, **What to play** lists **Past season** and each simulated season; a simulated
 season that can't be played yet is greyed out with the reason. The rules of the game (draft, waivers,
 trades, IR, playoffs, no hindsight) are the same as in a past season. A new league's default name is
 "&lt;season&gt; Sim", and building its season takes about 10 seconds.
@@ -1123,6 +1123,17 @@ trades, IR, playoffs, no hindsight) are the same as in a past season. A new leag
   Football Calculator has no ADP for a season in progress, so its preseason ADP is MyFantasyLeague's PPR
   list alone (real 12-team drafts from August 15 on; `services/replay_live_data.py`), which the other
   formats use as their nearest list until FFC has one.
+- **A game without a score** holds its week back only while it can still be played: once it is more than 4
+  days past its date with no score (a cancelled game, like Bills-Bengals in 2022), its week counts as final
+  without it, so the season keeps moving and can end.
+- **When the season ends** (every week final), nothing needs changing: it becomes an ordinary past season.
+  Prepare it once more (the button, or `--seasons 2026`) to fetch the last weeks' projections, tags and
+  expert ranks; it then shows in the past-season list, can be drawn by **Random**, and next season's
+  simulation is built from all of it. Next season stays the **future** season while only its schedule (or
+  some unfinished week-1 stats) is loaded: it is simulated whole, on its real schedule once that is in the
+  database. Once its week 1 is final it becomes the **live** season and the season after it the future one
+  (which needs its own `backend/sim_data/offseason_<season>.json`; the seasons list says so until it
+  exists).
 - **Two ways to start a live league** (**Start**): **Full season** drafts in week 0 on the preseason ADP
   and plays weeks 1 to N with the real results, then the simulated rest. **Jump in now** drafts today and
   plays from week N+1: the draft knows everything through week N (results, the week N+1 injury tags,
@@ -1140,8 +1151,11 @@ trades, IR, playoffs, no hindsight) are the same as in a past season. A new leag
 - **Every league is frozen:** each new simulated league rolls its own rest of the season from its seed,
   so two leagues on 2026 play out differently, and the whole season (the real weeks too) is saved with the
   league (table `replay_season_data`, `services/replay_blob.py`, compressed versioned JSON). New real data
-  (a finished week, an updated offseason file) only reaches leagues created after it; deleting a league
-  deletes its season.
+  (a finished week, an nflverse stat correction, an updated offseason file) reaches every league created
+  after it, with no restart or Prepare needed (the season cache is keyed on the data), and never one created
+  before it; deleting a league deletes its season. A league whose saved season can't be read (a damaged
+  database file, or saved by a newer version of the app) answers with an error saying so instead of its
+  screens; it is still listed and can be deleted.
 - **How the UI marks it:** the saved-leagues list puts a **Live 2026** or **Simulated** chip after the
   name; the game screen shows "2026 · simulated from week 12" or "2027 · simulated season" under the
   scorebug; on a player's card every simulated week in the game log and the weeks ahead carries a small
@@ -1157,16 +1171,18 @@ read the belief, so, as in a real season, the public learns the truth only from 
   trailer passing more), then they are split among the active players by their roles (an injured player's
   work goes to his teammates, a rookie takes some from everyone), then catches, yards and touchdowns per
   player. The quarterback's passing line is the sum of his receivers' lines, so a QB's yards and TDs always
-  match his receivers'. If he leaves hurt, his backup throws part of each receiver's catches. Kickers get an
-  extra point try for each of their team's TDs and field goal tries that rise with the team's yards and fall
-  with its TDs (drives that stall); a defense's sacks and interceptions are the opposing offense's, and its
-  points allowed are the opponent's points. Points use the league's own scoring, custom settings included.
+  match his receivers'. If he leaves hurt, his backup throws part of each receiver's catches (and the TDs
+  among them). Kickers get an extra point try for each of their team's TDs and field goal tries that rise
+  with the team's yards and fall with its TDs (drives that stall); a kicker who leaves hurt keeps only his
+  share of the kicks. A defense's sacks and interceptions are the opposing offense's, and its points allowed
+  are the opponent's points. Points use the league's own scoring, custom settings included.
 - **Injuries** come from what really happened to fantasy-relevant players in 2018-2025
   (`services/sim_injuries.py`, rates in `sim_injuries.json`): by position, the chance a player who plays a
   game gets hurt in it, how many games he then misses (the real lengths, season-enders included), how much
   of the game he finished, the body part, how often he comes back listed Q, and how often a healthy starter
-  is listed Q or D and plays anyway. A long absence is tagged IR, like the real reports. Defenses are never
-  hurt. A player already out when the simulation starts sits a fitting number of further games.
+  is listed Q or D and plays anyway (who counts as a starter there comes from the public belief, never the
+  truth). A long absence is tagged IR, like the real reports. Defenses are never hurt. A player already out
+  when the simulation starts sits a fitting number of further games.
 - **Hidden talent:** every player's true role and efficiency differ from his reputation by a random draw,
   widest for rookies and players with few games, smallest for veterans with a full season
   (`services/sim_talent.py`); teams' volume and defenses move the same way. During the season some
@@ -1177,7 +1193,8 @@ read the belief, so, as in a real season, the public learns the truth only from 
 - **Buzz:** before the week a breakout, bust or benching starts, a news line is published for 60% of
   them ("Beat reporters say his role is growing; expect more work.", "Reports say his snaps and touches are
   shrinking.", "Reports say his starting job is in danger."), and false lines about other starters are added
-  so only about 60% of all lines are true. It shows as a small **Buzz** chip ("Rumor: ...") on player rows
+  so only about 60% of all lines are true, in the same weeks a change can start (never the first simulated
+  week or the last two). It shows as a small **Buzz** chip ("Rumor: ...") on player rows
   and the draft board, and under **News** on his card. It is the only way the truth reaches the screen
   before the games, and it is right only some of the time.
 - **Projections, expert ranks and ADP** are computed from the belief each week (`services/sim_market.py`):
@@ -1219,7 +1236,8 @@ read the belief, so, as in a real season, the public learns the truth only from 
 - A simulated injury's first missed week is always tagged O or IR, never a game-day Q/D ruling or PUP
   (every screen treats them the same).
 - The live season's preseason ADP is MyFantasyLeague's PPR list for every format until Fantasy Football
-  Calculator has one.
+  Calculator has one. MyFantasyLeague's ADP request can't be limited to drafts held before week 1, so a list
+  first fetched in-season also counts a few late drafts (a little hindsight in a **Full season** draft).
 - The rookies and moves in the 2027 file are a snapshot of mock drafts and reports (dated in the file), not
   facts.
 
@@ -1687,7 +1705,8 @@ backend/
                             weekly model and rankings, props math, leaderboards, players, trade, insights, agent)
     replay_*.py             Replay League: pool, values and state (data), draft, season, waivers, trades
                             (engine), game (week flow), views (JSON), data (season import CLI),
-                            blob (a simulated league's frozen season), live (the season in progress)
+                            blob (a simulated league's frozen season), live (which seasons are complete,
+                            in progress or next), readiness (what is loaded for a season)
     sim_*.py                simulated seasons: setup (the only DB read), season, world (belief), talent
                             (truth), game + draw, market, injuries, next year, schedule, offseason, eval + fits
   sim_data/                 offseason_<season>.json: hand-edited rookies and moves for a simulated season

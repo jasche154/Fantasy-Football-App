@@ -131,3 +131,22 @@ def test_a_preseason_market_leans_on_last_seasons_record(data, belief):
     middling = next(pid for pid, rank in wr.items() if rank == 20)
     hot = sim_market.adp(belief, HALF, record={**record, middling: 40.0})
     assert hot[middling][0] < plain[middling][0]
+
+
+def test_a_one_week_absence_costs_one_game_of_rest_of_season_value(belief, monkeypatch):
+    """Tagged O for one week: about one game of value off (a small drop, not WR11 -> WR113 -> WR8); out for every
+    game left: the bottom of the position."""
+    monkeypatch.setattr(sim_market, "EXPERT_NOISE", 1e-9)
+    games_left = 10
+
+    def wr_rank(pid: int, out_weeks: int) -> int:
+        world = replace(belief, players=MappingProxyType(
+            {**belief.players, pid: replace(belief.players[pid], out_weeks=out_weeks)}))
+        return sim_market.expert_ranks(world, world.players, 8, np.random.default_rng(1), HALF, games_left)[(pid, 8)]
+
+    worth = sim_market.values(belief, HALF, games_left)
+    wrs = sorted((p for p in belief.players if belief.players[p].position == "WR"), key=lambda p: (-worth[p], p))
+    pid = wrs[10]
+    healthy, one, gone = wr_rank(pid, 0), wr_rank(pid, 1), wr_rank(pid, games_left)
+    assert healthy == 11 and healthy < one <= healthy + 8
+    assert gone == len(wrs)

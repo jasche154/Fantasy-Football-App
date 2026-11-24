@@ -4,16 +4,20 @@
 the full schedule. Real weeks are copied through untouched; base rows for later weeks are dropped, except
 the injury tags and expert ranks of from_week itself (known before its games: the snapshot) and its
 projections, which say who exists for from_week's belief (a new season's depth players, sim_next_year) and are
-then replaced by the simulated ones.
+then replaced by the simulated ones (a player only they admit to SeasonData.as_of keeps MIN_PROJECTION, so a
+backup QB stays in view before his first game).
 
 1. belief = sim_world.estimate(base, from_week, prior); truth = sim_talent.truth(belief, seed, ...).
-2. Absences already running: a player hard-tagged at the snapshot with no game since sits from_week and
-   sim_injuries.open_spell more games. At from_week 1 with no real games, sim_injuries.preseason.
+2. Absences already running: a player hard-tagged at the snapshot with no game since (results before from_week
+   only) misses from_week's game, none over a bye, and sim_injuries.open_spell more games. At from_week 1 with
+   no real games, sim_injuries.preseason.
 3. Each week W, in order:
    - tags known before W: sitting players get sim_injuries.tag (byes included), a player's first game back
-     may carry return_tag's Q, and healthy regulars (PHANTOM_MIN_SNAP) may be listed Q/D (phantom) and play;
+     may carry return_tag's Q, and healthy regulars (PHANTOM_MIN_SNAP in the latest public belief, never the
+     truth) may be listed Q/D (phantom) and play;
    - the public belief estimate(data so far, W) gives W's projections (hard-tagged players out), expert ranks
-     (when the week has none) and buzz notes (sim_market);
+     (when the week has none) and buzz notes (sim_market; false ones only in the weeks a true one can land,
+     sim_talent.change_weeks);
    - the truth at W plays every game (sim_game.play). Players on the field are hurt with
      sim_injuries.hazard (scaled down below FULL_EXPOSURE_SNAP); a hurt player plays exit_share of the game,
      then misses games_out team games (tagged from W + 1, as real tags are known before the week).
@@ -85,19 +89,19 @@ def _known(base: SeasonData, tables: _Tables, week: int) -> SeasonData:
 
 def _streak(base: SeasonData, tagged: Mapping[int, Injury], pid: int, team: str,
             week: int) -> tuple[Injury, int] | None:
-    """(hard tag, games missed counting this week) of an absence running at `week`, else None.
-    `tagged`: his tags by week."""
+    """(hard tag, team games missed BEFORE `week`) of an absence running at `week`, else None. `tagged`: his
+    tags by week. Only results before `week` are read: `week` itself is not played yet, whatever base holds."""
     known = [w for w in tagged if w <= week]
     if not known:
         return None
     injury = tagged[max(known)]
     if injury.tag not in replay_pool.IR_TAGS or any((pid, w) in base.actual for w in range(max(known), week)):
         return None
-    missed, w = 0, week
+    missed, w = 0, week - 1
     while w >= 1 and (pid, w) not in base.actual and not (w in tagged and not tagged[w].hard):
         missed += 1 if base.schedule.opponent(team, w) else 0
         w -= 1
-    return injury, max(1, missed)
+    return injury, missed
 
 
 def _absences(base: SeasonData, belief: World, seed: int, from_week: int) -> dict[int, _Absence]:
@@ -118,29 +122,31 @@ def _absences(base: SeasonData, belief: World, seed: int, from_week: int) -> dic
             continue
         running = _streak(base, by_player.get(pid, {}), pid, player.team, from_week)
         if running is not None:
-            injury, missed = running
-            left = sim_injuries.open_spell(dice, player.position, injury.tag, missed)
-            spell = replace(sim_injuries.draw(dice, player.position), games_out=missed + left, exit_share=1.0,
+            injury, before = running
+            # open_spell's "this game": from_week's, or over a bye his last missed one (the next if none yet)
+            now = 1 if base.schedule.opponent(player.team, from_week) or not before else 0
+            left = sim_injuries.open_spell(dice, player.position, injury.tag, before + now)
+            spell = replace(sim_injuries.draw(dice, player.position), games_out=before + now + left, exit_share=1.0,
                             body=injury.injury or UNKNOWN_BODY)
-            out[pid] = _Absence(spell, left + 1, missed - 1)
+            out[pid] = _Absence(spell, left + now, before)
     return out
 
 
-def _tags(base: SeasonData, truth: World, absences: Mapping[int, _Absence], returning: Mapping[int, sim_injuries.Spell],
+def _tags(base: SeasonData, public: World, absences: Mapping[int, _Absence], returning: Mapping[int, sim_injuries.Spell],
           week: int, from_week: int, dice) -> dict[int, Injury]:
-    """The tags known before `week` (the snapshot's own at from_week win)."""
+    """The tags known before `week` (the snapshot's own at from_week win). Phantom candidates and their draw order
+    come from `public`, a belief from before the week, never the truth."""
     tags = {pid: sim_injuries.tag(a.spell, a.missed) for pid, a in absences.items() if a.left > 0}
     for pid, spell in returning.items():
         back = sim_injuries.return_tag(spell)
-        if back is not None and pid in truth.players and base.schedule.opponent(truth.players[pid].team, week):
+        if back is not None and pid in public.players and base.schedule.opponent(public.players[pid].team, week):
             tags[pid] = back
-    world = truth.at(week)
-    for team in sorted(truth.teams):
+    for team in sorted(public.teams):
         if not base.schedule.opponent(team, week):
             continue
-        for pid, snap in sorted(on_field(world, team, set(tags)).items()):
+        for pid, snap in sorted(on_field(public, team, set(tags)).items()):
             if snap >= PHANTOM_MIN_SNAP and pid not in tags:
-                listed = sim_injuries.phantom(dice, truth.players[pid].position)
+                listed = sim_injuries.phantom(dice, public.players[pid].position)
                 if listed is not None:
                     tags[pid] = listed
     if week == from_week:
@@ -161,10 +167,18 @@ def _market(tables: _Tables, base: SeasonData, belief: World, truth: World, seed
             false_rate: float) -> None:
     scoring, last = scoring_of(base), base.last_week
     known = _known(base, tables, week)
-    for key in [key for key in tables.projected if key[1] == week]:     # the snapshot's own (from_week only)
-        del tables.projected[key]
-    tables.projected.update({(pid, week): p for pid, p in sim_market.projections(
-        belief, base.schedule, week, out, scoring).items()})
+    snapshot = sorted(pid for pid, w in tables.projected if w == week)      # the snapshot's own (from_week only)
+    for pid in snapshot:
+        del tables.projected[(pid, week)]
+    fresh = sim_market.projections(belief, base.schedule, week, out, scoring)
+    tables.projected.update({(pid, week): p for pid, p in fresh.items()})
+    if snapshot:
+        # a player the snapshot alone admits (a backup QB, a WR6: no ADP, no game, no earlier projection) keeps a
+        # token one, or as_of would drop him until he plays (SeasonData.as_of admits by ADP, projection or game)
+        admitted = {pid for pid, w in (*tables.projected, *tables.actual) if w < week}
+        admitted |= {pid for pid, player in base.players.items() if player.adp is not None}
+        tables.projected.update({(pid, week): sim_market.MIN_PROJECTION for pid in snapshot
+                                 if pid not in fresh and pid not in admitted})
     for rank_week in ((0, week) if week == 1 else (week,)):
         if not any(w == rank_week for _, w in tables.expert_ranks):
             ids = known.players if rank_week else base.as_of(0).players
@@ -186,14 +200,17 @@ def simulate(base: SeasonData, seed: int, from_week: int, prior: World | None = 
     truth = sim_talent.truth(belief, seed, from_week, last)
     absences = _absences(base, belief, seed, from_week)
     returning: dict[int, sim_injuries.Spell] = {}
-    false_rate = sim_market.expected_hints(len(truth.teams), last - from_week + 1, sim_talent.settings())
+    buzz_weeks = sim_talent.change_weeks(from_week, last)          # false buzz only where true buzz can land
+    false_rate = sim_market.expected_hints(len(truth.teams), buzz_weeks[1] - buzz_weeks[0] + 1, sim_talent.settings())
+    public = belief                                  # the latest public belief (last week's, for this week's tags)
     for week in range(from_week, last + 1):
-        tags = _tags(base, truth, absences, returning, week, from_week, replay_state.rng(seed, "sim", "tags", week))
+        tags = _tags(base, public, absences, returning, week, from_week, replay_state.rng(seed, "sim", "tags", week))
         tables.injuries.update({(pid, week): injury for pid, injury in tags.items()})
         public_out = {pid for pid, injury in tags.items() if injury.hard}
         sitting = public_out | {pid for pid, a in absences.items() if a.left > 0}
-        _market(tables, base, estimate(_known(base, tables, week), week, prior), truth, seed, week, public_out,
-                false_rate)
+        public = estimate(_known(base, tables, week), week, prior)
+        _market(tables, base, public, truth, seed, week, public_out,
+                false_rate if buzz_weeks[0] <= week <= buzz_weeks[1] else 0.0)
         world = truth.at(week)
         played_teams, fresh = set(), set()
         for game in sorted((g for g in base.schedule.games if g.week == week), key=lambda g: g.home_team):
@@ -213,7 +230,7 @@ def simulate(base: SeasonData, seed: int, from_week: int, prior: World | None = 
                     returning.pop(pid, None)
                 elif spell.questionable_back:
                     returning[pid] = spell
-        _advance(absences, returning, truth, played_teams, fresh, week, tables)
+        _advance(absences, returning, truth, played_teams, fresh)
     # an as_of fallback (a real game after the cut) that no simulated game replaced is dropped
     tables.games = {pid: [g for g in games if g[0] < from_week or (pid, g[0]) in tables.actual]
                     for pid, games in tables.games.items()}
@@ -234,15 +251,18 @@ def _record(tables: _Tables, world: World, result, week: int) -> None:
             tables.box[(pid, week)] = line.box
 
 
-def _advance(absences: dict[int, _Absence], returning: dict, truth: World, played: set[str], fresh: set[int],
-             week: int, tables: _Tables) -> None:
-    """After the week: sitters whose team played miss one more game; a finished absence may bring a Q back."""
-    for pid in [pid for pid in returning if (pid, week) in tables.actual and pid not in fresh]:
+def _advance(absences: dict[int, _Absence], returning: dict, truth: World, played: set[str], fresh: set[int]) -> None:
+    """After the week: sitters whose team played miss one more game; a finished absence may bring a Q back. A
+    returning player's Q was for his team's game this week, played or not (an inactive one records no line)."""
+    def team_played(pid: int) -> bool:
+        return pid in truth.players and truth.players[pid].team in played
+
+    for pid in [pid for pid in returning if team_played(pid) and pid not in fresh]:
         del returning[pid]
     for pid, absence in list(absences.items()):
         if pid in fresh:
             continue                               # hurt this week: his absence starts with the next game
-        if pid in truth.players and truth.players[pid].team in played:
+        if team_played(pid):
             absence.left -= 1
             absence.missed += 1
         if absence.left <= 0:

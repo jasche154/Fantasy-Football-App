@@ -157,3 +157,19 @@ def test_rookies_are_the_least_certain_and_prospects_take_over_at_the_rookie_rat
     assert benched(prospect, True) == pytest.approx(knobs["rookie_bench_rate"], abs=0.04)
     assert benched(veteran, True) == pytest.approx(knobs["bench_rate"], abs=0.03)
     assert benched(prospect, False) == pytest.approx(knobs["bench_rate"], abs=0.03)   # mid-season: the usual rate
+
+
+def test_every_player_of_the_new_season_stays_in_the_public_view_until_he_plays():
+    """A backup QB or a WR6 has no ADP and the market projects him nothing, yet he must be there to add (and in
+    the belief, to step in) from week 1, not only after his first game."""
+    from services import sim_season, sim_world
+
+    belief, pool = _next()
+    base = ny.season_base(2027, belief, pool, _schedule(), "half", None, {})
+    season = sim_season.simulate(base, 4, 1, belief)
+    depth = [i for i, p in base.players.items() if p.adp is None]
+    assert any(belief.players[i].position == "QB" for i in depth)
+    for week in range(1, season.last_week + 1):
+        known = season.as_of(week).players
+        assert set(belief.players) <= set(known), week
+        assert set(belief.players) <= set(sim_world.estimate(season, week, belief).players), week

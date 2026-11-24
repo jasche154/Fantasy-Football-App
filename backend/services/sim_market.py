@@ -19,7 +19,8 @@ truth's dated role changes into a noisy hint.
   defenses at the real average ADP of the Nth one taken (`kdst_adp` in sim_params.json), stdev = a + b x adp
   as measured. A player believed out for the games left gets none.
 - `buzz`: before the week a change starts, HINT_RATE of true breakouts, busts and benchings get a news line;
-  false lines (random leads, backups and starting QBs) are added so that about PRECISION of all lines are true.
+  false lines (random leads, backups and starting QBs) are added so that about PRECISION of all lines are true
+  (sim_season passes no false rate outside the weeks a change can start, so those weeks stay quiet).
 """
 from collections import defaultdict
 from collections.abc import Collection, Iterable, Mapping

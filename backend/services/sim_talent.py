@@ -29,8 +29,9 @@ reputation, plus dated role changes. Nothing in a simulated SeasonData reads it 
   more: a drafted rookie, sim_next_year) benches its starter at `rookie_bench_rate` instead: most such
   rookies start before the season is out (sim_next_year_fit's `qb_takeover`, injuries included).
 
-The spreads and rates are tuned so simulated seasons reshuffle like real ones (`sim_eval --tune`: ADP rank
-vs final rank, breakouts, busts) and live in sim_params.json's tuned "talent" section.
+The spreads and rates are tuned so simulated seasons reshuffle like real ones (`sim_eval --set talent.<knob>=...`
+against ADP rank vs final rank, breakouts, busts; `--save-tuned` stores them in sim_params.json's tuned "talent"
+section).
 """
 import math
 from dataclasses import replace
@@ -135,6 +136,11 @@ def _changes(team_players: list[Player], dice: np.random.Generator, weeks: tuple
     return out
 
 
+def change_weeks(from_week: int, last_week: int) -> tuple[int, int]:
+    """(first, last) week a dated role change may start in (buzz lines run in the same weeks)."""
+    return from_week + 1, max(from_week + 1, last_week - CHANGE_LAST_WEEKS)
+
+
 def truth(belief: World, seed: int, from_week: int, last_week: int) -> World:
     """The hidden true World for a season simulated from `from_week` (see the module docstring). Pure and
     deterministic for (belief, seed, from_week, last_week)."""
@@ -150,7 +156,7 @@ def truth(belief: World, seed: int, from_week: int, last_week: int) -> World:
     if from_week == 1:
         season = replay_state.rng(seed, "sim", "offseason").standard_normal((len(ids), len(SEASON_RATES)))
         players = {pid: _offseason(players[pid], season[i], knobs) for i, pid in enumerate(ids)}
-    first, last = from_week + 1, max(from_week + 1, last_week - CHANGE_LAST_WEEKS)
+    first, last = change_weeks(from_week, last_week)
     changes = []
     for team in names:
         team_dice = replay_state.rng(seed, "sim", "changes", team)

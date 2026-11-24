@@ -33,12 +33,13 @@ DEFAULT_CHAMPIONSHIP = 17           # api/replay_routes.CreateBody.playoff_end_w
 
 
 def kind_of(session: Session, season: int) -> tuple[str, int]:
-    """(kind, last real week) of a season a league may be created on: (REPLAY, 0) for a complete past season,
-    (LIVE, through) for the season in progress, (FUTURE, 0) for the one after the newest. ValueError otherwise."""
+    """(kind, last real week) of a season a league may be created on: (REPLAY, 0) for a complete season
+    (replay_live.replay_seasons), (LIVE, through) for the season in progress, (FUTURE, 0) for the one after the
+    newest started one. ValueError otherwise."""
     live = replay_live.current_live(session)
     if live and live[0] == season:
         return LIVE, live[1]
-    seasons = replay_pool.SUPPORTED_SEASONS
+    seasons = replay_live.replay_seasons(session)
     if season in seasons:
         return REPLAY, 0
     future = replay_live.future_season(session)
@@ -60,11 +61,10 @@ def now_window(through: int, championship_week: int, playoff_teams: int) -> tupl
     return regular, start + (2 * left) // 3 - 1
 
 
-def build(session: Session, settings: Settings, seed: int) -> SeasonData:
+def build(session: Session, settings: Settings, seed: int) -> tuple[bytes, SeasonData]:
     """The whole season a new simulated league plays (real weeks before settings.sim_from, its own simulated
-    future after), to be frozen with it. NoDataError when the season's data is not ready. Returned as its save
-    will hold it (replay_blob's codec: plain floats where the engine made numpy ones), so the league plays the
-    same numbers before and after it is next loaded."""
+    future after), to be frozen with it: (its save's bytes, the season as the save holds it; replay_blob.freeze).
+    NoDataError when the season's data is not ready."""
     from services import sim_season                     # the engine, imported only when a league is built
 
     if settings.sim_from is None:
@@ -77,7 +77,7 @@ def build(session: Session, settings: Settings, seed: int) -> SeasonData:
                                             settings.adp_format, through=settings.sim_from - 1)
         data = sim_season.simulate(base, seed, settings.sim_from)
         data = _market_adp(data, settings) if settings.start_week > 1 else data
-    return replay_blob.loads(replay_blob.dumps(data))
+    return replay_blob.freeze(data)
 
 
 def _market_adp(data: SeasonData, settings: Settings) -> SeasonData:
@@ -95,13 +95,13 @@ def _market_adp(data: SeasonData, settings: Settings) -> SeasonData:
 # ---------------- the future season ----------------
 
 def source(session: Session) -> tuple[int, int | None] | None:
-    """(season, through) the future season is built from: the season in progress through its last finished week,
-    else the newest season in full (through None). None when the database has no season."""
-    live = replay_live.current_live(session)
-    if live:
-        return live
-    newest = replay_live.newest_season(session)
-    return (newest, None) if newest is not None else None
+    """(season, through) the future season is built from: the newest started season (replay_live.newest_started)
+    through its last finished week while in progress, else in full (through None). None when there is none."""
+    found = replay_live.newest_started(session)
+    if found is None:
+        return None
+    season, through, last_week = found
+    return season, (through if through < last_week else None)
 
 
 def future_problem(session: Session, season: int) -> str | None:
@@ -164,7 +164,7 @@ def _season_end(session: Session, season: int, settings: Settings):
     market leans on more than one season), or None when the database doesn't have it."""
     from services import sim_world
 
-    if season not in replay_pool.SUPPORTED_SEASONS:
+    if season not in replay_live.replay_seasons(session):
         return None
     try:
         data = replay_pool.load_season_data(session, season, settings.scoring, settings.scoring_rules,

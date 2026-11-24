@@ -18,6 +18,8 @@ def test_spearman():
     assert sim_metrics.spearman([1, 2, 3, 4], [10, 20, 30, 40]) == pytest.approx(1.0)
     assert sim_metrics.spearman([1, 2, 3, 4], [4, 3, 2, 1]) == pytest.approx(-1.0)
     assert math.isnan(sim_metrics.spearman([1], [2]))
+    # a block of ties shares its average rank, so tied zeros say nothing about the order of the rest
+    assert sim_metrics.spearman([0, 0, 0, 0, 1, 2], [3, 1, 2, 0, 4, 5]) == pytest.approx(0.845, abs=1e-3)
 
 
 def test_tiers_follow_adp_position_ranks(data):
@@ -78,3 +80,23 @@ def test_the_leaderboard_and_big_games_need_no_adp(data):
     weekly = sim_metrics.weekly(data, range(1, 18))
     assert weekly["25+ games"] >= weekly["30+ games"] >= weekly["35+ games"]
     assert sim_metrics.leaderboard(data, range(10, 18)) != board
+
+
+def test_constants_are_read_only_overrides_apply_and_a_missing_file_says_how_to_fit_it(tmp_path, monkeypatch):
+    from services import sim_constants, sim_eval
+
+    with pytest.raises(TypeError):
+        sim_world.params()["league"]["targets"] = 0.0
+    monkeypatch.setattr(sim_constants, "_overrides", {})
+    try:
+        assert sim_eval.apply_overrides(["talent.role_sd=0.5"]) == {"talent": {"role_sd": 0.5}}
+        assert sim_world.params()["talent"]["role_sd"] == 0.5
+    finally:
+        monkeypatch.undo()
+        sim_world.params.cache_clear()
+    assert sim_world.params()["talent"].get("role_sd") != 0.5
+    with pytest.raises(RuntimeError, match="nothing.json.*sim_eval --fit"):
+        sim_constants.fitted_json(tmp_path / "nothing.json", "python -m services.sim_eval --fit", ())
+    (tmp_path / "part.json").write_text("{}")
+    with pytest.raises(RuntimeError, match="part.json has no league"):
+        sim_constants.fitted_json(tmp_path / "part.json", "x", ("league",))

@@ -446,6 +446,22 @@ def test_load_is_cached_until_the_cache_is_cleared(seeded_db):
     assert rebuilt is not first and dict(rebuilt.actual) == dict(first.actual)
 
 
+def test_load_is_rebuilt_when_the_seasons_data_is_written_by_any_loader(small_db):
+    from database.models import DataLoad
+
+    first = replay_pool.load_season_data(small_db, fakes.SEASON, "half")
+    small_db.add(DataLoad(seasons=str(fakes.SEASON)))              # the stats loader's stamp
+    small_db.commit()
+    stamped = replay_pool.load_season_data(small_db, fakes.SEASON, "half")
+    small_db.execute(delete(ReplayInjury).where(ReplayInjury.week == 3))     # a replay import step's rows
+    small_db.commit()
+    retagged = replay_pool.load_season_data(small_db, fakes.SEASON, "half")
+
+    assert stamped is not first and retagged is not stamped
+    assert retagged is replay_pool.load_season_data(small_db, fakes.SEASON, "half")      # unchanged: cached
+    assert not any(week == 3 for _, week in retagged.injuries) and any(week == 3 for _, week in stamped.injuries)
+
+
 def test_the_cache_keeps_only_the_most_recently_used_seasons(seeded_db, monkeypatch):
     monkeypatch.setattr(replay_pool, "CACHED_SEASONS", 2)
     monkeypatch.setattr(replay_pool, "_build", lambda *args: object())

@@ -6,9 +6,12 @@ Who counts: each season's top TOP[position] players by preseason ADP (the fantas
 his team's games are walked in order (byes skipped):
 - exposure: a game he played that has a later team game (an injury after the last game is never seen);
 - absence: he played a game and missed the next with an injury tag (Q/D/O/IR/PUP, not a suspension or a
-  non-injury note); its length is the tagged games he missed in a row. One that runs out the season goes on
-  into the next: the games his team played before his first game there are added (still out, or retired,
-  is right-censored). Lengths are a Kaplan-Meier fit, so censored ones count as "at least";
+  non-injury note); its length is the tagged games he missed in a row. One that ends with a missed game
+  carrying no injury tag is right-censored (real tags hold to the return: IR and PUP come from the weekly
+  roster every week, over byes too, so an untagged miss is a gap, a cut or a scratch, and in 2018-2025 he
+  missed more games after it in nearly every case). One that runs out the season goes on into the next: the
+  games his team played before his first game there are added (still out, or retired, is right-censored).
+  Lengths are a Kaplan-Meier fit, so censored ones count as "at least";
 - banged up: he played, his snaps were under EXIT_CUTOFF of his season median, and he was listed Q/D for the
   next game and played it;
 - exit share: that game's snaps over his season median (1.0 when he did not leave early);
@@ -50,7 +53,7 @@ HIST_EDGES = (1, 2, 3, 4, 6, 9)  # 1, 2, 3, 4-5, 6-8, 9+
 class Spell:
     position: str
     length: int                   # games missed in this season (extended across the offseason later)
-    censored: bool                # ran to the season's end (or an untagged miss ended it unseen)
+    censored: bool                # ran to the season's end, or an untagged miss ended it unseen
     tags: list[str]
     exit_share: float | None = None
     q_back: bool | None = None
@@ -59,6 +62,7 @@ class Spell:
     preseason: bool = False
     pid: int = 0
     in_season: int = 0            # games missed in the season it started
+    season_end: bool = False      # ran to the season's end (carried into the next by `extend`)
 
 
 @dataclass
@@ -129,7 +133,8 @@ def walk(data: SeasonData, pid: int, position: str, tally: Tally, fresh: bool) -
         return j - start, j == len(weeks)
 
     def add(start: int, exit_share: float | None, preseason: bool) -> None:
-        length, censored = run(start)
+        length, season_end = run(start)
+        censored = season_end or not played[start + length]          # ended by a missed game with no injury tag
         end = start + length
         back = end < len(weeks) and played[end]
         texts = [t.injury for t in tags[start:end] if t] + ([tags[end].injury] if back and tags[end] else [])
@@ -138,7 +143,7 @@ def walk(data: SeasonData, pid: int, position: str, tally: Tally, fresh: bool) -
         if q_back:
             claimed.add(end)
         tally.spells.append(Spell(position, length, censored, [t.tag for t in tags[start:end]], exit_share, q_back,
-                                  tags[end].practice if q_back else None, body, preseason, pid, length))
+                                  tags[end].practice if q_back else None, body, preseason, pid, length, season_end))
         if body:
             tally.bodies[position][body] += 1
 
@@ -279,12 +284,12 @@ def real_summary(tally: Tally) -> dict:
 def extend(spells: list[Spell], nxt: dict[int, tuple[list[int], list[bool], list]]) -> None:
     """Carry a season-ending absence into the next season (its team games before his first game there)."""
     for s in spells:
-        if not s.censored or s.pid not in nxt:
+        if not s.season_end or s.pid not in nxt:
             continue
         _, played, tags = nxt[s.pid]
         if any(played):
             s.length += played.index(True)
-            s.censored = False
+            s.censored = s.season_end = False
         elif played and all(_hurt(t) for t in tags):
             s.length += len(played)
 
@@ -299,7 +304,7 @@ def fit(session, seasons: list[int]) -> dict:
         seen = {}
         prior = by_season.get(season - 1, {})
         for pid, position in relevant(data).items():
-            fresh = season - 1 in by_season and not any(s.pid == pid and s.censored for s in prior.get("spells", []))
+            fresh = season - 1 in by_season and not any(s.pid == pid and s.season_end for s in prior.get("spells", []))
             weeks, played = walk(data, pid, position, tally, fresh)
             seen[pid] = (weeks, played, [data.injuries.get((pid, w)) for w in weeks])
         for pid in {pid for pid, _ in data.actual} | {pid for pid, _ in data.injuries}:
@@ -310,7 +315,7 @@ def fit(session, seasons: list[int]) -> dict:
         mine = tally.spells[first:]
         if season - 1 in by_season:
             extend(by_season[season - 1]["spells"], seen)
-        by_season[season] = {"spells": mine, "censored": [s for s in mine if s.censored]}
+        by_season[season] = {"spells": mine}
         log.info("%s: %d relevant players, %d spells", season, len(relevant(data)), len(mine))
     recent = [s for season, row in by_season.items() if season >= IR_RULES_SINCE for s in row["spells"]]
     model = summarize(tally, recent, o_practices)

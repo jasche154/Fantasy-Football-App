@@ -126,3 +126,36 @@ def test_body_part_cleanup():
     assert body_part("Not injury related - personal matter") is None
     assert body_part("Illness") is None
     assert body_part("knee, ankle") == "Knee"
+
+
+def _season(played: tuple[int, ...], tagged: dict[int, str]):
+    """A 6-week season of one WR (id 1, team AAA): his played weeks and his tags by week."""
+    from types import MappingProxyType
+
+    from services.replay_pool import PoolPlayer, SeasonData
+    from services.schedule_strength import Game, Schedule
+
+    games = tuple(Game(w, "AAA", "BBB", None, None, None, None) for w in range(1, 7))
+    opponents = MappingProxyType({**{("AAA", w): "BBB" for w in range(1, 7)}, **{("BBB", w): "AAA" for w in range(1, 7)}})
+    return SeasonData(2024, "half", MappingProxyType({1: PoolPlayer(1, "W", "WR", 10.0, 1.0, "AAA")}),
+                      Schedule(games, opponents), MappingProxyType({(1, w): 8.0 for w in played}),
+                      MappingProxyType({}), MappingProxyType({1: tuple((w, "AAA") for w in played)}), 6,
+                      injuries=MappingProxyType({(1, w): Injury(t, "DNP", "Knee") for w, t in tagged.items()}))
+
+
+def test_an_absence_that_ends_unseen_is_censored_and_only_a_season_end_carries_over():
+    """Hurt after week 1, tagged O in weeks 2-3, then an untagged miss in week 4: he was out at least 2 games
+    (right-censored), and the absence did not run out the season, so it is not carried into the next."""
+    from services.sim_injuries_fit import Tally, walk
+
+    tally = Tally()
+    walk(_season((1, 5, 6), {2: "O", 3: "O"}), 1, "WR", tally, False)
+    (spell,) = tally.spells
+    assert (spell.length, spell.censored, spell.season_end) == (2, True, False)
+    tally = Tally()
+    walk(_season((1,), {w: "IR" for w in range(2, 7)}), 1, "WR", tally, False)
+    (spell,) = tally.spells
+    assert (spell.length, spell.censored, spell.season_end) == (5, True, True)
+    tally = Tally()
+    walk(_season((1, 4, 5, 6), {2: "O", 3: "O"}), 1, "WR", tally, False)
+    assert [(s.length, s.censored, s.season_end) for s in tally.spells] == [(2, False, False)]

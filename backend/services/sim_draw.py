@@ -16,11 +16,9 @@ from services.replay_box import BoxLine
 from services.replay_pool import Usage
 from services.scoring import ScoringSettings
 from services.sim_game import (
-    MAX_TD_RATE, MIN_SNAP_TO_RECORD, GameResult, PlayerGame, _dst_points, _skill_points, fga_mean,
+    MAX_TD_RATE, MIN_SNAP_TO_RECORD, TWO_POINT_SUCCESS, GameResult, PlayerGame, _dst_points, _skill_points, fga_mean,
 )
 from services.sim_world import params
-
-TWO_POINT_SUCCESS = 0.48
 
 
 @dataclass(frozen=True)
@@ -129,7 +127,7 @@ def _passers(side, o: _Offense, rng: np.random.Generator) -> dict[int, dict]:
     else:
         kept = rng.binomial(catches, side.qb_share)
         kept_yards = np.where(catches > 0, np.round(yards * kept / np.maximum(catches, 1)), 0).astype(int)
-        kept_tds = rng.binomial(tds, side.qb_share)
+        kept_tds = rng.hypergeometric(tds, catches - tds, kept)      # his TDs are among the catches he threw
         mine = (kept, kept_yards, kept_tds)
         shares = {side.qb: side.qb_share, side.backup: 1.0 - side.qb_share}
     out = {}
@@ -186,12 +184,20 @@ def draw_game(sides: Sequence, rng: np.random.Generator, scoring: ScoringSetting
             players[pid] = PlayerGame(box, round(_skill_points(box, fumbles, side.positions[pid], scoring), 2),
                                       Usage(round(min(100.0, snap), 1), box.targets, share, box.carries))
         if side.kicker is not None:
-            counts = scored[i][1]
+            counts = scored[i][1] if side.kicker_share >= 1.0 else _thinned(scored[i][1], side.kicker_share, rng)
             players[side.kicker] = PlayerGame(BoxLine(), float(_kick_points_drawn(counts)), None)
         if side.dst is not None:
             players[side.dst] = PlayerGame(BoxLine(), float(_dst_points(
                 opp.sacks, opp.ints, recovered[i], returns[i], int(safeties[i]), int(blocks[i]), points[1 - i])), None)
     return GameResult(players, {side.team: points[i] for i, side in enumerate(sides)})
+
+
+def _thinned(counts: dict, share: float, rng: np.random.Generator) -> dict:
+    """The kicks a kicker who left hurt took himself (each one his with probability `share`)."""
+    made, missed = rng.binomial(counts["made"], share), rng.binomial(counts["missed"], share)
+    pat_made = int(rng.binomial(counts["pat_made"], share))
+    return {"made": made, "missed": missed, "pat_made": pat_made,
+            "pat_att": pat_made + int(rng.binomial(counts["pat_att"] - counts["pat_made"], share))}
 
 
 def _kick_points_drawn(counts: dict) -> float:

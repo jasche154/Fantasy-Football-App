@@ -19,9 +19,10 @@ For each team (a `_Side` built from a World, who is out, and who leaves the game
    TD rate x the same). Rushing the same way per carry.
 5. The QB's line IS the sum: passing yards and TDs are the receivers' (the "other" bucket included, its own
    line discarded). If the starter leaves hurt, each receiver's catches are split binomially between him and
-   the backup, yards in proportion. INTs and sacks come per attempt.
+   the backup, yards in proportion, TDs among the catches each threw. INTs and sacks come per attempt.
 6. Kicker: XP attempts = the team's TDs (some go for two), FG attempts ~ a binomial over `fga_chances` whose
-   mean rises with the team's yards and falls with its TDs (drives that stall), by distance band. D/ST: its
+   mean rises with the team's yards and falls with its TDs (drives that stall), by distance band; a kicker who
+   leaves hurt keeps each kick with probability exit_share (a fill-in takes the rest). D/ST: its
    sacks and INTs ARE the opposing offense's, its fumble recoveries are the opponent's lost fumbles plus
    special-teams ones, return TDs ride on them; points allowed = the opponent's points.
 7. Points come from services/scoring.py (skill) and kdst_model's formulas (K, D/ST), so custom league
@@ -47,6 +48,7 @@ MAX_TD_RATE = 0.6
 FULL_STRENGTH = 1.0              # role weights of a team at full strength sum to about this
 ACTIVE_SLOTS = {"RB": 3, "WR": 5, "TE": 3}     # game-day actives at a position (the top healthy by role weight)
 PA_GRID = np.arange(0, 80)       # points allowed values for the D/ST expectation
+TWO_POINT_SUCCESS = 0.48
 
 
 @dataclass(frozen=True)
@@ -71,6 +73,7 @@ class _Side:
     int_rate: float
     sack_rate: float
     kicker: int | None
+    kicker_share: float                 # share of the game the kicker plays (the rest of his kicks go to a fill-in)
     dst: int | None
     positions: Mapping[int, str] = field(default_factory=dict)
     snaps: Mapping[int, float] = field(default_factory=dict)
@@ -99,9 +102,8 @@ def _norm(position: str) -> Mapping:
     return params()["positions"][position]
 
 
-def _starter(players, out: Collection[int], position: str, exits: Mapping[int, float]):
-    ranked = sorted((p for p in players if p.position == position and p.player_id not in out),
-                    key=lambda p: (-p.starts, p.player_id))
+def _starter(players, position: str):
+    ranked = sorted((p for p in players if p.position == position), key=lambda p: (-p.starts, p.player_id))
     return ranked[0] if ranked else None, ranked[1] if len(ranked) > 1 else None
 
 
@@ -113,8 +115,8 @@ def _side(world: World, team: str, opponent: str | None, out: Collection[int],
     pass_def, rush_def = (defense.pass_def, defense.rush_def) if defense else (1.0, 1.0)
     takeaways = defense.takeaways if defense else 1.0
     roster = _dressed([p for p in world.roster(team) if p.player_id not in out])
-    qb, backup = _starter(roster, (), "QB", exits)
-    kicker, _ = _starter(roster, (), "K", exits)
+    qb, backup = _starter(roster, "QB")
+    kicker, _ = _starter(roster, "K")
     qb_share = exits.get(qb.player_id, 1.0) if qb else 1.0
     quality = ((qb.quality * qb_share + (backup.quality if backup else qb.quality) * (1 - qb_share))
                if qb else league.get("backup_quality", 0.9))
@@ -144,6 +146,7 @@ def _side(world: World, team: str, opponent: str | None, out: Collection[int],
         int_rate=(qb.int_rate if qb else league["int_rate"]) * takeaways,
         sack_rate=league["sack_rate"] * takeaways ** 0.5,
         kicker=kicker.player_id if kicker else None,
+        kicker_share=exits.get(kicker.player_id, 1.0) if kicker else 1.0,
         dst=next((p.player_id for p in roster if p.position == "DST"), None),
         positions=positions, snaps=snaps)
 
@@ -241,6 +244,32 @@ def fga_mean(yards: float, tds: float) -> float:
                         + kick["fga_tds"] * (tds - league["tds"])))
 
 
+def _fga_drawn(yards: float, tds: float) -> float:
+    """Mean field-goal attempts as sim_draw draws them (a binomial over fga_chances, so capped there)."""
+    return min(fga_mean(yards, tds), float(round(params()["kick"]["fga_chances"])))
+
+
+def _takeaways(against: dict | None) -> tuple[float, float, float]:
+    """(sacks, INTs, fumbles recovered) a defense makes against offense means `against` (None: league average)."""
+    league, extra = params()["league"], params()["dst"]["extra_fumbles"]
+    if against is None:
+        return league["sack_rate"] * league["targets"], league["int_rate"] * league["targets"], league["fumbles"] + extra
+    return against["sacks"], against["ints"], against["fumbles"] + extra
+
+
+def _mean_points(m: dict, against: dict | None) -> float:
+    """A team's mean points as sim_draw scores them: offensive and return TDs with their tries, field goals at
+    the real make rates, safeties (`against`: the opposing offense's means, None for a league average)."""
+    kick, dst = params()["kick"], params()["dst"]
+    _, ints, fumbles = _takeaways(against)
+    tds = float(m["rec_td"].sum() + m["rush_td"].sum())
+    scored = tds + ints * dst["int_td"] + fumbles * dst["fum_td"] + dst["st_td"]
+    per_td = 6 + (1 - kick["two_point"]) * kick["xp"] + kick["two_point"] * 2 * TWO_POINT_SUCCESS
+    make = float(np.dot(kick["bands"], kick["make"]))
+    yards = float(m["rec_yds"].sum() + m["rush_yds"].sum())
+    return scored * per_td + 3 * make * _fga_drawn(yards, tds) + 2 * dst["safety"]
+
+
 # ---------------- the analytic mean ----------------
 
 def _side_means(side: _Side) -> dict:
@@ -253,7 +282,8 @@ def _side_means(side: _Side) -> dict:
     return {"targets": targets, "catches": catches, "rec_yds": rec_yds, "rec_td": rec_td, "carries": carries,
             "rush_yds": rush_yds, "rush_td": rush_td, "ints": attempts * side.int_rate,
             "sacks": attempts * side.sack_rate,
-            "fumbles": float((carries * side.fumble).sum() + (catches * side.rec_fumble).sum())}
+            "fumbles": float((carries * side.fumble).sum() + (catches * side.rec_fumble).sum()
+                             + attempts * side.sack_rate * params()["league"]["sack_fumble"])}   # sack fumbles too
 
 
 def expected(world: World, home: str, away: str | None, out: Collection[int], scoring: ScoringSettings,
@@ -266,11 +296,8 @@ def expected(world: World, home: str, away: str | None, out: Collection[int], sc
     means = {team: _side_means(side) for team, side in sides.items()}
     dst = params()["dst"]
     league = params()["league"]
-    team_points = {}
-    for team, m in means.items():
-        tds = float(m["rec_td"].sum() + m["rush_td"].sum())
-        yards = float(m["rec_yds"].sum() + m["rush_yds"].sum())
-        team_points[team] = (tds + dst["st_td"]) * (6 + params()["kick"]["xp"]) + 3 * fga_mean(yards, tds) * 0.85
+    other = {home: away, away: home}
+    team_points = {team: _mean_points(m, means.get(other[team])) for team, m in means.items()}
     out_lines: dict[int, Expected] = {}
     for team, side in sides.items():
         m, opp = means[team], (away if team == home else home)
@@ -278,13 +305,10 @@ def expected(world: World, home: str, away: str | None, out: Collection[int], sc
         if side.kicker is not None:
             tds = float(m["rec_td"].sum() + m["rush_td"].sum())
             yards = float(m["rec_yds"].sum() + m["rush_yds"].sum())
-            out_lines[side.kicker] = Expected(BoxLine(), round(_kick_points(fga_mean(yards, tds), tds), 2))
+            out_lines[side.kicker] = Expected(BoxLine(), round(_kick_points(_fga_drawn(yards, tds), tds), 2))
         if side.dst is not None:
-            against = means[opp] if opp in means else None
             allowed = team_points.get(opp, league["points"])
-            sacks = against["sacks"] if against else league["sack_rate"] * league["targets"]
-            ints = against["ints"] if against else league["int_rate"] * league["targets"]
-            fumbles = (against["fumbles"] if against else league["fumbles"]) + dst["extra_fumbles"]
+            sacks, ints, fumbles = _takeaways(means.get(opp))
             tds = ints * dst["int_td"] + fumbles * dst["fum_td"] + dst["st_td"]
             allowed = min(max(allowed, 0.0), float(PA_GRID[-1]))
             grid = np.exp(-0.5 * ((PA_GRID - allowed) / league["points_sd"]) ** 2)

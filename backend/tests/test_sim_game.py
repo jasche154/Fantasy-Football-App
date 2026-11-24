@@ -136,7 +136,7 @@ def test_the_mean_of_many_games_is_the_expected_line():
     for name in ("QB", "RB", "WR", "TE"):
         assert points[pid("AAA", name)] == pytest.approx(expected[pid("AAA", name)].points, rel=0.06)
     assert points[pid("AAA", "K")] == pytest.approx(expected[pid("AAA", "K")].points, rel=0.08)
-    assert points[pid("AAA", "DST")] == pytest.approx(expected[pid("AAA", "DST")].points, abs=0.8)
+    assert points[pid("AAA", "DST")] == pytest.approx(expected[pid("AAA", "DST")].points, abs=0.3)
 
 
 def test_scores_vary_like_football_and_custom_scoring_counts():
@@ -164,3 +164,27 @@ def test_a_thin_roster_leaves_depth_work_to_the_other_bucket_without_inflating_t
     assert after[lead].box.targets < 1.1 * before[lead].box.targets
     pool = sum(e.box.targets for p, e in after.items() if team_of(p) == "AAA")
     assert pool < full.teams["AAA"].targets - 1                  # some targets go to unpooled depth
+
+
+def test_a_kicker_who_leaves_hurt_keeps_only_his_share_of_the_kicks():
+    rng = np.random.default_rng(8)
+    kicker = pid("AAA", "K")
+    healthy = np.mean([sim_game.play(world(), "AAA", "BBB", set(), rng, HALF).players[kicker].points for _ in range(400)])
+    hurt = np.mean([sim_game.play(world(), "AAA", "BBB", set(), rng, HALF, {kicker: 0.25}).players[kicker].points
+                    for _ in range(400)])
+    assert hurt == pytest.approx(0.25 * healthy, abs=0.6)
+
+
+def test_each_passer_is_credited_only_touchdowns_among_the_catches_he_threw():
+    from types import SimpleNamespace
+
+    from services import sim_draw
+    side = SimpleNamespace(qb=1, backup=2, qb_share=0.5)
+    catches = np.array([1, 1, 2])
+    offense = SimpleNamespace(catches=catches, rec_yds=np.array([30, 5, 20]), rec_td=np.array([1, 0, 1]), ints=0,
+                              sack_fumbles=0)
+    rng = np.random.default_rng(9)
+    for _ in range(300):
+        lines = sim_draw._passers(side, offense, rng)
+        assert all(line["pass_td"] <= line["completions"] for line in lines.values())
+        assert sum(line["pass_td"] for line in lines.values()) == 2

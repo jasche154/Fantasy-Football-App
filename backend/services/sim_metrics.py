@@ -20,6 +20,7 @@ from collections.abc import Iterable
 
 import numpy as np
 
+from services.replacement_eval import spearman  # noqa: F401  (tied values share their average rank)
 from services.replay_pool import SeasonData
 
 TIER_SIZE = 12
@@ -30,13 +31,6 @@ TOP_FINISH, BREAKOUT_ADP, BUST_FINISH = 12, 24, 24
 TOP_ADP_FOR_MISSED = 150
 BIG_GAMES = (25, 30, 35)         # skill games of this many points or more, counted
 LEADERS = (1, 6, 12, 24)         # leaderboard: mean points per game of the top N finishers at a position
-
-
-def spearman(a: Iterable[float], b: Iterable[float]) -> float:
-    a, b = np.asarray(list(a), float), np.asarray(list(b), float)
-    if len(a) < 3:
-        return float("nan")
-    return float(np.corrcoef(a.argsort().argsort(), b.argsort().argsort())[0, 1])
 
 
 def adp_ranks(data: SeasonData) -> dict[int, int]:

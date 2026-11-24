@@ -46,7 +46,7 @@ log = logging.getLogger(__name__)
 
 STATUS_KEY = "replay_prepare"
 ADP_NO_DATA_KEY = "replay_adp_no_data"          # {season: [ADP formats FFC answered without a list]}
-LIVE_KEY = "replay_live_prepared"               # {season in progress: the last week its last clean prepare covered}
+LIVE_KEY = "replay_live_prepared"               # {season prepared in progress: last week its last clean prepare covered}
 RESULT_TABLES = {"player_stats_weekly": PlayerStatsWeekly, "nfl_games": NflGame,
                  "kicker_games": KickerGame, "team_game_stats": TeamGameStats}
 SOURCES = ((espn_history.SOURCE, espn_history.week_projections),
@@ -60,21 +60,25 @@ class ReplayDataError(RuntimeError):
 
 
 def _check_season(season: int, session: Session | None = None) -> int | None:
-    """None for a complete past season, the last real week for the season in progress (replay_live); ValueError
-    for any other season."""
-    seasons = replay_pool.SUPPORTED_SEASONS         # ESPN and Sleeper have no pre-game projections before them
+    """None for a complete season (replay_live.replay_seasons: 2018 through the newest complete one), the last real
+    week for the season in progress (replay_live.current_live); ValueError for any other season."""
+    seasons = replay_live.SUPPORTED_SEASONS          # complete for good: no database read needed
+    if season > seasons[-1] and session is not None:
+        seasons = replay_live.replay_seasons(session)
     if season in seasons:
         return None
     live = replay_live.current_live(session) if session is not None and season > seasons[-1] else None
     if live and live[0] == season:
         return live[1]
     raise ValueError(f"Replay seasons run from {seasons[0]} to {seasons[-1]}"
-                     f"{f' (and {live[0]}, in progress)' if live else ''}; {season} can't be prepared.")
+                     f"{f' (and {live[0]}, in progress)' if live else ''}; {season} can't be prepared"
+                     f"{'' if live or season < seasons[0] else ' until its week 1 is final'}.")
 
 
-def _prepared_through(session: Session, season: int) -> int:
-    """The last week of the season in progress its last clean prepare covered (0: none)."""
-    return int((system_status.read(session, LIVE_KEY) or {}).get(str(season), 0))
+def _prepared_through(session: Session, season: int) -> int | None:
+    """The last week its last clean prepare covered, for a season prepared while in progress (None otherwise)."""
+    done = (system_status.read(session, LIVE_KEY) or {}).get(str(season))
+    return None if done is None else int(done)
 
 
 def table_counts(session: Session, season: int) -> dict[str, int]:
@@ -192,7 +196,7 @@ def create_drafted_players(session: Session, entries: Iterable[AdpEntry], crossw
     return len(new)
 
 
-def _adp_player(matcher: SeasonMatcher, entry: AdpEntry, crosswalk: dict[str, str],
+def adp_player(matcher: SeasonMatcher, entry: AdpEntry, crosswalk: dict[str, str],
                 via_mfl: dict[tuple[str, str], int]) -> int | None:
     if entry.position == "DST":
         return matcher.defense(entry.team)
@@ -292,9 +296,9 @@ def load_adp(session: Session, season: int, client: HistoryClient, force: bool =
                     season, ", ".join(errors), ", ".join(lists))
     created = create_drafted_players(session, mfl, crosswalk)
     matcher = SeasonMatcher(session, season)
-    mfl_pairs = [(e, _adp_player(matcher, e, crosswalk, {})) for e in mfl]
+    mfl_pairs = [(e, adp_player(matcher, e, crosswalk, {})) for e in mfl]
     via_mfl = {(name_key(e.name), e.position): pid for e, pid in mfl_pairs if pid is not None}
-    pairs = {fmt: [(e, _adp_player(matcher, e, crosswalk, via_mfl)) for e in entries] for fmt, entries in lists.items()}
+    pairs = {fmt: [(e, adp_player(matcher, e, crosswalk, via_mfl)) for e in entries] for fmt, entries in lists.items()}
     by_format = {fmt: adp_rows(season, fmt_pairs, mfl_pairs) for fmt, fmt_pairs in pairs.items()}
     session.execute(delete(ReplayAdp).where(ReplayAdp.season == season, ReplayAdp.format.in_(list(by_format))))
     rows = [{**row, "format": fmt} for fmt, fmt_rows in by_format.items() for row in fmt_rows]
@@ -391,13 +395,31 @@ def prepare_season(session: Session, season: int, http: httpx.Client | None = No
 
     The season in progress (replay_live) gets weeks 1..through, safe to re-run each week: its game results are
     the live app's (never re-downloaded here), only new weeks' projections are fetched, and its injury tags and
-    expert ranks are reloaded whenever `through` has grown since the last clean run."""
+    expert ranks are reloaded whenever the weeks covered have grown since the last clean run, including once it
+    is complete (then it is prepared like any past season: every week, the last one included)."""
     through = _check_season(season, session)
-    grown = through is not None and through > _prepared_through(session, season)
+    seen_live = season > replay_live.SUPPORTED_SEASONS[-1]        # a season the app saw in progress
+    prepared = _prepared_through(session, season) if seen_live else None
+    covered = (through or replay_live.progress(session, season)[1]) if seen_live else 0
+    grown = seen_live and covered > (prepared or 0)
     client = HistoryClient(http, pause=PAUSE_SECONDS)
     started = time.monotonic()
     summary: dict = {"season": season, "errors": {}, **({"through": through} if through is not None else {})}
+    try:
+        _prepare_steps(session, season, client, force, through, grown, summary, on_step)
+        if seen_live and not summary["errors"]:
+            done = system_status.read(session, LIVE_KEY) or {}
+            system_status.record(session, LIVE_KEY, {**done, str(season): covered})
+    finally:
+        client.close()
+        replay_pool.clear_cache()           # a season loaded before this import is read again
+    summary["requests"], summary["seconds"] = client.requests, round(time.monotonic() - started, 1)
+    return summary
 
+
+def _prepare_steps(session: Session, season: int, client: HistoryClient, force: bool, through: int | None,
+                   grown: bool, summary: dict, on_step: Callable[[str], None] | None) -> None:
+    """prepare_season's steps, each one's result (or HistoryError type) into `summary`."""
     def run(step: str, work: Callable[[], dict]) -> None:
         if on_step:
             on_step(step)
@@ -409,33 +431,23 @@ def prepare_season(session: Session, season: int, http: httpx.Client | None = No
         summary["errors"].update(result.pop("errors", {}))
         summary[step] = result
 
-    try:
-        run("game_results", lambda: load_game_results(session, season, force and through is None))
-        summary["defenses"] = ensure_defenses(session)
-        if "crosswalk" in summary["errors"]:          # nothing is stored without ids; the next run retries
-            skipped = {"skipped": "player ids not synced"}       # snap counts match players by their PFR id
-            for step in ("snaps", "adp", "experts", "projections", "injuries"):
-                summary[step] = skipped
-        else:
-            run("snaps", lambda: load_snaps(session, season, force))
-            if through is None:
-                run("adp", lambda: load_adp(session, season, client, force))
-            else:
-                from services.replay_live_data import load_live_adp
-                run("adp", lambda: load_live_adp(session, season, client, force))
-            run("experts", lambda: load_expert_ranks(session, season, force or grown))
-            run("projections", lambda: load_projections(session, season, client, force, through))
-            # Reloaded whenever ADP was: that step may have created players the tags must be matched to.
-            run("injuries", lambda: load_injuries(session, season,
-                                                  force or grown or not summary["adp"].get("skipped")))
-        if through is not None and not summary["errors"]:
-            done = system_status.read(session, LIVE_KEY) or {}
-            system_status.record(session, LIVE_KEY, {**done, str(season): through})
-    finally:
-        client.close()
-        replay_pool.clear_cache()           # a season loaded before this import is read again
-    summary["requests"], summary["seconds"] = client.requests, round(time.monotonic() - started, 1)
-    return summary
+    run("game_results", lambda: load_game_results(session, season, force and through is None))
+    summary["defenses"] = ensure_defenses(session)
+    if "crosswalk" in summary["errors"]:              # nothing is stored without ids; the next run retries
+        skipped = {"skipped": "player ids not synced"}       # snap counts match players by their PFR id
+        for step in ("snaps", "adp", "experts", "projections", "injuries"):
+            summary[step] = skipped
+        return
+    run("snaps", lambda: load_snaps(session, season, force))
+    if season <= replay_live.SUPPORTED_SEASONS[-1]:
+        run("adp", lambda: load_adp(session, season, client, force))
+    else:                                           # a season the app saw live: FFC may never get a list
+        from services.replay_live_data import load_live_adp
+        run("adp", lambda: load_live_adp(session, season, client, force))
+    run("experts", lambda: load_expert_ranks(session, season, force or grown))
+    run("projections", lambda: load_projections(session, season, client, force, through))
+    # Reloaded whenever ADP was: that step may have created players the tags must be matched to.
+    run("injuries", lambda: load_injuries(session, season, force or grown or not summary["adp"].get("skipped")))
 
 
 def _state(season: int, state: str, step: str | None, error: str | None = None) -> dict:

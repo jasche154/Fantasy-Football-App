@@ -25,16 +25,17 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import json  # noqa: E402
-from bisect import bisect_right
+from bisect import bisect_right  # noqa: E402
 from dataclasses import dataclass
 from functools import lru_cache
 
 import numpy as np
 
-from services.replay_pool import IR_TAGS, Injury
+from services.replay_pool import IR_TAGS, Injury  # noqa: E402
+from services.sim_constants import fitted_json  # noqa: E402
 
 PATH = Path(__file__).with_name("sim_injuries.json")
+FIT = "python -m services.sim_injuries --fit --seasons 2018-2025"
 POSITIONS = ("QB", "RB", "WR", "TE", "K")
 NEVER_HURT = ("DST",)
 POOLED = "ALL"                      # the all-positions fit, used where a position has too little data
@@ -53,7 +54,7 @@ class Spell:
 @lru_cache(maxsize=1)
 def stored() -> dict:
     """The fitted model (sim_injuries.json); raises if it is missing, since nothing can be drawn without it."""
-    return json.loads(PATH.read_text(encoding="utf-8"))
+    return fitted_json(PATH, FIT, ("positions", "ir", "remaining"))
 
 
 def _fit(position: str) -> dict:
@@ -89,7 +90,8 @@ def hazard(position: str) -> float:
 
 
 def draw(dice: np.random.Generator, position: str) -> Spell:
-    """One injury suffered in a game (call it when `hazard` hits). Always 6 draws, in the same order."""
+    """One injury suffered in a game (call it when `hazard` hits). 4 to 6 draws, in the same order (a banged-up
+    player skips the exit and the return-tag ones)."""
     fit = _fit(position)
     banged = dice.random() < fit["banged_share"]
     games = _pick(dice, fit["length_pmf"])

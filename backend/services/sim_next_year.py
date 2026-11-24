@@ -36,7 +36,6 @@ ADP for the new season is the market's under the new belief in the league's form
 the 2-QB list for a superflex league; sim_market.adp). Rookie ids: ROOKIE_ID_BASE + season x 1000 + pick
 (`rookie_ids`); database ids are autoincrement row ids, far below the base.
 """
-import json
 import math
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
@@ -50,6 +49,7 @@ from services.replay_adp_format import TWO_QB
 from services.replay_pool import PoolPlayer, SeasonData
 from services.replay_scoring import ScoringRules
 from services.schedule_strength import Schedule
+from services.sim_constants import fitted_json
 from services.sim_offseason import Rookie
 from services.sim_world import STARTER_ROLE, Player, Team, World, params, scoring_of
 
@@ -71,7 +71,8 @@ POSITIONS = ("QB", "RB", "WR", "TE")
 @lru_cache(maxsize=1)
 def stored() -> dict:
     """The fitted offseason model (sim_next_year.json)."""
-    return json.loads(PATH.read_text(encoding="utf-8"))
+    return fitted_json(PATH, "python -m services.sim_next_year_fit --fit",
+                       ("age", "keep", "center", "efficiency_keep", "efficiency_sd", "rookies", "team_keep"))
 
 
 def rookie_ids(season: int, rookies: Sequence[Rookie]) -> dict[int, Rookie]:
