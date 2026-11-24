@@ -91,11 +91,12 @@ describe('DraftView', () => {
   });
 
   it.each([
-    ['drafts mid-season', { kind: 'live', sim_from: 10, start_week: 10 }],
-    ['plays a future season', { kind: 'future', sim_from: 1, start_week: 1 }],
-  ] as const)('says the ADP is the simulated market in a league that %s', async (_name, simulated) => {
-    renderDraft(draft(), [], vi.fn(), { ...draftSummary(), ...simulated });
-    expect(await screen.findByText('ADP: the simulated market for this league')).toBeInTheDocument();
+    ['drafts mid-season', { kind: 'live', sim_from: 10, start_week: 10 }, 'ADP: the simulated market for this league'],
+    ['plays a future season', { kind: 'future', sim_from: 1, start_week: 1 }, 'ADP: the simulated market for this league'],
+    ['plays the live season in full', { kind: 'live', sim_from: 10, start_week: 1 }, 'ADP: MyFantasyLeague / Fantasy Football Calculator'],
+  ] as const)('names the ADP source of a league that %s', async (_name, league, source) => {
+    renderDraft(draft(), [], vi.fn(), { ...draftSummary(), ...league });
+    expect(await screen.findByText(source)).toBeInTheDocument();
   });
 
   it('sorts by ADP or projection from the column headers, toggles direction and starts over at the first page', async () => {
