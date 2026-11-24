@@ -23,7 +23,8 @@ DISCOUNT_RANGE) that `replay_trade_value.tally` takes off his price for the user
 `replay_state.markdowns`. While it is open the player is the user's to buy: no other CPU may trade for him
 (replay_trade_ai). It stays open week to week while he stays that worried and the player is on his active
 roster and doesn't look hurt; a good game or the deadline closes it, and a trade, drop or IR move removes it
-at once (`replay_state.with_team`). He sends the user his shop offer for a player once (replay_trade_ai).
+at once (`replay_state.with_team`). He sends the user his shop offer for a player once per shop (`Shop.opened`,
+kept when it renews; replay_trade_ai).
 Nothing here posts chat: replay_game does, with replay_chat (which also uses `might_be_hurt` for bust lines).
 Pure: a Knowledge and the state in, new data out.
 """
@@ -105,10 +106,13 @@ def mood_line(know: Knowledge, team: Team) -> str | None:
 def might_be_hurt(know: Knowledge, played: SeasonData, player_id: int, week: int) -> bool:
     """Could he have been hurt in `week`'s game, as far as anyone knows once it is played? A tag for that week
     or the next, no projection next week (not a bye), or a snap share under LEFT_EARLY x his season median. No
-    snap count to tell (or no earlier game to compare with) is a maybe too: then nobody mocks or shops him."""
+    snap count to tell (or no earlier game to compare with) is a maybe too: then nobody mocks or shops him. A
+    bye that week is not (no game, no snap count, nothing to get hurt in), unless he carries a tag."""
     value = know.by_id[player_id]
     if value.out or value.injury is not None or (player_id, week) in played.injuries:
         return True
+    if played.on_bye(player_id, week):
+        return False
     game = played.usage.get((player_id, week))
     earlier = [u.snap_pct for w in range(1, week) if (u := played.usage.get((player_id, w))) and u.snap_pct]
     if game is None or game.snap_pct is None or not earlier:
@@ -180,5 +184,5 @@ def refresh_shops(state: State, settings: Settings, know: Knowledge, seed: int, 
             continue
         pick = _shop_pick(state, know, team, hurt)
         if pick is not None:
-            opened.append(Shop(team.id, pick[0], state.week, discount(seed, state.week, team, pick[1])))
+            opened.append(Shop(team.id, pick[0], state.week, discount(seed, state.week, team, pick[1]), state.week))
     return replace(state, shops=(*kept, *opened)), tuple(opened)

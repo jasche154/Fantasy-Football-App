@@ -17,9 +17,10 @@ than one attempt; the re-trade lock keeps it from moving the same players again.
    CPUs only make a deal that nets both at least SEEK_SCORE.
 
 A CPU shopping a player to the user (`State.shops`, replay_mood) offers first: the best deal that includes
-that player, at his shop discount (no roll), once: a player he has already offered the user (any offer of his
-to the user with him in `give`) is not offered again while the shop stays open, though the user may still
-propose for him at the discount. Otherwise the persona rolls above decide. While his shop is open
+that player, at his shop discount (no roll), once per shop: a player he has offered the user since the shop
+opened (`Shop.opened`; an offer of his to the user with him in `give`) is not offered again while it stays
+open, though the user may still propose for him at the discount; a shop that closes and later reopens sends
+a new offer. Otherwise the persona rolls above decide. While his shop is open
 a shopped player is the user's to buy: CPU-CPU deals never move him, though they run first.
 An offer to the user is stored as a pending Offer; nothing changes hands until `replay_trades.respond`.
 """
@@ -132,15 +133,21 @@ def _cpu_attempt(state: State, settings: Settings, know: Knowledge, dice: np.ran
     return state
 
 
+def _offered_since(state: State, team_id: int, user_id: int, player_id: int, week: int) -> bool:
+    """Has this CPU offered the user that player since `week` (this shop's opening week)?"""
+    return any(offer.from_team == team_id and offer.to_team == user_id and offer.week >= week
+               and player_id in offer.give for offer in state.offers)
+
+
 def _user_offer(state: State, settings: Settings, know: Knowledge, dice: np.random.Generator) -> State:
     """At most one new offer to the user a week, from the first free CPU whose offer rate hits."""
     user, free = next((team for team in state.teams if team.is_user), None), _free_cpus(state)
     if user is None or any(offer.week == state.week and offer.to_team == user.id for offer in state.offers):
         return state
-    for team in free:                               # a shopping CPU offers his player first, once per player
-        sent = {pid for offer in state.offers if offer.from_team == team.id and offer.to_team == user.id
-                for pid in offer.give}
-        for pid in [pid for pid in rs.markdowns(state, team.id) if pid not in sent]:
+    for team in free:                               # a shopping CPU offers his player first, once per shop
+        live = rs.markdowns(state, team.id)
+        for pid in [shop.player_id for shop in state.shops if shop.team_id == team.id and shop.player_id in live
+                    and not _offered_since(state, team.id, user.id, shop.player_id, shop.opened)]:
             deal = _best_deal(state, settings, know, user, team, need=pid)
             if deal is not None:
                 return rt.record_offer(state, team.id, user.id, deal[1], deal[0], "pending")

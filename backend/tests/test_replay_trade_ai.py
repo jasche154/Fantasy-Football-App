@@ -412,7 +412,8 @@ def test_a_declined_shop_offer_is_not_repeated_and_another_cpu_can_offer(monkeyp
     assert first.offers[-1].from_team == cpu.id and star.player_id in first.offers[-1].give
     declined = replace(first, offers=tuple(replace(o, status="declined") for o in first.offers))
 
-    nxt = replace(declined, week=WEEK + 1, shops=(rs.Shop(cpu.id, star.player_id, WEEK + 1, 0.15),))   # still open
+    nxt = replace(declined, week=WEEK + 1,                                                   # still open
+                  shops=(rs.Shop(cpu.id, star.player_id, WEEK + 1, 0.15, opened=WEEK),))
     week_after = mood_knowledge(WEEK + 1)
     later = _shop_offer(nxt, with_values(week_after, slumping(week_after.by_id[star.player_id], 0.1)), monkeypatch, rate)
     made = later.offers[len(nxt.offers):]
@@ -420,3 +421,28 @@ def test_a_declined_shop_offer_is_not_repeated_and_another_cpu_can_offer(monkeyp
     assert rs.markdowns(later, cpu.id) == {star.player_id: 0.15}       # the user may still buy him at the discount
     assert not any(o.from_team == cpu.id and star.player_id in o.give for o in made)
     assert [o.from_team != cpu.id for o in made] == [True]             # another CPU's offer comes through
+
+
+def test_a_shop_that_closes_and_reopens_later_sends_one_new_offer(monkeypatch):
+    """Once per shop: the offer declined while an earlier shop was open doesn't stop the next shop's offer."""
+    from tests.test_replay_mood import WEEK, knowledge as mood_knowledge, shop_league, slumping, with_values
+    state, know, cpu, star = shop_league()
+    state = replace(state, shops=(rs.Shop(cpu.id, star.player_id, WEEK, 0.15, opened=WEEK),))
+    never = lambda persona: 0.0                                          # noqa: E731 - only the shop path offers
+    first = _shop_offer(state, know, monkeypatch, never)
+    declined = replace(first, offers=tuple(replace(o, status="declined") for o in first.offers))
+
+    later_week = WEEK + 3                                       # closed in between, open again from later_week
+    reopened = replace(declined, week=later_week,
+                       shops=(rs.Shop(cpu.id, star.player_id, later_week, 0.15, opened=later_week),))
+    now = mood_knowledge(later_week)
+    now = with_values(now, slumping(now.by_id[star.player_id], 0.1))
+    again = _shop_offer(reopened, now, monkeypatch, never)
+    made = again.offers[len(reopened.offers):]
+
+    assert [(o.from_team, star.player_id in o.give) for o in made] == [(cpu.id, True)]
+    renewed = replace(again, week=later_week + 1,
+                      shops=(rs.Shop(cpu.id, star.player_id, later_week + 1, 0.15, opened=later_week),))
+    after = mood_knowledge(later_week + 1)
+    after = with_values(after, slumping(after.by_id[star.player_id], 0.1))
+    assert _shop_offer(renewed, after, monkeypatch, never).offers == renewed.offers      # no repeat while open

@@ -218,6 +218,7 @@ class Shop(_Record):                          # a worried CPU shopping one of hi
     player_id: int
     week: int                                 # the week it is open for; renewed while he stays worried
     discount: float                           # share off his usual price for the user (0.05-0.15); never shown
+    opened: int = 0                           # the week it opened (kept on renewal); old saves: 0 (from the start)
 
 
 @dataclass(frozen=True)

@@ -1044,8 +1044,9 @@ that week's games on; only scoring a week reads its real points.
   (`replay_trade_value.tally` via `replay_state.markdowns`), so evaluate, propose, counters and his own offer
   all see it; it never moves the chart, and the re-trade lock stops you flipping the player. While the shop is
   open the player is yours to buy: no other CPU can trade for him, and the shopping CPU sends you his offer
-  first, once (decline it or let it expire and he doesn't send it again, though you can still propose at
-  the discount; other CPUs' offers come through as usual). The shop stays open week to week while he stays
+  first, once per shop (decline it or let it expire and he doesn't send it again while that shop stays open,
+  though you can still propose at the discount; other CPUs' offers come through as usual; if the shop closes
+  and opens again later, he sends a new one). The shop stays open week to week while he stays
   that worried; it closes after a good game, if the player might be hurt, once the trade deadline week is
   over (no shop opens after it), or as soon as the player leaves his active roster (a trade, a drop or IR).
   In a league with waivers a shop opens at Sim to Wednesday, so last week's shops wait out the waiver phase
@@ -1056,7 +1057,8 @@ that week's games on; only scoring a week reads its real points.
   the league's 4th week), a
   3+ game streak, a starter's huge game (22% of the league's median team score and 1.75x his rate) or dud
   (40% of a 10+ rate; never a player who scored 0 or might be hurt: a tag that week or the next, no
-  projection next week, a snap share under 60% of his season median, or no snap counts to tell; so week 1
+  projection next week, a snap share under 60% of his season median, or no snap counts to tell (a bye
+  is not a maybe: he had no game to get hurt in, unless he carries a tag); so week 1
   has no dud lines, with no earlier snap share to compare against), or the
   result itself (close under 9% of the median team score, a blowout from 22%: about 10 and 25 points in a
   half-PPR league, more in a high-scoring one). The final's champion and runner-up don't talk margins after

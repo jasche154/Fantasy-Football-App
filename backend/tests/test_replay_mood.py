@@ -1,4 +1,5 @@
 """Replay League: CPU feelings and shops (services/replay_mood.py), and the shop discount in trades."""
+import json
 from dataclasses import replace
 from types import MappingProxyType
 
@@ -141,7 +142,9 @@ def test_a_shop_closes_after_a_good_game_or_when_he_leaves_and_renews_otherwise(
     closed, _ = rm.refresh_shops(nxt, SETTINGS, good, seed, PLAYED + 1, season_now(WEEK + 1))
     gone = rs.with_team(nxt, replace(cpu, roster=tuple(p for p in cpu.roster if p != star.player_id)))
 
-    assert [(s.player_id, s.week, s.discount) for s in renewed.shops] == [(star.player_id, WEEK + 1, opened[0].discount)]
+    assert [(s.player_id, s.week, s.discount, s.opened) for s in renewed.shops] == [
+        (star.player_id, WEEK + 1, opened[0].discount, WEEK)]                 # renewed: still the shop opened in WEEK
+    assert opened[0].opened == WEEK
     assert all(s.player_id != star.player_id for s in closed.shops)
     assert rs.markdowns(gone, cpu.id) == {}
 
@@ -332,9 +335,10 @@ def test_a_left_early_shop_check_never_sees_the_future():
 
 # ---------------- an open shop closes for each reason ----------------
 
-def _reopened(state: rs.State, know: rv.Knowledge, played: int = PLAYED) -> list[int]:
+def _reopened(state: rs.State, know: rv.Knowledge, played: int = PLAYED, data=None) -> list[int]:
     """The players shopped once an already-open shop is refreshed (any seed: a kept shop never rolls)."""
-    return [s.player_id for s in rm.refresh_shops(state, SETTINGS, know, 0, played, season_now(state.week))[0].shops]
+    now = season_now(state.week, data)
+    return [s.player_id for s in rm.refresh_shops(state, SETTINGS, know, 0, played, now)[0].shops]
 
 
 @pytest.mark.parametrize("reason", ["tag", "worry_faded", "retrade_lock", "deadline", "tendency_weeks"])
@@ -343,8 +347,9 @@ def test_an_open_shop_closes_for_each_reason(reason):
     state = replace(state, shops=(rs.Shop(cpu.id, star.player_id, WEEK - 1, 0.1),))
     assert _reopened(state, know) == [star.player_id]                    # nothing changed: it renews
 
-    if reason == "tag":
-        know = with_values(know, replace(star, injury=fakes.Injury("Q")))
+    data = None
+    if reason == "tag":             # tagged in last week's game: only might_be_hurt sees it (star.injury stays None)
+        data = fakes.tagged(fakes.fake_season(), {(star.player_id, PLAYED): fakes.Injury("Q")})
     elif reason == "worry_faded":
         know = with_values(know, replace(star, form_chart=-0.01 * star.chart))      # still slumping, barely worried
     elif reason == "retrade_lock":
@@ -353,7 +358,43 @@ def test_an_open_shop_closes_for_each_reason(reason):
         state = replace(state, week=SETTINGS.trade_deadline_week + 1)
     played = replay_personas.TENDENCY_WEEKS - 1 if reason == "tendency_weeks" else PLAYED
 
-    assert star.player_id not in _reopened(state, know, played)
+    assert star.player_id not in _reopened(state, know, played, data)
+
+
+def _off_a_bye() -> tuple[rs.State, rv.Knowledge, rs.Team, rv.ReplayValue, int]:
+    """Team 2 (panicky) the week after its best slumping skill player's team had a bye: (state, know, cpu,
+    star, bye week)."""
+    data = fakes.fake_season()
+    state = league({team_id: "panicky" if team_id == 2 else "steady" for team_id in range(2, SETTINGS.teams + 1)})
+    cpu = rs.team(state, 2)
+    for bye in range(replay_personas.TENDENCY_WEEKS + 1, SETTINGS.trade_deadline_week):
+        know = knowledge(bye + 1)
+        star = slumping(best_skill(know, cpu), 0.1)
+        if data.on_bye(star.player_id, bye):
+            calm = [replace(know.by_id[pid], form_chart=0.0, shock_chart=0.0) for pid in cpu.roster
+                    if pid != star.player_id]                                 # he is the one worry
+            return replace(state, week=bye + 1), with_values(know, star, *calm), cpu, star, bye
+    raise AssertionError("no star with a bye before the deadline in the fake season")
+
+
+def test_a_bye_last_week_is_not_a_maybe_injury():
+    state, know, cpu, star, bye = _off_a_bye()
+    played = fakes.fake_season().as_of(bye + 1)
+
+    assert (star.player_id, bye) not in played.usage                     # no snap count: he had no game
+    assert not rm.might_be_hurt(know, played, star.player_id, bye)
+    assert rm.might_be_hurt(know, fakes.tagged(fakes.fake_season(), {(star.player_id, bye): fakes.Injury("Q")})
+                            .as_of(bye + 1), star.player_id, bye)                # a tag still counts, bye or not
+
+
+def test_a_slumping_player_coming_off_a_bye_can_be_shopped_and_an_open_shop_on_him_stays():
+    state, know, cpu, star, bye = _off_a_bye()
+    weeks = bye                                                           # league weeks played (week 1 on)
+
+    opened = [shops for _, _, shops in open_shops(state, know, played=weeks)]
+    assert any(s.player_id == star.player_id for shops in opened for s in shops)
+    kept = replace(state, shops=(rs.Shop(cpu.id, star.player_id, bye, 0.1),))
+    assert _reopened(kept, know, weeks) == [star.player_id]
 
 
 # ---------------- the discount's limits ----------------
@@ -377,3 +418,11 @@ def test_a_balanced_manager_barely_worried_is_floored_at_its_bottom():
     found = [rm.discount(seed, WEEK, team, rm.SHOP_WORRY) for seed in range(60)]
     assert min(found) == rm.DISCOUNT_RANGE[0]                         # some seeds' jitter takes it below: floored
     assert max(found) > rm.DISCOUNT_RANGE[0]
+
+
+def test_an_old_save_shop_without_an_opened_week_loads():
+    state, _, cpu, star = shop_league()
+    saved = json.loads(rs.to_json(replace(state, shops=(rs.Shop(cpu.id, star.player_id, WEEK, 0.1, opened=WEEK),))))
+    saved["shops"] = [{key: value for key, value in shop.items() if key != "opened"} for shop in saved["shops"]]
+
+    assert rs.state_from_json(json.dumps(saved)).shops == (rs.Shop(cpu.id, star.player_id, WEEK, 0.1),)
