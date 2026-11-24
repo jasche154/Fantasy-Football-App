@@ -10,11 +10,12 @@ The year, as the database sees it (S = the newest season whose week 1 is final, 
 A season later than this calendar year is ignored (a bad feed's season 2999 can't have a final week yet).
 
 A week is final when player stats are loaded for it and every game has a score and team stats for both teams,
-except a game still without a score that the stats loader has seen STALE_DAYS after its date (a DataLoad run
-covering the season finished that late): it was not played (cancelled, like BUF@CIN in 2022), so it never holds
-its week, or the season, back. An unscored game only stops holding its week back once the loader has run again
-well after it: data that simply hasn't arrived (the app idle since before the game) never reads as a cancelled
-game. `today` is a function so tests can pin the calendar.
+except a game that was not played (cancelled, like BUF@CIN in 2022). A game without a score is only treated as
+not played once a later game of the season (postseason included), at least STALE_DAYS after it and not after
+today, has its score: that score proves the schedule was read again well after the game, so a failed download,
+a partial reload or an idle app never makes a played game look cancelled. A cancelled game in the last regular
+week therefore holds the season back until a postseason game has its score (about a week). `today` is a
+function so tests can pin the calendar.
 
 `year(session)` reads all of it once (`Year`), for a request that needs several of the answers.
 """
@@ -24,7 +25,7 @@ from datetime import date, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from database.models import DataLoad, NflGame, PlayerStatsWeekly, TeamGameStats
+from database.models import NflGame, PlayerStatsWeekly, TeamGameStats
 from services.projections import REGULAR_SEASON
 
 FIRST_SEASON = 2018                         # ESPN and Sleeper have no pre-game projections before it
@@ -36,20 +37,19 @@ def today() -> date:
     return date.today()
 
 
-def _last_load(session: Session, season: int) -> date | None:
-    """When the stats loader last finished a run covering `season` (DataLoad.seasons is "2025,2026"); None if
-    it never has."""
-    stamp = session.scalar(select(func.max(DataLoad.finished_at)).where(
-        ("," + DataLoad.seasons + ",").contains(f",{season},")))
-    return stamp.date() if stamp else None
+def _last_scored(session: Session, season: int) -> date | None:
+    """The date of the season's latest game with a score, postseason included; None when no game has one."""
+    day = session.scalar(select(func.max(NflGame.gameday)).where(
+        NflGame.season == season, NflGame.home_score.is_not(None), NflGame.away_score.is_not(None)))
+    return date.fromisoformat(day[:10]) if day else None
 
 
 def _holds_back(game, gone: str, teams: set[tuple[int, str]]) -> bool:
-    """Whether a game keeps its week from being final: scored without both teams' stats, or unscored and not yet
-    seen stale by the loader (`gone`: the last date such a game may have; "" when the loader never ran)."""
+    """Whether a game keeps its week from being final: scored without both teams' stats, or unscored and not dated
+    on or before `gone` (the last date a game not played may have; "" when no game has a score)."""
     week, home, away, home_score, away_score, day = game
     if home_score is None or away_score is None:
-        return not (day and day[:10] < gone)
+        return not (day and day[:10] <= gone)
     return not {(week, home), (week, away)} <= teams
 
 
@@ -61,7 +61,7 @@ def progress(session: Session, season: int) -> tuple[int, int]:
         NflGame.season == season, NflGame.game_type == REGULAR_SEASON)).all()
     if not games:
         return 0, 0
-    seen = _last_load(session, season)
+    seen = _last_scored(session, season)
     gone = (min(today(), seen) - timedelta(days=STALE_DAYS)).isoformat() if seen else ""
     teams = {(week, team) for week, team in session.execute(
         select(TeamGameStats.week, TeamGameStats.team).where(TeamGameStats.season == season))}

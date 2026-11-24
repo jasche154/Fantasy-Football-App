@@ -1123,11 +1123,13 @@ trades, IR, playoffs, no hindsight) are the same as in a past season. A new leag
   Football Calculator has no ADP for a season in progress, so its preseason ADP is MyFantasyLeague's PPR
   list alone (real 12-team drafts from August 15 on; `services/replay_live_data.py`), which the other
   formats use as their nearest list until FFC has one.
-- **A game without a score** holds its week back until the stats load has run again well after it: once a
-  load of that season finished more than 4 days past the game's date and the game still has no score (a
-  cancelled game, like Bills-Bengals in 2022), its week counts as final without it, so the season keeps
-  moving and can end. Data that simply hasn't arrived (the app idle since before the game) never reads as a
-  cancelled game, so a new league never freezes a team with a missing week.
+- **A game without a score** is only treated as not played (a cancelled game, like Bills-Bengals in 2022)
+  once a later game of the same season, at least 4 days after it, has its score. Its week then counts as
+  final without it, so the season keeps moving and can end. A later score proves the schedule was read again
+  well after the game, so data that simply hasn't arrived (a failed download, the app idle since before the
+  game) never reads as a cancelled game, and a new league never freezes a team with a missing week. A
+  cancelled game in the last regular-season week holds the season back until a playoff game has its score
+  (about a week later).
 - **Seasons from a bad feed:** a season later than the current calendar year is ignored.
 - **When the season ends** (every week final), nothing needs changing: it becomes an ordinary past season.
   Prepare it once more (the button, or `--seasons 2026`) to fetch the last weeks' projections, tags and
