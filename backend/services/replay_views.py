@@ -325,9 +325,13 @@ def player_row(game: Game, know: Knowledge, player_id: int) -> dict:
 
 
 def buzz(game: Game, player_id: int, week: int) -> str | None:
-    """His news line known before `week`: the one dated `week`, else the week before's (as_of drops later ones)."""
-    notes = game.full_season.as_of(week).notes
-    return notes.get((player_id, week)) or notes.get((player_id, week - 1))
+    """His news line known before `week`: the one dated `week`, else the week before's (as_of drops later ones);
+    none while a hard tag has him out that week (last week's role rumour is moot once he is on IR)."""
+    known = game.full_season.as_of(week)
+    tag = known.injuries.get((player_id, week))
+    if tag is not None and tag.hard:
+        return None
+    return known.notes.get((player_id, week)) or known.notes.get((player_id, week - 1))
 
 
 def news(value: ReplayValue) -> dict | None:

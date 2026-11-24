@@ -2,8 +2,9 @@
 
     python -m services.sim_next_year_fit --fit [--seasons 2019-2025] [--dump rows.json]
 
-For each season S, the public belief at the end of S-1 and of S (sim_world.estimate over the whole season,
-no prior) are compared:
+For each season S, the public belief at the end of S-1 (sim_world.estimate over the whole season, with the
+belief at the end of S-2 as its prior when stored, as sim_setup builds a future season) and at the end of S
+(no prior) are compared:
 - rookies (nflverse draft picks of year S, through nflreadpy, joined to the players table by gsis id): their
   role in S as a line in log(pick) per position (targets, carries, a kicker's starts, a QB's chance to start
   week 1), fitted by least squares on every rookie (a never-seen late pick counts as no role), so the mean
@@ -19,6 +20,8 @@ no prior) are compared:
 - efficiency persistence: next season's RAW rate (box totals; the belief is shrunk, which would bias the
   slope) on this season's belief, as deviations from the position norm (`efficiency_keep`). QB quality and
   INT rate have no raw rate in the box lines, so theirs is the belief's slope over its mean shrink;
+- the true-talent spread of each rate a new season's truth draws around that regressed belief (`efficiency_sd`,
+  `_spread_fit`; read by sim_talent for a whole season);
 - teams: volume and defense factors next season on this season's, as log deviations (`team_keep`).
 Experience = seasons through S-1 since his draft year (nflverse), else since his first database season.
 
@@ -41,6 +44,7 @@ from services.replay_pool import SeasonData
 from services.sim_next_year import PATH, VOLUME_MIN, volume
 from services.sim_offseason import Rookie
 from services.sim_schedule import TEAMS
+from services.sim_eval import season_end
 from services.sim_setup import first_seasons
 
 log = logging.getLogger(__name__)
@@ -123,7 +127,7 @@ def observations(session, seasons: list[int]) -> dict[str, list[dict]]:
     for season in seasons:
         before = replay_pool.load_season_data(session, season - 1, SCORING)
         after = replay_pool.load_season_data(session, season, SCORING)
-        old = sim_world.estimate(before, before.last_week + 1)
+        old = sim_world.estimate(before, before.last_week + 1, season_end(session, season - 2))
         new = sim_world.estimate(after, after.last_week + 1)
         rookies += _rookie_rows(season, draft_class(session, season, picks), new, qb_starts(after))
         exp, raw = experience(session, season - 1, picks, first), _raw(after)
@@ -210,6 +214,38 @@ def _efficiency_fit(rows: list[dict]) -> dict:
     return out
 
 
+def _spread_fit(rows: list[dict], keep: Mapping[str, float]) -> dict:
+    """{position: {rate: true-talent sd}}: the sd of the belief's log deviations from the position norm among
+    relevant veterans (volume-weighted) x sqrt(keep). Under belief = talent + noise, keep (next season's raw
+    rate on the belief) is talent's share of the belief's variance, so talent's sd is that. Only cells with
+    MIN_ROOKIES rows or more (a rate a position barely uses gets none)."""
+    norms, league = sim_world.params()["positions"], sim_world.params()["league"]
+    cells: dict[tuple[str, str], tuple[list[float], list[float]]] = defaultdict(lambda: ([], []))
+    for r in rows:
+        if not _relevant(r):
+            continue
+        position = r["position"]
+        if position == "QB":
+            for name in QB_SHRINK:
+                norm = 1.0 if name == "quality" else league["int_rate"]
+                if r[name][0] > 0:
+                    cells[(position, name)][0].append(float(np.log(r[name][0] / norm)))
+                    cells[(position, name)][1].append(1.0)
+            continue
+        for name, (_, base, minimum) in RAW.items():
+            norm, n = norms[position].get(name), r["raw"].get(base, 0.0)
+            if norm and n >= minimum and r[name][0] > 0:
+                cells[(position, name)][0].append(float(np.log(r[name][0] / norm)))
+                cells[(position, name)][1].append(n)
+    out: dict[str, dict[str, float]] = defaultdict(dict)
+    for (position, name), (x, w) in sorted(cells.items()):
+        if len(x) >= MIN_ROOKIES:
+            x, w = np.array(x), np.array(w)
+            spread = float(np.sqrt((w * x * x).sum() / w.sum()))
+            out[position][name] = round(spread * float(np.sqrt(max(0.0, min(1.0, keep[name])))), 4)
+    return dict(out)
+
+
 def _team_fit(rows: list[dict]) -> dict:
     league = sim_world.params()["league"]
     out = {}
@@ -225,9 +261,10 @@ def summarize(rows: Mapping[str, list[dict]], seasons: list[int]) -> dict:
     age, keep, center = {}, {}, {}
     for position in POSITIONS:
         age[position], keep[position], center[position] = _age_fit(rows["veterans"], position)
+    efficiency = _efficiency_fit(rows["veterans"])
     return {"seasons": seasons, "rookies": _rookie_fit(rows["rookies"]), "age": age, "keep": keep,
-            "center": center, "efficiency_keep": _efficiency_fit(rows["veterans"]),
-            "team_keep": _team_fit(rows["teams"])}
+            "center": center, "efficiency_keep": efficiency,
+            "efficiency_sd": _spread_fit(rows["veterans"], efficiency), "team_keep": _team_fit(rows["teams"])}
 
 
 def _seasons(text: str) -> list[int]:

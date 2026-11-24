@@ -25,16 +25,17 @@ seasons 2019-2025 by services/sim_next_year_fit.py and lives in sim_next_year.js
   in log(pick), not extrapolated above ROOKIE_PICK_FLOOR for non-QBs: the fit has almost none there),
   position-norm efficiency at his team's passer scale, and no games of evidence, so sim_talent.truth draws
   them the widest. A rookie QB is named the starter when his team has no starter
-  (nobody with STARTER_ROLE starts) or when his pick makes week 1 likely (week-1 chance ROOKIE_QB_NAMED or
-  more) and the incumbent is a below-average passer; otherwise his starts weight is his week-1 chance, which
+  (nobody with STARTER_ROLE starts), when his pick makes week 1 very likely (week-1 chance ROOKIE_QB_FRANCHISE
+  or more), or likely (ROOKIE_QB_NAMED) and the incumbent is a below-average passer; otherwise his starts
+  weight is his week-1 chance, which
   puts him next in line (sim_talent's rookie takeover).
 - Teams: volume and defenses regress toward the league (`team_keep`); the passer scale and the "other"
   buckets stay.
 
-ADP for the new season is the market's under the new belief (sim_market.adp). Rookie ids: ROOKIE_ID_BASE +
-season x 1000 + pick (`rookie_ids`); database ids are autoincrement row ids, far below the base.
+ADP for the new season is the market's under the new belief in the league's format (`season_base`: its scoring,
+the 2-QB list for a superflex league; sim_market.adp). Rookie ids: ROOKIE_ID_BASE + season x 1000 + pick
+(`rookie_ids`); database ids are autoincrement row ids, far below the base.
 """
-import json
 import math
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
@@ -44,9 +45,11 @@ from pathlib import Path
 from types import MappingProxyType
 
 from services import sim_market
+from services.replay_adp_format import TWO_QB
 from services.replay_pool import PoolPlayer, SeasonData
 from services.replay_scoring import ScoringRules
 from services.schedule_strength import Schedule
+from services.sim_constants import fitted_json
 from services.sim_offseason import Rookie
 from services.sim_world import STARTER_ROLE, Player, Team, World, params, scoring_of
 
@@ -56,6 +59,8 @@ ROOKIE_ID_SEASON = 1000                 # ids per season (more than the most pic
 VOLUME_MIN = {"QB": 3.0, "RB": 3.0, "WR": 2.0, "TE": 1.5}    # opportunities per game (as the fit)
 ROOKIE_PICK_FLOOR = 4                   # a non-QB's line is read at this pick or later (few go higher in the fit)
 ROOKIE_QB_NAMED = 0.35                  # a rookie QB this likely to start week 1 beats a below-average incumbent
+ROOKIE_QB_FRANCHISE = 0.5               # ... and this likely (about the top 5 picks) beats any incumbent: 2022-2025
+                                        # named 7 week-1 rookie starters, as many as really started (1.75 a season)
 AVERAGE_PASSER = 1.0
 VETERAN_BACKUP_STARTS = 0.15            # a veteran backup's starts weight at most (a first-round rookie is ahead)
 RECEIVER_RATES = ("ypc", "rec_td")      # measured with his team's usual passer
@@ -66,7 +71,8 @@ POSITIONS = ("QB", "RB", "WR", "TE")
 @lru_cache(maxsize=1)
 def stored() -> dict:
     """The fitted offseason model (sim_next_year.json)."""
-    return json.loads(PATH.read_text(encoding="utf-8"))
+    return fitted_json(PATH, "python -m services.sim_next_year_fit --fit",
+                       ("age", "keep", "center", "efficiency_keep", "efficiency_sd", "rookies", "team_keep"))
 
 
 def rookie_ids(season: int, rookies: Sequence[Rookie]) -> dict[int, Rookie]:
@@ -159,11 +165,12 @@ def rookie_player(pid: int, rookie: Rookie, team: Team) -> Player:
 
 
 def _qb_competition(players: dict[int, Player], rookie: Player) -> None:
-    """Name the rookie QB the starter when his team has no starter, or when his week-1 chance is high and the
-    incumbent is a below-average passer (see the module docstring). Mutates `players` (local to next_year)."""
+    """Name the rookie QB the starter when his team has no starter, when his week-1 chance is very high, or high
+    and the incumbent is a below-average passer (see the module docstring). Mutates `players` (local to
+    next_year)."""
     others = [p for p in players.values() if p.team == rookie.team and p.position == "QB" and p.player_id != rookie.player_id]
     incumbent = max(others, key=lambda p: (p.starts, -p.player_id), default=None)
-    if incumbent is None or incumbent.starts < STARTER_ROLE or (
+    if incumbent is None or incumbent.starts < STARTER_ROLE or rookie.starts >= ROOKIE_QB_FRANCHISE or (
             rookie.starts >= ROOKIE_QB_NAMED and incumbent.quality < AVERAGE_PASSER):
         players[rookie.player_id] = replace(rookie, starts=1.0)
         if incumbent is not None:
@@ -222,8 +229,8 @@ def _teams(world: World) -> dict[str, Team]:
 def next_year(world: World, players: Mapping[int, PoolPlayer], experience: Mapping[int, int],
               rookies: Mapping[int, Rookie], moves: Mapping[int, str | None],
               season_starts: Mapping[int, Sequence[int]] | None = None) -> tuple[World, dict[int, PoolPlayer]]:
-    """(the belief going into next season, its player pool with the market's ADP) from the belief at the end
-    of this one. `players`: names and positions of the world's players; `experience`: seasons each has played
+    """(the belief going into next season, its player pool: names, positions and teams, no ADP yet) from the
+    belief at the end of this one. `players`: names and positions of the world's players; `experience`: seasons each has played
     through this one; `rookies`: {id: rookie} (rookie_ids); `moves`: {id: new team, or None = gone};
     `season_starts`: the weeks each QB started this season (sim_metrics.qb_starts)."""
     teams = _teams(world)
@@ -237,20 +244,22 @@ def next_year(world: World, players: Mapping[int, PoolPlayer], experience: Mappi
         if pid in new and new[pid].position == "QB":
             _qb_competition(new, new[pid])
     belief = World(MappingProxyType(new), MappingProxyType(teams))
-    market = sim_market.adp(belief)
     pool = {}
     for pid, player in new.items():
         known = players.get(pid)
         name = known.name if known is not None else rookies[pid].name
-        adp, stdev = market.get(pid, (None, None))
-        pool[pid] = PoolPlayer(pid, name, player.position, adp, stdev, player.team)
+        pool[pid] = PoolPlayer(pid, name, player.position, None, None, player.team)
     return belief, pool
 
 
 def season_base(season: int, belief: World, pool: Mapping[int, PoolPlayer], schedule: Schedule, scoring: str,
-                rules: ScoringRules | None, defense_prior: Mapping[tuple[str, str], float]) -> SeasonData:
+                rules: ScoringRules | None, defense_prior: Mapping[tuple[str, str], float],
+                adp_format: str = "ppr", record: Mapping[int, float] | None = None) -> SeasonData:
     """The season before anything happened, ready for sim_season.simulate(base, seed, 1, prior=belief): the
-    pool (each player's team is his PoolPlayer.adp_team, as nothing is played), the schedule, and a week-1
+    pool (each player's team is his PoolPlayer.adp_team, as nothing is played) with the market's ADP for the
+    league's `adp_format` (replay_adp_format.wanted: priced on its own scoring, rules included; "2qb" for a
+    superflex league; recorded as SeasonData.adp_format; leaning on `record`, the players' points a game in
+    the season the belief came from, as a real August market leans on what it saw), the schedule, and a week-1
     projection for every player of the belief (the market's for those who dress, MIN_PROJECTION for backups
     and depth), so all of them exist from the start: SeasonData.as_of admits a player with an ADP, a
     projection or a game, and a backup QB or a WR6 must be there to step in. simulate replaces week 1's
@@ -259,7 +268,20 @@ def season_base(season: int, belief: World, pool: Mapping[int, PoolPlayer], sche
     base = SeasonData(season=season, scoring=scoring, players=MappingProxyType(dict(pool)), schedule=schedule,
                       actual=empty, projected=empty, team_by_week=empty,
                       last_week=max(game.week for game in schedule.games),
-                      defense_prior=MappingProxyType(dict(defense_prior)), rules=rules, adp_format="ppr")
+                      defense_prior=MappingProxyType(dict(defense_prior)), rules=rules, adp_format=adp_format)
     week_one = sim_market.projections(belief, schedule, 1, (), scoring_of(base))
-    return replace(base, projected=MappingProxyType({(pid, 1): week_one.get(pid, sim_market.MIN_PROJECTION)
-                                                     for pid in belief.players}))
+    return replace(with_market_adp(base, belief, record=record),
+                   projected=MappingProxyType({(pid, 1): week_one.get(pid, sim_market.MIN_PROJECTION)
+                                               for pid in belief.players}))
+
+
+def with_market_adp(data: SeasonData, belief: World, games_left: int = sim_market.SEASON_GAMES,
+                    record: Mapping[int, float] | None = None) -> SeasonData:
+    """`data` with every player's ADP the market's under `belief` with `games_left` games to play (none for a
+    player it does not list), priced for data's scoring and its ADP list (data.adp_format "2qb": superflex),
+    leaning on each player's `record` when given (sim_market.track_record)."""
+    market = sim_market.adp(belief, scoring_of(data), data.adp_format == TWO_QB, games_left, record)
+    players = {pid: replace(player, adp=market[pid][0] if pid in market else None,
+                            adp_stdev=market[pid][1] if pid in market else None)
+               for pid, player in data.players.items()}
+    return replace(data, players=MappingProxyType(players))

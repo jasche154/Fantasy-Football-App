@@ -5,6 +5,7 @@ real engine runs end to end in test_replay_future_leagues.py."""
 import json
 from collections.abc import Iterator
 from dataclasses import replace
+from datetime import timedelta
 from types import MappingProxyType, SimpleNamespace
 
 import pytest
@@ -16,9 +17,10 @@ from sqlalchemy.pool import StaticPool
 
 import services
 from config import get_settings
+from database import populate_stats
 from database.db import get_session
 from database.models import Base, NflGame, PlayerStatsWeekly, ReplaySeasonData
-from services import replay_blob, replay_live, replay_pool, sim_setup
+from services import replay_blob, replay_live, replay_pool, sim_next_year, sim_setup
 from services.replay_pool import SeasonData
 from tests import replay_fakes as fakes
 from tests.test_replay_routes import _snapshot, get, post, refused
@@ -61,12 +63,21 @@ def fake_market(world: SeasonData) -> dict[int, tuple[float, float]]:
     return {pid: (float(pick), MARKET) for pick, pid in enumerate(ranked, start=1)}
 
 
+TODAY = fakes.sunday(LIVE, THROUGH) + timedelta(days=4)      # the Thursday before week THROUGH + 1
+
+
+@pytest.fixture(autouse=True)
+def live_today(monkeypatch):
+    """The calendar the fixture's season is in (replay_live judges a game with no score by its date)."""
+    monkeypatch.setattr(replay_live, "today", lambda: TODAY)
+
+
 @pytest.fixture(autouse=True)
 def engine_stand_in(monkeypatch):
     monkeypatch.setattr(services, "sim_season", SimpleNamespace(simulate=fake_simulate), raising=False)
-    monkeypatch.setattr(services, "sim_world", SimpleNamespace(estimate=lambda data, week, prior=None: data),
+    monkeypatch.setattr(services, "sim_world", SimpleNamespace(estimate=lambda data, week, prior=None: data.as_of(week)),
                         raising=False)
-    monkeypatch.setattr(services, "sim_market", SimpleNamespace(adp=fake_market), raising=False)
+    monkeypatch.setattr(sim_next_year, "sim_market", SimpleNamespace(adp=lambda world, *format: fake_market(world)))
 
 
 def _app(url: str) -> Iterator[tuple[TestClient, Engine]]:
@@ -235,27 +246,53 @@ def test_deleting_a_simulated_league_deletes_its_season(app):
     assert refused(client, game, method="GET")[0] == 404
 
 
+def test_a_league_whose_saved_season_is_broken_says_so_and_can_still_be_deleted(app):
+    client, engine = app
+    game = _create(client)
+    league = int(game.rsplit("/", 1)[1])
+    with Session(engine) as session:
+        row = session.get(ReplaySeasonData, league)
+        row.blob = row.blob[: len(row.blob) // 2]                  # truncated on disk
+        session.commit()
+    replay_blob.clear_cache()
+
+    for path, method in ((game, "GET"), (game + "/players", "GET"), (game + "/draft/auto", "POST")):
+        status, detail = refused(client, path, method=method)
+        assert status == 500 and "saved season can't be read (error)" in detail, path     # zlib.error
+    assert any(row["id"] == league for row in get(client, "/games")["results"])
+    post(client, game + "/delete")
+    assert refused(client, game, method="GET")[0] == 404
+
+
 # ---------------- frozen: later real data never reaches a saved league ----------------
+
+def _correct_stats(session: Session, star: int, yards: int) -> None:
+    """An nflverse stat correction as the 6-hourly stats loader stores it: rows rewritten, then its run stamped."""
+    session.execute(update(PlayerStatsWeekly).where(PlayerStatsWeekly.player_id == star, PlayerStatsWeekly.week == 1)
+                    .values(rushing_yards=PlayerStatsWeekly.rushing_yards + yards))
+    populate_stats.record_load(session, [LIVE])
+
 
 def test_new_real_data_reaches_new_leagues_only(tmp_path_factory):
     url = f"sqlite:///{(tmp_path_factory.mktemp('sim') / 'live.db').as_posix()}"
+    star = next(pid for (pid, week) in FULL.actual if week == 1 and pid // 1000 == 11)       # a running back
     for client, engine in _app(url):
         old = _create(client)
         before = replay_blob.dumps(_frozen(engine, old))
-        star = next(pid for (pid, week) in FULL.actual if week == 1 and pid // 1000 == 11)       # a running back
-        with Session(engine) as session:                         # a stat correction and the next week finished
-            session.execute(update(PlayerStatsWeekly).where(PlayerStatsWeekly.player_id == star,
-                                                            PlayerStatsWeekly.week == 1)
-                            .values(rushing_yards=PlayerStatsWeekly.rushing_yards + 100))
+        with Session(engine) as session:                         # a correction, no new week: `through` unchanged
+            _correct_stats(session, star, 100)
+        corrected = post(client, "/games", {"season": LIVE, "seed": 4})["game"]
+        with Session(engine) as session:                         # another correction and the next week finished
+            _correct_stats(session, star, 100)
             play_through(session, THROUGH + 1)
-        replay_pool.clear_cache()                                # what a prepare run ends with
         after = _frozen(engine, old)
         new = post(client, "/games", {"season": LIVE, "seed": 4})["game"]
-        fresh = _frozen(engine, f"/games/{new['id']}")
+        mid, fresh = _frozen(engine, f"/games/{corrected['id']}"), _frozen(engine, f"/games/{new['id']}")
         get(client, old + "/players", status="all")              # the old league still plays
 
     assert replay_blob.dumps(after) == before and after.actual[(star, 1)] == FULL.actual[(star, 1)]
-    assert new["sim_from"] == THROUGH + 2 and fresh.actual[(star, 1)] == pytest.approx(FULL.actual[(star, 1)] + 10)
+    assert corrected["sim_from"] == THROUGH + 1 and mid.actual[(star, 1)] == pytest.approx(FULL.actual[(star, 1)] + 10)
+    assert new["sim_from"] == THROUGH + 2 and fresh.actual[(star, 1)] == pytest.approx(FULL.actual[(star, 1)] + 20)
 
 
 # ---------------- no hindsight ----------------

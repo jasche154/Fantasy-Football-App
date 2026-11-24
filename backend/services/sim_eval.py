@@ -8,10 +8,12 @@
   MID_WEEK..last are simulated and compared with the real ones (sim_metrics.weekly). This is out of sample:
   the simulation never sees the weeks it is judged on.
 - full: season S built exactly the way a future season is (sim_setup._future_base): the belief at the end of
-  S-1 (estimate, all of it) through sim_next_year.next_year with S's real rookies (nflverse draft picks of
-  year S, landing on the drafting team; needs the network) and S's real veteran moves (`real_moves`), S's
-  real schedule; the whole season is simulated and compared with the real one (sim_metrics.season, weekly,
-  rookies, and how our ADP agrees with S's real ADP).
+  S-1 (estimate, all of it, on the belief at the end of S-2 as its prior) through sim_next_year.next_year with
+  S's real rookies (nflverse draft picks of year S, landing on the drafting team; needs the network) and S's
+  real veteran moves (`real_moves`), S's real schedule, the market's ADP leaning on S-1's track record; the
+  whole season is simulated and compared with the real one (sim_metrics.season with its leaderboard, weekly,
+  rookies, and how our ADP agrees with S's real ADP: ours priced in the real list's format, PPR).
+  mid reports the leaderboard of the simulated weeks too.
 - --set overrides a sim_params.json value for this run (section.key=value, JSON value); --save-tuned writes
   the overrides into the file's `tuned` section, which is how tuned constants get there.
 
@@ -26,7 +28,8 @@ from collections import defaultdict
 from dataclasses import replace
 from pathlib import Path
 
-from services import replay_pool, sim_fit, sim_metrics, sim_season, sim_world
+from services import replay_pool, sim_fit, sim_market, sim_metrics, sim_season, sim_world
+from services.replay_adp_format import TWO_QB
 from services.replay_pool import SeasonData
 from services.sim_world import World
 
@@ -64,19 +67,32 @@ def real_moves(belief: World, real: SeasonData) -> dict[int, str | None]:
     return moves
 
 
+def season_end(session, season: int) -> World | None:
+    """The belief at the end of `season` (the prior the season after it is estimated on), None if not stored."""
+    if season not in replay_pool.SUPPORTED_SEASONS:
+        return None
+    data = replay_pool.load_season_data(session, season, SCORING)
+    return sim_world.estimate(data, data.last_week + 1)
+
+
 def next_season(session, real: SeasonData, offseason: dict) -> tuple[SeasonData, World, set[int]]:
     """(base, prior, rookie ids) for season `real.season` built like sim_setup._future_base from the season before it."""
     from services import sim_next_year, sim_next_year_fit as fit
 
     previous = replay_pool.load_season_data(session, real.season - 1, SCORING)
-    world = sim_world.estimate(previous, previous.last_week + 1)
+    world = sim_world.estimate(previous, previous.last_week + 1, season_end(session, real.season - 2))
     rookies = {pid: r for pid, r in fit.draft_class(session, real.season, offseason["picks"]).items()
                if pid not in world.players}
     experience = fit.experience(session, real.season - 1, offseason["picks"], offseason["first"])
     belief, pool = sim_next_year.next_year(world, previous.players, experience, rookies, real_moves(world, real),
                                            sim_metrics.qb_starts(previous))
     base = sim_next_year.season_base(real.season, belief, pool, real.schedule, SCORING, None, real.defense_prior)
-    return base, belief, set(rookies) & set(base.players)
+    # our ADP priced like the real list it is compared with (the stored lists are PPR, read for a half league too)
+    listed = "ppr" if real.adp_format == TWO_QB else real.adp_format
+    record = sim_market.track_record(replay_pool.load_season_data(session, real.season - 1, listed))
+    priced = sim_next_year.with_market_adp(replace(base, scoring=listed, adp_format=real.adp_format), belief,
+                                           record=record)
+    return replace(base, players=priced.players), belief, set(rookies) & set(base.players)
 
 
 def _mean(rows: list[dict[str, float]]) -> dict[str, float]:
@@ -99,8 +115,12 @@ def _mid(session, season: int, seeds: list[int]) -> tuple[dict, dict]:
     real = replay_pool.load_season_data(session, season, SCORING)
     weeks = range(MID_WEEK, real.last_week + 1)
     base = cut(real, MID_WEEK)
-    sims = [sim_metrics.weekly(sim_season.simulate(base, seed, MID_WEEK), weeks) for seed in seeds]
-    return sim_metrics.weekly(real, weeks), _mean(sims)
+    sims = [_rest(sim_season.simulate(base, seed, MID_WEEK), weeks) for seed in seeds]
+    return _rest(real, weeks), _mean(sims)
+
+
+def _rest(data: SeasonData, weeks: range) -> dict[str, float]:
+    return {**sim_metrics.weekly(data, weeks), **sim_metrics.leaderboard(data, weeks)}
 
 
 def _whole(data: SeasonData, rookies: set[int], real: SeasonData) -> dict[str, float]:
@@ -131,7 +151,7 @@ def apply_overrides(pairs: list[str]) -> dict[str, dict]:
         name, value = pair.split("=", 1)
         section, key = name.split(".", 1)
         overrides[section][key] = json.loads(value)
-        sim_world.params().setdefault(section, {})[key] = json.loads(value)
+        sim_world.override(section, key, json.loads(value))
     return dict(overrides)
 
 

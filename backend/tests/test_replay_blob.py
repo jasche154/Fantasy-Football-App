@@ -75,15 +75,49 @@ def test_an_old_save_reads_with_defaults_and_a_newer_one_is_refused():
         replay_blob._records({"snap_pct": [1.0]}, fakes.Usage, 1)
     assert "TypeError" in _refusal({**payload, "usage": {"k0": [1], "k1": [1], "v": {"snap_pct": [1.0]}}})
     assert "version 2" in _refusal({**payload, "v": replay_blob.VERSION + 1})
-    with pytest.raises(ValueError, match="Not a stored replay season"):
+    for version in (True, 0, -1, 1.0, "1", None):
+        assert "version" in _refusal({**payload, "v": version}), version
+    with pytest.raises(replay_blob.UnreadableSeason, match=r"can't be read \(error\)"):     # zlib.error
         replay_blob.loads(b"not a blob")
 
 
 def _refusal(payload: dict) -> str:
-    """...is a ValueError, never a half-built season."""
-    with pytest.raises(ValueError) as refused:
+    """...is an UnreadableSeason, never a half-built season."""
+    with pytest.raises(replay_blob.UnreadableSeason) as refused:
         replay_blob.loads(zlib.compress(json.dumps(payload).encode()))
     return str(refused.value)
+
+
+def test_any_broken_save_is_one_clean_error_with_the_exception_type():
+    payload = json.loads(zlib.decompress(replay_blob.dumps(_rich(DATA))))
+    short = {**payload["box"], "v": {**payload["box"]["v"], "rec_td": payload["box"]["v"]["rec_td"][:3]}}
+
+    assert "IndexError" in _refusal({**payload, "box": short})                 # a column shorter than its keys
+    assert "AttributeError" in _refusal({**payload, "schedule": {**payload["schedule"], "games": [1, 2]}})  # list
+    assert "TypeError" in _refusal({**payload, "players": [1, 2, 3]})          # ... where columns belong
+    assert "KeyError" in _refusal({**payload, "schedule": {}})
+    blob = replay_blob.dumps(_rich(DATA))
+    rng = np.random.default_rng(0)
+    for cut in (1, 10, len(blob) // 3, len(blob) - 1):
+        with pytest.raises(replay_blob.UnreadableSeason):
+            replay_blob.loads(blob[:cut])
+    for _ in range(40):                                        # flipped bytes: zlib's checksum or the JSON refuses
+        garbled = bytearray(blob)
+        garbled[int(rng.integers(len(blob)))] ^= 1 << int(rng.integers(8))
+        with pytest.raises(replay_blob.UnreadableSeason):
+            replay_blob.loads(bytes(garbled))
+    for name in ("actual", "injuries", "team_by_week", "players"):     # a table's values garbled: decoded or
+        broken = {**payload, name: {**payload[name], "v": "x" if name != "players" else {"name": None}}}
+        try:                                                           # refused, never another exception
+            replay_blob.loads(zlib.compress(json.dumps(broken).encode()))
+        except replay_blob.UnreadableSeason:
+            pass
+
+
+def test_a_plain_record_holding_a_list_comes_back_hashable_like_a_table_record():
+    back = replay_blob._decode(ScoringRules, {"reception": [1, 2]})
+
+    assert back.reception == (1, 2) and hash(back)
 
 
 @pytest.fixture
@@ -98,9 +132,31 @@ def db():
 def _league(db: Session, data: SeasonData) -> int:
     settings = fakes.fake_settings(sim_from=6)
     row = rs.create(db, "Sim", settings, fakes.drafted_state(), 1, commit=False)
-    replay_blob.store(db, row.id, "live", 5, data)
+    replay_blob.store(db, row.id, "live", 5, replay_blob.dumps(data))
     db.commit()
+    replay_blob.remember(db, row.id, data)
     return row.id
+
+
+def test_a_season_is_cached_only_once_its_league_is_committed(db):
+    row = rs.create(db, "Sim", fakes.fake_settings(sim_from=6), fakes.drafted_state(), 1, commit=False)
+    replay_blob.store(db, row.id, "live", 5, replay_blob.dumps(DATA))
+    league = row.id
+    db.rollback()                                                   # the commit never happened
+
+    assert not replay_blob._cache
+    with pytest.raises(replay_blob.NoDataError):
+        replay_blob.load(db, league)
+
+
+def test_a_new_league_on_a_reused_id_never_sees_the_old_leagues_season(db):
+    old = _league(db, DATA)
+    replay_blob.load(db, old)
+    rs.delete(db, old)                                             # a request that read it before the delete
+    replay_blob._keep(replay_blob._key(db, old), DATA)              # ... caches it after the delete's forget
+    new = _league(db, replace(DATA, season=DATA.season + 1))
+
+    assert new == old and replay_blob.load(db, new).season == DATA.season + 1
 
 
 def test_a_league_gets_one_season_object_until_the_cache_is_cleared(db):

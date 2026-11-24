@@ -20,7 +20,7 @@ from api.deps import Scoring
 from database.db import get_session
 from database.models import ReplayLeague
 from services import (
-    replay_adp_format, replay_blob, replay_data, replay_game as rg, replay_pool, replay_scoring, replay_slots,
+    replay_adp_format, replay_blob, replay_data, replay_game as rg, replay_live, replay_pool, replay_scoring, replay_slots,
     replay_state as rs, replay_views as views, replay_views_league as league_views, sim_setup,
 )
 from services.replay_pool import SeasonData
@@ -48,11 +48,15 @@ def game_lock(game_id: int) -> threading.Lock:
 
 @contextmanager
 def errors() -> Iterator[None]:
-    """Domain errors as HTTP: an unknown game or player 404, season data not loaded 503, bad input 422."""
+    """Domain errors as HTTP: an unknown game or player 404, season data not loaded 503, bad input 422, a saved
+    season that can't be decoded 500 (the server's fault, with the reason; GET /games still lists the league, so
+    it can be deleted)."""
     try:
         yield
     except rs.ReplayNotFound as exc:
         raise HTTPException(404, str(exc)) from exc
+    except replay_blob.UnreadableSeason as exc:
+        raise HTTPException(500, f"{exc} Delete this league to start another.") from exc
     except NoDataError as exc:
         raise HTTPException(503, str(exc)) from exc
     except ValueError as exc:
@@ -127,7 +131,7 @@ def turn(session: Session, game_id: int, week: int | None = None, overall: int |
 @router.get("/seasons")
 def seasons(session: Session = Depends(get_session)) -> dict:
     """Which past seasons can be played, the simulated ones (live, future), and the season import that is running."""
-    return {"results": [replay_pool.readiness(session, season) for season in replay_pool.SUPPORTED_SEASONS],
+    return {"results": [replay_pool.readiness(session, season) for season in replay_live.replay_seasons(session)],
             "simulated": sim_setup.simulated(session), "prepare": replay_data.status(session)}
 
 
@@ -228,14 +232,15 @@ def create_game(body: CreateBody, session: Session = Depends(get_session)) -> di
                             scoring_rules=rules, adp_format=replay_adp_format.wanted(scoring, rules, starters),
                             **_window(body, kind, through))
         simulated = settings.sim_from is not None
-        data = (sim_setup.build(session, settings, seed) if simulated
-                else replay_pool.load_season_data(session, season, scoring, rules, settings.adp_format))
+        blob, data = (sim_setup.build(session, settings, seed) if simulated else
+                      (None, replay_pool.load_season_data(session, season, scoring, rules, settings.adp_format)))
         state = rg.create_game(settings, data, seed)
         name = (body.name or "").strip() or f"{season} {'Sim' if simulated else 'Replay'}"
         row = rs.create(session, name, settings, state, seed, commit=not simulated)
         if simulated:                               # never a league without its season
-            data = replay_blob.store(session, row.id, kind, through, data)
+            replay_blob.store(session, row.id, kind, through, blob)
             session.commit()
+            replay_blob.remember(session, row.id, data)
         game = _game(row, settings, state, data)
         return {"game": views.summary(game), "events": views.new_events(game, None)}
 

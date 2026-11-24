@@ -46,3 +46,22 @@ def test_the_truth_is_centred_on_the_belief(belief):
     ratios = [t.targets / belief.players[pid].targets for seed in range(10)
               for pid, t in sim_talent.truth(belief, seed, 8, 17).players.items() if belief.players[pid].targets > 0.05]
     assert np.mean(ratios) == pytest.approx(1.0, abs=0.03)
+
+
+def test_a_whole_season_draws_the_talent_its_regressed_belief_cannot_know(belief):
+    """From week 1 each rate gets its own offseason draw (wider for a player with no games); mid-season none."""
+    receivers = sorted(pid for pid, p in belief.players.items() if p.position == "WR" and p.targets > 0.05)
+    rookie_like = replace(belief, players=MappingProxyType(
+        {**belief.players, **{pid: replace(belief.players[pid], games=0.0) for pid in receivers[::2]}}))
+
+    truths = {week: [sim_talent.truth(rookie_like, seed, week, 17) for seed in range(12)] for week in (1, 8)}
+
+    def td_spread(pids, from_week):
+        logs = [math.log(truth.players[pid].rec_td / belief.players[pid].rec_td)
+                for truth in truths[from_week] for pid in pids]
+        return float(np.std(logs))
+
+    veterans, rookies = receivers[1::2], receivers[::2]
+    assert td_spread(veterans, 1) > td_spread(veterans, 8) * 1.5          # the offseason adds to the in-season spread
+    assert td_spread(rookies, 1) > td_spread(veterans, 1)
+    assert all(p.catch <= sim_talent.MAX_CATCH for p in truths[1][0].players.values())

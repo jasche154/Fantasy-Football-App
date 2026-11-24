@@ -29,12 +29,10 @@ A World is everything the game simulator (services/sim_game.py) needs to play an
 
 Constants measured from real seasons live in sim_params.json (`python -m services.sim_eval --fit`).
 """
-import json
 from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from functools import cached_property, lru_cache
-from pathlib import Path
+from functools import cached_property
 from statistics import median
 from types import MappingProxyType
 
@@ -43,8 +41,8 @@ import numpy as np
 from services import replay_scoring
 from services.replay_pool import SeasonData
 from services.scoring import ScoringSettings, reception_points
+from services.sim_constants import PARAMS_PATH, override, params  # noqa: F401  (re-exported: the engine's import path)
 
-PARAMS_PATH = Path(__file__).with_name("sim_params.json")
 OTHER = 0                        # member id of a team's "other" bucket in role fits
 DECAY = 0.9                      # a game one week older counts this much less in the role fit
 ROLE_PRIOR_GAMES = 2.5           # pseudo-games of the prior share in the role fit
@@ -134,16 +132,6 @@ class World:
         for player in self.players.values():
             grouped[player.team].append(player)
         return {team: tuple(players) for team, players in grouped.items()}
-
-
-@lru_cache(maxsize=1)
-def params() -> Mapping:
-    """The constants in sim_params.json: the measured sections, each overlaid with its `tuned` values
-    (constants set by matching simulated seasons to real ones, `sim_eval --tune`)."""
-    stored = json.loads(PARAMS_PATH.read_text())
-    tuned = stored.pop("tuned", {})
-    return {name: {**value, **tuned.get(name, {})} if isinstance(value, dict) else value
-            for name, value in {**{k: {} for k in tuned}, **stored}.items()}
 
 
 def scoring_of(data: SeasonData) -> ScoringSettings:

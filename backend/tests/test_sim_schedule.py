@@ -100,3 +100,31 @@ def test_standings_now_with_tiebreakers():
     assert places["MIA"] == 1 and places["BUF"] == 2
     assert {places["NE"], places["NYJ"]} == {3, 4}
     assert ss.standings_now(games, before_week=2)["BUF"] == 1
+
+
+def hash_seed_outputs(code: str, seeds=(1, 2, 3)) -> list[str]:
+    """`code`'s stdout in fresh interpreters under different PYTHONHASHSEEDs (set and str order differ)."""
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    backend = Path(__file__).resolve().parents[1]
+    outputs = []
+    for seed in seeds:
+        env = {**os.environ, "PYTHONHASHSEED": str(seed), "PYTHONPATH": str(backend), "FANTASY_ENV_FILE": ""}
+        run = subprocess.run([sys.executable, "-c", code], cwd=backend, env=env, capture_output=True, text=True,
+                             timeout=600)
+        assert run.returncode == 0, run.stderr
+        outputs.append(run.stdout)
+    return outputs
+
+
+def test_the_schedule_is_the_same_in_every_process():
+    """Every league of a season shares one schedule, so it can't depend on str hash order (per process)."""
+    code = ("import hashlib\nfrom services import sim_schedule as ss\n"
+            "st = {t: p for teams in ss.DIVISIONS.values() for p, t in enumerate(teams, start=1)}\n"
+            "games = ss.build(2027, st, 7).games\n"
+            "print(hashlib.md5(repr([(g.week, g.home_team, g.away_team, g.gametime) for g in games]).encode()).hexdigest())")
+    outputs = hash_seed_outputs(code)
+    assert len(set(outputs)) == 1, outputs

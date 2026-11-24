@@ -2,17 +2,20 @@
 that reads the database; the engine (services/sim_season, sim_world, sim_market) is pure.
 
 - live: the season in progress (replay_live.current_live), real through week N, weeks N+1.. simulated from the
-  league's own seed. A league may start "now" (Settings.start_week = N + 1): it drafts on today's market ADP.
+  league's own seed. A league may start "now" (Settings.start_week = N + 1): it drafts on today's market ADP
+  (`_market_adp`: the belief before week N + 1 of its own simulated season, the one that week's expert snapshot
+  came from), in the league's format.
 - future: the season after the newest one, simulated whole from what is known today (`_future_base`): the
   belief at the end of the newest season so far (the season in progress through its last finished week, else
-  the finished one), carried through the offseason (sim_next_year, with sim_data's rookies and moves), on the
-  stored schedule or a generated one (sim_schedule, seeded by the season, so every league shares it).
+  the finished one; estimated on the belief at the end of the season before it, `_season_end`, so a star's
+  longer record counts), carried through the offseason (sim_next_year, with sim_data's rookies and moves), on
+  the stored schedule or a generated one (sim_schedule, seeded by the season, so every league shares it). Its
+  ADP is the market's in the league's format, leaning on the newest season's track record.
 
 The season is built once, when its league is created, and frozen into the save (services/replay_blob.py).
 """
 import logging
 from dataclasses import replace
-from types import MappingProxyType
 
 from sqlalchemy.orm import Session
 
@@ -30,12 +33,13 @@ DEFAULT_CHAMPIONSHIP = 17           # api/replay_routes.CreateBody.playoff_end_w
 
 
 def kind_of(session: Session, season: int) -> tuple[str, int]:
-    """(kind, last real week) of a season a league may be created on: (REPLAY, 0) for a complete past season,
-    (LIVE, through) for the season in progress, (FUTURE, 0) for the one after the newest. ValueError otherwise."""
+    """(kind, last real week) of a season a league may be created on: (REPLAY, 0) for a complete season
+    (replay_live.replay_seasons), (LIVE, through) for the season in progress, (FUTURE, 0) for the one after the
+    newest started one. ValueError otherwise."""
     live = replay_live.current_live(session)
     if live and live[0] == season:
         return LIVE, live[1]
-    seasons = replay_pool.SUPPORTED_SEASONS
+    seasons = replay_live.replay_seasons(session)
     if season in seasons:
         return REPLAY, 0
     future = replay_live.future_season(session)
@@ -57,11 +61,10 @@ def now_window(through: int, championship_week: int, playoff_teams: int) -> tupl
     return regular, start + (2 * left) // 3 - 1
 
 
-def build(session: Session, settings: Settings, seed: int) -> SeasonData:
+def build(session: Session, settings: Settings, seed: int) -> tuple[bytes, SeasonData]:
     """The whole season a new simulated league plays (real weeks before settings.sim_from, its own simulated
-    future after), to be frozen with it. NoDataError when the season's data is not ready. Returned as its save
-    will hold it (replay_blob's codec: plain floats where the engine made numpy ones), so the league plays the
-    same numbers before and after it is next loaded."""
+    future after), to be frozen with it: (its save's bytes, the season as the save holds it; replay_blob.freeze).
+    NoDataError when the season's data is not ready."""
     from services import sim_season                     # the engine, imported only when a league is built
 
     if settings.sim_from is None:
@@ -73,32 +76,32 @@ def build(session: Session, settings: Settings, seed: int) -> SeasonData:
         base = replay_pool.load_season_data(session, settings.season, settings.scoring, settings.scoring_rules,
                                             settings.adp_format, through=settings.sim_from - 1)
         data = sim_season.simulate(base, seed, settings.sim_from)
-        data = _market_adp(data, base, settings.sim_from) if settings.start_week > 1 else data
-    return replay_blob.loads(replay_blob.dumps(data))
+        data = _market_adp(data, settings) if settings.start_week > 1 else data
+    return replay_blob.freeze(data)
 
 
-def _market_adp(data: SeasonData, base: SeasonData, week: int) -> SeasonData:
-    """Every player's ADP replaced by the market's going into `week` (none for a player it does not list), so a
-    draft held mid-season reflects today, not August."""
-    from services import sim_market, sim_world
+def _market_adp(data: SeasonData, settings: Settings) -> SeasonData:
+    """Every player's ADP replaced by the market's going into the league's first week, in the league's format
+    (settings.adp_format), so a draft held mid-season reflects today, not August. The belief reads the
+    simulated season as known before that week, which includes that week's injury tags (a starter's running
+    IR stint): the same belief the week's expert snapshot was drawn from, so the draft room's rank and ADP agree."""
+    from services import sim_next_year, sim_world
 
-    market = sim_market.adp(sim_world.estimate(base, week))
-    players = {pid: replace(player, adp=market[pid][0] if pid in market else None,
-                            adp_stdev=market[pid][1] if pid in market else None)
-               for pid, player in data.players.items()}
-    return replace(data, players=MappingProxyType(players))
+    week = settings.start_week
+    return sim_next_year.with_market_adp(replace(data, adp_format=settings.adp_format),
+                                         sim_world.estimate(data, week), data.last_week - week + 1)
 
 
 # ---------------- the future season ----------------
 
 def source(session: Session) -> tuple[int, int | None] | None:
-    """(season, through) the future season is built from: the season in progress through its last finished week,
-    else the newest season in full (through None). None when the database has no season."""
-    live = replay_live.current_live(session)
-    if live:
-        return live
-    newest = replay_live.newest_season(session)
-    return (newest, None) if newest is not None else None
+    """(season, through) the future season is built from: the newest started season (replay_live.newest_started)
+    through its last finished week while in progress, else in full (through None). None when there is none."""
+    found = replay_live.newest_started(session)
+    if found is None:
+        return None
+    season, through, last_week = found
+    return season, (through if through < last_week else None)
 
 
 def future_problem(session: Session, season: int) -> str | None:
@@ -156,11 +159,26 @@ def _defense_prior(data: SeasonData) -> dict[tuple[str, str], float]:
             **{(replay_defense.AVERAGE, position): round(value, 2) for position, value in averages.items()}}
 
 
+def _season_end(session: Session, season: int, settings: Settings):
+    """The belief at the end of a complete `season` (the prior the newest season is estimated on: a preseason
+    market leans on more than one season), or None when the database doesn't have it."""
+    from services import sim_world
+
+    if season not in replay_live.replay_seasons(session):
+        return None
+    try:
+        data = replay_pool.load_season_data(session, season, settings.scoring, settings.scoring_rules,
+                                            settings.adp_format)
+    except NoDataError:
+        return None
+    return sim_world.estimate(data, data.last_week + 1)
+
+
 def _future_base(session: Session, season: int, settings: Settings) -> tuple[SeasonData, object]:
     """(the season to simulate: every player of the new belief, the schedule, preseason ADP and week-1
     projections, no games; the prior World) for the season after the newest one, from what is known today
     (sim_next_year). Raises NoDataError when it can't be built (future_problem says why)."""
-    from services import sim_metrics, sim_next_year, sim_offseason, sim_world
+    from services import sim_market, sim_metrics, sim_next_year, sim_offseason, sim_world
 
     problem = future_problem(session, season)
     if problem:
@@ -168,7 +186,8 @@ def _future_base(session: Session, season: int, settings: Settings) -> tuple[Sea
     newest, through = source(session)
     data = replay_pool.load_season_data(session, newest, settings.scoring, settings.scoring_rules,
                                         settings.adp_format, through=through)
-    world = sim_world.estimate(data, (through or data.last_week) + 1)
+    world = sim_world.estimate(data, (through or data.last_week) + 1,
+                               _season_end(session, newest - 1, settings))
     rookies, moves = sim_offseason.load(season)
     matched, missing = sim_offseason.match(moves, data.players)
     if missing:
@@ -181,7 +200,7 @@ def _future_base(session: Session, season: int, settings: Settings) -> tuple[Sea
                                            sim_metrics.qb_starts(data))
     prior = _defense_prior(data)
     base = sim_next_year.season_base(season, belief, pool, _schedule(session, season, data), settings.scoring,
-                                     settings.scoring_rules, prior)
+                                     settings.scoring_rules, prior, settings.adp_format, sim_market.track_record(data))
     return base, belief
 
 

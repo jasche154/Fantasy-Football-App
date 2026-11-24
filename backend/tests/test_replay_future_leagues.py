@@ -11,12 +11,14 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from database.models import NflGame
-from services import replay_pool, sim_next_year, sim_offseason, sim_setup
+from services import replay_pool, replay_state as rs, sim_next_year, sim_offseason, sim_setup
 from services.replay_state import Settings
 from services.sim_offseason import Move, Rookie
 from tests import replay_fakes as fakes
 from tests.test_replay_routes import get, post
-from tests.test_replay_sim_leagues import FULL, LIVE, THROUGH, _app, _frozen, screens_never_leak
+from tests.test_replay_sim_leagues import (  # noqa: F401 (live_today is an autouse fixture)
+    FULL, LIVE, THROUGH, _app, _frozen, live_today, screens_never_leak,
+)
 
 FUTURE = LIVE + 1
 RETIRED = fakes.player_id("WR", 2)
@@ -125,6 +127,23 @@ def test_a_live_league_is_played_to_a_champion_on_the_real_engine(app):
     assert {k: v for k, v in data.actual.items() if k[1] <= THROUGH} == {
         k: v for k, v in FULL.actual.items() if k[1] <= THROUGH and k[0] in data.players}
     assert any(week > THROUGH for _, week in data.actual)
+
+
+def test_a_live_league_that_starts_now_drafts_on_the_real_engines_market(app):
+    client, engine = app
+    game = post(client, "/games", {"season": LIVE, "seed": 6, "teams": 8, "start": "now"})["game"]
+    path = f"/games/{game['id']}"
+
+    data = _frozen(engine, path)
+    market = {pid: p.adp for pid, p in data.players.items() if p.adp is not None}
+    with Session(engine) as session:
+        settings = rs.load(session, game["id"])[1]
+    assert (game["start_week"], data.adp_format) == (THROUGH + 1, settings.adp_format)
+    assert len(market) >= 8 * 15 and sum(market[pid] != p.adp for pid, p in FULL.players.items()
+                                         if pid in market and p.adp is not None) > len(market) // 2
+    post(client, path + "/draft/auto", whole_draft="true")
+    post(client, path + "/advance", {"step": "play", "week": THROUGH + 1})
+    assert get(client, path)["week"] == THROUGH + 2
 
 
 def test_a_future_leagues_screens_never_show_an_unplayed_week(app):
