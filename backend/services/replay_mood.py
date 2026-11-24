@@ -107,12 +107,14 @@ def might_be_hurt(know: Knowledge, played: SeasonData, player_id: int, week: int
     """Could he have been hurt in `week`'s game, as far as anyone knows once it is played? A tag for that week
     or the next, no projection next week (not a bye), or a snap share under LEFT_EARLY x his season median. No
     snap count to tell (or no earlier game to compare with) is a maybe too: then nobody mocks or shops him. A
-    bye that week is not (no game, no snap count, nothing to get hurt in), unless he carries a tag."""
+    bye that week is no game to get hurt in: unless he carries a tag, his last game before it is judged instead
+    (a game cut short before a bye still counts)."""
     value = know.by_id[player_id]
     if value.out or value.injury is not None or (player_id, week) in played.injuries:
         return True
     if played.on_bye(player_id, week):
-        return False
+        last = next((w for w in range(week - 1, 0, -1) if not played.on_bye(player_id, w)), None)
+        return last is not None and might_be_hurt(know, played, player_id, last)
     game = played.usage.get((player_id, week))
     earlier = [u.snap_pct for w in range(1, week) if (u := played.usage.get((player_id, w))) and u.snap_pct]
     if game is None or game.snap_pct is None or not earlier:

@@ -387,6 +387,19 @@ def test_a_bye_last_week_is_not_a_maybe_injury():
                             .as_of(bye + 1), star.player_id, bye)                # a tag still counts, bye or not
 
 
+def test_a_bye_does_not_hide_that_his_last_game_was_cut_short():
+    state, know, cpu, star, bye = _off_a_bye()
+    healthy = fakes.fake_season()
+    assert not healthy.on_bye(star.player_id, bye - 1)                   # he played the week before the bye
+    hurt = left_early(star.player_id, week=bye - 1, data=healthy)         # untagged: only the snap count tells
+
+    assert rm.might_be_hurt(know, hurt.as_of(bye), star.player_id, bye - 1)          # judged right after it
+    assert rm.might_be_hurt(know, hurt.as_of(bye + 1), star.player_id, bye)          # and still after the bye
+    assert not rm.might_be_hurt(know, healthy.as_of(bye + 1), star.player_id, bye)   # a full game before it: fine
+    assert not any(s.player_id == star.player_id for _, after, _ in open_shops(state, know, played=bye, data=hurt)
+                   for s in after.shops)
+
+
 def test_a_slumping_player_coming_off_a_bye_can_be_shopped_and_an_open_shop_on_him_stays():
     state, know, cpu, star, bye = _off_a_bye()
     weeks = bye                                                           # league weeks played (week 1 on)
