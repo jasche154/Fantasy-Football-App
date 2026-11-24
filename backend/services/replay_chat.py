@@ -14,8 +14,8 @@ When lines are posted (replay_game calls these; each reads only what is known wh
   was tied), clinch / eliminated (newly, regular season), upset (beat a team UPSET_GAP or more places above
   him, from the league's UPSET_FROM_WEEK-th week: league weeks, so a league that jumped in mid-season waits
   too), streak_win / streak_loss (STREAK games), then one of boom (a starter's huge game), bust (a starter's
-  dud; never one who might be hurt, `might_be_hurt`) and the result itself. Margins scale with the league
-  (`thresholds`, from the median team score so far): close_* under CLOSE_SHARE of it, blowout_* from
+  dud; never one who might be hurt, `replay_mood.might_be_hurt`) and the result itself. Margins scale with
+  the league (`thresholds`, from the median team score so far): close_* under CLOSE_SHARE of it, blowout_* from
   BLOWOUT_SHARE, and a boom needs BOOM_SHARE of it as well as BOOM_RATE x his rate (about 10, 25 and 25
   points in a half-PPR league). The user's opponent talks to the user (a kind that names him, by the nearer
   margin when the game was in between) and may also post his clinch / elimination; the others post with
@@ -26,7 +26,8 @@ When lines are posted (replay_game calls these; each reads only what is known wh
 - `shop_lines`: a worried manager's direct message when he starts shopping a player to the user (replay_mood).
 - `trade_reactions`: a third manager may react to a new trade (at most MAX_REACTIONS a week).
 - `label_offers`: every new CPU offer to the user gets his one-line reason (Offer.message): worried about a
-  player he sends, high on a player he asks for, short at a position, a counter, else a plain value pitch.
+  player he sends (one he is shopping, or one he feels worried about who nobody could think was hurt), high
+  on a player he asks for, short at a position, a counter, else a plain value pitch.
 Text is built from team names, player names and numbers only. Pure.
 """
 import json
@@ -39,6 +40,7 @@ from pathlib import Path
 from types import MappingProxyType
 
 from services import replay_mood, replay_state as rs
+from services.replay_mood import might_be_hurt      # shared with the shops; re-exported for callers
 from services.replay_pool import SKILL, SeasonData
 from services.replay_state import Chat, Offer, Settings, Shop, State, Team, WeekResult
 from services.replay_values import Knowledge
@@ -70,7 +72,6 @@ UPSET_FROM_WEEK = 4             # league weeks played (a jump-in league's NFL we
 STREAK = 3
 BOOM_SHARE, BOOM_RATE = 0.22, 1.75      # a starter's points >= both that share of a team score and 1.75 x his rate
 BUST_RATE, BUST_MIN_PPG = 0.4, 10.0     # <= 0.4 x a rate of at least 10 (and more than 0)
-LEFT_EARLY = 0.6                # a snap share under this x his season median: he may have left the game hurt
 MAX_WEEK_LINES = 5
 MAX_REACTIONS = 2
 REACT_CHANCE = {"cpu": 0.35, "user": 0.75}      # a trade between two CPUs / with the user
@@ -166,20 +167,6 @@ def thresholds(state: State) -> tuple[float, float, float]:
     """(close margin, blowout margin, boom points) in this league: shares of its median team score so far."""
     typical = statistics.median(score for result in state.results for score in result.scores.values())
     return CLOSE_SHARE * typical, BLOWOUT_SHARE * typical, BOOM_SHARE * typical
-
-
-def might_be_hurt(know: Knowledge, played: SeasonData, player_id: int, week: int) -> bool:
-    """Could he have been hurt in `week`'s game, as far as anyone knows once it is played? A tag for that week
-    or the next, no projection next week (not a bye), or a snap share under LEFT_EARLY x his season median. No
-    snap count to tell (or no earlier game to compare with) is a maybe too: then nobody mocks his game."""
-    value = know.by_id[player_id]
-    if value.out or value.injury is not None or (player_id, week) in played.injuries:
-        return True
-    game = played.usage.get((player_id, week))
-    earlier = [u.snap_pct for w in range(1, week) if (u := played.usage.get((player_id, w))) and u.snap_pct]
-    if game is None or game.snap_pct is None or not earlier:
-        return True
-    return game.snap_pct < LEFT_EARLY * statistics.median(earlier)
 
 
 @dataclass(frozen=True)
@@ -350,12 +337,14 @@ def trade_reactions(state: State, offer_ids: Sequence[int], know: Knowledge, see
     return state
 
 
-def _offer_kind(state: State, know: Knowledge, offer: Offer) -> tuple[str, int | None]:
-    """Why this CPU (offer.from_team) makes the offer: (kind, the player the line names)."""
+def _offer_kind(state: State, know: Knowledge, played: SeasonData, offer: Offer) -> tuple[str, int | None]:
+    """Why this CPU (offer.from_team) makes the offer: (kind, the player the line names). A shopped player was
+    checked for `might_be_hurt` when his shop opened or renewed this week; any other worry is checked here."""
     cpu = rs.team(state, offer.from_team)
     shopped = rs.markdowns(state, cpu.id)
     worried = [pid for pid in offer.give if pid in shopped or (
-        (felt := replay_mood.feeling(know.by_id[pid], cpu.persona, cpu.hype)) and felt.kind == "worried")]
+        (felt := replay_mood.feeling(know.by_id[pid], cpu.persona, cpu.hype)) and felt.kind == "worried"
+        and not might_be_hurt(know, played, pid, state.week - 1))]
     if worried:
         return "offer_worried", worried[0]
     if offer.counter_to is not None:
@@ -371,14 +360,15 @@ def _offer_kind(state: State, know: Knowledge, offer: Offer) -> tuple[str, int |
     return "offer_value", max(offer.get, key=lambda pid: (know.by_id[pid].chart, -pid))
 
 
-def label_offers(state: State, know: Knowledge, seed: int) -> State:
-    """Every pending CPU offer to the user without a message gets one in its sender's voice (not in the feed)."""
+def label_offers(state: State, know: Knowledge, seed: int, played: SeasonData) -> State:
+    """Every pending CPU offer to the user without a message gets one in its sender's voice (not in the feed).
+    `played` is the season as known now (data.as_of(state.week)), for `might_be_hurt` on last week's game."""
     user = rs.user_team(state)
     for offer in state.offers:
         if offer.to_team != user.id or offer.status != "pending" or offer.message:
             continue
         cpu = rs.team(state, offer.from_team)
-        kind, pid = _offer_kind(state, know, offer)
+        kind, pid = _offer_kind(state, know, played, offer)
         named = know.by_id[pid] if pid is not None else None
         values = {"me": cpu.name, "you": user.name, "player": named.name if named else "",
                   "position": named.position if named else ""}

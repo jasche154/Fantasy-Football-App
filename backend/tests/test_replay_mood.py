@@ -17,6 +17,11 @@ def knowledge(week: int = WEEK, data=None) -> rv.Knowledge:
     return fakes.fake_knowledge(week, SETTINGS, data)
 
 
+def season_now(week: int = WEEK, data=None):
+    """The season as known at the start of `week` (what refresh_shops reads last week's snap counts from)."""
+    return (data or fakes.fake_season()).as_of(week)
+
+
 def league(personas: dict[int, str] | None = None, week: int = WEEK) -> rs.State:
     """The drafted league in `week`, every CPU balanced unless `personas` says otherwise."""
     state = fakes.drafted_state(SETTINGS)
@@ -85,8 +90,9 @@ def shop_league(persona: str = "panicky") -> tuple[rs.State, rv.Knowledge, rs.Te
     return state, with_values(know, star), cpu, star
 
 
-def open_shops(state: rs.State, know: rv.Knowledge, seeds=range(40), played: int = PLAYED):
-    return [(seed, *rm.refresh_shops(state, SETTINGS, know, seed, played)) for seed in seeds]
+def open_shops(state: rs.State, know: rv.Knowledge, seeds=range(40), played: int = PLAYED, data=None):
+    return [(seed, *rm.refresh_shops(state, SETTINGS, know, seed, played, season_now(state.week, data)))
+            for seed in seeds]
 
 
 def test_a_panicky_manager_shops_his_slumping_star_with_a_bounded_discount():
@@ -130,9 +136,9 @@ def test_a_shop_closes_after_a_good_game_or_when_he_leaves_and_renews_otherwise(
     seed, after, opened = next(run for run in open_shops(state, know) if run[2])
     nxt = replace(after, week=WEEK + 1)
 
-    renewed, _ = rm.refresh_shops(nxt, SETTINGS, know, seed, PLAYED + 1)
+    renewed, _ = rm.refresh_shops(nxt, SETTINGS, know, seed, PLAYED + 1, season_now(WEEK + 1))
     good = with_values(know, replace(star, recent_points=(star.ros_ppg + 10.0, 1.0)))
-    closed, _ = rm.refresh_shops(nxt, SETTINGS, good, seed, PLAYED + 1)
+    closed, _ = rm.refresh_shops(nxt, SETTINGS, good, seed, PLAYED + 1, season_now(WEEK + 1))
     gone = rs.with_team(nxt, replace(cpu, roster=tuple(p for p in cpu.roster if p != star.player_id)))
 
     assert [(s.player_id, s.week, s.discount) for s in renewed.shops] == [(star.player_id, WEEK + 1, opened[0].discount)]
@@ -206,8 +212,8 @@ def test_feelings_and_shops_never_see_the_future():
         assert rm.feelings(now, team) == rm.feelings(later, team)
         assert rm.mood_line(now, team) == rm.mood_line(later, team)
     for seed in range(5):
-        assert rs.to_json(rm.refresh_shops(state, SETTINGS, now, seed, PLAYED)[0]) == rs.to_json(
-            rm.refresh_shops(state, SETTINGS, later, seed, PLAYED)[0])
+        assert rs.to_json(rm.refresh_shops(state, SETTINGS, now, seed, PLAYED, season_now())[0]) == rs.to_json(
+            rm.refresh_shops(state, SETTINGS, later, seed, PLAYED, season_now(data=changed))[0])
 
 
 # ---------------- what he says agrees with what he pays ----------------
@@ -273,3 +279,101 @@ def test_the_trade_eval_tally_counts_a_shop_discount_like_replay_trades():
     price = replay_personas.private_value(star, cpu.persona, cpu.hype)
     bar = rs.USER_TRADE_MULTIPLE[SETTINGS.difficulty] * rt.tv.OUT_MARGIN
     assert tally(shopped) - tally(state) == pytest.approx(0.10 * price * bar, abs=0.05)
+
+
+# ---------------- never about a player who may be hurt ----------------
+
+def left_early(pid: int, week: int = PLAYED, data=None):
+    """The season with his `week` game cut short: a snap share well under LEFT_EARLY x his median, no tag."""
+    data = data or fakes.fake_season()
+    earlier = sorted(u.snap_pct for w in range(1, week) if (u := data.usage.get((pid, w))) and u.snap_pct)
+    short = replace(data.usage[(pid, week)], snap_pct=round(0.3 * earlier[len(earlier) // 2], 1))
+    return replace(data, usage=MappingProxyType({**data.usage, (pid, week): short}))
+
+
+def test_a_slumping_player_who_left_his_game_early_is_never_shopped_and_his_open_shop_closes():
+    state, know, cpu, star = shop_league()
+    hurt = left_early(star.player_id)
+    assert star.injury is None and not star.out                          # untagged: only the snap count tells
+    assert rm.might_be_hurt(know, hurt.as_of(WEEK), star.player_id, PLAYED)
+    open_now = replace(state, shops=(rs.Shop(cpu.id, star.player_id, WEEK - 1, 0.1),))
+
+    assert any(shops for _, _, shops in open_shops(state, know))         # healthy: he is shopped
+    assert not any(s.player_id == star.player_id for _, after, _ in open_shops(state, know, data=hurt)
+                   for s in after.shops)
+    assert [s.player_id for s in rm.refresh_shops(open_now, SETTINGS, know, 0, PLAYED, season_now())[0].shops] == [
+        star.player_id]
+    assert all(s.player_id != star.player_id
+               for s in rm.refresh_shops(open_now, SETTINGS, know, 0, PLAYED, hurt.as_of(WEEK))[0].shops)
+
+
+def test_an_offer_never_says_he_is_worried_about_a_player_who_may_be_hurt():
+    from services import replay_chat
+    state, know, cpu, star = shop_league()
+    user = rs.user_team(state)
+    offer = rs.Offer(70, WEEK, cpu.id, user.id, (star.player_id,), (user.roster[1],), "pending")
+    state = replace(state, offers=(offer,))
+
+    def kind(data) -> str:
+        return replay_chat.label_offers(state, know, 4, data.as_of(WEEK)).chat[-1].kind
+
+    assert kind(fakes.fake_season()) == "offer_worried"
+    assert kind(left_early(star.player_id)) != "offer_worried"
+
+
+def test_a_left_early_shop_check_never_sees_the_future():
+    state, know, cpu, star = shop_league()
+    hurt = left_early(star.player_id)
+    changed = fakes.future_changed(hurt, after_week=WEEK)
+    for seed in range(5):
+        assert rs.to_json(rm.refresh_shops(state, SETTINGS, know, seed, PLAYED, hurt.as_of(WEEK))[0]) == rs.to_json(
+            rm.refresh_shops(state, SETTINGS, know, seed, PLAYED, changed.as_of(WEEK))[0])
+
+
+# ---------------- an open shop closes for each reason ----------------
+
+def _reopened(state: rs.State, know: rv.Knowledge, played: int = PLAYED) -> list[int]:
+    """The players shopped once an already-open shop is refreshed (any seed: a kept shop never rolls)."""
+    return [s.player_id for s in rm.refresh_shops(state, SETTINGS, know, 0, played, season_now(state.week))[0].shops]
+
+
+@pytest.mark.parametrize("reason", ["tag", "worry_faded", "retrade_lock", "deadline", "tendency_weeks"])
+def test_an_open_shop_closes_for_each_reason(reason):
+    state, know, cpu, star = shop_league()
+    state = replace(state, shops=(rs.Shop(cpu.id, star.player_id, WEEK - 1, 0.1),))
+    assert _reopened(state, know) == [star.player_id]                    # nothing changed: it renews
+
+    if reason == "tag":
+        know = with_values(know, replace(star, injury=fakes.Injury("Q")))
+    elif reason == "worry_faded":
+        know = with_values(know, replace(star, form_chart=-0.01 * star.chart))      # still slumping, barely worried
+    elif reason == "retrade_lock":
+        state = replace(state, traded={star.player_id: WEEK - 1})
+    elif reason == "deadline":
+        state = replace(state, week=SETTINGS.trade_deadline_week + 1)
+    played = replay_personas.TENDENCY_WEEKS - 1 if reason == "tendency_weeks" else PLAYED
+
+    assert star.player_id not in _reopened(state, know, played)
+
+
+# ---------------- the discount's limits ----------------
+
+def test_the_discount_always_stays_inside_its_range():
+    for persona in replay_personas.PERSONAS:
+        team = replace(league().teams[1], persona=persona)
+        for seed in range(30):
+            for worry in (rm.SHOP_WORRY, 0.3, 0.6, 1.0, 3.0):
+                assert rm.DISCOUNT_RANGE[0] <= rm.discount(seed, WEEK, team, worry) <= rm.DISCOUNT_RANGE[1]
+
+
+def test_the_discount_is_capped_at_its_top_for_a_deep_worry():
+    for persona in ("balanced", "panicky", "gambler"):
+        team = replace(league().teams[1], persona=persona)
+        assert {rm.discount(seed, WEEK, team, 1.0) for seed in range(20)} == {rm.DISCOUNT_RANGE[1]}
+
+
+def test_a_balanced_manager_barely_worried_is_floored_at_its_bottom():
+    team = replace(league().teams[1], persona="balanced")
+    found = [rm.discount(seed, WEEK, team, rm.SHOP_WORRY) for seed in range(60)]
+    assert min(found) == rm.DISCOUNT_RANGE[0]                         # some seeds' jitter takes it below: floored
+    assert max(found) > rm.DISCOUNT_RANGE[0]

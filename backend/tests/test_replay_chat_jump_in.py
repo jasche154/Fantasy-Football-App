@@ -112,7 +112,7 @@ def test_shops_open_only_after_three_league_weeks():
 
 
 def test_a_shopped_player_is_bought_at_his_discount_in_a_jump_in_league():
-    state = next(s for s in shop_season() if s.shops and s.phase == "waivers")
+    state = next(s for s in shop_season() if s.shops and s.phase == "open")     # shops open at start_week
     shop = state.shops[0]
     user = rs.user_team(state)
     know = rg.knowledge(state, SHOP_K8, MARKET8, seed=SEED)

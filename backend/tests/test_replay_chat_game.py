@@ -65,12 +65,41 @@ def test_a_shopped_player_is_never_sold_to_another_cpu_while_his_shop_is_open(mo
 
 @pytest.mark.parametrize("mode", MODES)
 def test_every_open_shop_is_live_tradable_and_on_his_active_roster(mode):
+    """Shops open at start_week, after the CPUs' IR and free-agency moves: live in the open phase; in the waiver
+    phase after the games last week's shops wait (no discount: `markdowns` reads this week's only) until
+    start_week renews or closes them."""
     chosen = settings(mode)
+    live = 0
     for state in game(mode):
         for shop in state.shops:
-            assert shop.week == state.week and rs.trades_open(state, chosen)
+            assert shop.week == state.week or (state.phase == "waivers" and shop.week == state.week - 1)
+            assert rs.trades_open(state, chosen)
             assert shop.player_id in rs.team(state, shop.team_id).roster
             assert not rs.retrade_locked(state, shop.player_id)
+            live += shop.player_id in rs.markdowns(state, shop.team_id)
+            assert (shop.player_id in rs.markdowns(state, shop.team_id)) == (state.phase == "open")
+    assert live
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_shops_open_after_the_cpus_roster_moves_and_before_their_trades(mode, monkeypatch):
+    """start_week opens shops (and posts their messages) on the rosters left by the CPUs' IR and free-agency
+    moves, so no shop names a player his manager drops or stashes that week; then the CPUs trade."""
+    from services import replay_chat, replay_mood, replay_trade_ai, replay_waiver_ai
+    chosen, data = settings(mode), data_for(mode)
+    state = next(s for s in game(mode) if s.phase == "open" and len(s.results) >= replay_personas.TENDENCY_WEEKS)
+    calls: list[str] = []
+
+    def spy(module, name):
+        real = getattr(module, name)
+        monkeypatch.setattr(module, name, lambda *args, **kw: (calls.append(name), real(*args, **kw))[1])
+
+    for module, name in ((replay_waiver_ai, "cpu_ir"), (replay_waiver_ai, "cpu_free_agency"),
+                         (replay_mood, "refresh_shops"), (replay_chat, "shop_lines"), (replay_trade_ai, "cpu_trades")):
+        spy(module, name)
+    rg.start_week(state, chosen, data, SEED)
+
+    assert calls == ["cpu_ir", "cpu_free_agency", "refresh_shops", "shop_lines", "cpu_trades"]
 
 
 # ---------------- words agree with prices ----------------
