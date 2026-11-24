@@ -176,6 +176,14 @@ def _clear_caches() -> None:
     replay_draft._board.cache_clear()
 
 
+@pytest.fixture
+def own_cpu() -> None:
+    """For a test with a time budget: skipped in a parallel (-n) run, where workers share the cores and a budget
+    measures the neighbours, not the code. Run its file on its own (no -n) to check the budget."""
+    if os.environ.get("PYTEST_XDIST_WORKER"):
+        pytest.skip("time budget: only meaningful without -n")
+
+
 @pytest.fixture(autouse=True)
 def isolated_state(monkeypatch):
     """Fresh settings (no secrets) and an empty value cache for every test."""

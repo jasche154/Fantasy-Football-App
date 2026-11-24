@@ -8,7 +8,7 @@ Gridiron Edge: a single-user, localhost fantasy football app. FastAPI + SQLAlche
 
 Backend (run from `backend/`, Windows venv at `backend/venv`):
 ```bash
-venv/Scripts/python.exe -m pytest -q                                  # full suite (~2-4 min)
+venv/Scripts/python.exe -m pytest -q -n 4                             # full suite in parallel (pytest-xdist): ~5 min here (6 cores), ~21 min serial; more workers don't help
 venv/Scripts/python.exe -m pytest -q tests/test_league_moves.py       # one file
 venv/Scripts/python.exe -m pytest -q tests/test_league_moves.py -k faab   # one test by name
 venv/Scripts/python.exe -m uvicorn main:app --reload                  # API on :8000 (docs at /docs)
@@ -25,7 +25,7 @@ Season simulator (read-only on the DB; the fits rewrite the JSON next to the mod
 
 Frontend (run from `frontend/`): `npm run dev` (:5173), `npm test` (vitest), `npx vitest run src/pages/team` (one folder), `npm run build` (runs `tsc` then Vite; the typecheck is the only static check, there is no ESLint config).
 
-CI (`.github/workflows`) runs `ruff check .` (backend, config in `backend/ruff.toml`), `pytest -q --cov` and `npm test && npm run build` on every PR.
+CI (`.github/workflows`) runs `ruff check .` (backend, config in `backend/ruff.toml`), `pytest -q -n auto --cov` and `npm test && npm run build` on every PR; a new push cancels the branch's unfinished run. Tests with a time budget take the `own_cpu` fixture (`conftest.py`) or guard their time assertion on `PYTEST_XDIST_WORKER`: skipped under `-n`, where workers share the cores; CI checks them in a separate serial, untraced step (`-k "budget or is_fast or cached_and_fast"`), and so can you without `-n`.
 
 ## Architecture
 

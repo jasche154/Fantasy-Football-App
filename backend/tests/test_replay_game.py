@@ -713,7 +713,7 @@ def test_a_user_who_does_nothing_finishes_mid_pack_on_average():
     assert min(shares) < 0.5 < max(shares), shares
 
 
-def test_every_step_fits_the_request_budget():
+def test_every_step_fits_the_request_budget(own_cpu):
     steps = [step for config in IDLE + ACTIVE for step in simulate(*config).steps]
 
     for label in ("create", "auto_draft", "pick", "user", "wednesday", "play"):

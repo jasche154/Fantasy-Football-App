@@ -5,6 +5,11 @@ on:
   push:
     branches: [main]
 
+# a new push to a branch or PR cancels its unfinished run; every commit on main gets its own run
+concurrency:
+  group: ci-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   backend:
     runs-on: ubuntu-latest
@@ -20,7 +25,9 @@ jobs:
           cache-dependency-path: backend/requirements*.txt
       - run: pip install -r requirements-dev.txt -r requirements-mcp.txt
       - run: ruff check .
-      - run: python -m pytest -q --cov=. --cov-report=term
+      - run: python -m pytest -q -n auto --cov=. --cov-report=term
+      # the time-budget tests skip under -n (they need the CPU to themselves): check them here, serially, untraced
+      - run: python -m pytest -q -p no:xdist -p no:cacheprovider -k "budget or is_fast or cached_and_fast" tests/test_replay_game.py tests/test_replay_trades.py tests/test_replay_waiver_ai.py tests/test_replay_trade_ai.py tests/test_replay_pool.py tests/test_replay_values.py
 
   frontend:
     runs-on: ubuntu-latest
