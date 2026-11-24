@@ -38,10 +38,15 @@ def today() -> date:
 
 
 def _last_scored(session: Session, season: int) -> date | None:
-    """The date of the season's latest game with a score, postseason included; None when no game has one."""
+    """The date of the season's latest game with a score, postseason included; None when no game has one, or
+    when that date can't be read (the feed's `gameday` is free text): unscored games then keep holding their
+    weeks back, the safe side."""
     day = session.scalar(select(func.max(NflGame.gameday)).where(
         NflGame.season == season, NflGame.home_score.is_not(None), NflGame.away_score.is_not(None)))
-    return date.fromisoformat(day[:10]) if day else None
+    try:
+        return date.fromisoformat(day[:10]) if day else None
+    except ValueError:
+        return None
 
 
 def _holds_back(game, gone: str, teams: set[tuple[int, str]]) -> bool:
