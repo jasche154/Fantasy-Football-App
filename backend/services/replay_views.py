@@ -19,7 +19,8 @@ Shared pieces
                     before 3 league weeks are played (the persona's name is never shown)
       mood          who a CPU is down on and high on right now, e.g. "Worried about X. High on Y."
                     (services/replay_mood.py); null for the user, in the draft, before 3 NFL weeks of results are
-                    known (replay_mood.moods_known: week 4 on, or a jump-in league's first week), or with no
+                    known (replay_mood.moods_known: week 4 on, which is the first week of a league that jumped in at
+                    week 4 or later), or with no
                     feelings
   Injury     {tag: Q | D | O | IR | PUP | SUS, practice: DNP | LP | FP | null, injury: string | null}
   PlayerRef  {id, name, position, team, injury: Injury | null, hype: {reason} | null}

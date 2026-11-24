@@ -12,8 +12,8 @@ contradicts what he accepts:
   so the feeling and the price can never point different ways. Only his own healthy skill players worth
   FEEL_MIN_CHART or more: an injured player is never something to be "worried" about.
 - `mood_line`: "Worried about X. High on Y." from his strongest feeling each way (None without one). Views
-  show it once `moods_known` (MOOD_WEEKS NFL weeks of results before the current week: week 4 on in a league
-  drafted in August, from its first week in one that jumped in mid-season, whose earlier real weeks are known);
+  show it once `moods_known` (MOOD_WEEKS NFL weeks of results before the current week: week 4 on, so a league
+  that jumped in at week 4 or later has it from its first week: its earlier real weeks are known);
   the persona's name stays hidden. A tendency (replay_personas) describes his behaviour in this league and
   still waits for league weeks.
 

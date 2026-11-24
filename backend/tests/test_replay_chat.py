@@ -227,6 +227,11 @@ def candidates(state: rs.State, seed: int) -> list[chat.Candidate]:
     return chat._game_lines(state, SETTINGS, knowledge(state), DATA.as_of(result.week + 1), before, result, seed)
 
 
+def test_a_boom_or_a_bust_posts_more_often_than_a_plain_result():
+    # calibrated on real 2022-2025 seasons: at the plain rate a boom or bust showed in only half the weeks
+    assert chat.POST_CHANCE["boom"] > chat.OTHER_CHANCE and chat.POST_CHANCE["bust"] > chat.OTHER_CHANCE
+
+
 def test_the_cap_keeps_rare_news_first_and_shares_the_rest_fairly():
     firsts, lows = [], []
     for seed in range(4):

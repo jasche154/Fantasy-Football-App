@@ -1032,8 +1032,8 @@ that week's games on; only scoring a week reads its real points.
   steady ones a slump only 0.3x (and stay high on a slumping star, cooler on one who outran draft day).
   Strength is that signal over his chart (at least 250): worried at -0.08 or below, high at +0.08 or above,
   and only on the side of the chart his own price is on (worried only when he values the player at or below
-  the chart, high only at or above it), so a mood line or message never points the other way from his price. Once 3 NFL weeks of results are known (week 4 on; in a league
-  that jumped in mid-season, from its first week, since the real weeks before it are known) each CPU shows a **mood
+  the chart, high only at or above it), so a mood line or message never points the other way from his price. Once 3 NFL weeks of results are known (week 4 on; a league
+  that jumped in at week 4 or later has them from its first week, since the real weeks before it are known) each CPU shows a **mood
   line** in the trade builder ("Worried about X. High on Y."). When a CPU is worried at -0.15 or worse about
   one of his 6 most valuable skill players whose last game fell short of his rate (and who nobody could think
   was hurt: the same test as the chat's dud lines below), he may **shop him to you** at the start of a week,
