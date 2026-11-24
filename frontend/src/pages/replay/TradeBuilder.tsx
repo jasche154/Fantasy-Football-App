@@ -129,11 +129,13 @@ export function TradeBuilder({ game, version, roster, ir, maxPlayers, counterTo,
   const isReady = giveIds.length > 0 && getIds.length > 0 && drops.length === Math.max(over, 0);
   const body: ReplayTradeBody | null = isReady ? { to_team: partnerId, give: giveIds, get: getIds, drops } : null;
 
-  // Debounced, and useAsync aborts the request before: the latest selection wins.
+  // Debounced, and useAsync aborts the request before: the latest selection wins. Only a settled key that is still
+  // the selection is sent: after a reload drops a player from it, the lagging key would ask about him.
   const bodyKey = body ? JSON.stringify(body) : '';
   const settledKey = useDebouncedValue(bodyKey, EVALUATE_DELAY_MS);
   const evaluation = useAsync(
-    settledKey ? (signal) => evaluateReplayTrade(game.id, JSON.parse(settledKey) as ReplayTradeBody, signal) : null,
+    settledKey && settledKey === bodyKey
+      ? (signal) => evaluateReplayTrade(game.id, JSON.parse(settledKey) as ReplayTradeBody, signal) : null,
     [game.id, settledKey, version],
   );
   const isEvaluated = settledKey === bodyKey && evaluation.status === 'success';

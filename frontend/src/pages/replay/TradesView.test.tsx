@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { ReplayPendingOffer, ReplaySummary, ReplayTrades, ReplayVerdict } from '../../api/types';
 import { json, mockFetch, type MockReply, type MockRequest, type MockRoute } from '../../test/mockFetch';
+import { AppProviders } from '../../App';
 import { META_ROUTE, renderWithProviders } from '../../test/render';
 import {
   actionResult, COLLINS, COOK, ETIENNE, GAME_ID, MCCAFFREY, MOSTERT, OLAVE, playerRef, rosterRow, summary, tagged, team, teamRef, USER_TEAM_ID,
@@ -142,6 +143,24 @@ describe('TradesView offers', () => {
 });
 
 describe('TradesView builder', () => {
+  it('never re-checks a deal with a player who left the roster while the screen reloads after a trade', async () => {
+    let isEtienneGone = false;          // accepted elsewhere (an offer card): the next load no longer has him
+    const userTeam = () => (isEtienneGone ? team({ results: team().results.filter((row) => row.player.id !== ETIENNE.id) }) : team());
+    const api = mockFetch([META_ROUTE, { method: 'POST', path: EVALUATE_PATH, reply: json({ verdict: verdict() }) },
+      { path: `${PATH}/team`, reply: (request) => (Number(request.url.searchParams.get('team_id')) === USER_TEAM_ID ? json(userTeam()) : teamReply(request)) },
+      { path: TRADES_PATH, reply: json(trades()) }]);
+    const { rerender } = renderWithProviders(<TradesView {...viewProps()} />);
+    await tickBothSides(userEvent.setup());
+    expect(await screen.findByText(/You give 31\.5 value, get 35\.0\./)).toBeInTheDocument();
+
+    isEtienneGone = true;
+    rerender(<AppProviders><TradesView {...viewProps({ version: 1 })} /></AppProviders>);
+    await waitFor(() => expect(screen.queryByRole('checkbox', { name: 'Give Travis Etienne' })).not.toBeInTheDocument());
+    await new Promise((resolve) => { setTimeout(resolve, 500); });       // past the evaluation's debounce
+
+    expect(api.callsTo(EVALUATE_PATH, 'POST')).toHaveLength(1);         // the server would refuse him: a 422
+  });
+
   it('evaluates as soon as both sides have a player and shows the verdict', async () => {
     const declined = verdict({
       accepted: false, fair_label: 'big_win', percent: 0.4, their_drops: [COLLINS],

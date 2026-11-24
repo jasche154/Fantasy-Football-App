@@ -105,8 +105,10 @@ function ShoppingStrip({ game, shops, openPlayer, onPick }: ShoppingStripProps) 
 /** Trades: CPU offers, the trade builder and the league's trades. */
 export function TradesView({ game, version, act, isBusy, openPlayer }: ReplayViewProps) {
   const { query } = useHashLocation();
+  // The data carries the version it was loaded for: while a reload runs the old rosters stay on screen, and the
+  // builder and offers must not re-check them against the new state (a player just traded away: a 422).
   const loaded = useAsync(
-    (signal) => Promise.all([getReplayTrades(game.id, signal), getReplayTeam(game.id, { team_id: game.user_team_id }, signal)]),
+    (signal) => Promise.all([getReplayTrades(game.id, signal), getReplayTeam(game.id, { team_id: game.user_team_id }, signal), version]),
     [game.id, game.user_team_id, version],
   );
   // A list still reloading can show an offer that was just answered: keep every button off until it arrives.
@@ -146,19 +148,19 @@ export function TradesView({ game, version, act, isBusy, openPlayer }: ReplayVie
       )}
       <p ref={noticeRef} tabIndex={-1} role="status" className={`replay-trades__notice${noticeTone}`}>{notice?.text}</p>
       <AsyncView state={loaded} loading={<Skeleton lines={6} label="Loading trades…" />} errorTitle="Couldn't load trades">
-        {([trades, mine]) => {
+        {([trades, mine, loadedVersion]) => {
           const countering = trades.offers.find((offer) => offer.id === counteringId) ?? null;
           return (
           <>
             {!trades.open && <p className="notice">{closedText(game, trades)}</p>}
             {trades.open && <ShoppingStrip game={game} shops={trades.shops} openPlayer={openPlayer} onPick={pickShop} />}
             <h2 className="section-title">Offers for you</h2>
-            <TradeOffers game={game} version={version} offers={trades.offers} roster={mine.results} isOpen={trades.open}
+            <TradeOffers game={game} version={loadedVersion} offers={trades.offers} roster={mine.results} isOpen={trades.open}
               actions={actions} openPlayer={openPlayer} onCounter={startCounter} isCountering={countering !== null} />
             {trades.open && (
               <Card title={<span ref={builderTitleRef} tabIndex={-1}>{countering ? `Counter ${countering.from_team.name}'s offer` : 'Propose a trade'}</span>}
                 eyebrow={`Open through week ${trades.deadline_week}'s waivers`}>
-                <TradeBuilder key={builderKey} game={game} version={version} roster={mine.results} ir={mine.ir}
+                <TradeBuilder key={builderKey} game={game} version={loadedVersion} roster={mine.results} ir={mine.ir}
                   maxPlayers={trades.max_players} counterTo={countering} onCounterDone={() => setCounteringId(null)}
                   initialPartner={shopPick?.partner ?? parsePositiveInt(query.with)}
                   initialWant={shopPick?.want ?? parsePositiveInt(query.want)}
