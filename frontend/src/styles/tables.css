@@ -1,5 +1,7 @@
-/* Tables scroll inside their own container, so the page never scrolls sideways. */
+/* Tables scroll inside their own container, so the page never scrolls sideways. Positioned, so absolute
+   children (.sr-only labels) are clipped by it instead of laying out against the page. */
 .table-wrap {
+  position: relative;
   width: 100%;
   max-width: 100%;
   overflow: auto;
