@@ -128,7 +128,7 @@ def start_week(state: State, settings: Settings, data: SeasonData, seed: int) ->
     state = replay_waiver_ai.cpu_ir(state, settings, know, seed)
     state = replay_waiver_ai.cpu_free_agency(state, settings, know, seed)
     played = data.as_of(state.week)                 # last week's games are known now (snap counts, tags)
-    state, opened = replay_mood.refresh_shops(state, settings, know, seed, len(state.results), played)  # league weeks
+    state, opened = replay_mood.refresh_shops(state, settings, know, seed, played)
     state = replay_chat.shop_lines(state, opened, know, seed)
     before = len(state.offers)
     state = replay_trade_ai.cpu_trades(state, settings, know, seed)

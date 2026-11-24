@@ -1032,7 +1032,8 @@ that week's games on; only scoring a week reads its real points.
   steady ones a slump only 0.3x (and stay high on a slumping star, cooler on one who outran draft day).
   Strength is that signal over his chart (at least 250): worried at -0.08 or below, high at +0.08 or above,
   and only on the side of the chart his own price is on (worried only when he values the player at or below
-  the chart, high only at or above it), so a mood line or message never points the other way from his price. After 3 league weeks each CPU shows a **mood
+  the chart, high only at or above it), so a mood line or message never points the other way from his price. Once 3 NFL weeks of results are known (week 4 on; in a league
+  that jumped in mid-season, from its first week, since the real weeks before it are known) each CPU shows a **mood
   line** in the trade builder ("Worried about X. High on Y."). When a CPU is worried at -0.15 or worse about
   one of his 6 most valuable skill players whose last game fell short of his rate (and who nobody could think
   was hurt: the same test as the chat's dud lines below), he may **shop him to you** at the start of a week,
@@ -1070,8 +1071,8 @@ that week's games on; only scoring a week reads its real points.
   top of the 5, so a week can show up to 9 lines. Every CPU offer carries a one-line reason in
   his voice (worried about a player, never one who might be hurt; high on yours, short at a position, a
   counter, or a value pitch).
-  In a league that started mid-season (or a simulated one) all of this counts the league's own weeks, and
-  each line is dated with the real NFL week.
+  In a league that started mid-season (or a simulated one) the chat counts the league's own weeks (moods and
+  shops only need 3 NFL weeks of results, see above), and each line is dated with the real NFL week.
   Lines come from a bank of 1,400+ clean lines in five voices, one per persona, so a manager sounds the same
   all season; a game never repeats a line until that bucket is used up (except when every unused line runs
   past 140 characters once the names are in: then the next one that fits is reused), and the text is copied
@@ -1201,7 +1202,8 @@ trades, IR, playoffs, no hindsight) are the same as in a past season. A new leag
   fewer playoff teams). The form shows the plan ("plays weeks 12-15 (4 weeks), then the playoffs in weeks
   16-17. Trade deadline: week 13."). Weeks before N+1 are history, not league weeks: the schedule,
   scoreboard, standings and week pickers start at N+1, while a player's game log still shows his real
-  earlier games. A CPU's tendency hint shows after 3 league weeks.
+  earlier games. A CPU's tendency hint shows after 3 league weeks; moods and shops start in the league's
+  first week, from the real weeks already played.
 - **The future season** (2027) is simulated whole, starting from what is known today: the public view of
   every player at the end of the newest season so far (2026 through its last finished week, so it moves as
   2026 is played), carried through an offseason (below). It needs that season prepared first.

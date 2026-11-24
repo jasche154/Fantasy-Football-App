@@ -1,5 +1,7 @@
 """Replay League chat, moods and shops in a league that jumped in mid-season (Settings.start_week) and in a
-simulated league over HTTP: everything counts league weeks, never NFL weeks before the league started.
+simulated league over HTTP: results talk, streaks, upsets and tendencies count league weeks, never NFL weeks before
+the league started; moods and shops only need enough played NFL weeks (replay_mood.MOOD_WEEKS), so they show from
+the league's first week.
 
 K8 (tests/test_replay_jump_in.py) drafts in week 8 and plays weeks 8-14, then playoffs 15-16."""
 import json
@@ -11,7 +13,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from services import (
-    replay_blob, replay_chat as chat, replay_game as rg, replay_personas, replay_state as rs,
+    replay_blob, replay_chat as chat, replay_game as rg, replay_mood, replay_personas, replay_state as rs,
     replay_trades as rt, replay_views as views, replay_views_league as league,
 )
 from database.models import ReplaySeasonData
@@ -79,14 +81,18 @@ def test_clinching_counts_the_weeks_left_from_the_league_week_not_from_week_one(
         assert seeded == (line.kind == "clinch")
 
 
-def test_moods_and_tendencies_show_from_the_third_league_week():
-    def moods(week: int) -> set:
-        state = next(s for s in season(K8) if s.week == week and s.phase == "open")
+def test_moods_show_from_the_first_league_week_and_tendencies_from_the_third():
+    def refs(week: int, phase: str = "open") -> list[dict]:
+        state = next(s for s in season(K8) if s.week == week and s.phase == phase)
         shown = views.Game(1, "x", K8, state, MARKET8, None, SEED)
-        return {ref["mood"] for ref in views.summary(shown)["teams"]}
+        return [ref for ref in views.summary(shown)["teams"] if not ref["is_user"]]
 
-    assert moods(8) == moods(10) == {None}
-    assert moods(11) != {None}
+    assert K8.start_week - 1 >= replay_mood.MOOD_WEEKS                  # weeks 1-7 are known when it starts
+    assert {ref["mood"] for ref in refs(K8.start_week)} != {None}       # moods: from its first week
+    assert {ref["tendency"] for ref in refs(10)} == {None}              # tendencies: his own behaviour, league weeks
+    assert {ref["tendency"] for ref in refs(11)} != {None}
+    drafting = views.Game(1, "x", K8, rg.create_game(K8, MARKET8, SEED), MARKET8, None, SEED)
+    assert {ref["mood"] for ref in views.summary(drafting)["teams"]} == {None}     # nothing in the draft room
 
 
 # ---------------- shops ----------------
@@ -101,14 +107,14 @@ def shop_season() -> tuple[rs.State, ...]:
     return tuple(states)
 
 
-def test_shops_open_only_after_three_league_weeks():
+def test_shops_can_open_from_the_first_league_week():
     states = shop_season()
     opened = [s for s in states if s.shops]
     shop_lines = [c for c in states[-1].chat if c.kind == "shop"]
 
     assert opened and shop_lines
-    assert all(len(s.results) >= replay_personas.TENDENCY_WEEKS for s in opened)
-    assert all(c.week > SHOP_K8.start_week + replay_personas.TENDENCY_WEEKS - 1 for c in shop_lines)
+    assert min(s.week for s in opened) < SHOP_K8.start_week + replay_personas.TENDENCY_WEEKS   # no 3-week wait
+    assert all(s.week - 1 >= replay_mood.MOOD_WEEKS for s in opened)
 
 
 def test_a_shopped_player_is_bought_at_his_discount_in_a_jump_in_league():

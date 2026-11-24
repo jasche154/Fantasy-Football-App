@@ -12,7 +12,10 @@ contradicts what he accepts:
   so the feeling and the price can never point different ways. Only his own healthy skill players worth
   FEEL_MIN_CHART or more: an injured player is never something to be "worried" about.
 - `mood_line`: "Worried about X. High on Y." from his strongest feeling each way (None without one). Views
-  show it from replay_personas.TENDENCY_WEEKS league weeks played; the persona's name stays hidden.
+  show it once `moods_known` (MOOD_WEEKS NFL weeks of results before the current week: week 4 on in a league
+  drafted in August, from its first week in one that jumped in mid-season, whose earlier real weeks are known);
+  the persona's name stays hidden. A tendency (replay_personas) describes his behaviour in this league and
+  still waits for league weeks.
 
 Shopping (`refresh_shops`, once a week at its start, after the CPUs' IR and free-agency moves): a CPU worried
 at >= SHOP_WORRY about one of his SHOP_TOP most valuable skill players, whose last game fell short of his rate
@@ -56,6 +59,7 @@ DISCOUNT_BASE = {"balanced": 0.06, "panicky": 0.09, "gambler": 0.07}
 DISCOUNT_PER_WORRY = 0.20       # extra discount per unit of worry beyond SHOP_WORRY
 DISCOUNT_JITTER = 0.02
 DISCOUNT_RANGE = (0.05, 0.15)
+MOOD_WEEKS = 3                  # NFL weeks of results known before a mood shows or a shop opens
 LEFT_EARLY = 0.6                # a snap share under this x his season median: he may have left the game hurt
 
 
@@ -101,6 +105,11 @@ def mood_line(know: Knowledge, team: Team) -> str | None:
     parts = [f"{label} {know.by_id[f.player_id].name}." for label, f in (("Worried about", worried),
                                                                          ("High on", high)) if f is not None]
     return " ".join(parts) or None
+
+
+def moods_known(week: int) -> bool:
+    """Are enough played NFL weeks known before `week` for moods and shops? Results of weeks 1..week - 1 are."""
+    return week - 1 >= MOOD_WEEKS
 
 
 def might_be_hurt(know: Knowledge, played: SeasonData, player_id: int, week: int) -> bool:
@@ -159,15 +168,15 @@ def _still_open(state: State, know: Knowledge, shop: Shop, hurt: Callable[[int],
     return value is not None and shop.player_id in team.roster and _worry(state, value, team, hurt) is not None
 
 
-def refresh_shops(state: State, settings: Settings, know: Knowledge, seed: int, weeks_played: int,
+def refresh_shops(state: State, settings: Settings, know: Knowledge, seed: int,
                   played: SeasonData) -> tuple[State, tuple[Shop, ...]]:
     """(the state with this week's shops, the ones newly opened). Closes the shops that no longer hold, renews
     the rest for `state.week`, then lets worried CPUs (in seeded order, each rolling SHOP_RATE) open new ones
-    up to MAX_SHOPS. No shops before TENDENCY_WEEKS league weeks (`weeks_played` = len(state.results)) are
-    played or after the trade deadline week (from then on no CPU sends the user an offer). `played` is the
+    up to MAX_SHOPS. No shops before `moods_known(state.week)` or after the trade deadline week (from then on no
+    CPU sends the user an offer). `played` is the
     season as known now (data.as_of(state.week)): `might_be_hurt` reads last week's game (state.week - 1)."""
     trading = state.phase in ("waivers", "open") and state.week <= settings.trade_deadline_week
-    if not trading or weeks_played < replay_personas.TENDENCY_WEEKS:
+    if not trading or not moods_known(state.week):
         return replace(state, shops=()), ()
 
     def hurt(player_id: int) -> bool:

@@ -18,7 +18,8 @@ Shared pieces
       tendency      a one-line hint at how a CPU trades, from its hidden persona; null for the user and
                     before 3 league weeks are played (the persona's name is never shown)
       mood          who a CPU is down on and high on right now, e.g. "Worried about X. High on Y."
-                    (services/replay_mood.py); null for the user, before 3 league weeks are played, or with no
+                    (services/replay_mood.py); null for the user, in the draft, before 3 NFL weeks of results are
+                    known (replay_mood.moods_known: week 4 on, or a jump-in league's first week), or with no
                     feelings
   Injury     {tag: Q | D | O | IR | PUP | SUS, practice: DNP | LP | FP | null, injury: string | null}
   PlayerRef  {id, name, position, team, injury: Injury | null, hype: {reason} | null}
@@ -267,7 +268,9 @@ class Game:
 def team_ref(game: Game, team: Team) -> dict:
     """tendency and mood: hints at a CPU's (hidden) persona and feelings, once it has played enough league weeks."""
     tendency = None if team.is_user else replay_personas.tendency(team.persona, game.weeks_played)
-    mood = None if tendency is None else game.moods.get(team.id)
+    # A mood is about his players' form: it needs played NFL weeks, not league weeks (a jump-in league has them).
+    feels = not team.is_user and game.state.phase != "draft" and replay_mood.moods_known(game.state.week)
+    mood = game.moods.get(team.id) if feels else None
     return {"team_id": team.id, "name": team.name, "is_user": team.is_user, "tendency": tendency, "mood": mood}
 
 

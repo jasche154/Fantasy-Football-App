@@ -91,8 +91,8 @@ def shop_league(persona: str = "panicky") -> tuple[rs.State, rv.Knowledge, rs.Te
     return state, with_values(know, star), cpu, star
 
 
-def open_shops(state: rs.State, know: rv.Knowledge, seeds=range(40), played: int = PLAYED, data=None):
-    return [(seed, *rm.refresh_shops(state, SETTINGS, know, seed, played, season_now(state.week, data)))
+def open_shops(state: rs.State, know: rv.Knowledge, seeds=range(40), data=None):
+    return [(seed, *rm.refresh_shops(state, SETTINGS, know, seed, season_now(state.week, data)))
             for seed in seeds]
 
 
@@ -114,10 +114,12 @@ def test_steady_and_shark_managers_never_shop(persona):
     assert not any(shops for _, _, shops in open_shops(state, know))
 
 
-def test_no_shops_before_tendency_weeks_or_after_the_deadline():
+def test_no_shops_before_mood_weeks_of_results_or_after_the_deadline():
     state, know, _, _ = shop_league()
 
-    assert not any(shops for _, _, shops in open_shops(state, know, played=replay_personas.TENDENCY_WEEKS - 1))
+    early = replace(state, week=rm.MOOD_WEEKS)                           # only MOOD_WEEKS - 1 weeks are known
+    assert not any(shops for _, _, shops in open_shops(early, know))
+    assert any(shops for _, _, shops in open_shops(replace(state, week=rm.MOOD_WEEKS + 1), know))
     late = replace(state, week=SETTINGS.trade_deadline_week + 1)
     assert not any(after.shops for _, after, _ in open_shops(late, know))
 
@@ -137,9 +139,9 @@ def test_a_shop_closes_after_a_good_game_or_when_he_leaves_and_renews_otherwise(
     seed, after, opened = next(run for run in open_shops(state, know) if run[2])
     nxt = replace(after, week=WEEK + 1)
 
-    renewed, _ = rm.refresh_shops(nxt, SETTINGS, know, seed, PLAYED + 1, season_now(WEEK + 1))
+    renewed, _ = rm.refresh_shops(nxt, SETTINGS, know, seed, season_now(WEEK + 1))
     good = with_values(know, replace(star, recent_points=(star.ros_ppg + 10.0, 1.0)))
-    closed, _ = rm.refresh_shops(nxt, SETTINGS, good, seed, PLAYED + 1, season_now(WEEK + 1))
+    closed, _ = rm.refresh_shops(nxt, SETTINGS, good, seed, season_now(WEEK + 1))
     gone = rs.with_team(nxt, replace(cpu, roster=tuple(p for p in cpu.roster if p != star.player_id)))
 
     assert [(s.player_id, s.week, s.discount, s.opened) for s in renewed.shops] == [
@@ -215,8 +217,8 @@ def test_feelings_and_shops_never_see_the_future():
         assert rm.feelings(now, team) == rm.feelings(later, team)
         assert rm.mood_line(now, team) == rm.mood_line(later, team)
     for seed in range(5):
-        assert rs.to_json(rm.refresh_shops(state, SETTINGS, now, seed, PLAYED, season_now())[0]) == rs.to_json(
-            rm.refresh_shops(state, SETTINGS, later, seed, PLAYED, season_now(data=changed))[0])
+        assert rs.to_json(rm.refresh_shops(state, SETTINGS, now, seed, season_now())[0]) == rs.to_json(
+            rm.refresh_shops(state, SETTINGS, later, seed, season_now(data=changed))[0])
 
 
 # ---------------- what he says agrees with what he pays ----------------
@@ -304,10 +306,10 @@ def test_a_slumping_player_who_left_his_game_early_is_never_shopped_and_his_open
     assert any(shops for _, _, shops in open_shops(state, know))         # healthy: he is shopped
     assert not any(s.player_id == star.player_id for _, after, _ in open_shops(state, know, data=hurt)
                    for s in after.shops)
-    assert [s.player_id for s in rm.refresh_shops(open_now, SETTINGS, know, 0, PLAYED, season_now())[0].shops] == [
+    assert [s.player_id for s in rm.refresh_shops(open_now, SETTINGS, know, 0, season_now())[0].shops] == [
         star.player_id]
     assert all(s.player_id != star.player_id
-               for s in rm.refresh_shops(open_now, SETTINGS, know, 0, PLAYED, hurt.as_of(WEEK))[0].shops)
+               for s in rm.refresh_shops(open_now, SETTINGS, know, 0, hurt.as_of(WEEK))[0].shops)
 
 
 def test_an_offer_never_says_he_is_worried_about_a_player_who_may_be_hurt():
@@ -329,19 +331,19 @@ def test_a_left_early_shop_check_never_sees_the_future():
     hurt = left_early(star.player_id)
     changed = fakes.future_changed(hurt, after_week=WEEK)
     for seed in range(5):
-        assert rs.to_json(rm.refresh_shops(state, SETTINGS, know, seed, PLAYED, hurt.as_of(WEEK))[0]) == rs.to_json(
-            rm.refresh_shops(state, SETTINGS, know, seed, PLAYED, changed.as_of(WEEK))[0])
+        assert rs.to_json(rm.refresh_shops(state, SETTINGS, know, seed, hurt.as_of(WEEK))[0]) == rs.to_json(
+            rm.refresh_shops(state, SETTINGS, know, seed, changed.as_of(WEEK))[0])
 
 
 # ---------------- an open shop closes for each reason ----------------
 
-def _reopened(state: rs.State, know: rv.Knowledge, played: int = PLAYED, data=None) -> list[int]:
+def _reopened(state: rs.State, know: rv.Knowledge, data=None) -> list[int]:
     """The players shopped once an already-open shop is refreshed (any seed: a kept shop never rolls)."""
     now = season_now(state.week, data)
-    return [s.player_id for s in rm.refresh_shops(state, SETTINGS, know, 0, played, now)[0].shops]
+    return [s.player_id for s in rm.refresh_shops(state, SETTINGS, know, 0, now)[0].shops]
 
 
-@pytest.mark.parametrize("reason", ["tag", "worry_faded", "retrade_lock", "deadline", "tendency_weeks"])
+@pytest.mark.parametrize("reason", ["tag", "worry_faded", "retrade_lock", "deadline", "mood_weeks"])
 def test_an_open_shop_closes_for_each_reason(reason):
     state, know, cpu, star = shop_league()
     state = replace(state, shops=(rs.Shop(cpu.id, star.player_id, WEEK - 1, 0.1),))
@@ -356,9 +358,10 @@ def test_an_open_shop_closes_for_each_reason(reason):
         state = replace(state, traded={star.player_id: WEEK - 1})
     elif reason == "deadline":
         state = replace(state, week=SETTINGS.trade_deadline_week + 1)
-    played = replay_personas.TENDENCY_WEEKS - 1 if reason == "tendency_weeks" else PLAYED
+    elif reason == "mood_weeks":
+        state = replace(state, week=rm.MOOD_WEEKS)
 
-    assert star.player_id not in _reopened(state, know, played, data)
+    assert star.player_id not in _reopened(state, know, data)
 
 
 def _off_a_bye() -> tuple[rs.State, rv.Knowledge, rs.Team, rv.ReplayValue, int]:
@@ -367,7 +370,7 @@ def _off_a_bye() -> tuple[rs.State, rv.Knowledge, rs.Team, rv.ReplayValue, int]:
     data = fakes.fake_season()
     state = league({team_id: "panicky" if team_id == 2 else "steady" for team_id in range(2, SETTINGS.teams + 1)})
     cpu = rs.team(state, 2)
-    for bye in range(replay_personas.TENDENCY_WEEKS + 1, SETTINGS.trade_deadline_week):
+    for bye in range(rm.MOOD_WEEKS + 1, SETTINGS.trade_deadline_week):
         know = knowledge(bye + 1)
         star = slumping(best_skill(know, cpu), 0.1)
         if data.on_bye(star.player_id, bye):
@@ -396,18 +399,17 @@ def test_a_bye_does_not_hide_that_his_last_game_was_cut_short():
     assert rm.might_be_hurt(know, hurt.as_of(bye), star.player_id, bye - 1)          # judged right after it
     assert rm.might_be_hurt(know, hurt.as_of(bye + 1), star.player_id, bye)          # and still after the bye
     assert not rm.might_be_hurt(know, healthy.as_of(bye + 1), star.player_id, bye)   # a full game before it: fine
-    assert not any(s.player_id == star.player_id for _, after, _ in open_shops(state, know, played=bye, data=hurt)
+    assert not any(s.player_id == star.player_id for _, after, _ in open_shops(state, know, data=hurt)
                    for s in after.shops)
 
 
 def test_a_slumping_player_coming_off_a_bye_can_be_shopped_and_an_open_shop_on_him_stays():
     state, know, cpu, star, bye = _off_a_bye()
-    weeks = bye                                                           # league weeks played (week 1 on)
 
-    opened = [shops for _, _, shops in open_shops(state, know, played=weeks)]
+    opened = [shops for _, _, shops in open_shops(state, know)]
     assert any(s.player_id == star.player_id for shops in opened for s in shops)
     kept = replace(state, shops=(rs.Shop(cpu.id, star.player_id, bye, 0.1),))
-    assert _reopened(kept, know, weeks) == [star.player_id]
+    assert _reopened(kept, know) == [star.player_id]
 
 
 # ---------------- the discount's limits ----------------
