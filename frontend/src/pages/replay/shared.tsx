@@ -17,12 +17,13 @@
  *   openPlayer  opens the hub's player drawer for a player id
  * POSTs that answer something else (evaluateReplayTrade) are called directly, not through `act`.
  *
- * Pieces: ReplayPlayerCell, ReplayHypeStar (+ hypeLabel), ReplayInjuryBadge (+ isHardTag, canGoOnIr, injuryLabel), ReplayIrBlockedNotice, ReplayPositionChip, PositionTabs (+ positionParam), TeamSelect, ConfirmButton,
+ * Pieces: ReplayPlayerCell, ReplayHypeStar (+ hypeLabel), ReplayBuzzChip (+ buzzLabel), ReplayInjuryBadge (+ isHardTag, canGoOnIr, injuryLabel), ReplayIrBlockedNotice, ReplayPositionChip, PositionTabs (+ positionParam), TeamSelect, ConfirmButton,
  * useKeyedAct (act with a pending state and a refusal per button), ReplayDrawer (the dialog frame, in ReplayDrawer.tsx),
  * EventList (+ groupEvents), formatPoints, formatRecord, ordinal, viewHash, REPLAY_VIEWS.
  */
 import { useState } from 'react';
 import { errorMessage } from '../../api/client';
+import { Icon } from '../../components/Icon';
 import type {
   ReplayActionResult,
   ReplayEvent,
@@ -96,7 +97,7 @@ export function ReplayPositionChip({ position }: { position: ReplayPosition }) {
 }
 
 /** The week facts shown next to a name; any PlayerRow (roster, wire, claim) can be passed as is. */
-export type ReplayPlayerInfo = Partial<Pick<ReplayPlayerRow, 'opponent' | 'bye' | 'out' | 'trade_locked'>>;
+export type ReplayPlayerInfo = Partial<Pick<ReplayPlayerRow, 'opponent' | 'bye' | 'out' | 'trade_locked' | 'buzz'>>;
 
 interface ReplayPlayerCellProps {
   player: ReplayPlayerRef;
@@ -153,6 +154,32 @@ export function ReplayHypeStar({ player }: { player: ReplayPlayerRef }) {
   );
 }
 
+/** "Buzz: Beat reporters say his role is growing; expect more work." The name starts with the chip's visible
+ * text (WCAG 2.5.3, so "click Buzz" reaches it); the tooltip says it is a rumor. */
+export function buzzLabel(text: string): string {
+  return `Buzz: ${text}`;
+}
+
+/** Where a league's draft ADP comes from: real drafts for a past or full live season, the simulated market for
+ * a league that drafts mid-season or plays a future season. */
+export function adpSource(kind: ReplaySummary['kind'], startsNow: boolean): string {
+  if (kind === 'future' || startsNow) return 'ADP: the simulated market for this league';
+  return kind === 'live' ? 'ADP: MyFantasyLeague / Fantasy Football Calculator' : 'ADP: Fantasy Football Calculator';
+}
+
+/** A small "Buzz" chip for a simulated season's news line about his role: a button that opens his card, whose News
+ * block shows the full line (the line is also its name and tooltip). Quiet on purpose: a rumor, not an injury or a fact. */
+export function ReplayBuzzChip({ text, onOpen }: { text: string | null | undefined; onOpen?: () => void }) {
+  if (!text) return null;
+  const label = buzzLabel(text);
+  const tooltip = `Buzz (a rumor): ${text}`;
+  const content = <><Icon name="news" size={12} /><span aria-hidden="true">Buzz</span></>;
+  if (!onOpen) return <span className="replay-buzz" role="img" aria-label={label} title={tooltip}>{content}</span>;
+  return (
+    <button type="button" className="replay-buzz" aria-label={label} aria-haspopup="dialog" title={tooltip} onClick={onOpen}>{content}</button>
+  );
+}
+
 /** The plain Out badge, unless a hard tag already says so. */
 export function showsOut(out: boolean | undefined, injury: ReplayInjury | null | undefined): boolean {
   return !!out && !isHardTag(injury);
@@ -190,6 +217,7 @@ export function ReplayPlayerCell({ player, info = {}, onOpen }: ReplayPlayerCell
         {info.bye && <span className="status-badge status-badge--missing">Bye</span>}
         {player.injury && <ReplayInjuryBadge injury={player.injury} />}
         {showsOut(info.out, player.injury) && <span className="status-badge status-badge--out">Out</span>}
+        <ReplayBuzzChip text={info.buzz} onOpen={onOpen && (() => onOpen(player.id))} />
         {info.trade_locked && (
           <span className="status-badge status-badge--missing" title="Traded in the last two weeks, so he can't be traded yet">Trade-locked</span>
         )}

@@ -40,7 +40,9 @@ describe('ReplayHome', () => {
     ]);
     const row = (await screen.findByRole('rowheader', { name: /Class of 2019/ })).closest('tr') as HTMLElement;
 
-    expect(screen.getByRole('status')).toBeEmptyDOMElement();
+    // The lobby's own region (the new-league form below has its own status regions, mounted empty too).
+    const region = screen.getAllByRole('status').find((status) => status.classList.contains('replay-notice'));
+    expect(region).toBeEmptyDOMElement();
     await user.click(within(row).getByRole('button', { name: 'Delete Class of 2019' }));
     await user.click(within(row).getByRole('button', { name: 'Cancel' }));
     expect(api.calls.filter((call) => call.method === 'POST')).toHaveLength(0);
@@ -52,7 +54,7 @@ describe('ReplayHome', () => {
     expect(api.callsTo(`${GAMES_PATH}/3/delete`, 'POST')).toHaveLength(1);
     await expect.poll(() => screen.queryByRole('rowheader', { name: /Class of 2019/ })).toBeNull();
     const notice = screen.getByText('Deleted Class of 2019.');
-    expect(notice).toHaveAttribute('role', 'status');
+    expect(notice).toBe(region);
     expect(notice).toHaveFocus();
   });
 
@@ -94,5 +96,19 @@ describe('ReplayHome', () => {
     expect(await screen.findByText('No leagues yet.')).toBeInTheDocument();
     await user.click(await screen.findByRole('button', { name: 'Create league and draft' }));
     await expect.poll(() => window.location.hash).toBe('#/play?game=12');
+  });
+});
+
+describe('ReplayHome simulated leagues', () => {
+  it('says which saved leagues are simulated, in words', async () => {
+    renderHome([{ path: GAMES_PATH, reply: json({ results: [
+      gameListing({ id: 8, name: 'Now League', season: 2026, kind: 'live' }),
+      gameListing({ id: 9, name: 'Next Year', season: 2027, kind: 'future' }),
+      gameListing(),
+    ] }) }]);
+    const [live, future, replay] = within(await screen.findByRole('table', { name: 'Your saved leagues' })).getAllByRole('row').slice(1);
+    expect(within(live).getByText('Live 2026')).toHaveClass('replay-kind-chip');
+    expect(within(future).getByText('Simulated')).toHaveClass('replay-kind-chip');
+    expect(replay.querySelector('.replay-kind-chip')).toBeNull();
   });
 });

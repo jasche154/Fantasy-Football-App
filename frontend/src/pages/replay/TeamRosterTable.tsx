@@ -90,7 +90,7 @@ function PlayerCells({ row, openPlayer }: { row: ReplayPlayerRow; openPlayer: ((
   return (
     <>
       {/* The Opp column carries the opponent and the bye, so the cell only adds the tag, Out and Trade-locked. */}
-      <td className="td--player"><ReplayPlayerCell player={row.player} info={{ out: row.out, trade_locked: row.trade_locked }} onOpen={openPlayer} /></td>
+      <td className="td--player"><ReplayPlayerCell player={row.player} info={{ out: row.out, trade_locked: row.trade_locked, buzz: row.buzz }} onOpen={openPlayer} /></td>
       <td className="replay-roster__opp">
         {row.opponent ?? EMPTY_VALUE}{row.defense && ' '}<DefenseChip rating={row.defense} position={row.player.position} />
       </td>

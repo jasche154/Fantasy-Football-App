@@ -17,7 +17,7 @@ const PICK_PATH = `${DRAFT_PATH}/pick`;
 const AUTO_PATH = `${DRAFT_PATH}/auto`;
 
 function boardRow(player: ReplayPlayerRef, overrides: Partial<ReplayDraftRow> = {}): ReplayDraftRow {
-  return { player, adp: 21.4, pos_rank: `${player.position}3`, rank: 18, pre_rank: 20, round: 2, projection: 17.25, ...overrides };
+  return { player, adp: 21.4, pos_rank: `${player.position}3`, rank: 18, pre_rank: 20, round: 2, projection: 17.25, buzz: null, ...overrides };
 }
 
 /** GET draft in round 2 of a 12-team draft: the user (slot 4) is up at 2.09 with McCaffrey already on the roster. */
@@ -88,6 +88,15 @@ describe('DraftView', () => {
     expect(screen.queryByRole('button', { name: 'Show more' })).not.toBeInTheDocument();
     expect(screen.getByText('ADP: Fantasy Football Calculator')).toBeInTheDocument();
     expect(lastQuery()?.toString()).toBe(DEFAULT_QUERY);
+  });
+
+  it.each([
+    ['drafts mid-season', { kind: 'live', sim_from: 10, start_week: 10 }, 'ADP: the simulated market for this league'],
+    ['plays a future season', { kind: 'future', sim_from: 1, start_week: 1 }, 'ADP: the simulated market for this league'],
+    ['plays the live season in full', { kind: 'live', sim_from: 10, start_week: 1 }, 'ADP: MyFantasyLeague / Fantasy Football Calculator'],
+  ] as const)('names the ADP source of a league that %s', async (_name, league, source) => {
+    renderDraft(draft(), [], vi.fn(), { ...draftSummary(), ...league });
+    expect(await screen.findByText(source)).toBeInTheDocument();
   });
 
   it('sorts by ADP or projection from the column headers, toggles direction and starts over at the first page', async () => {

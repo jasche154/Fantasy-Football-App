@@ -2,7 +2,7 @@ import { useId } from 'react';
 import type { ReplayPlayerDetail, ReplayPosition, ReplayUpcomingWeek } from '../../api/types';
 import { EMPTY_VALUE } from '../../lib/format';
 import { DefenseChip } from './gameUi';
-import { opponentText } from './PlayerGameLog';
+import { isSimWeek, opponentText, SimLegend, SimWeekMark } from './PlayerGameLog';
 import { formatPoints } from './shared';
 
 /** "Matchup ratings: 6 weeks this season, blended with last season." */
@@ -23,10 +23,12 @@ interface PlayerUpcomingProps {
   position: ReplayPosition;
   upcoming: readonly ReplayUpcomingWeek[];
   basis: ReplayPlayerDetail['defense_basis'];
+  /** The league's first simulated week: later weeks are marked Sim. */
+  simFrom?: number | null;
 }
 
 /** The weeks after this one: opponent, how that defense treats his position, and an estimate (never a projection). */
-export function PlayerUpcoming({ name, position, upcoming, basis }: PlayerUpcomingProps) {
+export function PlayerUpcoming({ name, position, upcoming, basis, simFrom = null }: PlayerUpcomingProps) {
   const headingId = useId();
   if (upcoming.length === 0) return null;
   return (
@@ -46,7 +48,7 @@ export function PlayerUpcoming({ name, position, upcoming, basis }: PlayerUpcomi
           <tbody>
             {upcoming.map((week) => (
               <tr key={week.week}>
-                <th scope="row" className="num">{week.week}</th>
+                <th scope="row" className="num">{week.week}{isSimWeek(week.week, simFrom) && <> <SimWeekMark /></>}</th>
                 <td>{opponentText(week.opponent, week.away, week.bye)}</td>
                 <td>{week.bye ? null : <DefenseChip rating={week.defense} position={position} />}</td>
                 <td className="num">{estimateText(week)}</td>
@@ -56,6 +58,7 @@ export function PlayerUpcoming({ name, position, upcoming, basis }: PlayerUpcomi
         </table>
       </div>
       <p className="hint">Est. is his rest-of-season rate adjusted for the opponent, not a site projection. {defenseBasisText(basis)}</p>
+      <SimLegend weeks={upcoming} simFrom={simFrom} />
     </section>
   );
 }

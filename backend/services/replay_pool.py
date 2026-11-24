@@ -10,7 +10,9 @@ each week's tag (that week's final report or roster status, known before its gam
 `usage` holds each skill game's snap share, targets, target share and carries, `box` its box score (results,
 like `actual`); `defense_prior` is last season's defense factors (replay_defense.load_prior, not a result).
 `expert_ranks` / `expert_age` are FantasyPros position ranks as of each week (services/replay_experts.py) and
-`returns` says when each hard-tag streak really ended (`hard_tag_returns`).
+`returns` says when each hard-tag streak really ended (`hard_tag_returns`). `notes` is a short public news line
+per player-week, known before that week's games (simulated seasons only). A simulated season (services/sim_setup)
+is built once from a partial real season (`through`), then frozen in its league's save (services/replay_blob).
 """
 import logging
 from collections import OrderedDict, defaultdict
@@ -21,19 +23,20 @@ from functools import lru_cache
 from threading import Lock
 from types import MappingProxyType
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from database.models import (
-    KickerGame, NflGame, Player, PlayerStatsWeekly, ReplayAdp, ReplayExpertRank, ReplayInjury, ReplayProjection,
-    TeamGameStats,
-)
+from database.models import KickerGame, Player, ReplayAdp, ReplayExpertRank, ReplayInjury, ReplayProjection, TeamGameStats
 from integrations.adp_history import TWO_WAY
 from services import kdst_model, replay_adp_format, replay_box, replay_defense, replay_scoring
 from services.build_locks import key_lock
 from services.kdst_rankings import DST_PREFIX
-from services.projections import REGULAR_SEASON, load_game_lines
+from services.projections import load_game_lines
 from services.replay_box import BoxLine
+from services.replay_live import SUPPORTED_SEASONS  # noqa: F401 (re-exported; replay_live.replay_seasons grows it)
+from services.replay_readiness import (  # noqa: F401 (re-exported)
+    MIN_ADP_PLAYERS, MIN_DEFENSES, MIN_KICKERS, data_version, readiness, ready_last_weeks, ready_seasons,
+)
 from services.replay_scoring import ScoringRules
 from services.schedule_strength import Schedule, load_schedule
 from services.scoring import ScoringSettings, scoring_for
@@ -41,12 +44,9 @@ from services.valuation import NoDataError
 
 log = logging.getLogger(__name__)
 
-SUPPORTED_SEASONS = range(2018, 2026)       # ESPN and Sleeper have no pre-game projections before 2018
 SKILL = ("QB", "RB", "WR", "TE")
 ALL_POSITIONS = SKILL + ("K", "DST")
 SOURCES = ("espn", "sleeper")               # in order of preference
-MIN_ADP_PLAYERS = 180                       # a 12-team, 15-round draft
-MIN_KICKERS = MIN_DEFENSES = 14             # one each for the largest league (ADP or a week-1 projection)
 
 PlayerWeek = tuple[int, int]                # (player_id, week)
 
@@ -109,6 +109,7 @@ class SeasonData:
     defense_prior: Mapping[tuple[str, str], float] = field(default_factory=lambda: MappingProxyType({}))  # last season
     rules: ScoringRules | None = None                         # custom key settings on `scoring` (replay_scoring)
     adp_format: str = "ppr"                                   # the replay_adp list `players` carry (replay_adp_format)
+    notes: Mapping[PlayerWeek, str] = field(default_factory=lambda: MappingProxyType({}))  # news before the week
 
     def as_of(self, week: int) -> "SeasonData":
         """A copy holding only what was known before `week` was played (0 = draft time); cached.
@@ -169,6 +170,7 @@ def _as_of(data: SeasonData, week: int) -> SeasonData:
         projected=MappingProxyType({key: v for key, v in projected.items() if key[0] in players}),
         injuries=MappingProxyType({key: v for key, v in data.injuries.items()
                                    if key[1] <= week and key[0] in players}),
+        notes=MappingProxyType({key: v for key, v in data.notes.items() if key[1] <= week and key[0] in players}),
         usage=MappingProxyType({key: v for key, v in data.usage.items() if key[1] < week and key[0] in players}),
         box=MappingProxyType({key: v for key, v in data.box.items() if key[1] < week and key[0] in players}),
         expert_ranks=MappingProxyType({key: v for key, v in data.expert_ranks.items() if key[1] <= week}),
@@ -182,6 +184,7 @@ CACHED_SEASONS = 8                  # SeasonData builds kept (each season x scor
 _cache: OrderedDict[tuple, SeasonData] = OrderedDict()
 _cache_lock = Lock()
 EVICT_HOOKS: list = []              # clear_cache()s of modules whose caches key on SeasonData (replay_chart adds its own)
+CLEAR_HOOKS: list = []              # other season caches clear_cache() empties too (replay_blob adds its own)
 
 
 def _cached(key: tuple) -> SeasonData | None:
@@ -198,93 +201,47 @@ def clear_cache() -> None:
         _cache.clear()
     _as_of.cache_clear()
     replay_defense.ratings.cache_clear()
+    for hook in CLEAR_HOOKS:
+        hook()
+
+
+def free_dependents() -> None:
+    """Empty every cache keyed on a SeasonData: call when a season is dropped, or they would keep it alive."""
+    _as_of.cache_clear()
+    replay_defense.ratings.cache_clear()
+    for hook in EVICT_HOOKS:
+        hook()
 
 
 def load_season_data(session: Session, season: int, scoring: str, rules: ScoringRules | None = None,
-                      adp_format: str | None = None) -> SeasonData:
-    """The season as plain data, built once per (database, season, scoring, rules, ADP list). `rules` (a league's
-    custom key settings, replay_scoring) rescore every real game exactly and convert the projections (an
+                      adp_format: str | None = None, through: int | None = None) -> SeasonData:
+    """The season as plain data, built once per (database, season, scoring, rules, ADP list, through, data version:
+    replay_readiness.data_version, so a stat correction reaches the next league without a restart). `rules` (a
+    league's custom key settings, replay_scoring) rescore every real game exactly and convert the projections (an
     estimate). `adp_format` is the ADP list the league wants (its Settings.adp_format, default: the scoring's
-    list); the nearest stored one stands in when the season lacks it (replay_adp_format.stored).
+    list); the nearest stored one stands in when the season lacks it (replay_adp_format.stored). `through`: a
+    season in progress, real only through that week (replay_live): results, projections, tags and expert ranks
+    stop there, the schedule does not.
 
     Raises ValueError for an unknown scoring and valuation.NoDataError when the season isn't ready."""
     scoring_for(scoring)
     want = adp_format or replay_adp_format.scoring_format(scoring, rules)
-    key = (str(session.get_bind().url), season, scoring, rules, want)
+    key = (str(session.get_bind().url), season, scoring, rules, want, through, data_version(session, season))
     cached = _cached(key)
     if cached is not None:
         return cached
     with key_lock(("replay_pool", key)):
         cached = _cached(key)                         # built by a request we waited for
         if cached is None:
-            cached = _build(session, season, scoring, rules, want)
+            cached = _build(session, season, scoring, rules, want, through)
             with _cache_lock:
                 _cache[key] = cached
                 evicted = len(_cache) > CACHED_SEASONS
                 while len(_cache) > CACHED_SEASONS:
                     _cache.popitem(last=False)
             if evicted:                               # other caches would keep the dropped season alive
-                _as_of.cache_clear()
-                replay_defense.ratings.cache_clear()
-                for hook in EVICT_HOOKS:
-                    hook()
+                free_dependents()
     return cached
-
-
-def _count(session: Session, column, *where) -> int:
-    return session.scalar(select(func.count(column)).where(*where)) or 0
-
-
-def _schedule_teams(session: Session, season: int) -> set[str]:
-    games = session.execute(select(NflGame.home_team, NflGame.away_team).where(
-        NflGame.season == season, NflGame.game_type == REGULAR_SEASON))
-    return {team for game in games for team in game}
-
-
-def _draftable(session: Session, season: int, position: str) -> int:
-    """Players at a position a draft can find: with an ADP or a week-1 projection."""
-    drafted = select(ReplayAdp.player_id).where(ReplayAdp.season == season)
-    projected = select(ReplayProjection.player_id).where(
-        ReplayProjection.season == season, ReplayProjection.week == 1, ReplayProjection.pts_ppr > 0)
-    return _count(session, Player.id, Player.position == position,
-                  or_(Player.id.in_(drafted), Player.id.in_(projected)))
-
-
-def readiness(session: Session, season: int) -> dict:
-    """What is loaded for a season, and whether a game can be played on it."""
-    teams = _schedule_teams(session, season)
-    defenses = set(session.scalars(select(Player.gsis_id).where(Player.position == "DST")))
-    has_stats = _count(session, PlayerStatsWeekly.id, PlayerStatsWeekly.season == season,
-                       PlayerStatsWeekly.season_type == REGULAR_SEASON) > 0
-    has_kdst = (_count(session, KickerGame.id, KickerGame.season == season) > 0
-                and _count(session, TeamGameStats.id, TeamGameStats.season == season) > 0
-                and all(f"{DST_PREFIX}{team}" in defenses for team in teams))     # every team's D/ST row exists
-    adp_players = _count(session, ReplayAdp.player_id.distinct(), ReplayAdp.season == season)   # any format
-    weeks = set(session.scalars(select(ReplayProjection.week.distinct()).where(ReplayProjection.season == season)))
-    last_week = session.scalar(select(func.max(NflGame.week)).where(
-        NflGame.season == season, NflGame.game_type == REGULAR_SEASON)) or 0
-    every_week = last_week > 0 and set(range(1, last_week + 1)) <= weeks    # a hole would zero a whole week
-    kickers, defenses = _draftable(session, season, "K"), _draftable(session, season, "DST")
-    ready = (has_stats and bool(teams) and has_kdst and adp_players >= MIN_ADP_PLAYERS
-             and every_week and kickers >= MIN_KICKERS and defenses >= MIN_DEFENSES)
-    projection_weeks = len(weeks)
-    injury_weeks = _count(session, ReplayInjury.week.distinct(), ReplayInjury.season == season)  # not needed to play
-    expert_snapshots = _count(session, ReplayExpertRank.scrape_date.distinct(), ReplayExpertRank.season == season)
-    return {"season": season, "ready": ready, "has_stats": has_stats, "has_schedule": bool(teams),
-            "has_kdst": has_kdst, "adp_players": adp_players, "projection_weeks": projection_weeks,
-            "kickers": kickers, "defenses": defenses, "injury_weeks": injury_weeks,
-            "expert_snapshots": expert_snapshots, "last_week": last_week}
-
-
-def ready_last_weeks(session: Session) -> dict[int, int]:
-    """{season: last week} for the supported seasons a game can be started on, oldest first."""
-    rows = (readiness(session, season) for season in SUPPORTED_SEASONS)
-    return {row["season"]: row["last_week"] for row in rows if row["ready"]}
-
-
-def ready_seasons(session: Session, min_last_week: int = 0) -> list[int]:
-    """The supported seasons a game can be started on, oldest first; min_last_week: only those that long."""
-    return [season for season, last in ready_last_weeks(session).items() if last >= min_last_week]
 
 
 def _two_way(session: Session) -> dict[int, tuple[str, str]]:
@@ -409,13 +366,13 @@ def hard_tag_returns(injuries: Mapping[PlayerWeek, Injury], actual: Mapping[Play
     return out
 
 
-def _expert_ranks(session: Session, season: int, schedule: Schedule,
-                  players: Mapping[int, PoolPlayer]) -> tuple[dict[PlayerWeek, int], dict[int, int]]:
+def _expert_ranks(session: Session, season: int, schedule: Schedule, players: Mapping[int, PoolPlayer],
+                  weeks: int) -> tuple[dict[PlayerWeek, int], dict[int, int]]:
     from services.replay_experts import week_ranks      # it imports this module
 
     kickoffs: dict[int, date] = {}
     for game in schedule.games:
-        if game.gameday:
+        if game.gameday and game.week <= weeks:
             day = date.fromisoformat(game.gameday)
             kickoffs[game.week] = min(kickoffs.get(game.week, day), day)
     rows = [dict(row._mapping) for row in session.execute(select(
@@ -426,23 +383,24 @@ def _expert_ranks(session: Session, season: int, schedule: Schedule,
 
 
 def _build(session: Session, season: int, scoring: str, rules: ScoringRules | None = None,
-           want: str | None = None) -> SeasonData:
-    status = readiness(session, season)
+           want: str | None = None, through: int | None = None) -> SeasonData:
+    status = readiness(session, season, through)
     if not status["ready"]:
         raise NoDataError(f"Replay data for {season} is not ready: {status}")
     loaded = load_schedule(session, season)
     # Final scores are results: replay code uses the schedule for byes and opponents only.
     schedule = replace(loaded, games=tuple(replace(g, home_score=None, away_score=None) for g in loaded.games))
     last_week = max(game.week for game in schedule.games)
+    weeks = min(through or last_week, last_week)      # the last week with real data
     two_way = _two_way(session)
     rescored = replay_scoring.scoring_settings(scoring, rules)
-    skill_points, skill_teams, usage, box = _skill_games(session, season, rescored, schedule, last_week, two_way)
+    skill_points, skill_teams, usage, box = _skill_games(session, season, rescored, schedule, weeks, two_way)
     parts = ((skill_points, skill_teams),
-             _kicker_games(session, season, last_week),
-             _defense_games(session, season, last_week, schedule, _defense_ids(session)))
+             _kicker_games(session, season, weeks),
+             _defense_games(session, season, weeks, schedule, _defense_ids(session)))
     actual = {key: points for part, _ in parts for key, points in part.items()}
     teams = {key: team for _, part in parts for key, team in part.items()}
-    projected = _projections(session, season, scoring, last_week, custom=rules is not None)
+    projected = _projections(session, season, scoring, weeks, custom=rules is not None)
     adp_format = replay_adp_format.stored(session, season, scoring, rules, want)
     players = _pool(session, season, {pid for pid, _ in (*actual, *projected)}, two_way,
                     {team for team, _ in schedule.opponents}, adp_format)
@@ -452,9 +410,9 @@ def _build(session: Session, season: int, scoring: str, rules: ScoringRules | No
                                             for table in (actual, projected, teams, usage, box))
     injuries = {(row.player_id, row.week): Injury(row.tag, row.practice, row.injury)
                 for row in session.scalars(select(ReplayInjury).where(
-                    ReplayInjury.season == season, ReplayInjury.week.between(1, last_week)))
+                    ReplayInjury.season == season, ReplayInjury.week.between(1, weeks)))
                 if row.player_id in players}
-    expert_ranks, expert_age = _expert_ranks(session, season, schedule, players)
+    expert_ranks, expert_age = _expert_ranks(session, season, schedule, players, weeks)
     unplaced = sum(1 for key in actual if key not in teams)
     if unplaced > len(actual) * 0.05:
         log.warning("Replay %s: %d of %d games have no team (schedule and stats team codes may differ)",
@@ -464,6 +422,6 @@ def _build(session: Session, season: int, scoring: str, rules: ScoringRules | No
                       team_by_week=MappingProxyType(_by_player(teams)), last_week=last_week,
                       injuries=MappingProxyType(injuries), usage=MappingProxyType(usage),
                       expert_ranks=MappingProxyType(expert_ranks), expert_age=MappingProxyType(expert_age),
-                      returns=MappingProxyType(hard_tag_returns(injuries, actual, last_week)),
+                      returns=MappingProxyType(hard_tag_returns(injuries, actual, weeks)),
                       box=MappingProxyType(box), rules=rules, adp_format=adp_format,
                       defense_prior=MappingProxyType(replay_defense.load_prior(session, season, rescored)))

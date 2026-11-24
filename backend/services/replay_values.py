@@ -210,7 +210,7 @@ class _Base:
 
 
 @lru_cache(maxsize=64)
-def _base(data: SeasonData, league: LeagueSettings, week: int, end_week: int) -> _Base:
+def _base(data: SeasonData, league: LeagueSettings, week: int, end_week: int, drafted: int = 0) -> _Base:
     priors = _priors(data)
     weeks_left = max(0, end_week - max(1, week) + 1)
     by_team: dict[str | None, int] = {None: weeks_left}          # unknown team: every week left
@@ -224,7 +224,7 @@ def _base(data: SeasonData, league: LeagueSettings, week: int, end_week: int) ->
     rows = [_row(data, player, priors[pid], week, teams[pid], games_left(teams[pid]))
             for pid, player in data.players.items()]
     chart_data = replay_chart.superflex_view(data) if replay_slots.two_qb(league.starters) else data  # QBs go earlier
-    charts, parts, source = replay_chart.base_charts(chart_data, rows, priors, week, end_week)
+    charts, parts, source = replay_chart.base_charts(chart_data, rows, priors, week, end_week, drafted)
     rows = [{**row, **charts[row["player_id"]]} for row in rows]
     replacement = replacement_levels(((r["position"], r["ros_ppg"]) for r in rows if r["position"] in SKILL), league)
     return _Base(MappingProxyType({r["player_id"]: _valued(r, replacement) for r in rows}), parts,
@@ -232,9 +232,10 @@ def _base(data: SeasonData, league: LeagueSettings, week: int, end_week: int) ->
 
 
 @lru_cache(maxsize=32)
-def _knowledge(data: SeasonData, league: LeagueSettings, week: int, end_week: int, seed: int) -> Knowledge:
+def _knowledge(data: SeasonData, league: LeagueSettings, week: int, end_week: int, seed: int,
+               drafted: int) -> Knowledge:
     """`_base` plus this seed's news (which may set availability) on the hard-tagged players only."""
-    base = _base(data, league, week, end_week)
+    base = _base(data, league, week, end_week, drafted)
     news = replay_chart.with_news(data, base.rows, base.rows, base.parts, week, end_week, seed)
     values = _ranked(_valued(news[pid], base.replacement) if pid in news else row for pid, row in base.rows.items())
     through = max(0, week - 1)
@@ -244,16 +245,19 @@ def _knowledge(data: SeasonData, league: LeagueSettings, week: int, end_week: in
                      weeks_remaining=max(1, end_week - through), through_week=through, rank_source=base.source)
 
 
-def knowledge(data: SeasonData, league: LeagueSettings, week: int, end_week: int, seed: int = 0) -> Knowledge:
-    """Values as of just before `week` is played (0 = draft time), looking ahead to `end_week`.
+def knowledge(data: SeasonData, league: LeagueSettings, week: int, end_week: int, seed: int = 0,
+              drafted: int = 0) -> Knowledge:
+    """Values as of just before `week` is played (0 = draft time), looking ahead to `end_week`. `drafted`:
+    the league's draft week (replay_state.draft_week; > 0 for a league that jumped in mid-season), which
+    sets the "preseason" pre_rank (replay_chart.pre_picks); never later than `week`.
 
     Built from `data.as_of(week)` only, and cached: the full season and its as_of(week) copy give the
     same object."""
-    if week < 0 or end_week < 1:
-        raise ValueError(f"Week {week} to {end_week} is not a valid span.")
+    if week < 0 or end_week < 1 or drafted > max(week, 0):
+        raise ValueError(f"Week {week} to {end_week} (drafted in week {drafted}) is not a valid span.")
     if data.known_before is not None and max(1, data.known_before) < week:
         raise ValueError(f"This season data stops before week {data.known_before}: it can't describe week {week}.")
-    return _knowledge(data.as_of(week), league, week, end_week, seed)      # seed: the game's news noise
+    return _knowledge(data.as_of(week), league, week, end_week, seed, drafted)      # seed: the game's news noise
 
 
 def clear_cache() -> None:

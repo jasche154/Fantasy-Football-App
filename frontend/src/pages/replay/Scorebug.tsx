@@ -10,6 +10,13 @@ function weekChip(game: ReplaySummary): string {
   return game.phase === 'complete' ? 'Final' : `Week ${game.week}`;
 }
 
+/** "2026 · simulated from week 10" ("2026 · live, simulated" without the week) / "2027 · simulated season"; null for a real replay. */
+export function simulatedLabel({ kind, season, sim_from: simFrom }: Pick<ReplaySummary, 'kind' | 'season' | 'sim_from'>): string | null {
+  if (kind === 'future') return `${season} · simulated season`;
+  if (kind !== 'live') return null;
+  return simFrom == null ? `${season} · live, simulated` : `${season} · simulated from week ${simFrom}`;
+}
+
 /** YOU x – y OPP: projections until the week is final. */
 function Score({ game }: { game: ReplaySummary }) {
   const { matchup } = game;
@@ -54,6 +61,7 @@ export function Scorebug({ game, advanceLabel, isAdvanceDisabled = false, onAdva
         {/* Kept in the same place while loading, so focus on it survives the league arriving. */}
         <h1 className="scorebug__title" tabIndex={-1} data-page-heading>{game?.name ?? 'Replay League'}</h1>
         {game && <p className="scorebug__meta">{game.season} season · {game.settings.teams} teams · {scoringLabel(game.settings.scoring)}</p>}
+        {game && simulatedLabel(game) && <p className="game-sim-badge">{simulatedLabel(game)}</p>}
       </div>
       {game && <p className="scorebug__week">{weekChip(game)}</p>}
       {game && <Score game={game} />}

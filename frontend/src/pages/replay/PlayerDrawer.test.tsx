@@ -134,3 +134,43 @@ describe('PlayerDrawer injuries', () => {
     expect(rows[1]).toHaveTextContent(/^1DEN12\.50/);                  // untagged
   });
 });
+
+describe('PlayerDrawer in a simulated league', () => {
+  function renderSim(detail: ReplayPlayerDetail, simFrom: number | null) {
+    mockFetch([META_ROUTE, { path: PLAYER, reply: json(detail) }]);
+    renderWithProviders(<PlayerDrawer gameId={GAME_ID} playerId={MOSTERT.id} version={0} simFrom={simFrom} onClose={() => undefined} />);
+  }
+
+  it('marks simulated weeks in the game log and the weeks ahead, with a legend', async () => {
+    renderSim(cardDetail(), 4);
+    const log = within(await screen.findByRole('table', { name: 'Raheem Mostert game log' }));
+    const weekCells = log.getAllByRole('rowheader').map((cell) => cell.textContent);
+    expect(weekCells).toEqual(['1', '2', '3', '4 Sim (simulated)', '5 Sim (simulated)']);
+    expect(log.getAllByTitle('Simulated week')).toHaveLength(2);
+    const ahead = within(screen.getByRole('table', { name: 'Raheem Mostert upcoming weeks' }));
+    expect(ahead.getAllByTitle('Simulated week')).toHaveLength(3);
+    expect(screen.getAllByText('Sim marks a simulated week: from week 4 on, this season is simulated, not the real NFL results.')).toHaveLength(2);
+  });
+
+  it('marks nothing in a real replay', async () => {
+    renderSim(cardDetail(), null);
+    await screen.findByRole('table', { name: 'Raheem Mostert game log' });
+    expect(screen.queryByTitle('Simulated week')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Sim marks/)).not.toBeInTheDocument();
+  });
+
+  it('lists the buzz newest first as rumors, never as an injury', async () => {
+    renderSim({ ...cardDetail(), buzz: [{ week: 5, text: 'Named the starter' }, { week: 3, text: 'Beat reporters say his role is growing; expect more work.' }] }, 4);
+    const news = within(await screen.findByRole('region', { name: 'News' }));
+    expect(news.getAllByRole('listitem').map((item) => item.textContent)).toEqual([
+      'Week 5 Named the starter', 'Week 3 Beat reporters say his role is growing; expect more work.']);
+    expect(news.getByText(/Rumors from around the league/)).toHaveTextContent('They are right only some of the time.');
+    expect(screen.queryByText(/Injured|Out:/)).not.toBeInTheDocument();
+  });
+
+  it('has no News block without buzz', async () => {
+    renderSim(cardDetail(), 4);
+    await screen.findByRole('table', { name: 'Raheem Mostert game log' });
+    expect(screen.queryByRole('region', { name: 'News' })).not.toBeInTheDocument();
+  });
+});

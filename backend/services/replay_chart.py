@@ -13,7 +13,8 @@ bye is behind him.
   SUPERFLEX_QB_ADP before anything above reads it: QB1 goes about pick 10 instead of 25, QB12 about 45
   instead of 110, close to real superflex drafts. The chart, pre_rank and the CPU draft all use it.
 - pre_rank: overall order of preseason picks (the slot of his preseason expert rank, else of his ADP);
-  star = clamp((STAR_TOP - pre_rank) / STAR_SPAN, 0, 1).
+  star = clamp((STAR_TOP - pre_rank) / STAR_SPAN, 0, 1). A league drafted in week K (jump in now) takes the
+  latest expert snapshot by week K instead: its "preseason" is its draft.
 - model_ppg: ros_ppg + k x (mean of his last <= FORM_GAMES real games - ros_ppg), k = n / FORM_GAMES x
   FORM_WEIGHT, x (1 - FORM_STAR_DOWN x star) for a dip, x (1 + FORM_STAR_UP x star) for a rise while ros_ppg
   is below his prior.
@@ -167,10 +168,13 @@ def _by_week(data: SeasonData) -> Mapping[int, Mapping[int, int]]:
     return MappingProxyType(dict(weeks))
 
 
-def pre_picks(data: SeasonData) -> dict[int, float]:
+def pre_picks(data: SeasonData, drafted: int = 0) -> dict[int, float]:
     """{id: preseason pick}: the slot of his expert preseason rank, else his ADP's slot at his position (his
-    ADP itself, except K/DST floored at KDST_FIRST_PICK)."""
-    curve, ranked = slot_curve(data), _by_week(data).get(0, {})
+    ADP itself, except K/DST floored at KDST_FIRST_PICK). `drafted`: the league's draft week; a league drafted
+    in week K (replay_state.draft_week) reads the latest expert snapshot by then instead of the preseason one."""
+    weeks = _by_week(data)
+    known = [w for w in weeks if w <= drafted]
+    curve, ranked = slot_curve(data), weeks[max(known)] if known else {}
     by_adp = sorted((p.adp, pid) for pid, p in data.players.items() if p.adp is not None)
     seen: dict[str, int] = defaultdict(int)
     picks: dict[int, float] = {}
@@ -230,21 +234,21 @@ Parts = Mapping[int, tuple[float, float, tuple[int, int, str]]]    # {id: (exper
 
 
 def charts(data: SeasonData, rows: Sequence[dict], priors: Mapping[int, float], week: int, end_week: int,
-           seed: int) -> tuple[dict[int, dict], str]:
+           seed: int, drafted: int = 0) -> tuple[dict[int, dict], str]:
     """({id: chart fields for ReplayValue (+ availability / expected_missed from news)}, rank_source).
 
     `rows` are replay_values rows (player_id, position, team, ros_ppg, recent_points, availability,
     games_left). `base_charts` then `with_news`: callers that value one week for many seeds cache the first."""
-    fields, parts, source = base_charts(data, rows, priors, week, end_week)
+    fields, parts, source = base_charts(data, rows, priors, week, end_week, drafted)
     by_id = {row["player_id"]: row for row in rows}
     return {**fields, **with_news(data, by_id, fields, parts, week, end_week, seed)}, source
 
 
 def base_charts(data: SeasonData, rows: Sequence[dict], priors: Mapping[int, float], week: int,
-                end_week: int) -> tuple[dict[int, dict], Parts, str]:
+                end_week: int, drafted: int = 0) -> tuple[dict[int, dict], Parts, str]:
     """`charts` without the seeded news: (fields with news None, the parts `with_news` needs for players
-    with an open hard-tag streak, rank_source)."""
-    curve, picks = slot_curve(data), pre_picks(data)
+    with an open hard-tag streak, rank_source). `drafted`: the league's draft week (see `pre_picks`)."""
+    curve, picks = slot_curve(data), pre_picks(data, drafted)
     overall = pre_ranks(picks)
     listed, age_weight = snapshot(data, week)
     by_position: dict[str, list[dict]] = defaultdict(list)

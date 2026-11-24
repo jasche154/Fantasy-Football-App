@@ -8,9 +8,10 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from database.models import (
-    Base, KickerGame, NflGame, Player, PlayerStatsWeekly, ReplayAdp, ReplayInjury, ReplayProjection, TeamGameStats,
+    Base, KickerGame, NflGame, Player, PlayerSnapCountsWeekly, PlayerStatsWeekly, ReplayAdp, ReplayInjury,
+    ReplayProjection, TeamGameStats,
 )
-from services import kdst_model, replay_pool, replay_state, replay_values
+from services import kdst_model, replay_pool, replay_readiness, replay_state, replay_values
 from services.injury_recovery import games_to_weeks
 from services.replay_pool import ALL_POSITIONS, SKILL, SeasonData
 from services.valuation import NoDataError
@@ -444,6 +445,89 @@ def test_load_is_cached_until_the_cache_is_cleared(seeded_db):
 
     assert again is first
     assert rebuilt is not first and dict(rebuilt.actual) == dict(first.actual)
+
+
+def test_load_is_rebuilt_when_the_seasons_data_is_written_by_any_loader(small_db):
+    from database.models import DataLoad
+
+    first = replay_pool.load_season_data(small_db, fakes.SEASON, "half")
+    small_db.add(DataLoad(seasons=str(fakes.SEASON)))              # the stats loader's stamp
+    small_db.commit()
+    stamped = replay_pool.load_season_data(small_db, fakes.SEASON, "half")
+    small_db.execute(delete(ReplayInjury).where(ReplayInjury.week == 3))     # a replay import step's rows
+    small_db.commit()
+    retagged = replay_pool.load_season_data(small_db, fakes.SEASON, "half")
+
+    assert stamped is not first and retagged is not stamped
+    assert retagged is replay_pool.load_season_data(small_db, fakes.SEASON, "half")      # unchanged: cached
+    assert not any(week == 3 for _, week in retagged.injuries) and any(week == 3 for _, week in stamped.injuries)
+
+
+def test_the_data_version_sees_rows_written_without_a_loader_stamp(small_db):
+    """No DataLoad stamp: a row deleted from this season or the season before (replay_defense.load_prior reads
+    it), a game dropped, a snap row added: each changes the key."""
+    season, star = fakes.SEASON, fakes.ID_BASE["RB"] + 1
+    small_db.execute(insert(PlayerStatsWeekly), [{"player_id": star, "season": season - 1, "week": week,
+                                                  "season_type": "REG"} for week in (1, 2)])
+    small_db.commit()
+    middle = small_db.scalar(select(PlayerStatsWeekly.id).where(PlayerStatsWeekly.season == season,
+                                                                 PlayerStatsWeekly.week == 9).limit(1))
+    versions = [replay_pool.data_version(small_db, season)]
+    for change in (delete(PlayerStatsWeekly).where(PlayerStatsWeekly.season == season - 1, PlayerStatsWeekly.week == 1),
+                   delete(PlayerStatsWeekly).where(PlayerStatsWeekly.id == middle),
+                   delete(NflGame).where(NflGame.season == season, NflGame.week == 9),
+                   insert(PlayerSnapCountsWeekly).values(player_id=star, season=season, week=18)):
+        small_db.execute(change)
+        small_db.commit()
+        versions.append(replay_pool.data_version(small_db, season))
+
+    assert len(set(versions)) == len(versions)
+
+
+def _copy_row(session, model, season: int) -> None:
+    """One of the fake season's rows again, in `season`, with its unique key moved off the original's."""
+    row = session.scalars(select(model).where(model.season == fakes.SEASON).limit(1)).one()
+    values = {column.key: getattr(row, column.key) for column in model.__table__.columns if column.key != "id"}
+    moved = {"week": 99, "format": "zz", "kind": "zz", "game_id": f"copy {season}"}
+    session.execute(insert(model).values(**{**values, "season": season,
+                                            **{key: value for key, value in moved.items() if key in values}}))
+    session.commit()
+
+
+@pytest.mark.parametrize("model", [*replay_readiness.SEASON_TABLES, PlayerSnapCountsWeekly], ids=lambda m: m.__tablename__)
+def test_the_data_version_reacts_to_a_new_row_of_every_table_a_season_is_built_from(small_db, model):
+    """A row of the season changes the key; a row of a later season changes only that table's max id (no
+    per-season count), so another season's writes cost a rebuild at most, never a stale pool."""
+    before = replay_pool.data_version(small_db, fakes.SEASON)
+    _copy_row(small_db, model, fakes.SEASON + 1)
+    other = replay_pool.data_version(small_db, fakes.SEASON)
+    _copy_row(small_db, model, fakes.SEASON)
+    mine = replay_pool.data_version(small_db, fakes.SEASON)
+
+    assert sum(a != b for a, b in zip(before, other)) == 1
+    assert mine != other and sum(a != b for a, b in zip(other, mine)) == (1 if model is PlayerSnapCountsWeekly else 2)
+
+
+def test_the_data_version_reacts_to_a_new_player_and_a_loader_stamp(small_db):
+    from database.models import DataLoad
+
+    before = replay_pool.data_version(small_db, fakes.SEASON)
+    small_db.add(Player(full_name="New Back", position="RB"))
+    small_db.commit()
+    added = replay_pool.data_version(small_db, fakes.SEASON)
+    small_db.add(DataLoad(seasons=str(fakes.SEASON)))
+    small_db.commit()
+
+    assert before != added != replay_pool.data_version(small_db, fakes.SEASON)
+
+
+@pytest.mark.parametrize(("week", "ready"), [(3, False), (8, True)])
+def test_a_season_in_progress_needs_projections_only_through_its_last_real_week(small_db, week, ready):
+    small_db.execute(delete(ReplayProjection).where(ReplayProjection.week == week))
+    small_db.commit()
+
+    assert replay_pool.readiness(small_db, fakes.SEASON, through=5)["ready"] is ready
+    assert replay_pool.readiness(small_db, fakes.SEASON)["ready"] is False      # the whole season: a hole
 
 
 def test_the_cache_keeps_only_the_most_recently_used_seasons(seeded_db, monkeypatch):

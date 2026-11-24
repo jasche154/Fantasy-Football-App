@@ -22,6 +22,9 @@ No hindsight, by construction: every step here hands the engine `data.as_of(stat
 built from it. The only call that receives the full season is `replay_season.play_week`, which reads it
 for the points of the week being played and nothing else.
 
+A "jump in now" league (settings.start_week K > 1) drafts in week K on `data.as_of(K)` (State.week is K
+during its draft, replay_state.draft_week) and plays weeks K..end_week; nothing else here changes.
+
 Routes import this module, replay_views and replay_state only: the user's actions below are thin
 pass-throughs that add the Knowledge the engine needs.
 """
@@ -51,7 +54,8 @@ SEASON_PHASES = ("waivers", "open")
 def knowledge(state: State, settings: Settings, data: SeasonData, *, seed: int) -> rv.Knowledge:
     """What everyone knows before `state.week` is played (cached). Views and every engine call use this;
     `seed` is the game's, for its injury-news noise (views pass the same one)."""
-    return rv.knowledge(data.as_of(state.week), rv.league_settings(settings), state.week, settings.end_week, seed)
+    return rv.knowledge(data.as_of(state.week), rv.league_settings(settings), state.week, settings.end_week, seed,
+                        drafted=rs.draft_week(settings))
 
 
 # ---------------- creating a game and drafting ----------------
@@ -73,8 +77,8 @@ def _draft_only(state: State) -> None:
 
 
 def _cpus_pick(state: State, settings: Settings, data: SeasonData, seed: int) -> State:
-    """CPUs pick up to the user's next turn; when that completes the draft, week 1 starts."""
-    state = replay_draft.run_cpu_picks(state, settings, data.as_of(0), seed)
+    """CPUs pick up to the user's next turn; when that completes the draft, the first week (start_week) starts."""
+    state = replay_draft.run_cpu_picks(state, settings, data.as_of(state.week), seed)
     return state if state.phase == "draft" else start_week(state, settings, data, seed)
 
 
@@ -89,13 +93,13 @@ def create_game(settings: Settings, data: SeasonData, seed: int) -> State:
 def pick(state: State, settings: Settings, data: SeasonData, seed: int, player_id: int) -> State:
     """The user drafts that player, then the CPUs pick up to the user's next turn."""
     _draft_only(state)
-    return _cpus_pick(replay_draft.make_pick(state, settings, data.as_of(0), player_id), settings, data, seed)
+    return _cpus_pick(replay_draft.make_pick(state, settings, data.as_of(state.week), player_id), settings, data, seed)
 
 
 def auto_pick(state: State, settings: Settings, data: SeasonData, seed: int) -> State:
     """The user's pick made for them with CPU logic (no noise), then the CPUs' picks."""
     _draft_only(state)
-    return _cpus_pick(replay_draft.autopick_user(state, settings, data.as_of(0), seed), settings, data, seed)
+    return _cpus_pick(replay_draft.autopick_user(state, settings, data.as_of(state.week), seed), settings, data, seed)
 
 
 def auto_draft(state: State, settings: Settings, data: SeasonData, seed: int) -> State:

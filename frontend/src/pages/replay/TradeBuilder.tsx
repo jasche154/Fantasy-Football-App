@@ -65,7 +65,7 @@ function RosterPicker({ title, caption, verb, rows, selected, max, onToggle, ope
                       aria-label={`${verb} ${player.name}${reason ? ` (can't be traded: ${reason})` : ''}`} onChange={() => onToggle(player.id)} />
                   </td>
                   <td className="td--player">
-                    <ReplayPlayerCell player={player} info={{ out: row.out, trade_locked: row.trade_locked }} onOpen={openPlayer} />
+                    <ReplayPlayerCell player={player} info={{ out: row.out, trade_locked: row.trade_locked, buzz: row.buzz }} onOpen={openPlayer} />
                     {row.slot === 'IR' && <span className="status-badge status-badge--missing">On IR</span>}
                     {row.news && <p className="hint">{row.news.text}</p>}
                   </td>
