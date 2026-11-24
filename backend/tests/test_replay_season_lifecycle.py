@@ -112,6 +112,7 @@ def test_a_cancelled_game_stops_holding_its_week_once_a_game_stale_days_later_ha
 
 def test_a_cancelled_game_in_the_last_week_holds_the_season_until_a_postseason_game_has_its_score(db, monkeypatch,
                                                                                                     caplog):
+    monkeypatch.setattr(replay_live, "_warned", set())            # the warn-once memory is per process
     play_through(db, LAST)
     _unscored(db, LAST, FULL.schedule.games[-1].home_team)
     _on(monkeypatch, _day_after(LAST, 30))
