@@ -18,7 +18,9 @@ from database.models import ReplaySeasonData
 from tests import replay_fakes as fakes
 from tests.test_replay_jump_in import K8, MARKET8, SEED, season
 from tests.test_replay_routes import get, post
-from tests.test_replay_sim_leagues import LIVE, THROUGH, _app, _frozen, engine_stand_in  # noqa: F401 (fixture)
+from tests.test_replay_sim_leagues import (  # noqa: F401 (fixtures)
+    LIVE, THROUGH, _app, _frozen, engine_stand_in, live_today,
+)
 
 RESULT_KINDS = {"blowout_win", "close_win", "close_loss", "blowout_loss", "boom", "bust", "upset",
                 "streak_win", "streak_loss", "clinch", "eliminated", "champion", "runner_up"}
