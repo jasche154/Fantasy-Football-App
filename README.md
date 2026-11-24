@@ -1312,11 +1312,13 @@ read the belief, so, as in a real season, the public learns the truth only from 
   facts.
 
 **Commands** (all read-only on the database; the fits rewrite the JSON files the simulator reads;
-`sim_next_year_fit` and `sim_eval`'s full mode download nflverse draft picks):
+`sim_next_year_fit` and `sim_eval`'s full mode need nflverse draft picks, downloaded once into
+`backend/data/cache/draft_picks.json` and again only with `--refresh` or when a needed season is missing):
 
 ```bash
 python -m services.sim_eval [--seasons 2021-2025] [--seeds 3] [--mode mid|full|both] [--out report.json]
-                                                     # realism check: simulated vs real seasons
+                            [--workers N] [--refresh]   # realism check: simulated vs real seasons; each
+                                                     # (mode, season) in its own process, --workers 1 = serial
 python -m services.sim_eval --set talent.role_sd=0.4 --save-tuned   # try a value; save it as tuned
 python -m services.sim_eval --fit [--seasons 2021-2025]             # refit the game model (sim_params.json)
 python -m services.sim_injuries --fit --seasons 2018-2025 [--check] # refit injuries (sim_injuries.json)
