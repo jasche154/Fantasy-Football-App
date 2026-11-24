@@ -512,6 +512,24 @@ def test_game_results_load_only_what_is_missing_and_never_the_depth_charts(db, l
     assert db.scalar(select(NflGame.away_team).where(NflGame.season == 2018)) == "LV"
 
 
+def test_a_stamped_partial_reload_reads_the_schedule_again(db, loaders, monkeypatch):
+    """replay_live reads a DataLoad stamp as "the loader saw this season's games", so a run that reloads only
+    a live season's stats refreshes its schedule too before it stamps."""
+    from database import populate_stats as ps
+    from database.models import DataLoad
+
+    season = ps.FIRST_SEASON
+    db.add(NflGame(game_id=f"{season}_01_LV_KC", season=season, week=1, game_type="REG", home_team="KC",
+                   away_team="LV"))
+    db.commit()
+    monkeypatch.setattr(ps, "load_schedules", lambda session, seasons: loaders.append("schedules again"))
+
+    replay_data.load_game_results(db, season)
+
+    assert loaders == ["stats", "crosswalk", "advanced", "schedules again"]
+    assert db.scalar(select(func.count()).select_from(DataLoad)) == 1
+
+
 def test_game_results_that_stay_missing_stop_the_import(db, loaders, monkeypatch):
     from database import advanced_stats
 
