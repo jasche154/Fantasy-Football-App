@@ -1034,7 +1034,9 @@ that week's games on; only scoring a week reads its real points.
   and only on the side of the chart his own price is on (worried only when he values the player at or below
   the chart, high only at or above it), so a mood line or message never points the other way from his price. After 3 league weeks each CPU shows a **mood
   line** in the trade builder ("Worried about X. High on Y."). When a CPU is worried at -0.15 or worse about
-  one of his 6 most valuable skill players whose last game fell short of his rate, he may **shop him to you**
+  one of his 6 most valuable skill players whose last game fell short of his rate (and who nobody could think
+  was hurt: the same test as the chat's dud lines below), he may **shop him to you** at the start of a week,
+  after the CPUs' IR and free-agency moves
   (chance by persona: panicky 75%, gambler 35%, balanced 25%, steady and shark never; one shop per CPU, at
   most 2 in the league): he sends you a message, the player shows under **Shopping to you** on the Trades
   tab, and for you only he asks a seeded 5-15% less for that player (panicky 9%, gambler 7%, balanced 6%,
@@ -1042,9 +1044,12 @@ that week's games on; only scoring a week reads its real points.
   (`replay_trade_value.tally` via `replay_state.markdowns`), so evaluate, propose, counters and his own offer
   all see it; it never moves the chart, and the re-trade lock stops you flipping the player. While the shop is
   open the player is yours to buy: no other CPU can trade for him, and the shopping CPU sends you his offer
-  first. The shop stays open week to week while he stays that worried; it closes after a good game, once the
-  trade deadline week is over (no shop opens after it), or as soon as the player leaves his active roster
-  (a trade, a drop or IR). No shop opens for a player who is on IR or was traded in the last 2 weeks.
+  first, once (decline it or let it expire and he doesn't send it again, though you can still propose at
+  the discount; other CPUs' offers come through as usual). The shop stays open week to week while he stays
+  that worried; it closes after a good game, if the player might be hurt, once the trade deadline week is
+  over (no shop opens after it), or as soon as the player leaves his active roster (a trade, a drop or IR).
+  In a league with waivers a shop opens at Sim to Wednesday, so last week's shops wait out the waiver phase
+  without their discount until then. No shop opens for a player who is on IR or was traded in the last 2 weeks.
 - **League chat** (`services/replay_chat.py`, lines in `services/replay_chat_lines.json`): a one-way group
   chat under League > Chat (an unread dot on the League tab). After each week every CPU may say one thing:
   a championship or final loss, clinching or elimination, an upset (beating a team 4+ places above him, from
@@ -1061,7 +1066,8 @@ that week's games on; only scoring a week reads its real points.
   and a line that would run past 140 characters with long names gives way to one that fits. A third manager may react to a
   trade (at most 2 a week) and a shopping CPU messages you (at most 2 shops are open at once); these come on
   top of the 5, so a week can show up to 9 lines. Every CPU offer carries a one-line reason in
-  his voice (worried about a player, high on yours, short at a position, a counter, or a value pitch).
+  his voice (worried about a player, never one who might be hurt; high on yours, short at a position, a
+  counter, or a value pitch).
   In a league that started mid-season (or a simulated one) all of this counts the league's own weeks, and
   each line is dated with the real NFL week.
   Lines come from a bank of 1,400+ clean lines in five voices, one per persona, so a manager sounds the same
