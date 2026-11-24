@@ -51,8 +51,10 @@ button.replay-player__name:hover { color: var(--color-accent); text-decoration: 
 /* Setup: everything inside the form's one fieldset lays out as if it were not there (it only disables them while a
    league is built); simulated-season cards that are not ready read as unavailable, with their reason in the text. */
 .replay-setup__all { display: contents; }
-.radio-card:has(input:disabled) { cursor: not-allowed; opacity: 0.7; border-style: dashed; }
-.replay-setup__now { margin: 0; }
+/* No opacity: the card's text is the reason it is unavailable, so it keeps its full contrast. */
+.radio-card:has(input:disabled) { cursor: not-allowed; border-style: dashed; background: transparent; }
+.radio-card:has(input:disabled) .radio-card__title { color: var(--color-text-muted); }
+.replay-setup__now { margin: var(--space-2) 0 0; }
 /* Saved games: what kind of league (a word, not a colour). */
 .replay-kind-chip { display: inline-block; margin-inline-start: var(--space-1); padding: 0 var(--space-2); border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-pill); color: var(--color-text-muted); font-size: var(--text-2xs); font-weight: 650; vertical-align: middle; }

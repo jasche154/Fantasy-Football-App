@@ -1,4 +1,5 @@
 """sim_next_year: the offseason turns one season's belief into the next one's (hand-built worlds, no database)."""
+from dataclasses import replace
 from types import MappingProxyType
 
 import numpy as np
@@ -157,6 +158,53 @@ def test_rookies_are_the_least_certain_and_prospects_take_over_at_the_rookie_rat
     assert benched(prospect, True) == pytest.approx(knobs["rookie_bench_rate"], abs=0.04)
     assert benched(veteran, True) == pytest.approx(knobs["bench_rate"], abs=0.03)
     assert benched(prospect, False) == pytest.approx(knobs["bench_rate"], abs=0.03)   # mid-season: the usual rate
+
+
+def test_the_market_pays_a_rookie_premium_on_his_price_only():
+    """Real drafters pay for a rookie's upside: his ADP rises with the premium, every position's veterans keep
+    their order, and the projections (the belief's) do not move."""
+    belief, pool = _next()
+    ids = ny.rookie_ids(2027, ROOKIES)
+    premium = ny.rookie_premium(ids)
+    assert set(premium) == set(ids) and all(m >= 1.0 for m in premium.values())
+    assert ny.premium_at({"WR": [0.5, -0.5]}, "WR", 1) > 1.0 == ny.premium_at({}, "QB", 1)
+    plain = ny.season_base(2027, belief, pool, _schedule(), "half", None, {})
+    paid = ny.season_base(2027, belief, pool, _schedule(), "half", None, {}, premium={pid: 1.5 for pid in ids})
+    rookie = next(pid for pid, r in ids.items() if r.name == "Early Receiver")
+    assert paid.players[rookie].adp < plain.players[rookie].adp
+    for position in ("QB", "RB", "WR", "TE"):              # (a rookie moving up can move replacement levels)
+        veterans = [pid for pid, p in plain.players.items() if p.adp and pid not in ids and p.position == position]
+        assert sorted(veterans, key=lambda p: plain.players[p].adp) == sorted(veterans, key=lambda p: paid.players[p].adp)
+    assert paid.projected == plain.projected                  # the price only: the projections are the belief's
+
+
+REAL_EXPERT_ADP_R = 0.98   # real week-0 expert vs ADP position ranks, real top-150 ADP, 2022-2025 (0.981-0.987)
+
+
+def test_the_preseason_experts_rank_players_the_way_the_preseason_market_drafts_them():
+    """The draft room orders by the week-0 expert ranks and shows the ADP next to them; in a real August the two
+    agree closely, so they must here too, even when last season's record (which the market leans on) disagrees
+    with the belief."""
+    from services import sim_metrics, sim_season
+
+    spread = dict(zip(TEAMS, (1.4, 1.15, 0.9, 0.7)))             # teams unlike each other, as real ones are
+    world = _world()
+    belief, pool = _next(replace(world, players=MappingProxyType({i: replace(p, targets=p.targets * spread[p.team],
+                                                                             carries=p.carries * spread[p.team])
+                                                                  for i, p in world.players.items()})))
+    flipped = {pid(team, slot): points for team in ("DAL", "KC")
+               for slot, points in (("WR1", 2.0), ("WR3", 22.0), ("RB1", 3.0), ("RB2", 20.0))}
+    base = ny.season_base(2027, belief, pool, _schedule(), "half", None, {}, record=flipped)
+    adp, agreement = sim_metrics.adp_ranks(base), []
+    for seed in (1, 2, 3):
+        season = sim_season.simulate(base, seed, 1, belief)
+        experts = {p: rank for (p, week), rank in season.expert_ranks.items() if week == 0}
+        skill = sorted(p for p in set(experts) & set(adp) if pool[p].position in sim_metrics.SKILL)
+        agreement.append(sim_metrics.spearman([experts[p] for p in skill], [adp[p] for p in skill]))
+        assert all(adp[p] <= 2 * experts[p] + 1 for p in skill if experts[p] <= 12)
+        assert all(experts[p] < experts[q] for p in adp for q in experts            # the undrafted rank last
+                   if q not in adp and pool[p].position == pool[q].position)
+    assert np.mean(agreement) >= REAL_EXPERT_ADP_R - 0.02
 
 
 def test_every_player_of_the_new_season_stays_in_the_public_view_until_he_plays():

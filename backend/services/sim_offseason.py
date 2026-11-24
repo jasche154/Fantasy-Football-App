@@ -78,10 +78,21 @@ def _move(row: Mapping, where: str) -> Move:
     return Move(name, position, None if team is None else _team(team, f"{where} ({name})"), _text(row, "note", where))
 
 
+def _entries(raw: Mapping, key: str) -> list:
+    value = raw.get(key)
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError(f"'{key}' must be a list of objects.")
+    return value
+
+
 def parse(raw: Mapping) -> tuple[tuple[Rookie, ...], tuple[Move, ...]]:
-    """Validated rookies and moves from the file's JSON object."""
-    rookies = tuple(_rookie(row, f"rookies[{i}]") for i, row in enumerate(raw.get("rookies") or []))
-    moves = tuple(_move(row, f"moves[{i}]") for i, row in enumerate(raw.get("moves") or []))
+    """Validated rookies and moves from the file's JSON object. Any wrong shape is a ValueError naming it."""
+    if not isinstance(raw, Mapping):
+        raise ValueError("the file must be a JSON object with 'rookies' and 'moves' lists.")
+    rookies = tuple(_rookie(row, f"rookies[{i}]") for i, row in enumerate(_entries(raw, "rookies")))
+    moves = tuple(_move(row, f"moves[{i}]") for i, row in enumerate(_entries(raw, "moves")))
     seen: dict[str, str] = {}
     for kind, entries in (("rookies", rookies), ("moves", moves)):
         for entry in entries:

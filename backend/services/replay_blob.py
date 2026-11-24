@@ -32,6 +32,7 @@ from services.valuation import NoDataError
 
 VERSION = 1                     # the "v" of a stored season (1..VERSION); a newer one is refused, an older one read
 CACHED = 4                      # decoded seasons kept, least recent out
+MAX_UNPACKED = 64 * 2**20       # JSON bytes a save may unpack to: far above any season; a tampered row can't balloon
 _HINTS = typing.get_type_hints(SeasonData)
 _SCHEDULE = {"games": tuple[Game, ...], "opponents": Mapping[tuple[str, int], str]}
 
@@ -118,11 +119,21 @@ def dumps(data: SeasonData) -> bytes:
     return zlib.compress(json.dumps(payload, separators=(",", ":")).encode(), 9)
 
 
+def _unpack(blob: bytes) -> bytes:
+    inflater = zlib.decompressobj()
+    raw = inflater.decompress(blob, MAX_UNPACKED)
+    if inflater.unconsumed_tail:
+        raise UnreadableSeason(f"This league's saved season unpacks to more than {MAX_UNPACKED // 2**20} MB.")
+    if not inflater.eof:
+        raise zlib.error("incomplete stream")             # what zlib.decompress says of a truncated save
+    return raw
+
+
 def loads(blob: bytes) -> SeasonData:
     """A stored season. UnreadableSeason (the exception's type in its text) when it is not one, or was saved by
     a newer app."""
     try:
-        payload = json.loads(zlib.decompress(blob))
+        payload = json.loads(_unpack(blob))
         version = payload.get("v")
         if isinstance(version, bool) or not isinstance(version, int) or not 1 <= version <= VERSION:
             raise UnreadableSeason(f"This league's season was saved in format version {version}; this app reads "

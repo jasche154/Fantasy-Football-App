@@ -22,7 +22,12 @@ belief at the end of S-2 as its prior when stored, as sim_setup builds a future 
   INT rate have no raw rate in the box lines, so theirs is the belief's slope over its mean shrink;
 - the true-talent spread of each rate a new season's truth draws around that regressed belief (`efficiency_sd`,
   `_spread_fit`; read by sim_talent for a whole season);
-- teams: volume and defense factors next season on this season's, as log deviations (`team_keep`).
+- teams: volume and defense factors next season on this season's, as log deviations (`team_keep`);
+- the market's rookie premium (`rookie_premium`, last, on the model just fitted): season S is built like a
+  future season (sim_eval.next_belief), its market priced with no premium like S's real ADP list, and
+  [a, b] per position of sim_next_year.premium_at (b <= 0) chosen on a grid to minimize the squared log ratio of our
+  ADP to the real one over every skill rookie of S (off a list, real or ours = PREMIUM_MISSING, so the
+  late picks real drafters skip hold the premium down as much as the hyped ones push it up).
 Experience = seasons through S-1 since his draft year (nflverse), else since his first database season.
 
 Needs the network (nflreadpy) and the database; never runs in the app.
@@ -30,18 +35,20 @@ Needs the network (nflreadpy) and the database; never runs in the app.
 import argparse
 import json
 import logging
+import math
 from collections import defaultdict
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 
 import numpy as np
 from sqlalchemy import select
 
 from integrations.weekly_sources import TEAM_ALIASES
-from services import replay_pool, sim_world
+from services import replay_pool, sim_next_year, sim_world
+from services.replay_adp_format import TWO_QB
 from services.sim_metrics import qb_starts
 from services.replay_pool import SeasonData
-from services.sim_next_year import PATH, VOLUME_MIN, volume
+from services.sim_next_year import PATH, VOLUME_MIN, premium_at, volume
 from services.sim_offseason import Rookie
 from services.sim_schedule import TEAMS
 from services.sim_eval import season_end
@@ -62,6 +69,11 @@ RAW = {"catch": ("rec", "targets", 20), "ypc": ("rec_yds", "rec", 15), "rec_td":
        "ypr": ("rush_yds", "carries", 30), "rush_td": ("rush_td", "carries", 30)}    # numerator, volume, minimum
 QB_SHRINK = {"quality": 150.0, "int_rate": 250.0}     # sim_world.EFFICIENCY_PRIOR, in pass attempts
 TEAM_FIELDS = ("targets", "carries", "pass_def", "rush_def", "takeaways")
+PREMIUM_MISSING = 300.0                         # premium fit: a rookie off an ADP list (real or ours) counts as this
+# the a and b searched; b <= 0: a later pick never carries more premium than an earlier one (free, the line rose
+# with the pick, fitting the few late picks real drafters took, and priced 3rd-round WRs above the first pick)
+PREMIUM_GRID = (np.linspace(-1.0, 1.5, 51), np.linspace(-0.3, 0.0, 7))
+PREMIUM_ROUNDS = 2
 
 
 def draft_picks(seasons: Iterable[int]) -> list[dict]:
@@ -257,6 +269,59 @@ def _team_fit(rows: list[dict]) -> dict:
     return out
 
 
+def premium_cases(session, seasons: list[int]) -> list[dict]:
+    """Per season S: the belief going into S built like a future season (sim_eval.next_belief: S's real rookies
+    and moves), the market's values under it with no premium (priced like S's real ADP list, leaning on S-1's
+    record), S's skill rookies {id: (position, pick)} and S's real ADP {id: adp}."""
+    from services import replay_scoring, sim_eval, sim_market
+
+    offseason = {"picks": draft_picks(range(DRAFT_HISTORY_FROM, max(seasons) + 1)), "first": first_seasons(session)}
+    cases = []
+    for season in seasons:
+        real = replay_pool.load_season_data(session, season, SCORING)
+        belief, _, rookies = sim_eval.next_belief(session, real, offseason)
+        listed, record = sim_eval.market_inputs(session, real)
+        cases.append({"season": season, "belief": belief, "two_qb": real.adp_format == TWO_QB,
+                      "values": sim_market.market_values(belief, replay_scoring.scoring_settings(listed, None), record=record),
+                      "rookies": {pid: (r.position, r.pick) for pid, r in rookies.items() if r.position in POSITIONS},
+                      "real": {pid: p.adp for pid, p in real.players.items() if p.adp is not None}})
+        log.info("%s: %d rookies for the premium", season, len(cases[-1]["rookies"]))
+    return cases
+
+
+def premium_board(case: Mapping, fit: Mapping[str, Sequence[float]]) -> dict[int, float]:
+    """{id: ADP} of `case`'s market with the rookie premium `fit` ({position: [a, b]})."""
+    from services import sim_market
+
+    lift = {pid: premium_at(fit, position, pick) for pid, (position, pick) in case["rookies"].items()}
+    values = {pid: v * lift.get(pid, 1.0) for pid, v in case["values"].items()}
+    return {pid: adp for pid, (adp, _) in sim_market.draft_board(case["belief"], values, case["two_qb"]).items()}
+
+
+def premium_loss(cases: Iterable[Mapping], fit: Mapping[str, Sequence[float]], position: str) -> float:
+    """Sum over `position`'s rookies of log(our ADP / real ADP)^2; off a list (real or ours) = PREMIUM_MISSING,
+    so a rookie real drafters skipped weighs against a premium as much as a drafted one for it."""
+    total = 0.0
+    for case in cases:
+        board = premium_board(case, fit)
+        for pid, (mine, _) in case["rookies"].items():
+            if mine == position:
+                total += math.log(board.get(pid, PREMIUM_MISSING) / case["real"].get(pid, PREMIUM_MISSING)) ** 2
+    return total
+
+
+def _premium_fit(cases: list[dict]) -> dict[str, list[float]]:
+    """{position: [a, b]} of sim_next_year.premium_at minimizing premium_loss: a grid search per position,
+    PREMIUM_ROUNDS passes (a position's rookies barely move another's)."""
+    fit = {position: [0.0, 0.0] for position in POSITIONS}
+    for _ in range(PREMIUM_ROUNDS):
+        for position in POSITIONS:
+            trials = [(a, b) for b in PREMIUM_GRID[1] for a in PREMIUM_GRID[0]]
+            best = min(trials, key=lambda ab: premium_loss(cases, {**fit, position: ab}, position))
+            fit[position] = [round(float(best[0]), 4), round(float(best[1]), 4)]
+    return fit
+
+
 def summarize(rows: Mapping[str, list[dict]], seasons: list[int]) -> dict:
     age, keep, center = {}, {}, {}
     for position in POSITIONS:
@@ -287,10 +352,16 @@ def main(argv: list[str] | None = None) -> None:
     seasons = _seasons(args.seasons)
     with SessionLocal() as session:
         rows = observations(session, seasons)
-    if args.dump:
-        Path(args.dump).write_text(json.dumps(rows))
-    PATH.write_text(json.dumps(summarize(rows, seasons), indent=1) + "\n")
-    log.info("wrote %s", PATH.name)
+        if args.dump:
+            Path(args.dump).write_text(json.dumps(rows))
+        fitted = summarize(rows, seasons)
+        # the premium is measured on the market of the model just fitted, with no premium yet
+        PATH.write_text(json.dumps({**fitted, "rookie_premium": {}}, indent=1) + "\n")
+        sim_next_year.stored.cache_clear()
+        fitted["rookie_premium"] = _premium_fit(premium_cases(session, seasons))
+    PATH.write_text(json.dumps(fitted, indent=1) + "\n")
+    sim_next_year.stored.cache_clear()
+    log.info("wrote %s (rookie premium %s)", PATH.name, fitted["rookie_premium"])
 
 
 if __name__ == "__main__":

@@ -1,9 +1,9 @@
-import { screen, within } from '@testing-library/react';
+import { act, fireEvent, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { json, mockFetch, type MockReply, type MockRoute } from '../../test/mockFetch';
 import { META_ROUTE, renderWithProviders } from '../../test/render';
-import { actionResult, draftSummary, seasons, simulatedSeason } from './fixtures';
+import { actionResult, draftSummary, readiness, seasons, simulatedSeason } from './fixtures';
 import { nowSummary } from './SeasonChoice';
 import { SetupForm } from './SetupForm';
 
@@ -104,24 +104,97 @@ describe('SetupForm simulated seasons', () => {
     expect(screen.getByRole('radio', { name: /Full season/ })).toBeChecked();
   });
 
-  it('disables the whole form while the season is simulated and sends one request however often it is pressed', async () => {
+  it('disables the fields while the season is simulated and sends one request however often it is pressed', async () => {
     let answer: (reply: MockReply) => void = () => undefined;
-    const { api, onCreated, user } = renderForm([
+    const { api, onCreated } = renderForm([
       { path: SEASONS_PATH, reply: json(BOTH) },
       createRoute(() => new Promise((resolve) => { answer = resolve; })),
     ]);
-    await user.click(await screen.findByRole('radio', { name: /2027/ }));
+    await userEvent.setup().click(await screen.findByRole('radio', { name: /2027/ }));
     const create = screen.getByRole('button', { name: 'Create league and draft' });
-    await user.dblClick(create);
+    // Two presses before any re-render: only the in-flight guard can stop the second one.
+    act(() => {
+      fireEvent.click(create);
+      fireEvent.click(create);
+    });
 
-    expect(await screen.findByRole('button', { name: 'Simulating the season…' })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: 'Simulating the season…' })).toHaveAttribute('aria-disabled', 'true');
     expect(screen.getByText('Simulating the 2027 season for your league. This takes about 10 seconds.')).toBeInTheDocument();
     expect(screen.getByLabelText('League name')).toBeDisabled();
     expect(screen.getByRole('radio', { name: /Past season/ })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Simulating the season…' }));
     expect(api.callsTo(GAMES_PATH, 'POST')).toHaveLength(1);
 
     answer(json(actionResult(CREATED)));
     await vi.waitFor(() => expect(onCreated).toHaveBeenCalledTimes(1));
+  });
+
+  it('keeps focus on the busy button (inert to Enter) and says what is happening in a status region that was already there', async () => {
+    let answer: (reply: MockReply) => void = () => undefined;
+    const message = 'The 2027 season could not be built.';
+    const { api, user } = renderForm([
+      { path: SEASONS_PATH, reply: json(BOTH) },
+      createRoute(() => new Promise((resolve) => { answer = resolve; })),
+    ]);
+    await user.click(await screen.findByRole('radio', { name: /2027/ }));
+    const regions = screen.getAllByRole('status');
+    // Enter in a field: the field is disabled while the league is built, so focus moves to the button, not <body>.
+    await user.type(screen.getByLabelText('League name'), 'Sunday{Enter}');
+
+    const busy = await screen.findByRole('button', { name: 'Simulating the season…' });
+    expect(busy).toHaveFocus();
+    expect(busy).toBeEnabled();
+    expect(regions).toContain(screen.getByText(/^Simulating the 2027 season/).closest('[role="status"]'));
+    await user.keyboard('{Enter}');
+    expect(api.callsTo(GAMES_PATH, 'POST')).toHaveLength(1);
+
+    answer(json({ detail: message }, 422));
+    expect(await screen.findByRole('alert')).toHaveTextContent(message);
+    expect(screen.getByRole('button', { name: 'Create league and draft' })).toHaveFocus();
+  });
+
+  it('fills the jump-in summary into a status region mounted with the start choice', async () => {
+    const { user } = renderForm([{ path: SEASONS_PATH, reply: json(BOTH) }]);
+    await user.click(await screen.findByRole('radio', { name: /2026 · live/ }));
+    const regions = screen.getAllByRole('status');
+    await user.click(screen.getByRole('radio', { name: /Jump in now/ }));
+    expect(regions).toContain(screen.getByText(nowSummary(9, 17, 4)).closest('[role="status"]'));
+  });
+
+  it('offers no live season when there is none: a finished season is an ordinary past season, next to the future one', async () => {
+    renderForm([{ path: SEASONS_PATH, reply: json(seasons({
+      results: [readiness(2024), readiness(2025), readiness(2026)],
+      simulated: [simulatedSeason('future', { season: 2027 })],
+    })) }]);
+    const group = await screen.findByRole('group', { name: 'What to play' });
+
+    expect(within(group).getAllByRole('radio').map((radio) => radio.closest('label')?.querySelector('.radio-card__title')?.textContent))
+      .toEqual(['Past season', '2027 · simulated season']);
+    expect(screen.queryByRole('group', { name: 'Start' })).not.toBeInTheDocument();
+    expect(within(screen.getByLabelText('Season')).getAllByRole('option').map((option) => option.textContent))
+      .toEqual(['2024', '2025', '2026', 'Random season']);
+    expect(screen.getByLabelText('Season')).toHaveValue('2026');
+  });
+
+  it('shows a new live season next to a future season that is not ready, with its reason', async () => {
+    const reason = 'offseason_2028.json: no such file. Add the 2028 offseason file.';
+    const { api, user } = renderForm([
+      { path: SEASONS_PATH, reply: json(seasons({
+        results: [readiness(2026)],
+        simulated: [simulatedSeason('live', { season: 2027, through: 1 }),
+          simulatedSeason('future', { season: 2028, ready: false, reason })],
+      })) },
+      createRoute(),
+    ]);
+
+    const future = await screen.findByRole('radio', { name: /2028 · simulated season/ });
+    expect(future).toBeDisabled();
+    expect(future.closest('label')).toHaveTextContent(reason);
+    await user.click(screen.getByRole('radio', { name: /2027 · live/ }));
+    expect(screen.getByRole('radio', { name: /2027 · live/ }).closest('label')).toHaveTextContent('Real through week 1');
+    await user.click(screen.getByRole('button', { name: 'Create league and draft' }));
+    await vi.waitFor(() => expect(api.callsTo(GAMES_PATH, 'POST')).toHaveLength(1));
+    expect(api.callsTo(GAMES_PATH, 'POST')[0].body).toMatchObject({ season: 2027, start: 'full' });
   });
 
   it('shows the server’s refusal next to the button and lets the user change the rules', async () => {

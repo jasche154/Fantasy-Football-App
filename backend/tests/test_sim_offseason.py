@@ -55,3 +55,24 @@ def test_match_normalises_names_and_reports_the_rest():
     found, missing = so.match(moves, players)
     assert found == {"Odell Beckham Jr.": 1, "AJ Brown": 2}
     assert missing == ("Mike Williams", "Josh Allen", "Nobody Here")
+
+
+@pytest.mark.parametrize("raw, message", [
+    ([], "must be a JSON object"),
+    ("rookies", "must be a JSON object"),
+    ({"rookies": 5}, "'rookies' must be a list"),
+    ({"rookies": "Jeremiah Smith"}, "'rookies' must be a list"),
+    ({"moves": {"name": "x"}}, "'moves' must be a list"),
+    ({"rookies": [5]}, r"rookies\[0\]: each entry must be an object"),
+    ({"moves": [["Aaron Rodgers"]]}, r"moves\[0\]: each entry must be an object"),
+])
+def test_a_badly_shaped_file_is_a_value_error_naming_the_problem(raw, message):
+    with pytest.raises(ValueError, match=message):
+        so.parse(raw)
+
+
+def test_a_badly_shaped_file_on_disk_is_a_value_error(monkeypatch, tmp_path):
+    monkeypatch.setattr(so, "DATA_DIR", tmp_path)
+    so.path(2030).write_text('{"rookies": 5}', encoding="utf-8")
+    with pytest.raises(ValueError, match="'rookies' must be a list"):
+        so.load(2030)

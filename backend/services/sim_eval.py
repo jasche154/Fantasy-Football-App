@@ -10,9 +10,10 @@
 - full: season S built exactly the way a future season is (sim_setup._future_base): the belief at the end of
   S-1 (estimate, all of it, on the belief at the end of S-2 as its prior) through sim_next_year.next_year with
   S's real rookies (nflverse draft picks of year S, landing on the drafting team; needs the network) and S's
-  real veteran moves (`real_moves`), S's real schedule, the market's ADP leaning on S-1's track record; the
-  whole season is simulated and compared with the real one (sim_metrics.season with its leaderboard, weekly,
-  rookies, and how our ADP agrees with S's real ADP: ours priced in the real list's format, PPR).
+  real veteran moves (`real_moves`), S's real schedule, the market's ADP leaning on S-1's track record and
+  paying the rookie premium; the whole season is simulated and compared with the real one (sim_metrics.season
+  with its leaderboard, weekly, rookies, how our ADP agrees with S's real ADP, all of it and the rookies':
+  ours priced in the real list's format, PPR; and how the preseason experts agree with the ADP).
   mid reports the leaderboard of the simulated weeks too.
 - --set overrides a sim_params.json value for this run (section.key=value, JSON value); --save-tuned writes
   the overrides into the file's `tuned` section, which is how tuned constants get there.
@@ -75,8 +76,9 @@ def season_end(session, season: int) -> World | None:
     return sim_world.estimate(data, data.last_week + 1)
 
 
-def next_season(session, real: SeasonData, offseason: dict) -> tuple[SeasonData, World, set[int]]:
-    """(base, prior, rookie ids) for season `real.season` built like sim_setup._future_base from the season before it."""
+def next_belief(session, real: SeasonData, offseason: dict) -> tuple[World, dict, dict]:
+    """(belief, pool, {id: rookie}) going into season `real.season`, built like sim_setup._future_base from the
+    season before it with that season's real rookies and moves."""
     from services import sim_next_year, sim_next_year_fit as fit
 
     previous = replay_pool.load_season_data(session, real.season - 1, SCORING)
@@ -86,12 +88,25 @@ def next_season(session, real: SeasonData, offseason: dict) -> tuple[SeasonData,
     experience = fit.experience(session, real.season - 1, offseason["picks"], offseason["first"])
     belief, pool = sim_next_year.next_year(world, previous.players, experience, rookies, real_moves(world, real),
                                            sim_metrics.qb_starts(previous))
-    base = sim_next_year.season_base(real.season, belief, pool, real.schedule, SCORING, None, real.defense_prior)
-    # our ADP priced like the real list it is compared with (the stored lists are PPR, read for a half league too)
+    return belief, pool, rookies
+
+
+def market_inputs(session, real: SeasonData) -> tuple[str, dict[int, float]]:
+    """(scoring, track record) our ADP is priced on to compare with `real`'s list (the stored lists are PPR,
+    read for a half league too)."""
     listed = "ppr" if real.adp_format == TWO_QB else real.adp_format
-    record = sim_market.track_record(replay_pool.load_season_data(session, real.season - 1, listed))
+    return listed, sim_market.track_record(replay_pool.load_season_data(session, real.season - 1, listed))
+
+
+def next_season(session, real: SeasonData, offseason: dict) -> tuple[SeasonData, World, set[int]]:
+    """(base, prior, rookie ids) for season `real.season` built like sim_setup._future_base from the season before it."""
+    from services import sim_next_year
+
+    belief, pool, rookies = next_belief(session, real, offseason)
+    base = sim_next_year.season_base(real.season, belief, pool, real.schedule, SCORING, None, real.defense_prior)
+    listed, record = market_inputs(session, real)          # our ADP priced like the real list it is compared with
     priced = sim_next_year.with_market_adp(replace(base, scoring=listed, adp_format=real.adp_format), belief,
-                                           record=record)
+                                           record=record, premium=sim_next_year.rookie_premium(rookies))
     return replace(base, players=priced.players), belief, set(rookies) & set(base.players)
 
 
@@ -126,7 +141,8 @@ def _rest(data: SeasonData, weeks: range) -> dict[str, float]:
 def _whole(data: SeasonData, rookies: set[int], real: SeasonData) -> dict[str, float]:
     weeks = range(1, data.last_week + 1)
     return {**sim_metrics.season(data), **sim_metrics.rookies(data, rookies),
-            **sim_metrics.adp_agreement(data, real), **sim_metrics.weekly(data, weeks)}
+            **sim_metrics.adp_agreement(data, real, rookies), **sim_metrics.expert_agreement(data),
+            **sim_metrics.weekly(data, weeks)}
 
 
 def _full(session, season: int, seeds: list[int], offseason: dict) -> tuple[dict, dict]:

@@ -114,6 +114,23 @@ def test_any_broken_save_is_one_clean_error_with_the_exception_type():
             pass
 
 
+def test_garbage_bytes_and_deeply_nested_json_are_clean_errors():
+    with pytest.raises(replay_blob.UnreadableSeason, match=r"\(error\)"):          # zlib.error
+        replay_blob.loads(b"not a zlib stream at all")
+    deep = b'{"v":1,"players":' + b"[" * 200_000 + b"]" * 200_000 + b"}"
+    with pytest.raises(replay_blob.UnreadableSeason, match="RecursionError"):
+        replay_blob.loads(zlib.compress(deep))
+
+
+def test_a_save_that_unpacks_past_the_limit_is_refused_without_unpacking_it_all(monkeypatch):
+    blob = replay_blob.dumps(DATA)
+    monkeypatch.setattr(replay_blob, "MAX_UNPACKED", len(zlib.decompress(blob)) - 1)
+    with pytest.raises(replay_blob.UnreadableSeason, match="unpacks to more than"):
+        replay_blob.loads(blob)
+    monkeypatch.setattr(replay_blob, "MAX_UNPACKED", len(zlib.decompress(blob)))
+    assert_same(DATA, replay_blob.loads(blob))
+
+
 def test_a_plain_record_holding_a_list_comes_back_hashable_like_a_table_record():
     back = replay_blob._decode(ScoringRules, {"reception": [1, 2]})
 

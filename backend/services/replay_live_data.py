@@ -22,7 +22,8 @@ from services import replay_data
 
 
 def load_live_adp(session: Session, season: int, client: HistoryClient, force: bool = False) -> dict:
-    """replay_data.load_adp, or MFL's ADP as the PPR list when FFC has none. HistoryError when MFL fails too.
+    """replay_data.load_adp, or MFL's ADP as the PPR list when FFC has none. HistoryError when MFL fails too, or
+    matches no player (the stored list is kept: it never shrinks to nothing).
     `force` reaches this path through load_adp: it asks FFC for PPR again only when forced or when no complete
     PPR list (one with MFL rows) is stored, so a stored MFL list is kept until a forced run."""
     try:
@@ -40,9 +41,10 @@ def load_live_adp(session: Session, season: int, client: HistoryClient, force: b
             seen.add(player_id)
             rows.append({"season": season, "player_id": player_id, "format": "ppr", "adp": entry.adp,
                          "stdev": None, "source": adp_history.MFL, "team": entry.team})
+    if not rows:                                        # never shrink a stored list to nothing (prepare rolls back)
+        raise adp_history.HistoryError(f"MFL's {season} ADP matched none of its {len(mfl)} entries to a player.")
     session.execute(delete(ReplayAdp).where(ReplayAdp.season == season, ReplayAdp.format == "ppr"))
-    if rows:
-        session.execute(insert(ReplayAdp), rows)
+    session.execute(insert(ReplayAdp), rows)
     session.commit()
     return {"rows": len(rows), "source": adp_history.MFL, "ffc": "no data", "mfl_matched": f"{len(rows)}/{len(mfl)}",
             "players_created": created}

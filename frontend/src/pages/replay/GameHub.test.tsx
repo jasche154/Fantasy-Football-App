@@ -10,6 +10,7 @@ import {
 } from './fixtures';
 import { AppProviders } from '../../App';
 import { GameHub } from './GameHub';
+import { simulatedLabel } from './Scorebug';
 import type { ReplayView, ReplayViewProps } from './shared';
 
 // Every render the screens see, in order (cleared per test).
@@ -316,6 +317,11 @@ describe('GameHub player drawer', () => {
 });
 
 describe('GameHub simulated badge', () => {
+  it('labels a live league without a first simulated week without the week', () => {
+    expect(simulatedLabel({ kind: 'live', season: 2026, sim_from: null })).toBe('2026 · live, simulated');
+    expect(simulatedLabel({ kind: 'replay', season: 2023, sim_from: null })).toBeNull();
+  });
+
   it('marks a live league with the week its simulation starts, a future league as simulated, and a replay not at all', async () => {
     renderHub(summary({ season: 2026, kind: 'live', sim_from: 10, start_week: 10, week: 10 }));
     expect(await screen.findByText('2026 · simulated from week 10')).toHaveClass('game-sim-badge');
