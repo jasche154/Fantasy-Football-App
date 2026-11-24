@@ -121,7 +121,15 @@ def test_a_cancelled_game_in_the_last_week_holds_the_season_until_a_postseason_g
     assert replay_live.current_live(db) == (LIVE, LAST - 1)
     assert replay_live.progress(db, LIVE) == (LAST - 1, LAST)       # the postseason row adds no week
 
-    wild_card.home_score, wild_card.away_score = 27, 24
+    wild_card.home_score = 27                                       # half a score is no score
+    db.commit()
+    assert replay_live.current_live(db) == (LIVE, LAST - 1)
+
+    wild_card.away_score, wild_card.gameday = 24, "not a date"      # a date that can't be read frees nothing
+    db.commit()
+    assert replay_live.current_live(db) == (LIVE, LAST - 1)
+
+    wild_card.gameday = f"{_day_after(LAST, 6).isoformat()}T20:20:00"       # a time part is fine
     db.commit()
     assert replay_live.current_live(db) is None and replay_live.complete_season(db) == LIVE
     assert LIVE in replay_live.replay_seasons(db)
