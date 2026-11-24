@@ -27,6 +27,7 @@
 Read-only on the database; the report is logged (and written as JSON with --out).
 """
 import argparse
+import atexit
 import json
 import logging
 import math
@@ -190,7 +191,9 @@ def _start(overrides: dict[str, dict], offseason: dict) -> None:
     for section, values in overrides.items():
         for key, value in values.items():
             sim_world.override(section, key, value)
-    _worker.update(offseason=offseason, session=SessionLocal())
+    session = SessionLocal()
+    atexit.register(session.close)                  # its connection goes back when the worker exits
+    _worker.update(offseason=offseason, session=session)
 
 
 _worker: dict = {}          # a worker process's offseason inputs and session (_start)

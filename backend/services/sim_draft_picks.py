@@ -5,11 +5,15 @@ the network is needed only the first time, with `refresh`, or when a wanted seas
 nflreadpy is imported only when a download is needed.
 """
 import json
+import logging
+import os
 from collections.abc import Iterable
 from datetime import date
 from pathlib import Path
 
 from integrations.weekly_sources import TEAM_ALIASES
+
+log = logging.getLogger(__name__)
 
 PICKS_CACHE = Path(__file__).resolve().parent.parent / "data" / "cache" / "draft_picks.json"
 PICK_FIELDS = ("season", "pick", "team", "gsis_id", "position", "pfr_player_name", "college")
@@ -27,7 +31,9 @@ def draft_picks(seasons: Iterable[int], refresh: bool = False) -> list[dict]:
     if not wanted <= _settled(cached):
         rows = _download(sorted({r["season"] for r in rows} | wanted))
         PICKS_CACHE.parent.mkdir(parents=True, exist_ok=True)
-        PICKS_CACHE.write_text(json.dumps({"downloaded": _today().isoformat(), "rows": rows}), encoding="utf-8")
+        partial = PICKS_CACHE.with_suffix(".tmp")            # written whole, then swapped in: never half a file
+        partial.write_text(json.dumps({"downloaded": _today().isoformat(), "rows": rows}), encoding="utf-8")
+        os.replace(partial, PICKS_CACHE)
     return [{"season": int(r["season"]), "pick": int(r["pick"]), "team": TEAM_ALIASES.get(r["team"], r["team"]),
              "gsis_id": r["gsis_id"], "position": r["position"], "name": r["pfr_player_name"],
              "college": r.get("college") or "-"} for r in rows if r["season"] in wanted and r.get("gsis_id")]
@@ -56,6 +62,12 @@ def _cached_picks() -> dict:
     try:
         cached = json.loads(PICKS_CACHE.read_text(encoding="utf-8"))
         date.fromisoformat(cached["downloaded"])
-        return cached if isinstance(cached["rows"], list) else {}
+        rows = cached["rows"]
+        if isinstance(rows, list) and all(isinstance(r, dict) and isinstance(r.get("season"), int) for r in rows):
+            return cached
+    except FileNotFoundError:
+        return {}                               # none yet
     except (OSError, ValueError, KeyError, TypeError):
-        return {}                               # none yet, or unreadable: download again
+        pass
+    log.info("%s is unreadable or the wrong shape: downloading the draft picks again", PICKS_CACHE.name)
+    return {}

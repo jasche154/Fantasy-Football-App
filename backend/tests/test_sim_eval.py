@@ -117,6 +117,21 @@ def fake_case(case: tuple[str, int], seeds: list[int], session=None, offseason=N
     return {**sim_eval._rest(data, weeks), "season": season / 10}, {**sim_eval._mean(sims), **seen}
 
 
+def kind_case(case: tuple[str, int], seeds: list[int], session=None, offseason=None) -> tuple[dict, dict]:
+    """A case that only says which mode it ran as."""
+    is_mid = {"is_mid": float(case[0] == "mid")}
+    return is_mid, is_mid
+
+
+@pytest.mark.parametrize("workers", [1, 2])
+def test_both_modes_report_each_mode_in_its_own_section(monkeypatch, workers):
+    monkeypatch.setattr(sim_eval, "_offseason", lambda *_: {"picks": [], "first": {}})
+    report = sim_eval.run([1, 2], [1], "both", workers, {}, case=kind_case)
+
+    assert report["mid"]["real"]["is_mid"] == report["mid"]["sim"]["is_mid"] == 1.0
+    assert report["full"]["real"]["is_mid"] == report["full"]["sim"]["is_mid"] == 0.0
+
+
 def test_the_parallel_report_equals_the_serial_one_and_workers_get_the_overrides(monkeypatch):
     from services import sim_constants
 
@@ -165,3 +180,7 @@ def test_draft_picks_are_cached_and_downloaded_again_only_when_needed(tmp_path, 
     fit.PICKS_CACHE.write_text("null")                      # unreadable: download again
     fit.draft_picks([2021])
     assert len(calls) == 6
+    for wrong in ('{"downloaded": "2023-09-01", "rows": [{"pick": 1}]}', '{}', '[{"season'):   # wrong shape or cut off
+        fit.PICKS_CACHE.write_text(wrong)
+        fit.draft_picks([2021])
+    assert len(calls) == 9 and not fit.PICKS_CACHE.with_suffix(".tmp").exists()
