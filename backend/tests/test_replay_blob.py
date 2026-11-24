@@ -77,8 +77,17 @@ def test_an_old_save_reads_with_defaults_and_a_newer_one_is_refused():
     assert "version 2" in _refusal({**payload, "v": replay_blob.VERSION + 1})
     for version in (True, 0, -1, 1.0, "1", None):
         assert "version" in _refusal({**payload, "v": version}), version
+    tampered = _refusal({**payload, "v": "<b>" * 2000})          # the route returns the text: only a type name
+    assert "version str" in tampered and "<b>" not in tampered and len(tampered) < 200
     with pytest.raises(replay_blob.UnreadableSeason, match=r"can't be read \(error\)"):     # zlib.error
         replay_blob.loads(b"not a blob")
+
+
+def test_why_a_save_is_unreadable_is_logged_by_type_without_its_contents(caplog):
+    with caplog.at_level("WARNING", logger="services.replay_blob"), pytest.raises(replay_blob.UnreadableSeason):
+        replay_blob.loads(b"secret-looking bytes")
+
+    assert [record.getMessage() for record in caplog.records] == ["Unreadable season blob (error)"]
 
 
 def _refusal(payload: dict) -> str:

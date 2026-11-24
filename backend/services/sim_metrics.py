@@ -78,6 +78,22 @@ def _qb_pairs(data: SeasonData, weeks: set[int], teams: dict) -> dict[str, list[
 def weekly(data: SeasonData, weeks: Iterable[int]) -> dict[str, float]:
     weeks = set(weeks)
     tier_of, teams = tiers(data), _teams(data)
+    out = {**_scores(data, weeks, tier_of), **_projection_fit(data, weeks)}
+    for position, pairs in _qb_pairs(data, weeks, teams).items():
+        out[f"QB-{position} corr"] = float(np.corrcoef(np.array(pairs).T)[0, 1])
+    sitting: dict[str, int] = defaultdict(int)
+    for pid in tier_of:
+        for week in weeks:
+            team = data.team_at(pid, week)
+            if team and data.schedule.opponent(team, week) and (pid, week) not in data.actual:
+                sitting[data.players[pid].position] += 1
+    for position in SKILL:
+        out[f"sitting/wk {position}"] = sitting[position] / max(1, len(weeks))
+    return {**out, **_team_scores(data, weeks, teams)}
+
+
+def _scores(data: SeasonData, weeks: set[int], tier_of: dict) -> dict[str, float]:
+    """Weekly points by tier (q10/q50/q90), the share of 25+ and 30+ games, and the count of big games."""
     out: dict[str, float] = {}
     by_tier: dict[str, list[float]] = defaultdict(list)
     for (pid, week), points in data.actual.items():
@@ -92,6 +108,12 @@ def weekly(data: SeasonData, weeks: Iterable[int]) -> dict[str, float]:
     skill = [points for (pid, week), points in data.actual.items() if week in weeks and data.players[pid].position in SKILL]
     for line in BIG_GAMES:
         out[f"{line}+ games"] = float(sum(1 for p in skill if p >= line))
+    return out
+
+
+def _projection_fit(data: SeasonData, weeks: set[int]) -> dict[str, float]:
+    """Projection RMSE, bias and rank correlation per skill position and overall."""
+    out: dict[str, float] = {}
     for position in (*SKILL, "all"):
         pairs = [(data.projected[k], v) for k, v in data.actual.items() if k[1] in weeks
                  and data.projected.get(k, 0) >= PROJECTED_MIN and data.players[k[0]].position in SKILL
@@ -101,16 +123,12 @@ def weekly(data: SeasonData, weeks: Iterable[int]) -> dict[str, float]:
             out[f"proj RMSE {position}"] = float(np.sqrt(np.mean((proj - act) ** 2)))
             out[f"actual - proj {position}"] = float(np.mean(act - proj))
             out[f"proj rank r {position}"] = spearman(proj, act)
-    for position, pairs in _qb_pairs(data, weeks, teams).items():
-        out[f"QB-{position} corr"] = float(np.corrcoef(np.array(pairs).T)[0, 1])
-    sitting: dict[str, int] = defaultdict(int)
-    for pid in tier_of:
-        for week in weeks:
-            team = data.team_at(pid, week)
-            if team and data.schedule.opponent(team, week) and (pid, week) not in data.actual:
-                sitting[data.players[pid].position] += 1
-    for position in SKILL:
-        out[f"sitting/wk {position}"] = sitting[position] / max(1, len(weeks))
+    return out
+
+
+def _team_scores(data: SeasonData, weeks: set[int], teams: dict) -> dict[str, float]:
+    """Team skill points a game (mean, sd, sd of season means) and K/DST points (mean, sd)."""
+    out: dict[str, float] = {}
     team_points: dict[tuple[str, int], float] = defaultdict(float)
     special: dict[str, list[float]] = defaultdict(list)
     for (pid, week), points in data.actual.items():

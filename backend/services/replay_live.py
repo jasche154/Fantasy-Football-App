@@ -7,17 +7,24 @@ The year, as the database sees it (S = the newest season whose week 1 is final, 
   again for its last weeks; S + 1 is the future season. Its schedule arriving, or stats of week 1 games in
   progress, change nothing: a season with no final week is not started.
 - S + 1's week 1 final: S + 1 is live, S + 2 the future season.
+A season later than this calendar year is ignored (a bad feed's season 2999 can't have a final week yet).
 
-A week is final when its player and team stats are loaded and every game has a score, except a game still
-without one STALE_DAYS after its date: it was not played (cancelled, like BUF@CIN in 2022), so it never holds
-its week, or the season, back. `today` is a function so tests can pin the calendar.
+A week is final when player stats are loaded for it and every game has a score and team stats for both teams,
+except a game still without a score that the stats loader has seen STALE_DAYS after its date (a DataLoad run
+covering the season finished that late): it was not played (cancelled, like BUF@CIN in 2022), so it never holds
+its week, or the season, back. An unscored game only stops holding its week back once the loader has run again
+well after it: data that simply hasn't arrived (the app idle since before the game) never reads as a cancelled
+game. `today` is a function so tests can pin the calendar.
+
+`year(session)` reads all of it once (`Year`), for a request that needs several of the answers.
 """
+from dataclasses import dataclass
 from datetime import date, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from database.models import NflGame, PlayerStatsWeekly, TeamGameStats
+from database.models import DataLoad, NflGame, PlayerStatsWeekly, TeamGameStats
 from services.projections import REGULAR_SEASON
 
 FIRST_SEASON = 2018                         # ESPN and Sleeper have no pre-game projections before it
@@ -29,23 +36,39 @@ def today() -> date:
     return date.today()
 
 
-def _loaded_weeks(session: Session, model, season: int, *where) -> set[int]:
-    return set(session.scalars(select(model.week).distinct().where(model.season == season, *where)))
+def _last_load(session: Session, season: int) -> date | None:
+    """When the stats loader last finished a run covering `season` (DataLoad.seasons is "2025,2026"); None if
+    it never has."""
+    stamp = session.scalar(select(func.max(DataLoad.finished_at)).where(
+        ("," + DataLoad.seasons + ",").contains(f",{season},")))
+    return stamp.date() if stamp else None
+
+
+def _holds_back(game, gone: str, teams: set[tuple[int, str]]) -> bool:
+    """Whether a game keeps its week from being final: scored without both teams' stats, or unscored and not yet
+    seen stale by the loader (`gone`: the last date such a game may have; "" when the loader never ran)."""
+    week, home, away, home_score, away_score, day = game
+    if home_score is None or away_score is None:
+        return not (day and day[:10] < gone)
+    return not {(week, home), (week, away)} <= teams
 
 
 def progress(session: Session, season: int) -> tuple[int, int]:
     """(through, last week) of a season: the last week up to which every week is final (see the module
     docstring), and its last regular-season week (0, 0 without a schedule)."""
-    games = session.execute(select(NflGame.week, NflGame.home_score, NflGame.away_score, NflGame.gameday).where(
+    games = session.execute(select(NflGame.week, NflGame.home_team, NflGame.away_team, NflGame.home_score,
+                                   NflGame.away_score, NflGame.gameday).where(
         NflGame.season == season, NflGame.game_type == REGULAR_SEASON)).all()
     if not games:
         return 0, 0
-    gone = (today() - timedelta(days=STALE_DAYS)).isoformat()
+    seen = _last_load(session, season)
+    gone = (min(today(), seen) - timedelta(days=STALE_DAYS)).isoformat() if seen else ""
+    teams = {(week, team) for week, team in session.execute(
+        select(TeamGameStats.week, TeamGameStats.team).where(TeamGameStats.season == season))}
+    # every regular-season week is below the postseason's, so no season_type filter (the index covers this)
+    stats = set(session.scalars(select(PlayerStatsWeekly.week).distinct().where(PlayerStatsWeekly.season == season)))
+    unfinished = {game.week for game in games if _holds_back(game, gone, teams)}
     last_week = max(game.week for game in games)
-    unfinished = {week for week, home, away, day in games
-                  if (home is None or away is None) and not (day and day[:10] < gone)}
-    stats = (_loaded_weeks(session, PlayerStatsWeekly, season, PlayerStatsWeekly.season_type == REGULAR_SEASON)
-             & _loaded_weeks(session, TeamGameStats, season))
     through = 0
     while through < last_week and through + 1 not in unfinished and through + 1 in stats:
         through += 1
@@ -53,9 +76,10 @@ def progress(session: Session, season: int) -> tuple[int, int]:
 
 
 def newest_started(session: Session) -> tuple[int, int, int] | None:
-    """(season, through, last week) of the newest season with week 1 final; None when there is none."""
-    seasons = session.scalars(select(PlayerStatsWeekly.season).distinct().where(
-        PlayerStatsWeekly.season_type == REGULAR_SEASON).order_by(PlayerStatsWeekly.season.desc()))
+    """(season, through, last week) of the newest season with week 1 final, no later than this year; None when
+    there is none. Walks down the seasons with a schedule (small tables), skipping any gap."""
+    seasons = session.scalars(select(NflGame.season).distinct().where(NflGame.season <= today().year)
+                              .order_by(NflGame.season.desc()))
     for season in seasons:
         through, last_week = progress(session, season)
         if through:
@@ -63,27 +87,56 @@ def newest_started(session: Session) -> tuple[int, int, int] | None:
     return None
 
 
+@dataclass(frozen=True)
+class Year:
+    """Where the seasons stand, from one `newest_started` read."""
+    newest: tuple[int, int, int] | None     # (season, through, last week) of the newest started season
+
+    @property
+    def live(self) -> tuple[int, int] | None:
+        """(season, through) for the season in progress; None when no season is (the newest one is complete,
+        or the next one has not finished week 1)."""
+        found = self.newest
+        return (found[0], found[1]) if found and found[1] < found[2] else None
+
+    @property
+    def complete(self) -> int:
+        """The newest complete season: the newest started one once every week is final, else the one before it
+        (never before SUPPORTED_SEASONS' last, so an empty database still lists them)."""
+        found = self.newest
+        newest = found[0] - (found[1] < found[2]) if found else 0
+        return max(newest, SUPPORTED_SEASONS[-1])
+
+    @property
+    def seasons(self) -> range:
+        """The complete seasons a replay can be played on: FIRST_SEASON through the newest complete one."""
+        return range(FIRST_SEASON, self.complete + 1)
+
+    @property
+    def future(self) -> int:
+        """The season after the newest started one (never a complete past season)."""
+        return max(self.newest[0] if self.newest else 0, self.complete) + 1
+
+
+def year(session: Session) -> Year:
+    return Year(newest_started(session))
+
+
 def current_live(session: Session) -> tuple[int, int] | None:
-    """(season, through) for the season in progress; None when no season is (the newest one is complete, or the
-    next one has not finished week 1)."""
-    found = newest_started(session)
-    return (found[0], found[1]) if found and found[1] < found[2] else None
+    """Year.live, read now."""
+    return year(session).live
 
 
 def complete_season(session: Session) -> int:
-    """The newest complete season: the newest started one once every week is final, else the one before it
-    (never before SUPPORTED_SEASONS' last, so an empty database still lists them)."""
-    found = newest_started(session)
-    newest = found[0] - (found[1] < found[2]) if found else 0
-    return max(newest, SUPPORTED_SEASONS[-1])
+    """Year.complete, read now."""
+    return year(session).complete
 
 
 def replay_seasons(session: Session) -> range:
-    """The complete seasons a replay can be played on: FIRST_SEASON through the newest complete one."""
-    return range(FIRST_SEASON, complete_season(session) + 1)
+    """Year.seasons, read now."""
+    return year(session).seasons
 
 
 def future_season(session: Session) -> int:
-    """The season after the newest started one (never a complete past season)."""
-    found = newest_started(session)
-    return max(found[0] if found else 0, complete_season(session)) + 1
+    """Year.future, read now."""
+    return year(session).future

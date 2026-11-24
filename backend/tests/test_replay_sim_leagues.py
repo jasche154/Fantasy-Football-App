@@ -199,7 +199,7 @@ def test_a_league_that_starts_now_drafts_on_todays_market(app):
 def test_what_a_simulated_league_cannot_be(client, monkeypatch):
     assert refused(client, "/games", {"season": LIVE + 2})[0] == 422
     assert refused(client, "/games", {"season": 2021, "start": "now"})[1].startswith("Only the season in progress")
-    monkeypatch.setattr(replay_live, "current_live", lambda session: (LIVE, 13))
+    monkeypatch.setattr(replay_live, "newest_started", lambda session: (LIVE, 13, FULL.last_week))
     assert refused(client, "/games", {"season": LIVE, "start": "now"}) == (422, (
         "Only 2 regular-season weeks are left after week 13, and a league that starts now needs 3: pick a later "
         "championship week or fewer playoff teams."))
@@ -271,6 +271,39 @@ def _correct_stats(session: Session, star: int, yards: int) -> None:
     session.execute(update(PlayerStatsWeekly).where(PlayerStatsWeekly.player_id == star, PlayerStatsWeekly.week == 1)
                     .values(rushing_yards=PlayerStatsWeekly.rushing_yards + yards))
     populate_stats.record_load(session, [LIVE])
+
+
+@pytest.mark.parametrize("failing", ["store", "commit"])
+def test_a_league_is_never_saved_without_its_season(tmp_path, monkeypatch, failing):
+    from sqlalchemy import func, select
+    from sqlalchemy.exc import OperationalError
+
+    from database.models import ReplayLeague
+
+    def fail(*args, **kwargs):
+        raise OperationalError("INSERT", {}, Exception("disk I/O error"))
+
+    for client, engine in _app(f"sqlite:///{(tmp_path / 'fail.db').as_posix()}"):
+        replay_blob.clear_cache()
+        quiet = TestClient(client.app, base_url="http://localhost", raise_server_exceptions=False)
+        with monkeypatch.context() as patch:
+            patch.setattr(*((replay_blob, "store") if failing == "store" else (Session, "commit")), fail)
+            response = quiet.post("/api/replay/games", json={"season": LIVE, "seed": 4})
+        with Session(engine) as session:
+            rows = [session.scalar(select(func.count()).select_from(model)) for model in (ReplayLeague, ReplaySeasonData)]
+
+    assert response.status_code == 500 and rows == [0, 0] and not replay_blob._cache
+
+
+def test_a_season_build_that_breaks_is_a_logged_500_with_the_type_only(client, monkeypatch, caplog):
+    def broken(*args, **kwargs):
+        raise ValueError("operands could not be broadcast together with shapes (3,) (4,)")
+
+    monkeypatch.setattr(sim_setup, "build", broken)
+    status, detail = refused(client, "/games", {"season": LIVE, "seed": 4})
+
+    assert status == 500 and "ValueError" in detail and "broadcast" not in detail
+    assert any(record.exc_info and record.levelname == "ERROR" for record in caplog.records)
 
 
 def test_new_real_data_reaches_new_leagues_only(tmp_path_factory):

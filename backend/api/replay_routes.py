@@ -5,6 +5,7 @@ Every change to a game runs load -> engine -> save under the replay lock (`turn`
 overlapping requests can never lose a write or play a week twice. The lock is never evicted (unlike
 build_locks.key_lock, whose bounded dict can hand two requests different locks for one key).
 """
+import logging
 import secrets
 import threading
 from collections.abc import Callable, Iterator
@@ -27,6 +28,7 @@ from services.replay_pool import SeasonData
 from services.replay_state import Settings, State
 from services.valuation import NoDataError
 
+log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/replay")
 
 MAX_SEED = 2 ** 31 - 1
@@ -131,8 +133,9 @@ def turn(session: Session, game_id: int, week: int | None = None, overall: int |
 @router.get("/seasons")
 def seasons(session: Session = Depends(get_session)) -> dict:
     """Which past seasons can be played, the simulated ones (live, future), and the season import that is running."""
-    return {"results": [replay_pool.readiness(session, season) for season in replay_live.replay_seasons(session)],
-            "simulated": sim_setup.simulated(session), "prepare": replay_data.status(session)}
+    year = replay_live.year(session)                    # read once: every answer below needs it
+    return {"results": [replay_pool.readiness(session, season) for season in year.seasons],
+            "simulated": sim_setup.simulated(session, year), "prepare": replay_data.status(session)}
 
 
 @router.post("/seasons/{season}/prepare")
@@ -232,7 +235,7 @@ def create_game(body: CreateBody, session: Session = Depends(get_session)) -> di
                             scoring_rules=rules, adp_format=replay_adp_format.wanted(scoring, rules, starters),
                             **_window(body, kind, through))
         simulated = settings.sim_from is not None
-        blob, data = (sim_setup.build(session, settings, seed) if simulated else
+        blob, data = (_build(session, settings, seed) if simulated else
                       (None, replay_pool.load_season_data(session, season, scoring, rules, settings.adp_format)))
         state = rg.create_game(settings, data, seed)
         name = (body.name or "").strip() or f"{season} {'Sim' if simulated else 'Replay'}"
@@ -243,6 +246,18 @@ def create_game(body: CreateBody, session: Session = Depends(get_session)) -> di
             replay_blob.remember(session, row.id, data)
         game = _game(row, settings, state, data)
         return {"game": views.summary(game), "events": views.new_events(game, None)}
+
+
+def _build(session: Session, settings: Settings, seed: int) -> tuple[bytes, SeasonData]:
+    """sim_setup.build. NoDataError (the season isn't ready, or future_problem's reason) stays a 503; anything else
+    is a fault in the simulation, never bad input: logged, and a 500 naming only the exception's type."""
+    try:
+        return sim_setup.build(session, settings, seed)
+    except NoDataError:
+        raise
+    except Exception as exc:
+        log.exception("Building the %s season failed", settings.season)
+        raise HTTPException(500, f"The season could not be built ({type(exc).__name__}).") from exc
 
 
 @router.get("/games/{game_id}")

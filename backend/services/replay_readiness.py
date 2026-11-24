@@ -1,7 +1,8 @@
 """Replay League: what the database holds for a season (re-exported by services/replay_pool, which builds on it).
 
-`readiness` says whether a game can be played on a season; `data_version` changes whenever any row a season is
-built from is written, so replay_pool's cache can never hand a new league data older than the database's.
+`readiness` says whether a game can be played on a season; `data_version` changes whenever a row a season is
+built from (including season - 1's rows replay_defense.load_prior reads) is written, so replay_pool's cache can
+never hand a new league data older than the database's.
 """
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
@@ -16,20 +17,27 @@ from services.projections import REGULAR_SEASON
 
 MIN_ADP_PLAYERS = 180                       # a 12-team, 15-round draft
 MIN_KICKERS = MIN_DEFENSES = 14             # one each for the largest league (ADP or a week-1 projection)
-SEASON_TABLES = (PlayerStatsWeekly, NflGame, KickerGame, TeamGameStats, PlayerSnapCountsWeekly, ReplayAdp,
-                 ReplayProjection, ReplayInjury, ReplayExpertRank)      # every per-season table replay_pool reads
+# every per-season table replay_pool reads; all but the snaps have an index that starts with the season
+SEASON_TABLES = (PlayerStatsWeekly, NflGame, KickerGame, TeamGameStats, ReplayAdp, ReplayProjection, ReplayInjury,
+                 ReplayExpertRank)
+PRIOR_TABLES = (PlayerStatsWeekly, NflGame)     # season - 1's, read by replay_defense.load_prior
 
 
 def data_version(session: Session, season: int) -> tuple:
-    """Changes whenever a season's data is written, by any loader: (count, max id) of each table it is built from
-    and of players, plus the stats loader's stamp (DataLoad: catches a reload that reuses the same ids), as in
-    valuation._data_version. One query."""
-    parts = [select(func.max(DataLoad.id)).scalar_subquery(), select(func.count(Player.id)).scalar_subquery(),
-             select(func.max(Player.id)).scalar_subquery()]
+    """Changes whenever a row replay_pool builds `season` from is written, by any loader, in a few ms (one query,
+    no scan of a big table): the stats loader's stamp (DataLoad, written after every run of populate_stats and of
+    replay_data's results and snaps steps for 2021 on: catches an in-place correction and a reload that reuses
+    the same ids; a prepare of an older season clears replay_pool's cache when it ends), the max id of every table
+    it reads (any insert anywhere), and the row count of the season in each per-season table and of season - 1 in
+    the two replay_defense.load_prior reads (a delete; indexed by season, or small: kicker_games). Snaps, whose
+    only index starts with the player, get no count: only those loaders write them. Players: count and max id."""
+    count = func.count()
+    parts = [select(func.max(DataLoad.id)), select(count).select_from(Player), select(func.max(Player.id)),
+             select(func.max(PlayerSnapCountsWeekly.id))]
     for model in SEASON_TABLES:
-        parts += [select(func.count(model.id)).where(model.season == season).scalar_subquery(),
-                  select(func.max(model.id)).where(model.season == season).scalar_subquery()]
-    return tuple(session.execute(select(*parts)).one())
+        parts += [select(count).select_from(model).where(model.season == season), select(func.max(model.id))]
+    parts += [select(count).select_from(model).where(model.season == season - 1) for model in PRIOR_TABLES]
+    return tuple(session.execute(select(*(part.scalar_subquery() for part in parts))).one())
 
 
 def _count(session: Session, column, *where) -> int:
@@ -56,8 +64,8 @@ def readiness(session: Session, season: int, through: int | None = None) -> dict
     needs projections for weeks 1..through only."""
     teams = _schedule_teams(session, season)
     defenses = set(session.scalars(select(Player.gsis_id).where(Player.position == "DST")))
-    has_stats = _count(session, PlayerStatsWeekly.id, PlayerStatsWeekly.season == season,
-                       PlayerStatsWeekly.season_type == REGULAR_SEASON) > 0
+    has_stats = session.scalar(select(PlayerStatsWeekly.id).where(          # any row: no count of the season
+        PlayerStatsWeekly.season == season, PlayerStatsWeekly.season_type == REGULAR_SEASON).limit(1)) is not None
     has_kdst = (_count(session, KickerGame.id, KickerGame.season == season) > 0
                 and _count(session, TeamGameStats.id, TeamGameStats.season == season) > 0
                 and all(f"{DST_PREFIX}{team}" in defenses for team in teams))     # every team's D/ST row exists

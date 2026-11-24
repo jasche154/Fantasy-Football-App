@@ -2,17 +2,17 @@
 then the next season's schedule arriving, then its week 1 going final (services/replay_live, sim_setup, replay_data,
 replay_pool, GET /seasons and POST /games)."""
 from collections.abc import Iterator
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 
 import pytest
-from sqlalchemy import create_engine, insert, update
+from sqlalchemy import create_engine, delete, insert, update
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from database.models import Base, NflGame, PlayerStatsWeekly, ReplayProjection, TeamGameStats
+from database.models import Base, DataLoad, NflGame, PlayerStatsWeekly, ReplayProjection, TeamGameStats
 from services import replay_data, replay_live, replay_pool, sim_setup
 from tests import replay_fakes as fakes
-from tests.test_replay_routes import get, post
+from tests.test_replay_routes import get, post, refused
 from tests.test_replay_sim_leagues import FULL, LIVE, THROUGH, _app, play_through
 
 NEXT = LIVE + 1
@@ -40,25 +40,36 @@ def db(monkeypatch) -> Iterator[Session]:
     replay_pool.clear_cache()
 
 
-def _next_season(session: Session, week_one_final: bool) -> None:
-    """NEXT's schedule (FULL's, a year on); week 1's games final with stats loaded, or none played."""
-    following = fakes.fake_season(NEXT)
+def _next_season(session: Session, week_one_final: bool, season: int = NEXT) -> None:
+    """`season`'s schedule (FULL's, moved to that year); week 1's games final with stats loaded, or none played."""
+    following = fakes.fake_season(season)
     games = fakes._game_rows(following)
     session.execute(insert(NflGame), [{**g, **({"home_score": 21, "away_score": 14}
                                                if week_one_final and g["week"] == 1 else {})} for g in games])
     if week_one_final:
         pid = next(iter(FULL.players))
-        session.execute(insert(PlayerStatsWeekly), [{"player_id": pid, "season": NEXT, "week": 1, "season_type": "REG"}])
-        session.execute(insert(TeamGameStats), [fakes._defense_row(following, 1, 3, "BUF", "MIA")])
+        session.execute(insert(PlayerStatsWeekly), [{"player_id": pid, "season": season, "week": 1, "season_type": "REG"}])
+        session.execute(insert(TeamGameStats), [fakes._defense_row(following, 1, 3, team, None) for g in games
+                                                if g["week"] == 1 for team in (g["home_team"], g["away_team"])])
+    session.commit()
+
+
+def _unscored(session: Session, week: int, home_team: str) -> None:
+    session.execute(update(NflGame).where(NflGame.season == LIVE, NflGame.week == week, NflGame.home_team == home_team)
+                    .values(home_score=None, away_score=None))
+
+
+def _loaded(session: Session, day: date, seasons: str = f"{LIVE - 1},{LIVE}") -> None:
+    """The stats loader finished a run over `seasons` on `day`."""
+    session.add(DataLoad(seasons=seasons, finished_at=datetime.combine(day, time(12))))
     session.commit()
 
 
 # ---------------- a cancelled game never freezes the season ----------------
 
 def test_a_game_without_a_score_holds_its_week_back_only_while_it_can_still_be_played(db, monkeypatch):
-    cancelled = next(g for g in FULL.schedule.games if g.week == 3)
-    db.execute(update(NflGame).where(NflGame.season == LIVE, NflGame.week == 3,
-                                     NflGame.home_team == cancelled.home_team).values(home_score=None, away_score=None))
+    _unscored(db, 3, next(g for g in FULL.schedule.games if g.week == 3).home_team)
+    _loaded(db, _day_after(THROUGH))
 
     assert replay_live.current_live(db) == (LIVE, THROUGH)          # weeks ago: it was never played
     _on(monkeypatch, _day_after(3))                                 # the Monday after: it may still be
@@ -67,14 +78,44 @@ def test_a_game_without_a_score_holds_its_week_back_only_while_it_can_still_be_p
 
 def test_a_cancelled_game_in_the_last_week_does_not_keep_the_season_live(db, monkeypatch):
     play_through(db, LAST)
-    db.execute(update(NflGame).where(NflGame.season == LIVE, NflGame.week == LAST,
-                                     NflGame.home_team == FULL.schedule.games[-1].home_team)
-               .values(home_score=None, away_score=None))
+    _unscored(db, LAST, FULL.schedule.games[-1].home_team)
+    _loaded(db, _day_after(LAST, replay_live.STALE_DAYS + 1))
     _on(monkeypatch, _day_after(LAST))
     assert replay_live.current_live(db) == (LIVE, LAST - 1)
 
     _on(monkeypatch, _day_after(LAST, replay_live.STALE_DAYS + 1))
     assert replay_live.current_live(db) is None and replay_live.complete_season(db) == LIVE
+
+
+def test_an_unscored_game_counts_as_cancelled_only_once_the_loader_has_run_well_after_it(db, monkeypatch):
+    """Week THROUGH's stats loaded before one game was in, then the app sat idle for days: that game still holds
+    its week back (a new league would otherwise freeze its two teams with no points), until the stats loader
+    has finished a run covering the season STALE_DAYS after the game."""
+    _unscored(db, THROUGH, next(g for g in FULL.schedule.games if g.week == THROUGH).home_team)
+    _loaded(db, _day_after(THROUGH))                                # Monday: before that game was in
+    _loaded(db, _day_after(THROUGH, 9), seasons=str(LIVE - 1))      # a later run, of another season only
+    _on(monkeypatch, _day_after(THROUGH, 10))
+    assert replay_live.current_live(db) == (LIVE, THROUGH - 1)
+
+    _loaded(db, _day_after(THROUGH, replay_live.STALE_DAYS + 1))
+    assert replay_live.current_live(db) == (LIVE, THROUGH)
+
+
+def test_a_week_is_final_only_when_every_scored_game_has_both_teams_stats(db):
+    game = next(g for g in FULL.schedule.games if g.week == THROUGH)
+    db.execute(delete(TeamGameStats).where(TeamGameStats.season == LIVE, TeamGameStats.week == THROUGH,
+                                           TeamGameStats.team == game.away_team))
+    assert replay_live.current_live(db) == (LIVE, THROUGH - 1)
+
+
+def test_a_season_from_the_far_future_is_ignored(db):
+    """A bad upstream feed's season 2999 (week 1 final, stats in) is not the live season and doesn't stretch the
+    list: a season can't have a final week before its year begins."""
+    _next_season(db, week_one_final=True, season=2999)
+
+    assert replay_live.current_live(db) == (LIVE, THROUGH)
+    assert replay_live.replay_seasons(db) == replay_pool.SUPPORTED_SEASONS
+    assert replay_live.future_season(db) == NEXT
 
 
 # ---------------- each state of the year ----------------
@@ -139,7 +180,8 @@ def test_once_next_seasons_week_one_is_final_it_is_live_and_the_one_after_is_the
 
 # ---------------- preparing the season once it is complete ----------------
 
-def test_a_complete_season_is_prepared_whole_and_its_new_weeks_reload_once(db, monkeypatch):
+def _stub_prepare(monkeypatch) -> tuple[list[tuple], object]:
+    """Every prepare step recorded instead of run: (the calls, step(name, result) to make another stub)."""
     calls: list[tuple] = []
 
     def step(name: str, result: dict | None = None):
@@ -149,7 +191,27 @@ def test_a_complete_season_is_prepared_whole_and_its_new_weeks_reload_once(db, m
         monkeypatch.setattr(replay_data, name, step(name))
     monkeypatch.setattr("services.replay_live_data.load_live_adp", step("adp", {"skipped": True}))
     monkeypatch.setattr(replay_data, "ensure_defenses", lambda session: 32)
+    return calls, step
 
+
+def test_a_failed_live_prepare_is_not_remembered_so_the_next_clean_run_reloads_tags_and_ranks(db, monkeypatch):
+    calls, step = _stub_prepare(monkeypatch)
+    replay_data.prepare_season(db, LIVE)                           # clean: covers weeks 1..THROUGH
+    play_through(db, THROUGH + 1)
+    monkeypatch.setattr(replay_data, "load_projections", step("load_projections", {"errors": {"projections": "X"}}))
+    failed = replay_data.prepare_season(db, LIVE)
+    assert failed["errors"] and replay_data._prepared_through(db, LIVE) == THROUGH
+
+    monkeypatch.setattr(replay_data, "load_projections", step("load_projections"))
+    calls.clear()
+    replay_data.prepare_season(db, LIVE)
+    retried = {name: args for name, args, _ in calls}
+    assert retried["load_expert_ranks"][-1] and retried["load_injuries"][-1]      # the weeks covered grew
+    assert replay_data._prepared_through(db, LIVE) == THROUGH + 1
+
+
+def test_a_complete_season_is_prepared_whole_and_its_new_weeks_reload_once(db, monkeypatch):
+    calls, _ = _stub_prepare(monkeypatch)
     replay_data.prepare_season(db, LIVE)                           # live: weeks 1..THROUGH
     play_through(db, LAST)
     _on(monkeypatch, _day_after(LAST))
@@ -188,6 +250,26 @@ def test_a_finished_season_is_listed_and_played_like_any_past_season(complete_ap
     drawn = post(client, "/games", {"season": "random", "seed": 3})["game"]
     assert (game["kind"], game["sim_from"], game["name"]) == ("replay", None, f"{LIVE} Replay")
     assert (drawn["season"], drawn["kind"]) == (LIVE, "replay")
+
+
+def test_the_seasons_list_reads_where_the_year_stands_once(complete_app, monkeypatch):
+    reads = []
+    newest_started = replay_live.newest_started
+    monkeypatch.setattr(replay_live, "newest_started", lambda session: reads.append(1) or newest_started(session))
+    get(complete_app, "/seasons")
+    assert len(reads) == 1
+
+
+def test_a_missing_offseason_file_is_the_future_seasons_reason_and_refuses_its_leagues(complete_app, monkeypatch,
+                                                                                         tmp_path):
+    from services import sim_offseason
+
+    monkeypatch.setattr(sim_offseason, "DATA_DIR", tmp_path)               # no offseason_<NEXT>.json
+    reason = f"offseason_{NEXT}.json is missing: add it first."
+
+    future = get(complete_app, "/seasons")["simulated"][-1]
+    assert (future["season"], future["ready"], future["reason"]) == (NEXT, False, reason)
+    assert refused(complete_app, "/games", {"season": NEXT, "seed": 3}) == (503, reason)
 
 
 def test_a_badly_shaped_offseason_file_is_the_future_seasons_reason_not_a_500(complete_app, monkeypatch, tmp_path):

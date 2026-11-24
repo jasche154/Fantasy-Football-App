@@ -110,18 +110,33 @@ def _team_games(data: SeasonData, pid: int) -> list[int]:
     return [w for w in range(1, data.last_week + 1) if data.schedule.opponent(data.team_at(pid, w), w)]
 
 
+def _snap_shares(data: SeasonData, pid: int, weeks: list[int]) -> list[float | None]:
+    """Each game's snap share against his median (capped at 1); None where unknown."""
+    snaps = [(data.usage.get((pid, w)).snap_pct if (pid, w) in data.usage else None) for w in weeks]
+    known = [s for s in snaps if s]
+    normal = float(np.median(known)) if known else None
+    return [min(1.0, s / normal) if normal and s is not None else None for s in snaps]
+
+
+def _count_tags(tally: Tally, position: str, tags: list, played: list[bool], claimed: set[int]) -> None:
+    """Q tags and whether he played through them, games played, and phantoms: a Q/D tag on a game he played that
+    no injury claimed."""
+    for i, injury in enumerate(tags):
+        if injury and injury.tag == "Q":
+            tally.q_tags[position] += 1
+            tally.q_played[position] += played[i]
+        if played[i]:
+            tally.played[position] += 1
+            if i not in claimed and injury and injury.tag in ("Q", "D") and _hurt(injury):
+                tally.phantoms[position].append((injury.tag, injury.practice or "DNP", body_part(injury.injury)))
+
+
 def walk(data: SeasonData, pid: int, position: str, tally: Tally, fresh: bool) -> tuple[list[int], list]:
     """Adds one player-season to the tally; returns (his team's game weeks, which of them he played)."""
     weeks = _team_games(data, pid)
     played = [(pid, w) in data.actual for w in weeks]
     tags = [data.injuries.get((pid, w)) for w in weeks]
-    snaps = [(data.usage.get((pid, w)).snap_pct if (pid, w) in data.usage else None) for w in weeks]
-    known = [s for s in snaps if s]
-    normal = float(np.median(known)) if known else None
-
-    def share(i: int) -> float | None:
-        return min(1.0, snaps[i] / normal) if normal and snaps[i] is not None else None
-
+    shares = _snap_shares(data, pid, weeks)
     tally.players[position] += 1
     tally.fresh_players[position] += fresh
     claimed: set[int] = set()                         # tagged games that belong to an injury (not phantoms)
@@ -154,22 +169,15 @@ def walk(data: SeasonData, pid: int, position: str, tally: Tally, fresh: bool) -
             continue
         tally.exposure[position] += 1
         if not after and _hurt(tags[i + 1]):
-            add(i + 1, share(i), False)
+            add(i + 1, shares[i], False)
         elif after and tags[i + 1] and tags[i + 1].tag in ("Q", "D") and _hurt(tags[i + 1]) \
-                and (share(i) or 1.0) < EXIT_CUTOFF:
+                and (shares[i] or 1.0) < EXIT_CUTOFF:
             tally.banged[position] += 1
-            tally.banged_exits[position].append(share(i))
+            tally.banged_exits[position].append(shares[i])
             claimed.add(i + 1)
             if body_part(tags[i + 1].injury):
                 tally.bodies[position][body_part(tags[i + 1].injury)] += 1
-    for i, injury in enumerate(tags):
-        if injury and injury.tag == "Q":
-            tally.q_tags[position] += 1
-            tally.q_played[position] += played[i]
-        if played[i]:
-            tally.played[position] += 1
-            if i not in claimed and injury and injury.tag in ("Q", "D") and _hurt(injury):
-                tally.phantoms[position].append((injury.tag, injury.practice or "DNP", body_part(injury.injury)))
+    _count_tags(tally, position, tags, played, claimed)
     return weeks, played
 
 
@@ -214,6 +222,18 @@ def _mode(values: Iterable[str | None], fallback: str) -> str:
     return found.most_common(1)[0][0] if found else fallback
 
 
+def _remaining(spells: list[Spell]) -> dict[str, list]:
+    """{"group|weeks out bucket": [(games still to miss, censored)]} at each game missed so far, by IR/O and pooled."""
+    remaining: dict[str, list] = defaultdict(list)
+    for s in spells:
+        for m in range(1, s.in_season + 1):
+            group = "IR" if s.tags[m - 1] in ("IR", "PUP") else "O"
+            bucket = _bucket(m, si.WEEKS_OUT_EDGES)
+            remaining[f"{group}|{bucket}"].append((s.length - m, s.censored))
+            remaining[f"{si.POOLED}|{bucket}"].append((s.length - m, s.censored))
+    return remaining
+
+
 def summarize(tally: Tally, recent: list[Spell], o_practices: list[str | None]) -> dict:
     """The JSON model from the tally (`recent`: spells since IR_RULES_SINCE, for the IR policy)."""
     spells = tally.spells
@@ -251,13 +271,7 @@ def summarize(tally: Tally, recent: list[Spell], o_practices: list[str | None]) 
             "preseason_n": len(pre)}
     for fit in positions.values():                   # every tag drawn must have a practice mix
         fit["phantom_practice"] = {label: fit["phantom_practice"].get(label, {"LP": 1}) for label in fit["phantom_tags"]}
-    remaining: dict[str, list] = defaultdict(list)
-    for s in spells:
-        for m in range(1, s.in_season + 1):
-            group = "IR" if s.tags[m - 1] in ("IR", "PUP") else "O"
-            bucket = _bucket(m, si.WEEKS_OUT_EDGES)
-            remaining[f"{group}|{bucket}"].append((s.length - m, s.censored))
-            remaining[f"{si.POOLED}|{bucket}"].append((s.length - m, s.censored))
+    remaining = _remaining(spells)
     ir = _ir_policy(recent)
     ir["o_practice"] = _mode(o_practices, "DNP")
     ir["back_practice"] = _mode((s.back_practice for s in spells), "LP")

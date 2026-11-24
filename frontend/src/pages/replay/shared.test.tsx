@@ -204,8 +204,8 @@ describe('buzz chip', () => {
   it('is a quiet Buzz button named by the rumor that opens his card (whose News block has the full line)', async () => {
     const onOpen = vi.fn();
     const { unmount } = render(<ReplayPlayerCell player={MOSTERT} info={{ buzz: 'Named the starter' }} onOpen={onOpen} />);
-    const chip = screen.getByRole('button', { name: 'Rumor: Named the starter' });
-    expect(chip).toHaveAttribute('title', 'Rumor: Named the starter');
+    const chip = screen.getByRole('button', { name: 'Buzz: Named the starter' });   // the name starts with the visible text
+    expect(chip).toHaveAttribute('title', 'Buzz (a rumor): Named the starter');
     expect(chip).toHaveAttribute('aria-haspopup', 'dialog');
     expect(chip).toHaveClass('replay-buzz');
     expect(chip).toHaveTextContent('Buzz');
@@ -219,7 +219,7 @@ describe('buzz chip', () => {
 
   it('without a card to open, shows the rumor as text for screen readers', () => {
     render(<ReplayPlayerCell player={MOSTERT} info={{ buzz: 'Named the starter' }} />);
-    expect(screen.queryByRole('button', { name: /Rumor/ })).not.toBeInTheDocument();
-    expect(screen.getByRole('img', { name: 'Rumor: Named the starter' })).toHaveTextContent('Buzz');
+    expect(screen.queryByRole('button', { name: /Buzz/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Buzz: Named the starter' })).toHaveTextContent('Buzz');
   });
 });
