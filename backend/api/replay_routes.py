@@ -11,13 +11,13 @@ import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Annotated, Literal
+from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from api.deps import Scoring
+from api.deps import DbId, Scoring
 from database.db import get_session
 from database.models import ReplayLeague
 from services import (
@@ -37,7 +37,7 @@ Limit = Query(views.DEFAULT_PAGE, ge=1, le=views.MAX_PAGE)
 Offset = Query(0, ge=0)
 Week = Query(None, ge=0, le=22)
 TeamId = Query(None, ge=1)
-GameId = Annotated[int, Path(ge=1, le=2 ** 63 - 1)]      # SQLite INTEGER range: a bigger id is a 422, not a 500
+GameId = DbId
 
 _GAME_LOCK = threading.Lock()
 
@@ -340,7 +340,7 @@ def players(game_id: GameId, position: str | None = None, search: str | None = Q
 
 
 @router.get("/games/{game_id}/players/{player_id}")
-def player(game_id: GameId, player_id: int, session: Session = Depends(get_session)) -> dict:
+def player(game_id: GameId, player_id: DbId, session: Session = Depends(get_session)) -> dict:
     return show(session, game_id, lambda game: league_views.player(game, player_id))
 
 

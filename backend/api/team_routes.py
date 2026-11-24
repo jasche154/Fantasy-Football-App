@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from api.deps import Position
+from api.deps import DbId, Position
 from api.integration_routes import HTTP_TIMEOUT_SECONDS, YAHOO_ERRORS, _yahoo_http_error
 from api.weekly_routes import flags_for
 from config import get_settings
@@ -42,7 +42,7 @@ def leagues(session: Session = Depends(get_session)) -> dict:
 
 
 @router.get("/{league_id}")
-def my_team(league_id: int, session: Session = Depends(get_session)) -> dict:
+def my_team(league_id: DbId, session: Session = Depends(get_session)) -> dict:
     _league_or_404(session, league_id)
     try:
         team = mt.build_my_team(session, league_id)
@@ -85,7 +85,7 @@ def my_team(league_id: int, session: Session = Depends(get_session)) -> dict:
 
 
 @router.get("/{league_id}/waivers")
-def waivers(league_id: int, position: Position | None = None, limit: int = Query(25, ge=1, le=30),
+def waivers(league_id: DbId, position: Position | None = None, limit: int = Query(25, ge=1, le=30),
             session: Session = Depends(get_session)) -> dict:
     """Free agents in your league scored by how much they add to your lineup (with the player to drop),
     and what to do for your league's waiver type: a FAAB bid, a priority claim or wait, or add now."""
@@ -106,7 +106,7 @@ def waivers(league_id: int, position: Position | None = None, limit: int = Query
 
 
 @router.get("/{league_id}/trades")
-def trades(league_id: int, want_position: Position | None = None, session: Session = Depends(get_session)) -> dict:
+def trades(league_id: DbId, want_position: Position | None = None, session: Session = Depends(get_session)) -> dict:
     league, _ = _league_or_404(session, league_id)
     from services.league_trades import deadline_passed, lineup_effect, lineup_label, score_trades
 
@@ -129,7 +129,7 @@ def trades(league_id: int, want_position: Position | None = None, session: Sessi
 
 
 @router.post("/{league_id}/sync")
-def sync(league_id: int, session: Session = Depends(get_session)) -> dict:
+def sync(league_id: DbId, session: Session = Depends(get_session)) -> dict:
     """Re-import this league's rosters and rules from Yahoo."""
     league, _ = _league_or_404(session, league_id)
     try:
@@ -140,7 +140,7 @@ def sync(league_id: int, session: Session = Depends(get_session)) -> dict:
 
 
 @router.get("/{league_id}/matchup")
-def matchup(league_id: int, session: Session = Depends(get_session)) -> dict:
+def matchup(league_id: DbId, session: Session = Depends(get_session)) -> dict:
     """This week's opponent, both lineups, win probability, and the upside / safe / expected lineups."""
     from services.matchup import build_matchup
 
@@ -153,7 +153,7 @@ def matchup(league_id: int, session: Session = Depends(get_session)) -> dict:
 
 
 @router.get("/{league_id}/playoffs")
-def playoffs(league_id: int, session: Session = Depends(get_session)) -> dict:
+def playoffs(league_id: DbId, session: Session = Depends(get_session)) -> dict:
     """Each player's fantasy-playoff weeks (opponent, schedule factor, bye, projection) and the best lineup per week."""
     from services.playoffs import playoff_outlook
 
@@ -162,7 +162,7 @@ def playoffs(league_id: int, session: Session = Depends(get_session)) -> dict:
 
 
 @router.get("/{league_id}/league")
-def league_overview(league_id: int, session: Session = Depends(get_session)) -> dict:
+def league_overview(league_id: DbId, session: Session = Depends(get_session)) -> dict:
     """Power rankings with simulated playoff odds, and each manager's trading and waiver tendencies."""
     from services import league_insights
 
@@ -175,7 +175,7 @@ def league_overview(league_id: int, session: Session = Depends(get_session)) -> 
 
 
 @router.get("/{league_id}/news")
-def roster_news(league_id: int, limit: int = Query(15, ge=1, le=40), session: Session = Depends(get_session)) -> dict:
+def roster_news(league_id: DbId, limit: int = Query(15, ge=1, le=40), session: Session = Depends(get_session)) -> dict:
     """The newest news across your roster (Sleeper's partners), newest first, plus each player's
     latest item time (`latest`) so the app can flag players with news you haven't opened."""
     from integrations.sleeper_news import news_by_player
@@ -190,7 +190,7 @@ def roster_news(league_id: int, limit: int = Query(15, ge=1, le=40), session: Se
 
 
 @router.get("/{league_id}/streaming")
-def streaming(league_id: int, session: Session = Depends(get_session)) -> dict:
+def streaming(league_id: DbId, session: Session = Depends(get_session)) -> dict:
     """Defense (and one-QB-league quarterback) streaming grid for the next three weeks, with a suggested path."""
     from services.streaming import streaming_grid
 

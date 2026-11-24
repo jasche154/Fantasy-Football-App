@@ -4,7 +4,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from api.deps import Position, league_params, valuation_or_503
+from api.deps import DbId, Position, league_params, valuation_or_503
 from api.integration_routes import integration_status
 from config import get_settings
 from database.db import get_session
@@ -55,7 +55,7 @@ def players_search(q: str = Query(..., min_length=1, max_length=60), position: P
 
 
 @router.get("/players/{player_id}")
-def player_detail(player_id: int, season: int | None = Query(None, ge=1999, le=2100),
+def player_detail(player_id: DbId, season: int | None = Query(None, ge=1999, le=2100),
                   league: LeagueSettings = Depends(league_params),
                   session: Session = Depends(get_session)) -> dict:
     if season is not None and season not in available_seasons(session):

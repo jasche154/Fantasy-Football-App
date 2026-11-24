@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
+from api.deps import DbId
 from api.replay_routes import GameId, Turn, errors, open_game, turn
 from database.db import get_session
 from services import replay_game as rg, replay_state as rs, replay_views as views, replay_views_league as league_views
@@ -112,14 +113,14 @@ def reorder_claims(game_id: GameId, body: ReorderBody, session: Session = Depend
 
 
 @router.post("/claims/{claim_id}/bid")
-def set_claim_bid(game_id: GameId, claim_id: int, body: BidBody, session: Session = Depends(get_session)) -> dict:
+def set_claim_bid(game_id: GameId, claim_id: DbId, body: BidBody, session: Session = Depends(get_session)) -> dict:
     """Change a pending claim's FAAB bid (phase "waivers" only)."""
     with turn(session, game_id) as t:
         return t.done(rg.set_claim_bid(t.state, t.settings, claim_id, body.bid))
 
 
 @router.post("/claims/{claim_id}/cancel")
-def cancel_claim(game_id: GameId, claim_id: int, session: Session = Depends(get_session)) -> dict:
+def cancel_claim(game_id: GameId, claim_id: DbId, session: Session = Depends(get_session)) -> dict:
     with turn(session, game_id) as t:
         return t.done(rg.cancel_claim(t.state, claim_id))
 
@@ -176,7 +177,7 @@ def propose_trade(game_id: GameId, body: TradeBody, session: Session = Depends(g
 
 
 @router.post("/trades/offers/{offer_id}/counter")
-def counter_offer(game_id: GameId, offer_id: int, body: CounterBody, session: Session = Depends(get_session)) -> dict:
+def counter_offer(game_id: GameId, offer_id: DbId, body: CounterBody, session: Session = Depends(get_session)) -> dict:
     """Answer a CPU's pending offer with a deal of your own: its offer is marked countered and yours is
     proposed to the same CPU (same answer as propose)."""
     with turn(session, game_id) as t:
@@ -189,7 +190,7 @@ def _proposed(t: Turn, state: rs.State, found: rg.Verdict, counter: rs.Offer | N
 
 
 @router.post("/trades/offers/{offer_id}/respond")
-def respond_offer(game_id: GameId, offer_id: int, body: RespondBody, session: Session = Depends(get_session)) -> dict:
+def respond_offer(game_id: GameId, offer_id: DbId, body: RespondBody, session: Session = Depends(get_session)) -> dict:
     """Accept or decline a CPU's offer. One that no longer stands is saved as expired and answered with
     expired=true and the reason."""
     with turn(session, game_id) as t:
