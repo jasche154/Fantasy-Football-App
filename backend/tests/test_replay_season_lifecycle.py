@@ -130,7 +130,10 @@ def test_a_cancelled_game_in_the_last_week_holds_the_season_until_a_postseason_g
     db.commit()
     with caplog.at_level("WARNING", logger="services.replay_live"):
         assert replay_live.current_live(db) == (LIVE, LAST - 1)
-    assert "unreadable gameday 'not a date'" in caplog.text          # and says why the season stalls
+    assert caplog.text.count("unreadable gameday 'not a date'") == 1    # says why the season stalls, once
+    with caplog.at_level("WARNING", logger="services.replay_live"):
+        replay_live.current_live(db)
+    assert caplog.text.count("unreadable gameday 'not a date'") == 1    # not again on the next request
 
     wild_card.gameday = f"{_day_after(LAST, 6).isoformat()}T20:20:00"       # a time part is fine
     db.commit()

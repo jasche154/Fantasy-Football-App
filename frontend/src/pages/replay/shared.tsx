@@ -160,8 +160,6 @@ export function buzzLabel(text: string): string {
   return `Buzz: ${text}`;
 }
 
-/** A small "Buzz" chip for a simulated season's news line about his role: a button that opens his card, whose News
- * block shows the full line (the line is also its name and tooltip). Quiet on purpose: a rumor, not an injury or a fact. */
 /** Where a league's draft ADP comes from: real drafts for a past or full live season, the simulated market for
  * a league that drafts mid-season or plays a future season. */
 export function adpSource(kind: ReplaySummary['kind'], startsNow: boolean): string {
@@ -169,6 +167,8 @@ export function adpSource(kind: ReplaySummary['kind'], startsNow: boolean): stri
   return kind === 'live' ? 'ADP: MyFantasyLeague / Fantasy Football Calculator' : 'ADP: Fantasy Football Calculator';
 }
 
+/** A small "Buzz" chip for a simulated season's news line about his role: a button that opens his card, whose News
+ * block shows the full line (the line is also its name and tooltip). Quiet on purpose: a rumor, not an injury or a fact. */
 export function ReplayBuzzChip({ text, onOpen }: { text: string | null | undefined; onOpen?: () => void }) {
   if (!text) return null;
   const label = buzzLabel(text);
