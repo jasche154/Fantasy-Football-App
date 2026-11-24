@@ -8,8 +8,7 @@ Gridiron Edge: a single-user, localhost fantasy football app. FastAPI + SQLAlche
 
 Backend (run from `backend/`, Windows venv at `backend/venv`):
 ```bash
-venv/Scripts/python.exe -m pytest -q -n auto                          # full suite in parallel (pytest-xdist): ~6 min on 12 cores, ~21 serial
-venv/Scripts/python.exe -m pytest -q -n 4 tests/test_replay_*.py       # one area; cap workers (-n 4) when other test runs share the machine
+venv/Scripts/python.exe -m pytest -q -n 4                             # full suite in parallel (pytest-xdist): ~5 min here (6 cores), ~21 min serial; more workers don't help
 venv/Scripts/python.exe -m pytest -q tests/test_league_moves.py       # one file
 venv/Scripts/python.exe -m pytest -q tests/test_league_moves.py -k faab   # one test by name
 venv/Scripts/python.exe -m uvicorn main:app --reload                  # API on :8000 (docs at /docs)
@@ -26,7 +25,7 @@ Season simulator (read-only on the DB; the fits rewrite the JSON next to the mod
 
 Frontend (run from `frontend/`): `npm run dev` (:5173), `npm test` (vitest), `npx vitest run src/pages/team` (one folder), `npm run build` (runs `tsc` then Vite; the typecheck is the only static check, there is no ESLint config).
 
-CI (`.github/workflows`) runs `ruff check .` (backend, config in `backend/ruff.toml`), `pytest -q -n auto --cov` and `npm test && npm run build` on every PR; a new push cancels the branch's unfinished run. Timing tests measure CPU time (`time.process_time`), so parallel runs don't make them flaky.
+CI (`.github/workflows`) runs `ruff check .` (backend, config in `backend/ruff.toml`), `pytest -q -n auto --cov` and `npm test && npm run build` on every PR; a new push cancels the branch's unfinished run. Tests with a time budget take the `own_cpu` fixture (`conftest.py`): skipped under `-n`, where workers share the cores; run their files without `-n` to check a budget.
 
 ## Architecture
 

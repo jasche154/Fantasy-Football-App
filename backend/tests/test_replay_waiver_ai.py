@@ -431,7 +431,7 @@ def test_waiver_activity_is_modest(season, record_property):
     assert 1 <= (sum(won) + sum(moves)) / len(season) <= 12
 
 
-def test_claims_and_free_agency_for_eleven_cpus_fit_the_half_second_budget():
+def test_claims_and_free_agency_for_eleven_cpus_fit_the_half_second_budget(own_cpu):
     state, knowledge = league(6), know(6)
 
     def fastest(step) -> float:

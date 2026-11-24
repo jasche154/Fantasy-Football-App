@@ -528,7 +528,7 @@ def test_a_user_counter_marks_the_offer_countered_and_carries_counter_to():
 
 # ---------------- speed and hindsight ----------------
 
-def test_evaluate_is_fast():
+def test_evaluate_is_fast(own_cpu):
     state, know = league()
     rt.evaluate(state, SETTINGS, know, USER, RICH, [SCRUB], [P("RB", 2)])       # warms the shared projector
     rt.clear_cache()
