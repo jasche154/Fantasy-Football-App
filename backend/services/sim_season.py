@@ -2,10 +2,12 @@
 
 `simulate(base, seed, from_week, prior)`: `base` holds real data for weeks < from_week (possibly none) and
 the full schedule. Real weeks are copied through untouched; base rows for later weeks are dropped, except
-the injury tags and expert ranks of from_week itself (known before its games: the snapshot) and its
-projections, which say who exists for from_week's belief (a new season's depth players, sim_next_year) and are
-then replaced by the simulated ones (a player only they admit to SeasonData.as_of keeps MIN_PROJECTION, so a
-backup QB stays in view before his first game).
+from_week's own rows when base carries them: its injury tags and expert ranks are kept (known before its games:
+the snapshot) and its projections, which say who exists for from_week's belief (a new season's depth players,
+sim_next_year), are replaced by the simulated ones (a player only they admit to SeasonData.as_of keeps
+MIN_PROJECTION, so a backup QB stays in view before his first game). A live league's base (sim_setup.build) is
+real only through from_week - 1, so it carries none: from_week's tags and expert ranks are simulated like any
+later week's, from what is known through from_week - 1 (a half-published mid-week injury report is never read).
 
 1. belief = sim_world.estimate(base, from_week, prior); truth = sim_talent.truth(belief, seed, ...).
 2. Absences already running: a player hard-tagged at the snapshot with no game since (results before from_week

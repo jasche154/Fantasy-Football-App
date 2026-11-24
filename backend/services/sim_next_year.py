@@ -35,8 +35,9 @@ seasons 2019-2025 by services/sim_next_year_fit.py and lives in sim_next_year.js
 ADP for the new season is the market's under the new belief in the league's format (`season_base`: its scoring,
 the 2-QB list for a superflex league; sim_market.adp). The market pays for a rookie's upside where the belief
 does not: his value x `rookie_premium` = max(1, exp(a + b x log(pick))) per position (pick held to
-PREMIUM_PICK_CAP; b <= 0), fitted so the market's ADP of each real rookie class 2019-2025 (built like a future
-season from the season before) best matches the real ADP (sim_next_year_fit; it came out flat per position).
+PREMIUM_PICK_CAP; b <= 0), fitted on all of 2019-2025 at once so the market's ADP of each real rookie class
+(built like a future season from the season before) best matches the real ADP (sim_next_year_fit), then checked
+on held-out seasons. The fitted premium is flat by position (b = 0: the same at every pick; none for a QB).
 Only the price moves: his role and talent draw are as above. Rookie ids: ROOKIE_ID_BASE + season x 1000 + pick
 (`rookie_ids`); database ids are autoincrement row ids, far below the base.
 """

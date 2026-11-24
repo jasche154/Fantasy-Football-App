@@ -1156,8 +1156,8 @@ season that can't be played yet is greyed out with the reason. The rules of the 
 trades, IR, playoffs, no hindsight) are the same as in a past season. A new league's default name is
 "&lt;season&gt; Sim", and building its season takes about 10 seconds.
 
-- **The live season:** real results through week N, the last week in which every game is final and the
-  app's player and team stats are loaded (`services/replay_live.py`; the stats come from the app's normal
+- **The live season:** real results through week N, the last week in which every game is final, the
+  app's player stats are loaded and every scored game has both teams' team stats (`services/replay_live.py`; the stats come from the app's normal
   stats load, not from Prepare); weeks N+1 to 18 are simulated. It must be prepared like a past season, and
   prepared again each time a week finishes: until weeks 1 to N all have their projections, the season is
   not ready and a **Prepare 2026 data** button shows under the new-league form, or run
@@ -1166,9 +1166,12 @@ trades, IR, playoffs, no hindsight) are the same as in a past season. A new leag
   Football Calculator has no ADP for a season in progress, so its preseason ADP is MyFantasyLeague's PPR
   list alone (real 12-team drafts from August 15 on; `services/replay_live_data.py`), which the other
   formats use as their nearest list until FFC has one.
-- **A game without a score** holds its week back only while it can still be played: once it is more than 4
-  days past its date with no score (a cancelled game, like Bills-Bengals in 2022), its week counts as final
-  without it, so the season keeps moving and can end.
+- **A game without a score** holds its week back until the stats load has run again well after it: once a
+  load of that season finished more than 4 days past the game's date and the game still has no score (a
+  cancelled game, like Bills-Bengals in 2022), its week counts as final without it, so the season keeps
+  moving and can end. Data that simply hasn't arrived (the app idle since before the game) never reads as a
+  cancelled game, so a new league never freezes a team with a missing week.
+- **Seasons from a bad feed:** a season later than the current calendar year is ignored.
 - **When the season ends** (every week final), nothing needs changing: it becomes an ordinary past season.
   Prepare it once more (the button, or `--seasons 2026`) to fetch the last weeks' projections, tags and
   expert ranks; it then shows in the past-season list, can be drawn by **Random**, and next season's
@@ -1179,8 +1182,9 @@ trades, IR, playoffs, no hindsight) are the same as in a past season. A new leag
   exists).
 - **Two ways to start a live league** (**Start**): **Full season** drafts in week 0 on the preseason ADP
   and plays weeks 1 to N with the real results, then the simulated rest. **Jump in now** drafts today and
-  plays from week N+1: the draft knows everything through week N (results, the week N+1 injury tags,
-  projections and the latest expert ranks), and the ADP is today's market (what a draft held under the
+  plays from week N+1: the draft knows everything real through week N (results, tags, projections and
+  expert ranks); week N+1's injury report and expert ranks are simulated from that, like every later week's
+  (the real ones, published during the week, are not read), and the ADP is today's market (what a draft held under the
   current public view would look like, below), not August's. Its defaults: 4 playoff teams (the smallest
   bracket, so the longest regular season), the trade deadline two thirds of the way through the weeks
   left, and at least 3 regular-season weeks must be left (otherwise pick a later championship week or
@@ -1198,7 +1202,9 @@ trades, IR, playoffs, no hindsight) are the same as in a past season. A new leag
   after it, with no restart or Prepare needed (the season cache is keyed on the data), and never one created
   before it; deleting a league deletes its season. A league whose saved season can't be read (a damaged
   database file, or saved by a newer version of the app) answers with an error saying so instead of its
-  screens; it is still listed and can be deleted.
+  screens (the server log records why, never the save's contents); it is still listed and can be deleted.
+  If building a new league's season fails unexpectedly, the create answers 500 with the error's type only
+  (the full trace is in the server log) and nothing is saved: never a league without its season.
 - **How the UI marks it:** the saved-leagues list puts a **Live 2026** or **Simulated** chip after the
   name; the game screen shows "2026 · simulated from week 12" or "2027 · simulated season" under the
   scorebug; on a player's card every simulated week in the game log and the weeks ahead carries a small
@@ -1237,7 +1243,7 @@ read the belief, so, as in a real season, the public learns the truth only from 
   them ("Beat reporters say his role is growing; expect more work.", "Reports say his snaps and touches are
   shrinking.", "Reports say his starting job is in danger."), and false lines about other starters are added
   so only about 60% of all lines are true, in the same weeks a change can start (never the first simulated
-  week or the last two). It shows as a small **Buzz** chip ("Rumor: ...") on player rows
+  week or the last two). It shows as a small **Buzz** chip (named "Buzz: ..." for screen readers and voice control, tooltip "Buzz (a rumor): ...") on player rows
   and the draft board (press it to open his card), and under **News** on his card. It is the only way the truth reaches the screen
   before the games, and it is right only some of the time.
 - **Projections, expert ranks and ADP** are computed from the belief each week (`services/sim_market.py`):
@@ -1262,8 +1268,9 @@ read the belief, so, as in a real season, the public learns the truth only from 
   talent draw. A rookie QB starts week 1 when his team has no starter, or when his pick makes it likely and
   the incumbent is a below-average passer; otherwise he is next in line. Real drafters pay for a rookie's
   upside, so the market (ADP and the preseason expert ranks, not his role or talent) multiplies his value by
-  a premium fitted on real rookie ADPs 2019-2025 (`rookie_premium` in `sim_next_year.json`; allowed to fall
-  with the pick but never to rise, and it came out flat): x1.22 for a running back, x1.10 for a receiver,
+  a premium fitted on the real rookie ADPs of all of 2019-2025 at once, then checked on held-out seasons
+  (`rookie_premium` in `sim_next_year.json`; allowed to fall with the pick but never to rise). The fitted
+  premium is flat by position, the same at every pick: x1.22 for a running back, x1.10 for a receiver,
   x1.05 for a tight end, none for a quarterback (rookie QBs already go where real ones do).
 - **The offseason file** `backend/sim_data/offseason_2027.json` is meant to be edited by hand. `rookies`:
   one entry per player with `name`, `position` (QB/RB/WR/TE/K), `team` (schedule code, e.g. MIA, LA, LV,

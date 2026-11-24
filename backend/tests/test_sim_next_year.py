@@ -178,7 +178,60 @@ def test_the_market_pays_a_rookie_premium_on_his_price_only():
     assert paid.projected == plain.projected                  # the price only: the projections are the belief's
 
 
-REAL_EXPERT_ADP_R = 0.98   # real week-0 expert vs ADP position ranks, real top-150 ADP, 2022-2025 (0.981-0.987)
+def test_the_rookie_premium_moves_the_price_and_nothing_the_season_does():
+    """Same seed, with and without a large premium: the results, projections, tags, buzz and the in-season expert
+    ranks are identical; only the ADP and the preseason (week-0) expert ranks move."""
+    from services import sim_season
+
+    belief, pool = _next()
+    ids = ny.rookie_ids(2027, ROOKIES)
+    plain = ny.season_base(2027, belief, pool, _schedule(), "half", None, {})
+    paid = ny.season_base(2027, belief, pool, _schedule(), "half", None, {}, premium=dict.fromkeys(ids, 3.0))
+    for seed in (1, 2):
+        a, b = sim_season.simulate(plain, seed, 1, belief), sim_season.simulate(paid, seed, 1, belief)
+        assert dict(a.actual) == dict(b.actual) and dict(a.box) == dict(b.box)
+        assert dict(a.projected) == dict(b.projected)
+        assert dict(a.injuries) == dict(b.injuries) and dict(a.notes) == dict(b.notes)
+        in_season = [{k: v for k, v in s.expert_ranks.items() if k[1] > 0} for s in (a, b)]
+        assert in_season[0] == in_season[1]
+        assert {i: p.adp for i, p in a.players.items()} != {i: p.adp for i, p in b.players.items()}
+        assert ({k: v for k, v in a.expert_ranks.items() if k[1] == 0}
+                != {k: v for k, v in b.expert_ranks.items() if k[1] == 0})
+
+
+def test_the_fit_writes_its_file_once_at_the_end_and_never_after_a_failed_step(tmp_path, monkeypatch):
+    """The premium step needs the network and runs last on the model just fitted (read from memory): an
+    interrupted run leaves the checked-in file as it was."""
+    import json
+    from contextlib import nullcontext
+
+    import database.db
+    from services import sim_next_year_fit as fit
+
+    path, model, seen, stored = tmp_path / "sim_next_year.json", {"age": {}, "keep": {}}, [], ny.stored
+    path.write_text("checked in\n")
+    monkeypatch.setattr(fit, "PATH", path)
+    monkeypatch.setattr(database.db, "SessionLocal", lambda: nullcontext(None))
+    monkeypatch.setattr(fit, "observations", lambda session, seasons: {})
+    monkeypatch.setattr(fit, "summarize", lambda rows, seasons: dict(model))
+
+    def offline(session, seasons):
+        seen.append(ny.stored())
+        raise ConnectionError
+
+    monkeypatch.setattr(fit, "premium_cases", offline)
+    with pytest.raises(ConnectionError):
+        fit.main(["--fit"])
+    assert path.read_text() == "checked in\n" and ny.stored is stored
+    assert seen == [{**model, "rookie_premium": {}}]                 # measured with no premium yet
+
+    monkeypatch.setattr(fit, "premium_cases", lambda session, seasons: [])
+    monkeypatch.setattr(fit, "_premium_fit", lambda cases: {"RB": [0.2, 0.0]})
+    fit.main(["--fit"])
+    assert json.loads(path.read_text()) == {**model, "rookie_premium": {"RB": [0.2, 0.0]}}
+
+
+REAL_EXPERT_ADP_R = 0.98  # real week-0 expert vs ADP position ranks, real top-150 ADP, 2022-2025 (0.981-0.987)
 
 
 def test_the_preseason_experts_rank_players_the_way_the_preseason_market_drafts_them():

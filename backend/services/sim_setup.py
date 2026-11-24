@@ -2,9 +2,11 @@
 that reads the database; the engine (services/sim_season, sim_world, sim_market) is pure.
 
 - live: the season in progress (replay_live.current_live), real through week N, weeks N+1.. simulated from the
-  league's own seed. A league may start "now" (Settings.start_week = N + 1): it drafts on today's market ADP
-  (`_market_adp`: the belief before week N + 1 of its own simulated season, the one that week's expert snapshot
-  came from), in the league's format.
+  league's own seed. The base is loaded real through week N only, so week N+1's injury report and expert ranks
+  are simulated from what is known through N (the real ones, published during the week, are never read). A
+  league may start "now" (Settings.start_week = N + 1): it drafts on today's market ADP (`_market_adp`: the
+  belief before week N + 1 of its own simulated season, the one that week's simulated expert snapshot came
+  from), in the league's format.
 - future: the season after the newest one, simulated whole from what is known today (`_future_base`): the
   belief at the end of the newest season so far (the season in progress through its last finished week, else
   the finished one; estimated on the belief at the end of the season before it, `_season_end`, so a star's
@@ -36,13 +38,12 @@ def kind_of(session: Session, season: int) -> tuple[str, int]:
     """(kind, last real week) of a season a league may be created on: (REPLAY, 0) for a complete season
     (replay_live.replay_seasons), (LIVE, through) for the season in progress, (FUTURE, 0) for the one after the
     newest started one. ValueError otherwise."""
-    live = replay_live.current_live(session)
+    year = replay_live.year(session)
+    live, seasons, future = year.live, year.seasons, year.future
     if live and live[0] == season:
         return LIVE, live[1]
-    seasons = replay_live.replay_seasons(session)
     if season in seasons:
         return REPLAY, 0
-    future = replay_live.future_season(session)
     if season == future:
         return FUTURE, 0
     simulated = f"{live[0]} (in progress) and {future}" if live else str(future)
@@ -94,26 +95,29 @@ def _market_adp(data: SeasonData, settings: Settings) -> SeasonData:
 
 # ---------------- the future season ----------------
 
-def source(session: Session) -> tuple[int, int | None] | None:
+def source(session: Session, year: replay_live.Year | None = None) -> tuple[int, int | None] | None:
     """(season, through) the future season is built from: the newest started season (replay_live.newest_started)
-    through its last finished week while in progress, else in full (through None). None when there is none."""
-    found = replay_live.newest_started(session)
+    through its last finished week while in progress, else in full (through None). None when there is none.
+    `year`: the request's replay_live.year, when it has read it already."""
+    found = (year or replay_live.year(session)).newest
     if found is None:
         return None
     season, through, last_week = found
     return season, (through if through < last_week else None)
 
 
-def future_problem(session: Session, season: int) -> str | None:
+def future_problem(session: Session, season: int, year: replay_live.Year | None = None) -> str | None:
     """Why a league can't be created on the future season yet, or None when it can."""
     from services import sim_offseason
 
-    found = source(session)
+    found = source(session, year)
     if found is None:
         return "No season is loaded yet: prepare one first."
     newest, through = found
     if not replay_pool.readiness(session, newest, through)["ready"]:
         return f"Prepare {newest} first: the {season} season is built from it."
+    if not sim_offseason.path(season).exists():          # sim_offseason.load would read it as no rookies, no moves
+        return f"{sim_offseason.path(season).name} is missing: add it first."
     try:
         sim_offseason.load(season)
     except ValueError as exc:
@@ -208,10 +212,11 @@ def _future_base(session: Session, season: int, settings: Settings) -> tuple[Sea
 
 # ---------------- the seasons list ----------------
 
-def simulated(session: Session) -> list[dict]:
-    """GET /seasons' `simulated` rows (shape at the top of services/replay_views.py)."""
+def simulated(session: Session, year: replay_live.Year | None = None) -> list[dict]:
+    """GET /seasons' `simulated` rows (shape at the top of services/replay_views.py). `year`: as `source`."""
     rows = []
-    live = replay_live.current_live(session)
+    year = year or replay_live.year(session)
+    live = year.live
     if live:
         season, through = live
         ready = replay_pool.readiness(session, season, through)["ready"]
@@ -223,8 +228,8 @@ def simulated(session: Session) -> list[dict]:
         rows.append({"season": season, "kind": LIVE, "through": through, "ready": ready,
                      "can_start_now": ready and late is None,
                      "reason": None if ready else f"Prepare {season} first: weeks 1-{through} are not all imported."})
-    future = replay_live.future_season(session)
-    problem = future_problem(session, future)
+    future = year.future
+    problem = future_problem(session, future, year)
     rows.append({"season": future, "kind": FUTURE, "through": 0, "ready": problem is None, "can_start_now": False,
                  "reason": problem})
     return rows

@@ -154,9 +154,10 @@ export function ReplayHypeStar({ player }: { player: ReplayPlayerRef }) {
   );
 }
 
-/** "Rumor: Beat reporters say his role is growing; expect more work." */
+/** "Buzz: Beat reporters say his role is growing; expect more work." The name starts with the chip's visible
+ * text (WCAG 2.5.3, so "click Buzz" reaches it); the tooltip says it is a rumor. */
 export function buzzLabel(text: string): string {
-  return `Rumor: ${text}`;
+  return `Buzz: ${text}`;
 }
 
 /** A small "Buzz" chip for a simulated season's news line about his role: a button that opens his card, whose News
@@ -164,10 +165,11 @@ export function buzzLabel(text: string): string {
 export function ReplayBuzzChip({ text, onOpen }: { text: string | null | undefined; onOpen?: () => void }) {
   if (!text) return null;
   const label = buzzLabel(text);
+  const tooltip = `Buzz (a rumor): ${text}`;
   const content = <><Icon name="news" size={12} /><span aria-hidden="true">Buzz</span></>;
-  if (!onOpen) return <span className="replay-buzz" role="img" aria-label={label} title={label}>{content}</span>;
+  if (!onOpen) return <span className="replay-buzz" role="img" aria-label={label} title={tooltip}>{content}</span>;
   return (
-    <button type="button" className="replay-buzz" aria-label={label} aria-haspopup="dialog" title={label} onClick={onOpen}>{content}</button>
+    <button type="button" className="replay-buzz" aria-label={label} aria-haspopup="dialog" title={tooltip} onClick={onOpen}>{content}</button>
   );
 }
 

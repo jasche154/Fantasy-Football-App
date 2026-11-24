@@ -27,7 +27,10 @@ belief at the end of S-2 as its prior when stored, as sim_setup builds a future 
   future season (sim_eval.next_belief), its market priced with no premium like S's real ADP list, and
   [a, b] per position of sim_next_year.premium_at (b <= 0) chosen on a grid to minimize the squared log ratio of our
   ADP to the real one over every skill rookie of S (off a list, real or ours = PREMIUM_MISSING, so the
-  late picks real drafters skip hold the premium down as much as the hyped ones push it up).
+  late picks real drafters skip hold the premium down as much as the hyped ones push it up). One fit over all
+  the seasons given (2019-2025 for the stored one: in sample; it was checked on held-out seasons afterwards); it
+  came out flat by position (b = 0) and none for a QB. Written last, once every step has succeeded: the
+  premium step reads the model just fitted from memory (`_in_use`), so an interrupted run leaves the file alone.
 Experience = seasons through S-1 since his draft year (nflverse), else since his first database season.
 
 Needs the network (nflreadpy) and the database; never runs in the app.
@@ -37,7 +40,8 @@ import json
 import logging
 import math
 from collections import defaultdict
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 
 import numpy as np
@@ -356,12 +360,23 @@ def main(argv: list[str] | None = None) -> None:
             Path(args.dump).write_text(json.dumps(rows))
         fitted = summarize(rows, seasons)
         # the premium is measured on the market of the model just fitted, with no premium yet
-        PATH.write_text(json.dumps({**fitted, "rookie_premium": {}}, indent=1) + "\n")
-        sim_next_year.stored.cache_clear()
-        fitted["rookie_premium"] = _premium_fit(premium_cases(session, seasons))
-    PATH.write_text(json.dumps(fitted, indent=1) + "\n")
+        with _in_use({**fitted, "rookie_premium": {}}):
+            premium = _premium_fit(premium_cases(session, seasons))
+    PATH.write_text(json.dumps({**fitted, "rookie_premium": premium}, indent=1) + "\n")    # once, every step done
     sim_next_year.stored.cache_clear()
-    log.info("wrote %s (rookie premium %s)", PATH.name, fitted["rookie_premium"])
+    log.info("wrote %s (rookie premium %s)", PATH.name, premium)
+
+
+@contextmanager
+def _in_use(model: dict) -> Iterator[None]:
+    """sim_next_year (and sim_talent through it) reads `model` instead of its file while the block runs, so a
+    later step can build on a model that is not written yet."""
+    stored = sim_next_year.stored
+    sim_next_year.stored = lambda: model
+    try:
+        yield
+    finally:
+        sim_next_year.stored = stored
 
 
 if __name__ == "__main__":

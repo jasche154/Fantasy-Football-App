@@ -12,6 +12,7 @@ season enters the cache only once its row is committed (`remember`), replacing w
 the same id left there. A save that can't be decoded is an UnreadableSeason (a server-side fault, never bad input).
 """
 import json
+import logging
 import types
 import typing
 import zlib
@@ -29,6 +30,8 @@ from services import replay_pool
 from services.replay_pool import SeasonData
 from services.schedule_strength import Game, Schedule
 from services.valuation import NoDataError
+
+log = logging.getLogger(__name__)
 
 VERSION = 1                     # the "v" of a stored season (1..VERSION); a newer one is refused, an older one read
 CACHED = 4                      # decoded seasons kept, least recent out
@@ -136,13 +139,16 @@ def loads(blob: bytes) -> SeasonData:
         payload = json.loads(_unpack(blob))
         version = payload.get("v")
         if isinstance(version, bool) or not isinstance(version, int) or not 1 <= version <= VERSION:
-            raise UnreadableSeason(f"This league's season was saved in format version {version}; this app reads "
+            shown = version if type(version) is int and abs(version) < 10**9 else type(version).__name__  # tampered
+            raise UnreadableSeason(f"This league's season was saved in format version {shown}; this app reads "
                                    f"1 to {VERSION}.")
         return SeasonData(**{spec.name: _decode(_HINTS[spec.name], payload[spec.name])
                              for spec in fields(SeasonData) if spec.name in payload})
-    except UnreadableSeason:
+    except UnreadableSeason as exc:                     # its text holds a number or a type name, never contents
+        log.warning("Unreadable season blob (%s)", exc)
         raise
     except Exception as exc:                            # any decode failure: one clean error, never a 500 trace
+        log.warning("Unreadable season blob (%s)", type(exc).__name__)      # the type only: never the contents
         raise UnreadableSeason(f"This league's saved season can't be read ({type(exc).__name__}).") from exc
 
 
