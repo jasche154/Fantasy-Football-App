@@ -1029,8 +1029,10 @@ that week's games on; only scoring a week reads its real points.
 - **Moods and shopping** (`services/replay_mood.py`): every CPU has feelings about his own healthy skill
   players, from the same numbers his price uses (recent games `form_chart` plus hype x `shock_chart`), so what
   he says never contradicts what he accepts. Panicky managers feel a slump 1.8x, gamblers a hot streak 1.8x,
-  steady ones a slump only 0.3x (and stay high on a slumping star). Strength is that signal over his chart
-  (at least 250): worried at -0.08 or below, high at +0.08 or above. After 3 league weeks each CPU shows a **mood
+  steady ones a slump only 0.3x (and stay high on a slumping star, cooler on one who outran draft day).
+  Strength is that signal over his chart (at least 250): worried at -0.08 or below, high at +0.08 or above,
+  and only on the side of the chart his own price is on (worried only when he values the player at or below
+  the chart, high only at or above it), so a mood line or message never points the other way from his price. After 3 league weeks each CPU shows a **mood
   line** in the trade builder ("Worried about X. High on Y."). When a CPU is worried at -0.15 or worse about
   one of his 6 most valuable skill players whose last game fell short of his rate, he may **shop him to you**
   (chance by persona: panicky 75%, gambler 35%, balanced 25%, steady and shark never; one shop per CPU, at
@@ -1038,15 +1040,23 @@ that week's games on; only scoring a week reads its real points.
   tab, and for you only he asks a seeded 5-15% less for that player (panicky 9%, gambler 7%, balanced 6%,
   plus more the more worried he is). The discount is applied once, in the CPU's value test
   (`replay_trade_value.tally` via `replay_state.markdowns`), so evaluate, propose, counters and his own offer
-  all see it; it never moves the chart, and the re-trade lock stops you flipping the player. A shopping CPU
-  sends you his offer first. The shop closes after a good game, a trade, or the deadline.
+  all see it; it never moves the chart, and the re-trade lock stops you flipping the player. While the shop is
+  open the player is yours to buy: no other CPU can trade for him, and the shopping CPU sends you his offer
+  first. The shop stays open week to week while he stays that worried; it closes after a good game, once the
+  trade deadline week is over (no shop opens after it), or as soon as the player leaves his active roster
+  (a trade, a drop or IR). No shop opens for a player who is on IR or was traded in the last 2 weeks.
 - **League chat** (`services/replay_chat.py`, lines in `services/replay_chat_lines.json`): a one-way group
   chat under League > Chat (an unread dot on the League tab). After each week every CPU may say one thing:
   a championship or final loss, clinching or elimination, an upset (beating a team 4+ places above him, from
   the league's 4th week), a
-  3+ game streak, a starter's huge game (25+ and 1.75x his rate) or dud (40% of a 10+ rate; never a player
-  who is hurt or scored 0), or the result itself (close under 10 points, a blowout from 25). Your opponent
-  always talks to you; the others post now and then, at most 5 lines a week. A third manager may react to a
+  3+ game streak, a starter's huge game (22% of the league's median team score and 1.75x his rate) or dud
+  (40% of a 10+ rate; never a player who scored 0 or might be hurt: a tag that week or the next, no
+  projection next week, a snap share under 60% of his season median, or no snap counts to tell), or the
+  result itself (close under 9% of the median team score, a blowout from 22%: about 10 and 25 points in a
+  half-PPR league, more in a high-scoring one). The final's champion and runner-up don't talk margins after
+  a tied final. Your opponent talks to you; the others post now and then, at most 5 lines a week, the rare
+  news kept first (title, clinching, elimination, then your opponent's line, then the rest in a seeded order),
+  and a line that would run past 140 characters with long names gives way to one that fits. A third manager may react to a
   trade (at most 2 a week), a shopping CPU messages you, and every CPU offer carries a one-line reason in
   his voice (worried about a player, high on yours, short at a position, a counter, or a value pitch).
   In a league that started mid-season (or a simulated one) all of this counts the league's own weeks, and

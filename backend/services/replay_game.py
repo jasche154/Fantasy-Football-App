@@ -146,7 +146,8 @@ def _wednesday(state: State, settings: Settings, data: SeasonData, seed: int) ->
 def _after_games(state: State, settings: Settings, data: SeasonData, seed: int) -> State:
     """The chat about the week just scored, then this week's shops and the shopping managers' messages."""
     know = knowledge(state, settings, data, seed=seed)
-    state = replay_chat.after_week(state, settings, know, seed)
+    played = data.as_of(state.results[-1].week + 1)     # the games just scored are known now (snap counts, tags)
+    state = replay_chat.after_week(state, settings, know, seed, played)
     state, opened = replay_mood.refresh_shops(state, settings, know, seed, len(state.results))  # league weeks
     return replay_chat.shop_lines(state, opened, know, seed)
 
