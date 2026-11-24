@@ -30,6 +30,7 @@ from database.models import NflGame, PlayerStatsWeekly, TeamGameStats
 from services.projections import REGULAR_SEASON
 
 log = logging.getLogger(__name__)
+_warned: set[tuple[int, str]] = set()     # (season, gameday) already reported: one line, not one a request
 
 FIRST_SEASON = 2018                         # ESPN and Sleeper have no pre-game projections before it
 SUPPORTED_SEASONS = range(FIRST_SEASON, 2026)   # complete when this was written; replay_seasons() grows past it
@@ -49,7 +50,9 @@ def _last_scored(session: Session, season: int) -> date | None:
     try:
         return date.fromisoformat(day[:10]) if day else None
     except ValueError:
-        log.warning("unreadable gameday %r in season %s: no unscored game is treated as not played", day[:40], season)
+        if (season, day) not in _warned:
+            _warned.add((season, day))
+            log.warning("unreadable gameday %r in season %s: no unscored game is treated as not played", day[:40], season)
         return None
 
 
