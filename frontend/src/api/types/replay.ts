@@ -38,6 +38,8 @@ export interface ReplayTeamRef {
   is_user: boolean;
   /** A one-line hint at how a CPU trades (its persona stays hidden); null for the user and before 3 weeks. */
   tendency: string | null;
+  /** Who a CPU is down on and high on right now ("Worried about X. High on Y."); null for the user, early on or with no feelings. */
+  mood: string | null;
 }
 
 export interface ReplayPlayerRef {
@@ -388,6 +390,8 @@ export interface ReplaySummary {
   matchup: ReplayHeadline | null;
   pending: { claims: number; offers: number };
   champion: ReplayTeamRef | null;
+  /** When the league was made: with its id it names the league, even after a deleted league's id is reused. */
+  created_at: string | null;
   updated_at: string | null;
   /** The user's IR players who lost their tag: adds, claims and trades are refused while non-empty. */
   ir_blocked: ReplayPlayerRef[];
@@ -402,6 +406,8 @@ export interface ReplaySummary {
   sim_from: number | null;
   /** The first week the league plays (later than 1 for a live league started "now"); earlier weeks are not league weeks. */
   start_week: number;
+  /** Lines in the league chat so far (GET chat total), for the unread dot. */
+  chat: number;
 }
 
 /** What every POST under /games answers; `events` is what the action caused, oldest first. */

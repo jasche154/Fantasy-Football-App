@@ -3,7 +3,8 @@
 `evaluate` is deterministic: a ValueError for input that cannot be a trade, else a `Verdict` whose decline
 lists its reasons. Every CPU team in the deal must pass both of these, on point-in-time values only (`know`):
 
-1. Value. `replay_trade_value.tally` on its persona's private values scores >= 0: what it gets (plus the
+1. Value. `replay_trade_value.tally` on its persona's private values (less the discount on a player it is
+   shopping to the user, `replay_state.markdowns`: the one place a shop changes a price) scores >= 0: what it gets (plus the
    best-player premium, a freed roster spot, half its lineup gain or its full lineup loss) against what it
    gives x a multiple x OUT_MARGIN (a 3% margin): 1.00 (normal) or 1.08 (hard) against the user, 0.95
    against another CPU.
@@ -242,7 +243,7 @@ def _side(state: State, settings: Settings, know: Knowledge, team: Team, other: 
     own_cuts = tuple(pid for pid in (cut or ()) if pid not in receives)
     per_week = gain / max(1e-9, sum(rv.horizon(know, settings).weights.values()))
     counted = tv.tally(know, team.persona, sends, kept, own_cuts, per_week, needed_multiple(settings, other),
-                       other.is_user, team.hype)
+                       other.is_user, team.hype, rs.markdowns(state, team.id))
     return replace(side, tally=counted, market_ok=tv.market_ok(know, sends, kept, own_cuts))
 
 

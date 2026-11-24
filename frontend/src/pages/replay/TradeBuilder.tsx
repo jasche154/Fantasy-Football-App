@@ -107,6 +107,9 @@ export function TradeBuilder({ game, version, roster, ir, maxPlayers, counterTo,
   const [give, setGive] = useState<number[]>(counterTo ? playerIds(counterTo.get) : []);
   const [get, setGet] = useState<number[]>(counterTo ? playerIds(counterTo.give) : linked && initialWant !== null ? [initialWant] : []);
   const [picked, setPicked] = useState<number[]>([]);
+  // The linked player, until a trade with his manager goes through: then his roster reloads without him, and
+  // that is no news.
+  const [linkedWant, setLinkedWant] = useState(initialWant);
   const [declined, setDeclined] = useState<ReplayVerdict | null>(null);
   const [counter, setCounter] = useState<ReplayOffer | null>(null);
   const theirs = useAsync((signal) => getReplayTeam(game.id, { team_id: partnerId }, signal), [game.id, partnerId, version]);
@@ -126,11 +129,13 @@ export function TradeBuilder({ game, version, roster, ir, maxPlayers, counterTo,
   const isReady = giveIds.length > 0 && getIds.length > 0 && drops.length === Math.max(over, 0);
   const body: ReplayTradeBody | null = isReady ? { to_team: partnerId, give: giveIds, get: getIds, drops } : null;
 
-  // Debounced, and useAsync aborts the request before: the latest selection wins.
+  // Debounced, and useAsync aborts the request before: the latest selection wins. Only a settled key that is still
+  // the selection is sent: after a reload drops a player from it, the lagging key would ask about him.
   const bodyKey = body ? JSON.stringify(body) : '';
   const settledKey = useDebouncedValue(bodyKey, EVALUATE_DELAY_MS);
   const evaluation = useAsync(
-    settledKey ? (signal) => evaluateReplayTrade(game.id, JSON.parse(settledKey) as ReplayTradeBody, signal) : null,
+    settledKey && settledKey === bodyKey
+      ? (signal) => evaluateReplayTrade(game.id, JSON.parse(settledKey) as ReplayTradeBody, signal) : null,
     [game.id, settledKey, version],
   );
   const isEvaluated = settledKey === bodyKey && evaluation.status === 'success';
@@ -155,10 +160,17 @@ export function TradeBuilder({ game, version, roster, ir, maxPlayers, counterTo,
     setGive([]);
     setGet([]);
     setPicked([]);
+    if (partnerId === linked?.team_id) setLinkedWant(null);
     actions.announce({ text: `Trade executed with ${partner}.`, isGood: true });
     if (counterTo) onCounterDone();         // the counter went through: back to a fresh builder
   };
-  const tendency = partners.find((team) => team.team_id === partnerId)?.tendency;
+  const chosen = partners.find((team) => team.team_id === partnerId);
+  const tendency = chosen?.tendency;
+  // A link asked for a player who has left that roster since (traded or dropped): say so instead of a silent blank.
+  const wanted = counterTo === null && linked?.team_id === partnerId ? linkedWant : null;
+  // Not news either when he is now the user's (bought here, or by accepting that manager's offer).
+  const isWantGone = wanted !== null && theirRows.length > 0 && !theirRows.some((row) => row.player.id === wanted)
+    && !myRows.some((row) => row.player.id === wanted);
   const error = actions.errorFor(PROPOSE_KEY);
 
   return (
@@ -169,6 +181,10 @@ export function TradeBuilder({ game, version, roster, ir, maxPlayers, counterTo,
           onChange={(id) => change(() => { setPartnerId(id); setGet([]); })} />
       </div>
       {tendency && <p className="hint">{tendency}</p>}
+      {chosen?.mood && <p className="game-mood"><span className="game-mood__label">Mood</span> {chosen.mood}</p>}
+      <div role="status">
+        {isWantGone && <p className="notice">That player is no longer on {partner}'s roster: pick from who they have now.</p>}
+      </div>
       <div className="replay-trade__sides">
         <RosterPicker title="You give" caption="Your roster" verb="Give" rows={myRows} selected={giveIds} max={maxPlayers}
           onToggle={(id) => change(() => setGive(toggleId(giveIds, id)))} openPlayer={openPlayer} />

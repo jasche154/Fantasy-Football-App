@@ -2,7 +2,8 @@
 
 score = in + premium + spot + 0.5 x lineup - out x multiple x 1.03 (a shark also wants SHARK_MARGIN x out):
 - out: what it sends, at its persona's private value (an emotional CPU's `hype` included); an out player it sends the user counts at least
-  OUT_SELL_SHARE of his healthy chart (the user may know he is back soon).
+  OUT_SELL_SHARE of his healthy chart (the user may know he is back soon). A player the CPU is shopping to
+  the user (`markdown`, replay_mood) counts that share less when sent to the user, before the floor.
 - in: what it receives and keeps, minus its own players it must cut to make room. Depth is worth less than
   quality: when it keeps more players than it sends pieces that matter (worth >= DEPTH_SHARE x its best
   piece in the deal, so a junk throw-in asked of it changes nothing), its least valuable pieces beyond the
@@ -16,7 +17,7 @@ score >= 0 when `market_ok` (the anti-stupid guard on neutral chart values, with
 whatever the persona) holds too.
 Pure: takes a Knowledge and the players, no state.
 """
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from services import replay_personas
@@ -66,22 +67,26 @@ def depth_counted(worth: Sequence[float], sent: Sequence[float]) -> float:
 
 
 def tally(know: Knowledge, persona: str, sends: Sequence[int], kept: Sequence[int], drops: Sequence[int],
-          gain_per_week: float, multiple: float, to_user: bool, hype: float = 1.0) -> Tally:
-    """The CPU sends `sends`, keeps `kept` of what it receives and cuts `drops` (its own players)."""
+          gain_per_week: float, multiple: float, to_user: bool, hype: float = 1.0,
+          markdown: Mapping[int, float] | None = None) -> Tally:
+    """The CPU sends `sends`, keeps `kept` of what it receives and cuts `drops` (its own players).
+    `markdown`: {player id: discount} it is shopping to the user (only applied when `to_user`)."""
+    cut = (markdown or {}) if to_user else {}
+
     def private(pid: int) -> float:
         return replay_personas.private_value(know.by_id[pid], persona, hype)
 
-    def sell(pid: int) -> float:
+    def sell(pid: int, off: float = 0.0) -> float:
         value = know.by_id[pid]
         floor = OUT_SELL_SHARE * value.healthy_chart if to_user and value.out else 0.0
-        return max(private(pid), floor)
+        return max(private(pid) * (1.0 - off), floor)
 
-    sent = sum(sell(pid) for pid in sends)
+    sent = sum(sell(pid, cut.get(pid, 0.0)) for pid in sends)
     received = (depth_counted([private(pid) for pid in kept], [private(pid) for pid in sends])
                 - sum(private(pid) for pid in drops))
     bonus = premium(know, persona, sends, kept)
     spot = SPOT_VALUE * max(0, len(sends) - len(kept))
-    cap = LINEUP_CAP * sent
+    cap = LINEUP_CAP * sum(sell(pid) for pid in sends)     # undiscounted: a shop moves his price by its discount only
     lineup = min(max(LINEUP_PER_WEEK * gain_per_week, -cap), cap)
     out = sent + max(0.0, -bonus)
     margin = SHARK_MARGIN * out if persona == "shark" else 0.0

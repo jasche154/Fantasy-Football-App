@@ -75,7 +75,8 @@ def _season_data(session: Session, settings: Settings, league_id: int) -> Season
 
 
 def _game(row: ReplayLeague, settings: Settings, state: State, data: SeasonData) -> views.Game:
-    return views.Game(row.id, row.name, settings, state, data, row.updated_at.isoformat(), row.seed)
+    return views.Game(row.id, row.name, settings, state, data, row.updated_at.isoformat(), row.seed,
+                      row.created_at.isoformat())
 
 
 def open_game(session: Session, game_id: int) -> views.Game:
@@ -319,6 +320,12 @@ def schedule(game_id: GameId, team_id: int | None = TeamId, session: Session = D
 def activity(game_id: GameId, kind: str | None = Query(None, max_length=80), limit: int = Limit,
              offset: int = Offset, session: Session = Depends(get_session)) -> dict:
     return show(session, game_id, lambda game: league_views.activity(game, kind, limit, offset))
+
+
+@router.get("/games/{game_id}/chat")
+def chat(game_id: GameId, limit: int = Limit, offset: int = Offset, session: Session = Depends(get_session)) -> dict:
+    """The league chat, newest first: the CPUs talk, the user reads."""
+    return show(session, game_id, lambda game: league_views.chat(game, limit, offset))
 
 
 @router.get("/games/{game_id}/players")

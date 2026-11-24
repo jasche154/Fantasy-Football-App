@@ -1,0 +1,265 @@
+import { act, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { ReplayChat, ReplayPage } from '../../api/types';
+import { AppProviders } from '../../App';
+import { json, mockFetch, type MockRoute } from '../../test/mockFetch';
+import { META_ROUTE, renderWithProviders } from '../../test/render';
+import { forgetChatSeen, markChatSeen, readChatSeen } from './chatSeen';
+import { GAME_ID, MOSTERT, OPPONENT_TEAM_ID, summary, teamRef, viewProps } from './fixtures';
+import { GameNav } from './GameNav';
+import { LeagueChat } from './LeagueChat';
+import { LeagueView } from './LeagueView';
+
+const CHAT_PATH = `/api/replay/games/${GAME_ID}/chat`;
+/** This league as the chat's unread count names it (the fixture summary's id and creation stamp). */
+const LEAGUE = { id: GAME_ID, created_at: summary().created_at };
+const SEEN_KEY = `replay-chat-seen:${GAME_ID}`;
+const seen = (count: number, createdAt = LEAGUE.created_at): string => `${createdAt}:${count}`;
+
+function line(overrides: Partial<ReplayChat> = {}): ReplayChat {
+  return { id: 1, week: 4, team: teamRef(2), to_user: false, kind: 'boom', text: `${MOSTERT.name} with 31.2. Love to see it.`,
+    players: [MOSTERT], ...overrides };
+}
+
+function page(results: ReplayChat[], total = results.length): ReplayPage<ReplayChat> {
+  return { total, limit: 25, offset: 0, results };
+}
+
+afterEach(() => window.localStorage.clear());
+
+describe('League chat', () => {
+  it('lists the lines newest first, highlights the ones to the user, and marks them seen', async () => {
+    const lines = [
+      line({ id: 3, team: teamRef(OPPONENT_TEAM_ID), to_user: true, kind: 'close_win', text: 'Whew. By 2.1. Good game Your Team.', players: [] }),
+      line(),
+    ];
+    mockFetch([META_ROUTE, { path: `/api/replay/games/${GAME_ID}/standings`, reply: json({ results: [], regular_season_weeks: 14,
+      playoff_teams: 4, playoff_weeks: [15, 16], byes: 0, seeds_final: false }) }, { path: CHAT_PATH, reply: json(page(lines)) }]);
+    renderWithProviders(<LeagueView {...viewProps({ game: summary({ chat: 2 }) })} />);
+    const user = userEvent.setup();
+
+    expect(screen.getByRole('button', { name: /Chat.*new messages/ })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Chat/ }));
+    const feed = await screen.findByRole('list', { name: 'League chat, newest first' });
+    const items = within(feed).getAllByRole('listitem');
+
+    expect(items[0]).toHaveTextContent('Whew. By 2.1.');
+    expect(items[0]).toHaveTextContent('to you');
+    expect(items[0]).toHaveClass('game-chat__line--to-you');
+    expect(items[1]).not.toHaveClass('game-chat__line--to-you');
+    expect(within(items[1]).getByRole('button', { name: MOSTERT.name })).toBeInTheDocument();
+    expect(readChatSeen(LEAGUE)).toBe(2);
+    expect(screen.queryByText('(new messages)')).not.toBeInTheDocument();
+  });
+
+  it('labels lines with the real NFL week in a simulated league that started mid-season', async () => {
+    const live = summary({ kind: 'live', sim_from: 6, start_week: 6, week: 8, chat: 1 });
+    mockFetch([META_ROUTE, { path: CHAT_PATH, reply: json(page([line({ week: 7, text: 'Two straight. Feels good.' })])) },
+      { path: `/api/replay/games/${GAME_ID}/standings`, reply: json({ results: [], regular_season_weeks: 15, playoff_teams: 4,
+        playoff_weeks: [16, 17], byes: 0, seeds_final: false }) }]);
+    renderWithProviders(<LeagueView {...viewProps({ game: live })} />);
+    await userEvent.setup().click(screen.getByRole('button', { name: /Chat/ }));
+    const item = within(await screen.findByRole('list', { name: 'League chat, newest first' })).getByRole('listitem');
+
+    expect(item).toHaveTextContent('Wk 7');
+    expect(item).toHaveTextContent('Two straight. Feels good.');
+  });
+
+  it('says so when nobody has talked yet', async () => {
+    mockFetch([META_ROUTE, { path: CHAT_PATH, reply: json(page([])) },
+      { path: `/api/replay/games/${GAME_ID}/standings`, reply: json({ results: [], regular_season_weeks: 14, playoff_teams: 4,
+        playoff_weeks: [15, 16], byes: 0, seeds_final: false }) }]);
+    renderWithProviders(<LeagueView {...viewProps()} />);
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Chat' }));
+
+    expect(await screen.findByText('Quiet so far')).toBeInTheDocument();
+  });
+});
+
+describe('GameNav unread dot', () => {
+  it('shows a dot with words on League while the chat has unseen lines', () => {
+    window.localStorage.setItem(SEEN_KEY, seen(3));
+    const { unmount } = renderWithProviders(<GameNav game={summary({ chat: 5 })} view="team" />);
+    expect(screen.getByRole('link', { name: /League.*new messages/ })).toBeInTheDocument();
+    unmount();
+
+    renderWithProviders(<GameNav game={summary({ chat: 3 })} view="team" />);
+    expect(screen.queryByText('(new messages)')).not.toBeInTheDocument();
+  });
+
+  it('still works when storage is blocked, remembering what was read in memory', () => {
+    const blockedRead = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('blocked'); });
+    const blockedWrite = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('blocked'); });
+    try {
+      const blocked = GAME_ID + 500;            // a league no other test has marked in this page's memory
+      renderWithProviders(<GameNav game={summary({ id: blocked, chat: 99 })} view="team" />);
+      expect(screen.getByText('(new messages)')).toBeInTheDocument();
+      act(() => markChatSeen({ id: blocked, created_at: LEAGUE.created_at }, 99));
+      expect(screen.queryByText('(new messages)')).not.toBeInTheDocument();
+    } finally {
+      blockedRead.mockRestore();
+      blockedWrite.mockRestore();
+    }
+  });
+
+  it('clears the dot when storage can be read but not written (a full quota)', () => {
+    const full = GAME_ID + 600;                 // a league no other test has marked
+    const quota = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota'); });
+    try {
+      renderWithProviders(<GameNav game={summary({ id: full, chat: 7 })} view="team" />);
+      expect(screen.getByText('(new messages)')).toBeInTheDocument();
+      act(() => markChatSeen({ id: full, created_at: LEAGUE.created_at }, 7));
+      expect(screen.queryByText('(new messages)')).not.toBeInTheDocument();
+    } finally {
+      quota.mockRestore();
+    }
+  });
+
+  it('writes the count once storage works again after a failed write', () => {
+    const retry = { id: GAME_ID + 700, created_at: LEAGUE.created_at };     // a league no other test has marked
+    // jsdom's Storage takes `localStorage.setItem = ...` as an item: spy on the prototype to make writes throw
+    const full = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota'); });
+    try {
+      markChatSeen(retry, 4);
+      expect(window.localStorage.getItem(`replay-chat-seen:${retry.id}`)).toBeNull();
+    } finally {
+      full.mockRestore();
+    }
+    markChatSeen(retry, 4);
+
+    expect(window.localStorage.getItem(`replay-chat-seen:${retry.id}`)).toBe(seen(4));
+  });
+
+  it("shows the dot in a new league that reuses a deleted league's id", () => {
+    window.localStorage.setItem(SEEN_KEY, seen(140));
+    renderWithProviders(<GameNav game={summary({ chat: 3 })} view="team" />);
+    expect(screen.getByRole('link', { name: /League.*new messages/ })).toBeInTheDocument();
+  });
+
+  it("counts nothing seen from another league with the same id, even a smaller count than this league's chat", () => {
+    window.localStorage.setItem(SEEN_KEY, seen(5, '2026-10-01T08:00:00'));      // the deleted league read 5 of its lines
+    expect(readChatSeen(LEAGUE)).toBe(0);
+    renderWithProviders(<GameNav game={summary({ chat: 7 })} view="team" />);
+    expect(screen.getByRole('link', { name: /League.*new messages/ })).toBeInTheDocument();
+  });
+
+  it('reads an old plain stored number as nothing seen: its league is unknown', () => {
+    window.localStorage.setItem(SEEN_KEY, '3');
+    expect(readChatSeen(LEAGUE)).toBe(0);
+    renderWithProviders(<GameNav game={summary({ chat: 5 })} view="team" />);
+    expect(screen.getByRole('link', { name: /League.*new messages/ })).toBeInTheDocument();
+  });
+
+  it('stores the count with the league it belongs to', () => {
+    markChatSeen(LEAGUE, 4);
+    expect(window.localStorage.getItem(SEEN_KEY)).toBe(seen(4));
+    expect(readChatSeen(LEAGUE)).toBe(4);
+  });
+
+  it("sees another tab's delete when the league id comes back", () => {
+    markChatSeen(LEAGUE, 5);                                    // this tab read the old league's 5 lines
+    window.localStorage.removeItem(SEEN_KEY);                   // another tab deleted it
+    act(() => { window.dispatchEvent(new StorageEvent('storage')); });
+
+    expect(readChatSeen(LEAGUE)).toBe(0);
+    renderWithProviders(<GameNav game={summary({ chat: 5 })} view="team" />);
+    expect(screen.getByRole('link', { name: /League.*new messages/ })).toBeInTheDocument();
+  });
+
+  it("forgets a deleted league's count", () => {
+    window.localStorage.setItem(SEEN_KEY, seen(12));
+    forgetChatSeen(GAME_ID);
+    expect(window.localStorage.getItem(SEEN_KEY)).toBeNull();
+    expect(readChatSeen(LEAGUE)).toBe(0);
+  });
+
+  it('stays hidden on League while the chat is open and the newest lines are still loading', async () => {
+    window.localStorage.setItem(SEEN_KEY, seen(5));
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    mockFetch([META_ROUTE, { path: CHAT_PATH, reply: async () => { await held; return json(page([line()], 7)); } }]);
+    const game = summary({ chat: 7 });
+    renderWithProviders(<><GameNav game={game} view="league" /><LeagueChat {...viewProps({ game })} /></>);
+
+    expect(screen.queryByText('(new messages)')).not.toBeInTheDocument();
+    release();
+    await waitFor(() => expect(readChatSeen(LEAGUE)).toBe(7));
+    expect(screen.queryByText('(new messages)')).not.toBeInTheDocument();
+  });
+});
+
+describe('League chat paging', () => {
+  const many = (offset: number, total = 60) => Array.from({ length: Math.min(25, total - offset) },
+    (_, n) => line({ id: total - offset - n, text: `Line ${total - offset - n}` }));
+
+  function chatRoute(seen: number[], total = 60): MockRoute {
+    return { path: CHAT_PATH, reply: ({ url }) => {
+      const offset = Number(url.searchParams.get('offset'));
+      seen.push(offset);
+      return json({ total, limit: 25, offset, results: many(offset, total) });
+    } };
+  }
+
+  it('keeps focus on the pager in a two-page chat, both ways', async () => {
+    mockFetch([META_ROUTE, chatRoute([], 30)]);
+    renderWithProviders(<LeagueChat {...viewProps({ game: summary({ chat: 30 }) })} />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Older' }));
+    await screen.findByText('26–30 of 30');
+
+    expect(screen.getByRole('button', { name: 'Older' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Newer' })).toHaveFocus();
+
+    await user.click(screen.getByRole('button', { name: 'Newer' }));
+    await screen.findByText('1–25 of 30');
+
+    expect(screen.getByRole('button', { name: 'Newer' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Older' })).toHaveFocus();
+  });
+
+  it('moves no focus on first load or when the game moves on', async () => {
+    mockFetch([META_ROUTE, chatRoute([], 30)]);
+    const { rerender } = renderWithProviders(<LeagueChat {...viewProps({ game: summary({ chat: 30 }) })} />);
+    await screen.findByText('1–25 of 30');
+    expect(document.body).toHaveFocus();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Older' }));
+    await screen.findByText('26–30 of 30');
+    act(() => {
+      const newer = screen.getByRole('button', { name: 'Newer' });     // jsdom keeps focus on a disabled button
+      newer.focus();
+      newer.blur();
+    });
+    rerender(<AppProviders><LeagueChat {...viewProps({ game: summary({ chat: 30 }), version: 1 })} /></AppProviders>);
+    await screen.findByText('1–25 of 30');
+
+    expect(document.body).toHaveFocus();
+  });
+
+  it('keeps focus on a pager button when Newer reaches the first page', async () => {
+    mockFetch([META_ROUTE, chatRoute([])]);
+    renderWithProviders(<LeagueChat {...viewProps({ game: summary({ chat: 60 }) })} />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Older' }));
+    await screen.findByText('26–50 of 60');
+    await user.click(screen.getByRole('button', { name: 'Newer' }));
+    await screen.findByText('1–25 of 60');
+
+    expect(screen.getByRole('button', { name: 'Newer' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Older' })).toHaveFocus();
+  });
+
+  it('goes back to the newest lines when the game moves on', async () => {
+    const offsets: number[] = [];
+    mockFetch([META_ROUTE, chatRoute(offsets)]);
+    const { rerender } = renderWithProviders(<LeagueChat {...viewProps({ game: summary({ chat: 60 }) })} />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Older' }));
+    await screen.findByText('26–50 of 60');
+    rerender(<AppProviders><LeagueChat {...viewProps({ game: summary({ chat: 60 }), version: 1 })} /></AppProviders>);
+
+    expect(await screen.findByText('1–25 of 60')).toBeInTheDocument();
+    expect(offsets).toEqual([0, 25, 0]);
+  });
+});

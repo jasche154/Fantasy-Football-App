@@ -17,8 +17,8 @@ const FILTERS: readonly { label: string; kind?: string }[] = [
   { label: 'Results', kind: 'result,playoffs,champion' },
 ];
 
-/** The event's sentence with each player's name turned into a button that opens his card. */
-function eventText(event: ReplayEvent, onOpen: (playerId: number) => void): ReactNode {
+/** The sentence (an event's or a chat line's) with each player's name turned into a button that opens his card. */
+export function eventText(event: Pick<ReplayEvent, 'text' | 'players'>, onOpen: (playerId: number) => void): ReactNode {
   const byName = new Map(event.players.map((player) => [player.name, player]));
   if (byName.size === 0) return event.text;
   const longestFirst = [...byName.keys()].sort((a, b) => b.length - a.length);

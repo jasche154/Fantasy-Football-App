@@ -182,7 +182,7 @@ def story(client) -> dict:
         seen["played"].append(post(client, game + "/advance", {"step": "play", "week": week}))
     seen["after_end"] = refused(client, game + "/advance", {"step": "play", "week": summary["week"]})
     seen["final"] = {name: get(client, f"{game}/{name}") for name in (
-        "team", "matchup", "scoreboard", "standings", "schedule", "activity", "players", "claims", "trades", "draft")}
+        "team", "matchup", "scoreboard", "standings", "schedule", "activity", "chat", "players", "claims", "trades", "draft")}
     seen["final"]["summary"] = summary
     return seen
 
@@ -342,10 +342,16 @@ def test_responses_have_the_documented_keys(story):
                                        "seeds_final"}
     assert (final["standings"]["playoff_weeks"], final["standings"]["byes"]) == ([15, 16], 0)
     assert set(final["activity"]) == {"total", "limit", "offset", "results"} and final["activity"]["limit"] == 50
+    chat = final["chat"]
+    assert chat["total"] == final["summary"]["chat"] > 0 and chat["results"]
+    assert set(chat["results"][0]) == {"id", "week", "team", "to_user", "kind", "text", "players"}
+    assert [row["id"] for row in chat["results"]] == sorted((row["id"] for row in chat["results"]), reverse=True)
+    assert all(not row["team"]["is_user"] and "{" not in row["text"] for row in chat["results"])
+    assert any(row["to_user"] for row in chat["results"])
     assert set(final["players"]["results"][0]) == WIRE_ROW and final["players"]["week"] == 16
     assert set(final["claims"]) == {"phase", "can_claim", "priority", "waiver_order", "results", "faab"}
     assert final["claims"]["faab"] is None                     # a "wednesday" league
-    assert set(final["trades"]) == {"open", "deadline_week", "max_players", "offers", "results"}
+    assert set(final["trades"]) == {"open", "deadline_week", "max_players", "offers", "results", "shops"}
     assert set(final["draft"]["picks"][0]) == {"overall", "round", "team", "player"}
 
 

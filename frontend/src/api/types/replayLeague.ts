@@ -281,6 +281,31 @@ export interface ReplayOffer {
   get: ReplayPlayerRef[];
   /** The offer this one answers (a counter), else null. */
   counter_to: number | null;
+  /** A CPU offer's one line to the user, in his voice; null otherwise. */
+  message: string | null;
+}
+
+/** A player a worried CPU is shopping to the user this week (a little under his usual price), with his message. */
+export interface ReplayShop {
+  team: ReplayTeamRef;
+  player: ReplayPlayerRef;
+  message: string | null;
+}
+
+export type ReplayChatKind =
+  | 'blowout_win' | 'close_win' | 'close_loss' | 'blowout_loss' | 'boom' | 'bust' | 'streak_win' | 'streak_loss'
+  | 'upset' | 'clinch' | 'eliminated' | 'champion' | 'runner_up' | 'trade_reaction' | 'shop';
+
+/** One line in the league chat (the CPUs talk, the user reads). */
+export interface ReplayChat {
+  id: number;
+  week: number;
+  team: ReplayTeamRef;
+  /** Addressed to the user: his opponent's line, or a manager shopping him a player. */
+  to_user: boolean;
+  kind: ReplayChatKind;
+  text: string;
+  players: ReplayPlayerRef[];
 }
 
 /** A CPU offer the user can answer: a preview verdict from the user's side, or a note saying why not. */
@@ -296,6 +321,8 @@ export interface ReplayTrades {
   offers: ReplayPendingOffer[];
   /** Every other offer and trade, newest first. */
   results: ReplayOffer[];
+  /** Players CPUs are shopping to the user now; empty once trades close. */
+  shops: ReplayShop[];
 }
 
 /** POST trades/evaluate and trades/propose body (player ids). */

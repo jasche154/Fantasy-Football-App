@@ -16,6 +16,12 @@ than one attempt; the re-trade lock keeps it from moving the same players again.
    chart gap and take the accepted one with the best `Verdict.score` (the lowest CPU net in the deal); two
    CPUs only make a deal that nets both at least SEEK_SCORE.
 
+A CPU shopping a player to the user (`State.shops`, replay_mood) offers first: the best deal that includes
+that player, at his shop discount (no roll), once per shop: a player he has offered the user since the shop
+opened (`Shop.opened`; an offer of his to the user with him in `give`) is not offered again while it stays
+open, though the user may still propose for him at the discount; a shop that closes and later reopens sends
+a new offer. Otherwise the persona rolls above decide. While his shop is open
+a shopped player is the user's to buy: CPU-CPU deals never move him, though they run first.
 An offer to the user is stored as a pending Offer; nothing changes hands until `replay_trades.respond`.
 """
 from collections.abc import Sequence
@@ -49,11 +55,12 @@ def _order(value: ReplayValue, look: str) -> tuple:
     return -first, -value.chart, value.player_id
 
 
-def _tradable(state: State, know: Knowledge, team: Team, look: str = "") -> list[ReplayValue]:
-    """The team's TOP_SKILL skill players that may move (not re-trade locked; out players may: an IR slot is
-    not on the roster), in search order."""
+def _tradable(state: State, know: Knowledge, team: Team, look: str = "",
+              held_back: frozenset[int] = frozenset()) -> list[ReplayValue]:
+    """The team's TOP_SKILL skill players that may move (not re-trade locked, not `held_back`; out players may:
+    an IR slot is not on the roster), in search order."""
     values = [value for pid in team.roster if (value := know.by_id[pid]).position in SKILL
-              and not rs.retrade_locked(state, pid)]
+              and not rs.retrade_locked(state, pid) and pid not in held_back]
     return sorted(values, key=lambda v: _order(v, look))[:TOP_SKILL]
 
 
@@ -74,8 +81,9 @@ def _candidates(state: State, settings: Settings, know: Knowledge, sender: Team,
     def look(team: Team, other: Team) -> str:
         return "sell" if team.persona == "shark" and not team.is_user else "buy" if other.persona == "shark" else ""
 
-    mine = _packages(_tradable(state, know, sender, look(sender, receiver)))
-    theirs = _packages(_tradable(state, know, receiver, look(receiver, sender)))
+    shopped = frozenset() if sender.is_user else frozenset(shop.player_id for shop in state.shops)   # the user's to buy
+    mine = _packages(_tradable(state, know, sender, look(sender, receiver), shopped))
+    theirs = _packages(_tradable(state, know, receiver, look(receiver, sender), shopped))
     found = []
     for give in mine:
         for get in theirs:
@@ -92,10 +100,12 @@ def _candidates(state: State, settings: Settings, know: Knowledge, sender: Team,
 
 
 def _best_deal(state: State, settings: Settings, know: Knowledge, sender: Team, receiver: Team,
-               scored: int = MAX_SCORED) -> Deal | None:
-    """The accepted deal with the best score among the `scored` candidates with the smallest gap."""
+               scored: int = MAX_SCORED, need: int | None = None) -> Deal | None:
+    """The accepted deal with the best score among the `scored` candidates with the smallest gap (only those
+    where the receiver sends `need`, when given)."""
     best: tuple[float, Deal] | None = None
-    for give, get in _candidates(state, settings, know, sender, receiver)[:scored]:
+    found = _candidates(state, settings, know, sender, receiver)
+    for give, get in [deal for deal in found if need is None or need in deal[1]][:scored]:
         verdict = rt.evaluate(state, settings, know, sender.id, receiver.id, give, get)
         if not verdict.accepted or (not sender.is_user and verdict.score < SEEK_SCORE):
             continue
@@ -123,11 +133,24 @@ def _cpu_attempt(state: State, settings: Settings, know: Knowledge, dice: np.ran
     return state
 
 
+def _offered_since(state: State, team_id: int, user_id: int, player_id: int, week: int) -> bool:
+    """Has this CPU offered the user that player since `week` (this shop's opening week)?"""
+    return any(offer.from_team == team_id and offer.to_team == user_id and offer.week >= week
+               and player_id in offer.give for offer in state.offers)
+
+
 def _user_offer(state: State, settings: Settings, know: Knowledge, dice: np.random.Generator) -> State:
     """At most one new offer to the user a week, from the first free CPU whose offer rate hits."""
     user, free = next((team for team in state.teams if team.is_user), None), _free_cpus(state)
     if user is None or any(offer.week == state.week and offer.to_team == user.id for offer in state.offers):
         return state
+    for team in free:                               # a shopping CPU offers his player first, once per shop
+        live = rs.markdowns(state, team.id)
+        for pid in [shop.player_id for shop in state.shops if shop.team_id == team.id and shop.player_id in live
+                    and not _offered_since(state, team.id, user.id, shop.player_id, shop.opened)]:
+            deal = _best_deal(state, settings, know, user, team, need=pid)
+            if deal is not None:
+                return rt.record_offer(state, team.id, user.id, deal[1], deal[0], "pending")
     rolls = dice.random(len(free))
     order = dice.permutation(len(free))
     partner = next((free[int(i)] for i in order if rolls[int(i)] < replay_personas.offer_rate(free[int(i)].persona)),

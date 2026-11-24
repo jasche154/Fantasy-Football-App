@@ -248,6 +248,40 @@ body:has(.game) { background: var(--game-bg); }
   .scorebug__exit, .game-nav__tab { transition: none; }
 }
 
+/* League chat, manager quotes, moods and the shopping strip: each line is tinted with its manager's team colour. */
+.game .game-chat { display: grid; gap: var(--space-4); margin: 0; padding: 0; list-style: none; }
+.game .game-chat__line { display: grid; gap: var(--space-1); max-width: 40rem; }
+.game .game-chat__meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); margin: 0; font-size: var(--text-sm); font-weight: 650; }
+.game .game-chat__week { color: var(--game-ink-dim); font-size: var(--text-xs); font-weight: 700; }
+.game .game-chat__to { padding: 0 var(--space-2); border-radius: var(--radius-pill); color: var(--color-accent-contrast);
+  background: var(--color-accent); font-size: var(--text-2xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+.game .game-chat__bubble, .game .game-quote { margin: 0; padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--game-line); border-inline-start: 3px solid var(--team, var(--game-line-strong));
+  border-radius: 4px var(--game-radius) var(--game-radius) var(--game-radius);
+  background: color-mix(in srgb, var(--team, var(--game-ink-dim)) 7%, var(--game-panel)); line-height: 1.45; }
+.game .game-chat__line--to-you { margin-inline-start: var(--space-4); }
+.game .game-chat__line--to-you .game-chat__bubble { border-color: var(--color-accent); border-inline-start-color: var(--team, var(--color-accent));
+  box-shadow: 0 0 0 1px var(--color-accent-soft); }
+.game .game-quote { font-style: italic; }
+.game .game-quote > p { margin: 0; }
+.game .game-quote > p::before { content: '\201C'; }
+.game .game-quote > p::after { content: '\201D'; }
+.game .game-mood { margin: 0; font-size: var(--text-sm); }
+.game .game-mood__label { margin-inline-end: var(--space-1); color: var(--game-ink-dim); font-size: var(--text-2xs); font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.05em; }
+.game .game-shops { display: grid; gap: var(--space-3); margin-block-start: var(--space-6); }
+.game .game-shops > h2 { margin: 0; }
+.game .game-shops__list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr)); gap: var(--space-3);
+  margin: 0; padding: 0; list-style: none; }
+.game .game-shops__item { display: grid; align-content: start; gap: var(--space-2); padding: var(--space-3);
+  border: 1px solid var(--game-line); border-radius: var(--game-radius); background: var(--game-panel); }
+.game .game-shops__who { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1); margin: 0; font-weight: 650; }
+.game .game-shops__go { justify-self: start; }
+.game .game-unread { display: inline-block; width: 0.5rem; height: 0.5rem; margin-inline-start: var(--space-1); border-radius: 50%;
+  background: var(--color-accent); vertical-align: middle; }
+.game .game-nav__tab .game-unread { position: absolute; top: 8px; left: calc(50% + 8px); margin: 0; }
+@media (min-width: 900px) { .game .game-nav__tab .game-unread { position: static; } }
+
 /* ---------- Simulated seasons (live / future leagues) and buzz ----------
    One block on purpose: the badge, the Sim week marker and the buzz rumours. Quiet, never the injury red or the hype
    amber: a word or icon always carries the meaning, the colour never does alone. */

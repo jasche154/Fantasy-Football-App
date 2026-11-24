@@ -3,9 +3,11 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { ReplayPendingOffer, ReplaySummary, ReplayTrades, ReplayVerdict } from '../../api/types';
 import { json, mockFetch, type MockReply, type MockRequest, type MockRoute } from '../../test/mockFetch';
+import { AppProviders } from '../../App';
 import { META_ROUTE, renderWithProviders } from '../../test/render';
 import {
-  actionResult, COLLINS, COOK, ETIENNE, GAME_ID, MCCAFFREY, MOSTERT, OLAVE, playerRef, rosterRow, summary, tagged, team, teamRef, USER_TEAM_ID, viewProps,
+  actionResult, COLLINS, COOK, ETIENNE, GAME_ID, MCCAFFREY, MOSTERT, OLAVE, playerRef, rosterRow, summary, tagged, team, teamRef, USER_TEAM_ID,
+  useTestHub, viewProps,
 } from './fixtures';
 import type { ReplayViewProps } from './shared';
 import { TradesView } from './TradesView';
@@ -18,6 +20,8 @@ const RESPOND_PATH = `${TRADES_PATH}/offers/61/respond`;
 /** The partner the builder starts on (the first CPU team) and the one that made the offer. */
 const GHOSTS = teamRef(1);
 const BRIGADE = teamRef(2);
+/** A player on neither the user's roster nor a CPU roster here (traded or dropped elsewhere since). */
+const WADDLE = playerRef(190, 'Jaylen Waddle', 'WR', 'MIA');
 
 function verdict(overrides: Partial<ReplayVerdict> = {}): ReplayVerdict {
   return {
@@ -30,11 +34,11 @@ function verdict(overrides: Partial<ReplayVerdict> = {}): ReplayVerdict {
 /** Blitz Brigade offers Mostert for Etienne. */
 function offer(overrides: Partial<ReplayPendingOffer> = {}): ReplayPendingOffer {
   return { id: 61, week: 5, status: 'pending', from_team: BRIGADE, to_team: teamRef(USER_TEAM_ID), give: [MOSTERT], get: [ETIENNE],
-    verdict: verdict(), note: null, counter_to: null, ...overrides };
+    verdict: verdict(), note: null, counter_to: null, message: null, ...overrides };
 }
 
 function trades(overrides: Partial<ReplayTrades> = {}): ReplayTrades {
-  return { open: true, deadline_week: 11, max_players: 3, offers: [], results: [], ...overrides };
+  return { open: true, deadline_week: 11, max_players: 3, offers: [], results: [], shops: [], ...overrides };
 }
 
 /** GET team: the user's roster, or a CPU roster of Mostert and Collins (locked). */
@@ -59,7 +63,7 @@ async function tickBothSides(user: ReturnType<typeof userEvent.setup>) {
 describe('TradesView offers', () => {
   it('shows an offer with its values, fairness and lineup gain, and the history with a status', async () => {
     const openPlayer = vi.fn();
-    const past = { id: 50, week: 3, status: 'declined' as const, from_team: teamRef(USER_TEAM_ID), to_team: GHOSTS, give: [MCCAFFREY], get: [COLLINS], counter_to: null };
+    const past = { id: 50, week: 3, status: 'declined' as const, from_team: teamRef(USER_TEAM_ID), to_team: GHOSTS, give: [MCCAFFREY], get: [COLLINS], counter_to: null, message: null };
     const { user } = renderTrades(trades({ offers: [offer()], results: [past] }), [], { props: { openPlayer } });
 
     const card = await screen.findByRole('listitem', { name: 'Offer from Blitz Brigade' });
@@ -139,6 +143,24 @@ describe('TradesView offers', () => {
 });
 
 describe('TradesView builder', () => {
+  it('never re-checks a deal with a player who left the roster while the screen reloads after a trade', async () => {
+    let isEtienneGone = false;          // accepted elsewhere (an offer card): the next load no longer has him
+    const userTeam = () => (isEtienneGone ? team({ results: team().results.filter((row) => row.player.id !== ETIENNE.id) }) : team());
+    const api = mockFetch([META_ROUTE, { method: 'POST', path: EVALUATE_PATH, reply: json({ verdict: verdict() }) },
+      { path: `${PATH}/team`, reply: (request) => (Number(request.url.searchParams.get('team_id')) === USER_TEAM_ID ? json(userTeam()) : teamReply(request)) },
+      { path: TRADES_PATH, reply: json(trades()) }]);
+    const { rerender } = renderWithProviders(<TradesView {...viewProps()} />);
+    await tickBothSides(userEvent.setup());
+    expect(await screen.findByText(/You give 31\.5 value, get 35\.0\./)).toBeInTheDocument();
+
+    isEtienneGone = true;
+    rerender(<AppProviders><TradesView {...viewProps({ version: 1 })} /></AppProviders>);
+    await waitFor(() => expect(screen.queryByRole('checkbox', { name: 'Give Travis Etienne' })).not.toBeInTheDocument());
+    await new Promise((resolve) => { setTimeout(resolve, 500); });       // past the evaluation's debounce
+
+    expect(api.callsTo(EVALUATE_PATH, 'POST')).toHaveLength(1);         // the server would refuse him: a 422
+  });
+
   it('evaluates as soon as both sides have a player and shows the verdict', async () => {
     const declined = verdict({
       accepted: false, fair_label: 'big_win', percent: 0.4, their_drops: [COLLINS],
@@ -397,7 +419,7 @@ describe('TradesView counters', () => {
     const COUNTER_PATH = `${TRADES_PATH}/offers/61/counter`;
     const no = verdict({ accepted: false, reasons: ['Value is too far apart.'], suggestion: 'Add Nico Collins to make this fair.' });
     const back = { id: 71, week: 5, status: 'pending' as const, from_team: BRIGADE, to_team: teamRef(USER_TEAM_ID),
-      give: [MOSTERT], get: [MCCAFFREY], counter_to: 70 };
+      give: [MOSTERT], get: [MCCAFFREY], counter_to: 70, message: null };
     const other = offer({ id: 62, from_team: GHOSTS });
     const { user } = renderTrades(trades({ offers: [offer(), other] }), [
       { method: 'POST', path: EVALUATE_PATH, reply: json({ verdict: no }) },
@@ -420,7 +442,7 @@ describe('TradesView counters', () => {
   it("shows the CPU's counter after it turns a proposal down", async () => {
     const no = verdict({ accepted: false, reasons: ['Value is too far apart.'] });
     const counter = { id: 70, week: 5, status: 'pending' as const, from_team: GHOSTS, to_team: teamRef(USER_TEAM_ID),
-      give: [COLLINS], get: [ETIENNE], counter_to: 69 };
+      give: [COLLINS], get: [ETIENNE], counter_to: 69, message: null };
     const { user } = renderTrades(trades(), [
       { method: 'POST', path: EVALUATE_PATH, reply: json({ verdict: no }) },
       { method: 'POST', path: PROPOSE_PATH, reply: json({ ...actionResult(), verdict: no, executed: false, counter }) },
@@ -431,5 +453,160 @@ describe('TradesView counters', () => {
 
     const shown = (await screen.findByText('Gridiron Ghosts countered:')).closest('p');
     expect(shown).toHaveTextContent('you give Travis Etienne for Nico Collins. Answer it under Offers for you.');
+  });
+});
+
+describe('TradesView manager voices', () => {
+  it('quotes the manager above his offer', async () => {
+    renderTrades(trades({ offers: [offer({ message: 'Man, I am kinda worried about Raheem Mostert. Take him?' })] }));
+    const card = await screen.findByRole('listitem', { name: 'Offer from Blitz Brigade' });
+    expect(within(card).getByText('Man, I am kinda worried about Raheem Mostert. Take him?').closest('blockquote')).toBeInTheDocument();
+  });
+
+  it('lists the players shopped to the user, with a link that opens the builder on that manager and player', async () => {
+    const shop = { team: BRIGADE, player: MOSTERT, message: 'Selling Raheem Mostert. Make an offer.' };
+    renderTrades(trades({ shops: [shop] }));
+    const strip = await screen.findByRole('region', { name: 'Shopping to you' });
+
+    expect(within(strip).getByText('Selling Raheem Mostert. Make an offer.')).toBeInTheDocument();
+    expect(within(strip).getByRole('link', { name: /Make an offer to Blitz Brigade for Raheem Mostert/ }))
+      .toHaveAttribute('href', `#/play?game=${GAME_ID}&view=trades&with=2&want=${MOSTERT.id}`);
+    expect(within(strip).queryByText(/%/)).not.toBeInTheDocument();
+  });
+
+  it('opens the builder on the shopped player from the strip, moves focus there, and does it again on a second press', async () => {
+    const { user } = renderTrades(trades({ shops: [{ team: BRIGADE, player: MOSTERT, message: null }] }));
+    const go = await screen.findByRole('link', { name: /Make an offer to Blitz Brigade for Raheem Mostert/ });
+
+    await user.click(go);
+    await waitFor(() => expect(screen.getByText('Propose a trade')).toHaveFocus());
+    const wanted = await screen.findByRole('checkbox', { name: 'Get Raheem Mostert' });
+    expect(wanted).toBeChecked();
+    await user.click(wanted);
+    expect(wanted).not.toBeChecked();
+
+    await user.click(go);
+    await waitFor(() => expect(screen.getByText('Propose a trade')).toHaveFocus());
+    expect(await screen.findByRole('checkbox', { name: 'Get Raheem Mostert' })).toBeChecked();
+  });
+
+  it('says nothing about a missing player once the shop trade goes through and his roster reloads without him', async () => {
+    let traded = false;
+    const roster = ({ url }: MockRequest): MockReply => {
+      const teamId = Number(url.searchParams.get('team_id'));
+      if (teamId === USER_TEAM_ID) return json(team());
+      const rows = [rosterRow(MOSTERT, 'RB', { value: 35 }), rosterRow(COLLINS, 'WR', { trade_locked: true })];
+      return json(team({ team: teamRef(teamId), results: traded ? rows.slice(1) : rows }));
+    };
+    const executed = () => { traded = true; return json({ ...actionResult(), verdict: verdict(), executed: true }); };
+    mockFetch([META_ROUTE, { method: 'POST', path: EVALUATE_PATH, reply: json({ verdict: verdict() }) },
+      { method: 'POST', path: PROPOSE_PATH, reply: executed },
+      { path: TRADES_PATH, reply: json(trades({ shops: [{ team: BRIGADE, player: MOSTERT, message: null }] })) },
+      { path: `${PATH}/team`, reply: roster }]);
+    function Hub() {
+      return <TradesView {...viewProps(useTestHub())} />;
+    }
+    renderWithProviders(<Hub />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('link', { name: /Make an offer to Blitz Brigade for Raheem Mostert/ }));
+    await user.click(await screen.findByRole('checkbox', { name: 'Give Travis Etienne' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Propose trade' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Propose trade' }));
+
+    expect(await screen.findByText('Trade executed with Blitz Brigade.')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('checkbox', { name: 'Get Raheem Mostert' })).not.toBeInTheDocument());
+    expect(screen.getByRole('checkbox', { name: /Get Nico Collins/ })).toBeInTheDocument();
+    expect(screen.queryByText(/no longer on Blitz Brigade's roster/)).not.toBeInTheDocument();
+  });
+
+  it("opens a blank counter after a shop was picked: not the shop's manager and player", async () => {
+    const { user } = renderTrades(trades({ shops: [{ team: GHOSTS, player: MOSTERT, message: null }], offers: [offer()] }));
+    await user.click(await screen.findByRole('link', { name: /Make an offer to Gridiron Ghosts for Raheem Mostert/ }));
+    expect(await screen.findByRole('checkbox', { name: 'Get Raheem Mostert' })).toBeChecked();
+
+    await user.click(screen.getByRole('button', { name: 'Counter offer from Blitz Brigade' }));
+    expect(await screen.findByText("Counter Blitz Brigade's offer")).toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: 'Cancel counter' }));
+
+    expect(await screen.findByText('Propose a trade')).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Trade with' })).toHaveValue(String(GHOSTS.team_id));
+    expect(await screen.findByRole('checkbox', { name: 'Get Raheem Mostert' })).not.toBeChecked();
+  });
+
+  it("says nothing about the linked player once the user accepts that manager's offer for him", async () => {
+    let accepted = false;
+    const roster = ({ url }: MockRequest): MockReply => {
+      const teamId = Number(url.searchParams.get('team_id'));
+      const mine = team();
+      if (teamId === USER_TEAM_ID) {
+        return json(accepted ? { ...mine, results: [...mine.results.filter((row) => row.player.id !== ETIENNE.id), rosterRow(MOSTERT, 'RB')] } : mine);
+      }
+      const rows = [rosterRow(MOSTERT, 'RB', { value: 35 }), rosterRow(COLLINS, 'WR', { trade_locked: true })];
+      return json(team({ team: teamRef(teamId), results: accepted ? rows.slice(1) : rows }));
+    };
+    const accept = () => { accepted = true; return json({ ...actionResult(), accepted: true, expired: false, message: null, verdict: null }); };
+    mockFetch([META_ROUTE, { method: 'POST', path: RESPOND_PATH, reply: accept },
+      { path: TRADES_PATH, reply: () => json(trades({ offers: accepted ? [] : [offer()] })) }, { path: `${PATH}/team`, reply: roster }]);
+    function Hub() {
+      return <TradesView {...viewProps(useTestHub())} />;
+    }
+    renderWithProviders(<Hub />, { hash: `#/play?game=${GAME_ID}&view=trades&with=2&want=${MOSTERT.id}` });
+    const user = userEvent.setup();
+    expect(await screen.findByRole('checkbox', { name: 'Get Raheem Mostert' })).toBeChecked();
+    await user.click(await screen.findByRole('button', { name: 'Accept offer from Blitz Brigade' }));
+
+    expect(await screen.findByText('Trade executed with Blitz Brigade.')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('checkbox', { name: 'Get Raheem Mostert' })).not.toBeInTheDocument());
+    expect(await screen.findByRole('checkbox', { name: 'Give Raheem Mostert' })).toBeInTheDocument();
+    expect(screen.queryByText(/no longer on Blitz Brigade's roster/)).not.toBeInTheDocument();
+  });
+
+  it("keeps the linked player's notice after a trade with another manager", async () => {
+    const executed = { ...actionResult(), verdict: verdict(), executed: true };
+    const { user } = renderTrades(trades(), [
+      { method: 'POST', path: EVALUATE_PATH, reply: json({ verdict: verdict() }) },
+      { method: 'POST', path: PROPOSE_PATH, reply: json(executed) },
+    ], { hash: `#/play?game=${GAME_ID}&view=trades&with=2&want=${WADDLE.id}` });
+    expect(await screen.findByText(/no longer on Blitz Brigade's roster/)).toBeInTheDocument();
+    const partner = screen.getByRole('combobox', { name: 'Trade with' });
+
+    await user.selectOptions(partner, 'Gridiron Ghosts');
+    await tickBothSides(user);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Propose trade' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Propose trade' }));
+    expect(await screen.findByText('Trade executed with Gridiron Ghosts.')).toBeInTheDocument();
+    await user.selectOptions(partner, 'Blitz Brigade');
+
+    expect(await screen.findByText(/no longer on Blitz Brigade's roster/)).toBeInTheDocument();
+  });
+
+  it('says so when the shopped player is no longer on that roster', async () => {
+    const { user } = renderTrades(trades({ shops: [{ team: BRIGADE, player: WADDLE, message: null }] }));
+    await user.click(await screen.findByRole('link', { name: /Make an offer to Blitz Brigade for Jaylen Waddle/ }));
+
+    expect(await screen.findByText(/no longer on Blitz Brigade's roster/)).toBeInTheDocument();
+  });
+
+  it('shows the strip and an offer quote in a simulated league that started mid-season', async () => {
+    const live = summary({ kind: 'live', sim_from: 6, start_week: 6, week: 9 });
+    const shop = { team: BRIGADE, player: MOSTERT, message: 'Selling Raheem Mostert. Make an offer.' };
+    renderTrades(trades({ shops: [shop], offers: [offer({ week: 9, message: 'Need a back. You in?' })] }), [], { props: { game: live } });
+
+    expect(await screen.findByRole('region', { name: 'Shopping to you' })).toBeInTheDocument();
+    const card = await screen.findByRole('listitem', { name: 'Offer from Blitz Brigade' });
+    expect(card).toHaveTextContent('week 9');
+    expect(within(card).getByText('Need a back. You in?').closest('blockquote')).toBeInTheDocument();
+  });
+
+  it('shows the partner\'s mood in the builder', async () => {
+    const moody = { ...summary(), teams: summary().teams.map((t) => (t.team_id === 1 ? { ...t, mood: 'Worried about Nico Collins.' } : t)) };
+    renderTrades(trades(), [], { props: { game: moody } });
+    expect(await screen.findByText('Worried about Nico Collins.')).toBeInTheDocument();
+  });
+
+  it('hides the strip once trades close', async () => {
+    renderTrades(trades({ open: false, shops: [{ team: BRIGADE, player: MOSTERT, message: null }] }));
+    expect(await screen.findByText(/trade deadline has passed/)).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Shopping to you' })).not.toBeInTheDocument();
   });
 });

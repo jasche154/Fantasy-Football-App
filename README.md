@@ -218,7 +218,7 @@ Open <http://localhost:5173>. The UI talks to `http://localhost:8000` by default
 | **Player page** | Weekly chart of actual vs expected points, game log, NGS stats, projection, signals. **Position percentiles** rank his season stats against his position (green = good, red = bad, grey for context stats like aDOT; "Small sample" until he has enough volume). **What changed** compares his last 3 games with the earlier games (snap share, target share, air-yard share, targets, carries, pass attempts) and flags big moves |
 | **Odds & Props** | Pick a week: every game's kickoff, closing spread and total, and each team's implied total. **Show props** opens the player props stored for that game (expected passing/rushing/receiving yards, receptions, TDs implied by the lines) with how long before kickoff they were bought. Props appear game by game on game day; before that the page says why they're missing |
 | **Ask AI** | Ask questions in plain English; each answer shows which tools it used |
-| **Replay League** | A game: replay a past season against CPU managers. **Start:** under **New league** pick what to play (a past season, or a simulated one: the live season with **Full season** or **Jump in now**, or next season), then a season (or Random), 4–16 teams, the **league format** (Standard, Superflex or Double flex as a start, then 0–3 starters per slot: QB, RB, WR, TE, FLEX, SFLX (superflex: a QB, RB, WR or TE), K, DST; at least one QB or SFLX, at most 12 starters; in superflex the CPUs value and draft quarterbacks much earlier), the **scoring** (PPR, half or standard as a base, then points per reception 0–1.5, a TE premium of +0.5 or +1 per catch, 4 or 6 points per passing TD and −1 or −2 per turnover; played games always score exactly, but with custom settings the pre-game projections are estimates converted from the sites' PPR and standard numbers), your draft slot, the playoff weeks (14–16, 15–17 by default, or 16–18 when the season has a week 18) and how many teams make the playoffs (4–8, default 4 under 10 teams, 6 under 14, else 8), waivers (Wednesday waivers; FAAB bidding: $100 per team, blind bids, the highest bid wins, ties go by waiver priority, winning bids show in the activity log; or free agency only) and difficulty, then **Create league and draft**. Saved leagues are listed above the form (Resume, Delete). **Draft:** the board lists who is left by **Rank** (the preseason expert rank, or the ADP order for 2018–2019, as Yahoo shows a rank next to ADP), with the round that rank implies (**Rd**), ADP and the preseason projection (points a game); sort by Rank, ADP or Proj. Press **Draft** next to a player on your turn, or auto-pick one pick or the rest; the CPUs pick in between. **The week loop:** the one primary button at the top says what comes next. **Play week N** scores the week with the real results; then every unrostered player is on waivers, you put in claims on the Players tab (with a bid in a FAAB league), and **Sim to Wednesday** settles them (by priority, or by bid in FAAB) and lets the CPUs move; then lineups, free-agent adds and trades are open again until you play the next week. **Tabs:** My Team (set your lineup with Move, drop players, look at any team or past week), Matchup (your game and the week's scoreboard), Players (the waiver wire with each player's usage over his last 3 games, adds and claims), Trades (CPU offers, and a builder that shows the CPU's verdict before you propose) and League (standings, schedule, scoreboard, activity). The regular season runs until the playoff weeks you chose; then the top seeds play a title bracket (top seeds get a bye when it has 5–7 teams) and everyone else plays for the places below. **No hindsight:** nothing on screen comes from a week you have not played. Before a week is played you see only its pre-game projection; points, records and standings stop at the last week played, the My Team and Matchup week pickers end at the current week, and later weeks on the League scoreboard show the pairings only |
+| **Replay League** | A game: replay a past season against CPU managers. **Start:** under **New league** pick what to play (a past season, or a simulated one: the live season with **Full season** or **Jump in now**, or next season), then a season (or Random), 4–16 teams, the **league format** (Standard, Superflex or Double flex as a start, then 0–3 starters per slot: QB, RB, WR, TE, FLEX, SFLX (superflex: a QB, RB, WR or TE), K, DST; at least one QB or SFLX, at most 12 starters; in superflex the CPUs value and draft quarterbacks much earlier), the **scoring** (PPR, half or standard as a base, then points per reception 0–1.5, a TE premium of +0.5 or +1 per catch, 4 or 6 points per passing TD and −1 or −2 per turnover; played games always score exactly, but with custom settings the pre-game projections are estimates converted from the sites' PPR and standard numbers), your draft slot, the playoff weeks (14–16, 15–17 by default, or 16–18 when the season has a week 18) and how many teams make the playoffs (4–8, default 4 under 10 teams, 6 under 14, else 8), waivers (Wednesday waivers; FAAB bidding: $100 per team, blind bids, the highest bid wins, ties go by waiver priority, winning bids show in the activity log; or free agency only) and difficulty, then **Create league and draft**. Saved leagues are listed above the form (Resume, Delete). **Draft:** the board lists who is left by **Rank** (the preseason expert rank, or the ADP order for 2018–2019, as Yahoo shows a rank next to ADP), with the round that rank implies (**Rd**), ADP and the preseason projection (points a game); sort by Rank, ADP or Proj. Press **Draft** next to a player on your turn, or auto-pick one pick or the rest; the CPUs pick in between. **The week loop:** the one primary button at the top says what comes next. **Play week N** scores the week with the real results; then every unrostered player is on waivers, you put in claims on the Players tab (with a bid in a FAAB league), and **Sim to Wednesday** settles them (by priority, or by bid in FAAB) and lets the CPUs move; then lineups, free-agent adds and trades are open again until you play the next week. **Tabs:** My Team (set your lineup with Move, drop players, look at any team or past week), Matchup (your game and the week's scoreboard), Players (the waiver wire with each player's usage over his last 3 games, adds and claims), Trades (players CPUs are shopping to you, CPU offers with each manager's message, and a builder that shows the CPU's verdict and mood before you propose) and League (standings, schedule, scoreboard, activity, and the league chat where the CPU managers talk after every week). The regular season runs until the playoff weeks you chose; then the top seeds play a title bracket (top seeds get a bye when it has 5–7 teams) and everyone else plays for the places below. **No hindsight:** nothing on screen comes from a week you have not played. Before a week is played you see only its pre-game projection; points, records and standings stop at the last week played, the My Team and Matchup week pickers end at the current week, and later weeks on the League scoreboard show the pairings only |
 | **Settings** | League scoring, size, superflex, and TE premium (used everywhere); connect Yahoo; check integrations. **System** shows when the auto-update last ran and what it did, Odds API credits left, data freshness and the last backup, with **Back up now**. **API access** takes the token when the backend has `API_TOKEN` set |
 
 ## How the numbers work
@@ -1026,6 +1026,57 @@ that week's games on; only scoring a week reads its real points.
   week 11's games (in a league without waivers, once week 11 is played). CPUs also trade with each other
   and send you offers. A CPU makes at most 3 trades a week (`replay_state.MAX_TRADES_PER_WEEK`, either
   side; a fourth is declined); you have no cap.
+- **Moods and shopping** (`services/replay_mood.py`): every CPU has feelings about his own healthy skill
+  players, from the same numbers his price uses (recent games `form_chart` plus hype x `shock_chart`), so what
+  he says never contradicts what he accepts. Panicky managers feel a slump 1.8x, gamblers a hot streak 1.8x,
+  steady ones a slump only 0.3x (and stay high on a slumping star, cooler on one who outran draft day).
+  Strength is that signal over his chart (at least 250): worried at -0.08 or below, high at +0.08 or above,
+  and only on the side of the chart his own price is on (worried only when he values the player at or below
+  the chart, high only at or above it), so a mood line or message never points the other way from his price. Once 3 NFL weeks of results are known (week 4 on; a league
+  that jumped in at week 4 or later has them from its first week, since the real weeks before it are known) each CPU shows a **mood
+  line** in the trade builder ("Worried about X. High on Y."). When a CPU is worried at -0.15 or worse about
+  one of his 6 most valuable skill players whose last game fell short of his rate (and who nobody could think
+  was hurt: the same test as the chat's dud lines below), he may **shop him to you** at the start of a week,
+  after the CPUs' IR and free-agency moves
+  (chance by persona: panicky 75%, gambler 35%, balanced 25%, steady and shark never; one shop per CPU, at
+  most 2 in the league): he sends you a message, the player shows under **Shopping to you** on the Trades
+  tab, and for you only he asks a seeded 5-15% less for that player (panicky 9%, gambler 7%, balanced 6%,
+  plus more the more worried he is). The discount is applied once, in the CPU's value test
+  (`replay_trade_value.tally` via `replay_state.markdowns`), so evaluate, propose, counters and his own offer
+  all see it; it never moves the chart, and the re-trade lock stops you flipping the player. While the shop is
+  open the player is yours to buy: no other CPU can trade for him, and the shopping CPU sends you his offer
+  first, once per shop (decline it or let it expire and he doesn't send it again while that shop stays open,
+  though you can still propose at the discount; other CPUs' offers come through as usual; if the shop closes
+  and opens again later, he sends a new one). The shop stays open week to week while he stays
+  that worried; it closes after a good game, if the player might be hurt, once the trade deadline week is
+  over (no shop opens after it), or as soon as the player leaves his active roster (a trade, a drop or IR).
+  In a league with waivers a shop opens at Sim to Wednesday, so last week's shops wait out the waiver phase
+  without their discount until then. No shop opens for a player who is on IR or was traded in the last 2 weeks.
+- **League chat** (`services/replay_chat.py`, lines in `services/replay_chat_lines.json`): a one-way group
+  chat under League > Chat (an unread dot on the League tab). After each week every CPU may say one thing:
+  a championship or final loss, clinching or elimination, an upset (beating a team 4+ places above him, from
+  the league's 4th week), a
+  3+ game streak, a starter's huge game (22% of the league's median team score and 1.75x his rate) or dud
+  (40% of a 10+ rate; never a player who scored 0 or might be hurt: a tag that week or the next, no
+  projection next week, a snap share under 60% of his season median, or no snap counts to tell (a bye
+  is not a maybe: he had no game to get hurt in, unless he carries a tag); so week 1
+  has no dud lines, with no earlier snap share to compare against), or the
+  result itself (close under 9% of the median team score, a blowout from 22%: about 10 and 25 points in a
+  half-PPR league, more in a high-scoring one). The final's champion and runner-up don't talk margins after
+  a tied final. Your opponent talks to you (and also posts his clinching or elimination when that game
+  settles it); the others post now and then (a boom or dud half the time, a plain result 30%), at most 5 of these after-the-games lines a week: your
+  opponent's line to you is always kept, then the rare news (title, clinching, elimination), then the rest in a seeded order,
+  and a line that would run past 140 characters with long names gives way to one that fits. A third manager may react to a
+  trade (at most 2 a week) and a shopping CPU messages you (at most 2 shops are open at once); these come on
+  top of the 5, so a week can show up to 9 lines. Every CPU offer carries a one-line reason in
+  his voice (worried about a player, never one who might be hurt; high on yours, short at a position, a
+  counter, or a value pitch).
+  In a league that started mid-season (or a simulated one) the chat counts the league's own weeks (moods and
+  shops only need 3 NFL weeks of results, see above), and each line is dated with the real NFL week.
+  Lines come from a bank of 1,400+ clean lines in five voices, one per persona, so a manager sounds the same
+  all season; a game never repeats a line until that bucket is used up (except when every unused line runs
+  past 140 characters once the names are in: then the next one that fits is reused), and the text is copied
+  into the save.
 - **Season:** the user picks the championship week (16, 17 or 18; 18 only when the season has a week 18)
   and the playoff teams P (4-8, at most the league size; default 4 under 10 teams, 6 under 14, else 8).
   The playoffs last 2 weeks for P = 4 and 3 weeks for 5-8, and the regular season is the weeks before
@@ -1100,7 +1151,8 @@ and the API sends no result of an unplayed week. The look ("Game Night", `styles
   **Easy**, the bottom quarter **Tough**. No chip for K/DST, a bye, or week 1 without last season. A played
   week's opponent in the game log is his real team's that week (a player traded mid-season shows his new
   team's game).
-- **Standings** show each CPU's tendency under its name (never the hidden persona itself).
+- **Standings** show each CPU's tendency under its name (never the hidden persona itself); team refs also
+  carry the CPU's current **mood** line.
 - New modules: `replay_box.py` (a game's box line, totals and averages), `replay_defense.py` and
   `replay_views_players.py` (the players list and player card; `replay_views_league` re-exports them).
   Bad `sort`, `dir`, `stats` or `stat_week` values on the players endpoint answer 422.
@@ -1150,7 +1202,8 @@ trades, IR, playoffs, no hindsight) are the same as in a past season. A new leag
   fewer playoff teams). The form shows the plan ("plays weeks 12-15 (4 weeks), then the playoffs in weeks
   16-17. Trade deadline: week 13."). Weeks before N+1 are history, not league weeks: the schedule,
   scoreboard, standings and week pickers start at N+1, while a player's game log still shows his real
-  earlier games. A CPU's tendency hint shows after 3 league weeks.
+  earlier games. A CPU's tendency hint shows after 3 league weeks; moods and shops start in the league's
+  first week, from the real weeks already played.
 - **The future season** (2027) is simulated whole, starting from what is known today: the public view of
   every player at the end of the newest season so far (2026 through its last finished week, so it moves as
   2026 is played), carried through an offseason (below). It needs that season prepared first.
