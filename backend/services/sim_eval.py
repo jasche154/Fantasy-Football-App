@@ -27,7 +27,6 @@
 Read-only on the database; the report is logged (and written as JSON with --out).
 """
 import argparse
-import atexit
 import json
 import logging
 import math
@@ -191,8 +190,10 @@ def _start(overrides: dict[str, dict], offseason: dict) -> None:
     for section, values in overrides.items():
         for key, value in values.items():
             sim_world.override(section, key, value)
+    from multiprocessing.util import Finalize
+
     session = SessionLocal()
-    atexit.register(session.close)                  # its connection goes back when the worker exits
+    Finalize(None, session.close, exitpriority=10)  # closed at worker exit, under fork (Linux) and spawn alike
     _worker.update(offseason=offseason, session=session)
 
 
@@ -228,11 +229,8 @@ def run(seasons: list[int], seeds: list[int], mode: str, workers: int = 1, overr
             results = {key: case(key, seeds, session, offseason) for key in cases}
     if workers > 1:
         with ProcessPoolExecutor(workers, initializer=_start, initargs=(overrides or {}, offseason)) as pool:
-            try:
-                results = dict(zip(cases, pool.map(partial(case, seeds=seeds), cases)))
-            except BaseException:
-                pool.shutdown(cancel_futures=True)      # a case failed: don't wait for the queued ones
-                raise
+            # a case that fails raises here; map's own iterator cancels the queued ones
+            results = dict(zip(cases, pool.map(partial(case, seeds=seeds), cases)))
     report = {}
     for kind in kinds:
         pairs = [results[(kind, season)] for season in seasons]

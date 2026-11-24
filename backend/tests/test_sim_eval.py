@@ -123,6 +123,20 @@ def kind_case(case: tuple[str, int], seeds: list[int], session=None, offseason=N
     return is_mid, is_mid
 
 
+def failing_case(case: tuple[str, int], seeds: list[int], session=None, offseason=None) -> tuple[dict, dict]:
+    """A case that fails for season 2."""
+    if case[1] == 2:
+        raise RuntimeError("season 2 broke")
+    return kind_case(case, seeds, session, offseason)
+
+
+@pytest.mark.parametrize("workers", [1, 2])
+def test_a_failing_case_fails_the_run_never_a_partial_report(monkeypatch, workers):
+    monkeypatch.setattr(sim_eval, "_offseason", lambda *_: {"picks": [], "first": {}})
+    with pytest.raises(RuntimeError, match="season 2 broke"):
+        sim_eval.run([1, 2, 3], [1], "mid", workers, {}, case=failing_case)
+
+
 @pytest.mark.parametrize("workers", [1, 2])
 def test_both_modes_report_each_mode_in_its_own_section(monkeypatch, workers):
     monkeypatch.setattr(sim_eval, "_offseason", lambda *_: {"picks": [], "first": {}})
@@ -145,7 +159,7 @@ def test_the_parallel_report_equals_the_serial_one_and_workers_get_the_overrides
         monkeypatch.undo()
         sim_world.params.cache_clear()
     assert parallel == serial
-    assert serial["full"]["real"]["season"] == (0.1 + 0.2 + 0.3) / 3          # summed in season order
+    assert serial["full"]["real"]["season"] == pytest.approx(0.2)    # order is proven by parallel == serial
     assert serial["full"]["sim"]["role_sd"] == 0.41 and serial["full"]["sim"]["picks"] == 7
 
 

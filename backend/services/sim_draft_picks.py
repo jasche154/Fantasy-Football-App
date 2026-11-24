@@ -31,7 +31,7 @@ def draft_picks(seasons: Iterable[int], refresh: bool = False) -> list[dict]:
     if not wanted <= _settled(cached):
         rows = _download(sorted({r["season"] for r in rows} | wanted))
         PICKS_CACHE.parent.mkdir(parents=True, exist_ok=True)
-        partial = PICKS_CACHE.with_suffix(".tmp")            # written whole, then swapped in: never half a file
+        partial = PICKS_CACHE.with_suffix(f".{os.getpid()}.tmp")   # written whole, then swapped in; own name per process
         partial.write_text(json.dumps({"downloaded": _today().isoformat(), "rows": rows}), encoding="utf-8")
         os.replace(partial, PICKS_CACHE)
     return [{"season": int(r["season"]), "pick": int(r["pick"]), "team": TEAM_ALIASES.get(r["team"], r["team"]),
