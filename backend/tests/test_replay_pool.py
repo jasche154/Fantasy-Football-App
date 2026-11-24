@@ -41,9 +41,9 @@ def _fresh_engine():
 
 def test_fake_season_is_fast_and_deterministic():
     fakes._season.cache_clear()
-    started = time.perf_counter()
+    started = time.process_time()           # CPU time: earlier tests or other processes don't count
     first = fakes.fake_season(seed=3)
-    elapsed = time.perf_counter() - started
+    elapsed = time.process_time() - started
     fakes._season.cache_clear()
     second = fakes.fake_season(seed=3)
 
