@@ -52,9 +52,9 @@ def play(seed: int, settings: rs.Settings = SETTINGS) -> list[Week]:
     for week in WEEKS:
         before = replace(state, week=week)
         know = knowledge(week, settings)
-        started = time.perf_counter()
+        started = time.process_time()           # CPU time: other processes (parallel tests) don't count
         state = ai.cpu_trades(before, settings, know, seed)
-        weeks.append(Week(week, before, state, time.perf_counter() - started))
+        weeks.append(Week(week, before, state, time.process_time() - started))
     return weeks
 
 

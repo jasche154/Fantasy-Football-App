@@ -82,10 +82,10 @@ def every_view(state: rs.State, data=DATA) -> dict[str, str]:
     return {name: json.dumps(screen, sort_keys=True, allow_nan=False) for name, screen in screens.items()}
 
 
-def changed(state: rs.State, data) -> list[str]:
-    """The screens that look different on `data` than on the real fake season. (Names only: pytest's diff
-    of two multi-megabyte strings never finishes.)"""
-    ours, theirs = every_view(state), every_view(state, data)
+def changed(state: rs.State, data, ours: dict[str, str] | None = None) -> list[str]:
+    """The screens that look different on `data` than on the real fake season (`ours`: that baseline, when the
+    caller already rendered it). (Names only: pytest's diff of two multi-megabyte strings never finishes.)"""
+    ours, theirs = ours or every_view(state), every_view(state, data)
     return [name for name in ours if ours[name] != theirs[name]]
 
 
@@ -114,22 +114,23 @@ def test_the_draft_room_shows_nothing_from_after_the_draft():
 
 def test_the_probe_is_live_a_played_week_and_this_weeks_projection_do_show():
     state = at(5)
+    base = every_view(state)                                    # rendered once, compared six times
     last_week = fakes.patched(DATA, actual={key: points + 7.5 for key, points in DATA.actual.items() if key[1] == 4})
     this_week = fakes.patched(DATA, projected={key: points + 7.5 for key, points in DATA.projected.items()
                                                if key[1] == 5})
 
-    assert {"teams", "matchups", "players", "details"} <= set(changed(state, last_week))
-    assert {"summary", "teams", "matchups", "scoreboards", "players", "details"} <= set(changed(state, this_week))
+    assert {"teams", "matchups", "players", "details"} <= set(changed(state, last_week, base))
+    assert {"summary", "teams", "matchups", "scoreboards", "players", "details"} <= set(changed(state, this_week, base))
     used = replace(DATA, usage={key: replace(u, carries=u.carries + 9) if key[1] == 4 else u
                                 for key, u in DATA.usage.items()})
-    assert set(changed(state, used)) == {"players", "stat_lines", "details"}
+    assert set(changed(state, used, base)) == {"players", "stat_lines", "details"}
     boxed = replace(DATA, box={key: replace(b, rec=b.rec + 3) if key[1] == 4 else b for key, b in DATA.box.items()})
-    assert set(changed(state, boxed)) == {"players", "stat_lines", "details"}
+    assert set(changed(state, boxed, base)) == {"players", "stat_lines", "details"}
     starter = next(pid for ids in state.results[3].starters[1].values() for pid in ids    # team 1's, week 4
                    if pid in state.teams[0].roster)
     tag_now, tag_before = (fakes.tagged(DATA, {(starter, week): fakes.Injury("Q")}) for week in (5, 4))
-    assert {"teams", "players", "details", "activity"} <= set(changed(state, tag_now))
-    assert {"teams", "details"} <= set(changed(state, tag_before)) <= {"teams", "matchups", "details"}
+    assert {"teams", "players", "details", "activity"} <= set(changed(state, tag_now, base))
+    assert {"teams", "details"} <= set(changed(state, tag_before, base)) <= {"teams", "matchups", "details"}
 
 
 def test_a_week_not_reached_yet_cannot_be_opened():
