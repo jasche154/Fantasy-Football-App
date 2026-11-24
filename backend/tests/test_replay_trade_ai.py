@@ -52,7 +52,7 @@ def play(seed: int, settings: rs.Settings = SETTINGS) -> list[Week]:
     for week in WEEKS:
         before = replace(state, week=week)
         know = knowledge(week, settings)
-        started = time.process_time()           # CPU time: other processes (parallel tests) don't count
+        started = time.process_time()           # CPU time: other agents' processes on the machine don't count
         state = ai.cpu_trades(before, settings, know, seed)
         weeks.append(Week(week, before, state, time.process_time() - started))
     return weeks
@@ -344,7 +344,7 @@ def test_a_player_on_ir_is_never_searched_or_offered(monkeypatch):
     assert not on_ir & {v.player_id for found in searched for v in found} and not on_ir & dealt
 
 
-def test_cpu_trades_stays_within_its_time_budget(seasons, own_cpu):
+def test_cpu_trades_stays_within_its_time_budget(own_cpu, seasons):     # own_cpu first: skip before building
     # A coverage tracer makes this pure-Python loop about 4x slower, so the wall-clock budget only means something without one.
     monitoring = getattr(sys, "monitoring", None)       # Python 3.12+: coverage may use it instead of a trace function
     if sys.gettrace() is not None or (monitoring and monitoring.get_tool(monitoring.COVERAGE_ID) is not None):
