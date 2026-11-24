@@ -19,8 +19,8 @@ export function LeagueChat({ game, version, openPlayer }: ReplayViewProps) {
   const total = feed.status === 'success' ? feed.data.total : 0;
   useChatReading(game.id);
   useEffect(() => {
-    if (total > 0) markChatSeen(game.id, total);
-  }, [game.id, total]);
+    if (total > 0) markChatSeen({ id: game.id, created_at: game.created_at }, total);
+  }, [game.id, game.created_at, total]);
   const newerRef = useRef<HTMLButtonElement>(null);
   const olderRef = useRef<HTMLButtonElement>(null);
   // After a pager press, once the new page shows: if the pressed button turned off at an end, focus the other

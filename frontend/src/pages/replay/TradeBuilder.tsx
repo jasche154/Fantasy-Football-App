@@ -107,6 +107,8 @@ export function TradeBuilder({ game, version, roster, ir, maxPlayers, counterTo,
   const [give, setGive] = useState<number[]>(counterTo ? playerIds(counterTo.get) : []);
   const [get, setGet] = useState<number[]>(counterTo ? playerIds(counterTo.give) : linked && initialWant !== null ? [initialWant] : []);
   const [picked, setPicked] = useState<number[]>([]);
+  // The linked player, until a trade goes through: then his roster reloads without him, and that is no news.
+  const [linkedWant, setLinkedWant] = useState(initialWant);
   const [declined, setDeclined] = useState<ReplayVerdict | null>(null);
   const [counter, setCounter] = useState<ReplayOffer | null>(null);
   const theirs = useAsync((signal) => getReplayTeam(game.id, { team_id: partnerId }, signal), [game.id, partnerId, version]);
@@ -155,13 +157,14 @@ export function TradeBuilder({ game, version, roster, ir, maxPlayers, counterTo,
     setGive([]);
     setGet([]);
     setPicked([]);
+    setLinkedWant(null);
     actions.announce({ text: `Trade executed with ${partner}.`, isGood: true });
     if (counterTo) onCounterDone();         // the counter went through: back to a fresh builder
   };
   const chosen = partners.find((team) => team.team_id === partnerId);
   const tendency = chosen?.tendency;
   // A link asked for a player who has left that roster since (traded or dropped): say so instead of a silent blank.
-  const wanted = counterTo === null && linked?.team_id === partnerId ? initialWant : null;
+  const wanted = counterTo === null && linked?.team_id === partnerId ? linkedWant : null;
   const isWantGone = wanted !== null && theirRows.length > 0 && !theirRows.some((row) => row.player.id === wanted);
   const error = actions.errorFor(PROPOSE_KEY);
 

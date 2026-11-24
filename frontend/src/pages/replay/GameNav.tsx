@@ -12,7 +12,7 @@ export function GameNav({ game, view }: { game: ReplaySummary; view: ReplayView 
     players: { count: game.pending.claims, noun: 'pending claims' },
     trades: { count: game.pending.offers, noun: 'offers to answer' },
   };
-  const hasUnread = useChatUnread(game.id, game.chat);
+  const hasUnread = useChatUnread(game);
   return (
     <nav className="game-nav" aria-label="League sections">
       <ul className="game-nav__list">

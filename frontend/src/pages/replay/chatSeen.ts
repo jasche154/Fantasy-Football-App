@@ -1,41 +1,54 @@
 import { useEffect, useSyncExternalStore } from 'react';
+import type { ReplaySummary } from '../../api/types';
 
 /** How many league-chat lines the user has seen per game, for the unread dot. localStorage is the truth
  * whenever it can be read (shared by every tab, so a delete in one tab is seen in the others); this page's
  * memory is only the fallback when storage throws (then the dot shows again after a reload).
- * League ids can come back after a delete (SQLite reuses the highest one), so deleting a league forgets its
- * count, and a count above the league's chat (left by a deleted league) counts as nothing seen. */
+ * League ids can come back after a delete (SQLite reuses the highest one), so the count is stored as
+ * "<created_at>:<count>": a count saved for another league with the same id (or an old plain number, whose
+ * league is unknown) counts as nothing seen. Deleting a league also forgets its count. */
 const EVENT = 'replay-chat-seen';
-const memory = new Map<number, number>();
+const memory = new Map<number, string>();     // the stored value, "<created_at>:<count>"
 const reading = new Set<number>();
 const READING = -1;
 const key = (gameId: number): string => `replay-chat-seen:${gameId}`;
+
+/** A league by its id and creation stamp: the stamp tells a reused id apart. */
+export type ChatLeague = Pick<ReplaySummary, 'id' | 'created_at'>;
 
 function changed(): void {
   window.dispatchEvent(new Event(EVENT));
 }
 
+/** The count in a stored value when it was saved for this league; 0 for another league or an old plain number. */
+function countFor(league: ChatLeague, stored: string | null | undefined): number {
+  const at = stored?.lastIndexOf(':') ?? -1;
+  if (!stored || at < 0 || stored.slice(0, at) !== String(league.created_at)) return 0;
+  const count = Number(stored.slice(at + 1));
+  return Number.isFinite(count) && count > 0 ? count : 0;
+}
+
 const unsaved = new Set<number>();            // games whose last write failed (quota): memory is newer than storage
 
-export function readChatSeen(gameId: number): number {
-  if (unsaved.has(gameId)) return memory.get(gameId) ?? 0;
+export function readChatSeen(league: ChatLeague): number {
+  if (unsaved.has(league.id)) return countFor(league, memory.get(league.id));
   try {
-    const raw = Number(window.localStorage.getItem(key(gameId)));
-    return Number.isFinite(raw) && raw > 0 ? raw : 0;
+    return countFor(league, window.localStorage.getItem(key(league.id)));
   } catch {
-    return memory.get(gameId) ?? 0;              // storage blocked: memory only
+    return countFor(league, memory.get(league.id));    // storage blocked: memory only
   }
 }
 
 /** The user has seen `count` lines (the chat's total as just loaded). */
-export function markChatSeen(gameId: number, count: number): void {
-  if (readChatSeen(gameId) === count && memory.get(gameId) === count) return;
-  memory.set(gameId, count);
+export function markChatSeen(league: ChatLeague, count: number): void {
+  const value = `${league.created_at}:${count}`;
+  if (readChatSeen(league) === count && memory.get(league.id) === value) return;
+  memory.set(league.id, value);
   try {
-    window.localStorage.setItem(key(gameId), String(count));
-    unsaved.delete(gameId);
+    window.localStorage.setItem(key(league.id), value);
+    unsaved.delete(league.id);
   } catch {
-    unsaved.add(gameId);                          // readable but not writable: this tab trusts its memory
+    unsaved.add(league.id);                       // readable but not writable: this tab trusts its memory
   }
   changed();
 }
@@ -73,9 +86,9 @@ export function useChatReading(gameId: number): void {
   }, [gameId]);
 }
 
-/** True when the league chat has lines the user has not opened yet. */
-export function useChatUnread(gameId: number, total: number): boolean {
-  const seen = useSyncExternalStore(subscribe, () => (reading.has(gameId) ? READING : readChatSeen(gameId)), () => 0);
+/** True when the league chat (`game.chat` lines so far) has lines the user has not opened yet. */
+export function useChatUnread(game: ChatLeague & Pick<ReplaySummary, 'chat'>): boolean {
+  const seen = useSyncExternalStore(subscribe, () => (reading.has(game.id) ? READING : readChatSeen(game)), () => 0);
   if (seen === READING) return false;
-  return total > (seen > total ? 0 : seen);
+  return game.chat > (seen > game.chat ? 0 : seen);
 }

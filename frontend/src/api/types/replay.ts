@@ -390,6 +390,8 @@ export interface ReplaySummary {
   matchup: ReplayHeadline | null;
   pending: { claims: number; offers: number };
   champion: ReplayTeamRef | null;
+  /** When the league was made: with its id it names the league, even after a deleted league's id is reused. */
+  created_at: string | null;
   updated_at: string | null;
   /** The user's IR players who lost their tag: adds, claims and trades are refused while non-empty. */
   ir_blocked: ReplayPlayerRef[];

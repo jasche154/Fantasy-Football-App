@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { getReplayTeam, getReplayTrades } from '../../api/replay';
-import type { ReplayOffer, ReplayShop, ReplaySummary, ReplayTrades } from '../../api/types';
+import type { ReplayOffer, ReplayPendingOffer, ReplayShop, ReplaySummary, ReplayTrades } from '../../api/types';
 import { AsyncView } from '../../components/AsyncView';
 import { Card } from '../../components/Card';
 import { Skeleton } from '../../components/StatusViews';
@@ -131,6 +131,11 @@ export function TradesView({ game, version, act, isBusy, openPlayer }: ReplayVie
     setCounteringId(null);
     setShopPick((last) => ({ partner: shop.team.team_id, want: shop.player.id, n: (last?.n ?? 0) + 1 }));
   };
+  // A counter starts from its offer alone: a shop picked earlier must not come back once it ends.
+  const startCounter = (offer: ReplayPendingOffer) => {
+    setShopPick(null);
+    setCounteringId(offer.id);
+  };
   const builderKey = counteringId ?? (shopPick ? `shop-${shopPick.n}` : `new-${query.with ?? ''}-${query.want ?? ''}`);
   return (
     <>
@@ -149,7 +154,7 @@ export function TradesView({ game, version, act, isBusy, openPlayer }: ReplayVie
             {trades.open && <ShoppingStrip game={game} shops={trades.shops} openPlayer={openPlayer} onPick={pickShop} />}
             <h2 className="section-title">Offers for you</h2>
             <TradeOffers game={game} version={version} offers={trades.offers} roster={mine.results} isOpen={trades.open}
-              actions={actions} openPlayer={openPlayer} onCounter={(offer) => setCounteringId(offer.id)} isCountering={countering !== null} />
+              actions={actions} openPlayer={openPlayer} onCounter={startCounter} isCountering={countering !== null} />
             {trades.open && (
               <Card title={<span ref={builderTitleRef} tabIndex={-1}>{countering ? `Counter ${countering.from_team.name}'s offer` : 'Propose a trade'}</span>}
                 eyebrow={`Open through week ${trades.deadline_week}'s waivers`}>

@@ -12,6 +12,10 @@ import { LeagueChat } from './LeagueChat';
 import { LeagueView } from './LeagueView';
 
 const CHAT_PATH = `/api/replay/games/${GAME_ID}/chat`;
+/** This league as the chat's unread count names it (the fixture summary's id and creation stamp). */
+const LEAGUE = { id: GAME_ID, created_at: summary().created_at };
+const SEEN_KEY = `replay-chat-seen:${GAME_ID}`;
+const seen = (count: number, createdAt = LEAGUE.created_at): string => `${createdAt}:${count}`;
 
 function line(overrides: Partial<ReplayChat> = {}): ReplayChat {
   return { id: 1, week: 4, team: teamRef(2), to_user: false, kind: 'boom', text: `${MOSTERT.name} with 31.2. Love to see it.`,
@@ -45,7 +49,7 @@ describe('League chat', () => {
     expect(items[0]).toHaveClass('game-chat__line--to-you');
     expect(items[1]).not.toHaveClass('game-chat__line--to-you');
     expect(within(items[1]).getByRole('button', { name: MOSTERT.name })).toBeInTheDocument();
-    expect(readChatSeen(GAME_ID)).toBe(2);
+    expect(readChatSeen(LEAGUE)).toBe(2);
     expect(screen.queryByText('(new messages)')).not.toBeInTheDocument();
   });
 
@@ -75,7 +79,7 @@ describe('League chat', () => {
 
 describe('GameNav unread dot', () => {
   it('shows a dot with words on League while the chat has unseen lines', () => {
-    window.localStorage.setItem(`replay-chat-seen:${GAME_ID}`, '3');
+    window.localStorage.setItem(SEEN_KEY, seen(3));
     const { unmount } = renderWithProviders(<GameNav game={summary({ chat: 5 })} view="team" />);
     expect(screen.getByRole('link', { name: /League.*new messages/ })).toBeInTheDocument();
     unmount();
@@ -92,7 +96,7 @@ describe('GameNav unread dot', () => {
       const blocked = GAME_ID + 500;            // a league no other test has marked in this page's memory
       renderWithProviders(<GameNav game={summary({ id: blocked, chat: 99 })} view="team" />);
       expect(screen.getByText('(new messages)')).toBeInTheDocument();
-      act(() => markChatSeen(blocked, 99));
+      act(() => markChatSeen({ id: blocked, created_at: LEAGUE.created_at }, 99));
       expect(screen.queryByText('(new messages)')).not.toBeInTheDocument();
     } finally {
       window.localStorage.getItem = getItem;
@@ -107,7 +111,7 @@ describe('GameNav unread dot', () => {
     try {
       renderWithProviders(<GameNav game={summary({ id: full, chat: 7 })} view="team" />);
       expect(screen.getByText('(new messages)')).toBeInTheDocument();
-      act(() => markChatSeen(full, 7));
+      act(() => markChatSeen({ id: full, created_at: LEAGUE.created_at }, 7));
       expect(screen.queryByText('(new messages)')).not.toBeInTheDocument();
     } finally {
       window.localStorage.setItem = setItem;
@@ -115,30 +119,50 @@ describe('GameNav unread dot', () => {
   });
 
   it("shows the dot in a new league that reuses a deleted league's id", () => {
-    window.localStorage.setItem(`replay-chat-seen:${GAME_ID}`, '140');
+    window.localStorage.setItem(SEEN_KEY, seen(140));
     renderWithProviders(<GameNav game={summary({ chat: 3 })} view="team" />);
     expect(screen.getByRole('link', { name: /League.*new messages/ })).toBeInTheDocument();
   });
 
+  it("counts nothing seen from another league with the same id, even a smaller count than this league's chat", () => {
+    window.localStorage.setItem(SEEN_KEY, seen(5, '2026-10-01T08:00:00'));      // the deleted league read 5 of its lines
+    expect(readChatSeen(LEAGUE)).toBe(0);
+    renderWithProviders(<GameNav game={summary({ chat: 7 })} view="team" />);
+    expect(screen.getByRole('link', { name: /League.*new messages/ })).toBeInTheDocument();
+  });
+
+  it('reads an old plain stored number as nothing seen: its league is unknown', () => {
+    window.localStorage.setItem(SEEN_KEY, '3');
+    expect(readChatSeen(LEAGUE)).toBe(0);
+    renderWithProviders(<GameNav game={summary({ chat: 5 })} view="team" />);
+    expect(screen.getByRole('link', { name: /League.*new messages/ })).toBeInTheDocument();
+  });
+
+  it('stores the count with the league it belongs to', () => {
+    markChatSeen(LEAGUE, 4);
+    expect(window.localStorage.getItem(SEEN_KEY)).toBe(seen(4));
+    expect(readChatSeen(LEAGUE)).toBe(4);
+  });
+
   it("sees another tab's delete when the league id comes back", () => {
-    markChatSeen(GAME_ID, 5);                                   // this tab read the old league's 5 lines
-    window.localStorage.removeItem(`replay-chat-seen:${GAME_ID}`);  // another tab deleted it
+    markChatSeen(LEAGUE, 5);                                    // this tab read the old league's 5 lines
+    window.localStorage.removeItem(SEEN_KEY);                   // another tab deleted it
     act(() => { window.dispatchEvent(new StorageEvent('storage')); });
 
-    expect(readChatSeen(GAME_ID)).toBe(0);
+    expect(readChatSeen(LEAGUE)).toBe(0);
     renderWithProviders(<GameNav game={summary({ chat: 5 })} view="team" />);
     expect(screen.getByRole('link', { name: /League.*new messages/ })).toBeInTheDocument();
   });
 
   it("forgets a deleted league's count", () => {
-    window.localStorage.setItem(`replay-chat-seen:${GAME_ID}`, '12');
+    window.localStorage.setItem(SEEN_KEY, seen(12));
     forgetChatSeen(GAME_ID);
-    expect(window.localStorage.getItem(`replay-chat-seen:${GAME_ID}`)).toBeNull();
-    expect(readChatSeen(GAME_ID)).toBe(0);
+    expect(window.localStorage.getItem(SEEN_KEY)).toBeNull();
+    expect(readChatSeen(LEAGUE)).toBe(0);
   });
 
   it('stays hidden on League while the chat is open and the newest lines are still loading', async () => {
-    window.localStorage.setItem(`replay-chat-seen:${GAME_ID}`, '5');
+    window.localStorage.setItem(SEEN_KEY, seen(5));
     let release: () => void = () => undefined;
     const held = new Promise<void>((resolve) => { release = resolve; });
     mockFetch([META_ROUTE, { path: CHAT_PATH, reply: async () => { await held; return json(page([line()], 7)); } }]);
@@ -147,7 +171,7 @@ describe('GameNav unread dot', () => {
 
     expect(screen.queryByText('(new messages)')).not.toBeInTheDocument();
     release();
-    await waitFor(() => expect(readChatSeen(GAME_ID)).toBe(7));
+    await waitFor(() => expect(readChatSeen(LEAGUE)).toBe(7));
     expect(screen.queryByText('(new messages)')).not.toBeInTheDocument();
   });
 });

@@ -23,7 +23,7 @@ export function LeagueView(props: ReplayViewProps) {
   const { game } = props;
   const isPlayoffs = game.week > game.settings.regular_season_weeks || game.phase === 'complete';
   const [page, setPage] = useState(PAGES[isPlayoffs ? 1 : 0]);
-  const hasUnread = useChatUnread(game.id, game.chat);
+  const hasUnread = useChatUnread(game);
   return (
     <div className="replay-league">
       <div className="segmented replay-segmented" role="group" aria-label="League pages">

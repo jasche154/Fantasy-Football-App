@@ -149,7 +149,7 @@ export function summary(overrides: Partial<ReplaySummary> = {}): ReplaySummary {
       week: 5, playoff: false, label: null, you: side(USER_TEAM_ID, { projected: 118.4 }),
       opponent: side(OPPONENT_TEAM_ID, { projected: 104.75, record: record({ wins: 2, losses: 2, rank: 6 }) }),
     },
-    pending: { claims: 0, offers: 0 }, champion: null, updated_at: '2026-11-20T12:00:00',
+    pending: { claims: 0, offers: 0 }, champion: null, created_at: '2026-11-01T09:00:00', updated_at: '2026-11-20T12:00:00',
     ir_blocked: [], has_injuries: true, trades_open: true, rank_source: 'experts', kind: 'replay', sim_from: null, start_week: 1,
     chat: 0,
     ...overrides,
