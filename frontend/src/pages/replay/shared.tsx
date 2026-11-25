@@ -185,6 +185,14 @@ export function showsOut(out: boolean | undefined, injury: ReplayInjury | null |
   return !!out && !isHardTag(injury);
 }
 
+/** Why "Out" can sit next to a Q or D tag: the tag is the week's injury report, Out is the pre-game projection. */
+export const OUT_REASON = 'Out: no projection for this game, so he is not expected to play';
+
+/** The plain Out badge (see showsOut), its reason on hover. */
+export function ReplayOutBadge({ className = '' }: { className?: string }) {
+  return <span className={`status-badge status-badge--out${className ? ` ${className}` : ''}`} title={OUT_REASON}>Out</span>;
+}
+
 /** The user's IR players who lost their tag block adds, claims and trades; null when nothing is blocked. */
 export function irBlockedText(game: ReplaySummary): string | null {
   if (game.ir_blocked.length === 0 || !EDIT_PHASES.includes(game.phase)) return null;
@@ -216,7 +224,7 @@ export function ReplayPlayerCell({ player, info = {}, onOpen }: ReplayPlayerCell
         {info.opponent && !info.bye && <span className="player-cell__team">vs {info.opponent}</span>}
         {info.bye && <span className="status-badge status-badge--missing">Bye</span>}
         {player.injury && <ReplayInjuryBadge injury={player.injury} />}
-        {showsOut(info.out, player.injury) && <span className="status-badge status-badge--out">Out</span>}
+        {showsOut(info.out, player.injury) && <ReplayOutBadge />}
         <ReplayBuzzChip text={info.buzz} onOpen={onOpen && (() => onOpen(player.id))} />
         {info.trade_locked && (
           <span className="status-badge status-badge--missing" title="Traded in the last two weeks, so he can't be traded yet">Trade-locked</span>

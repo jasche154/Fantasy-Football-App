@@ -3,7 +3,7 @@ import type { ReplayPlayerWeek, ReplayPosition } from '../../api/types';
 import { EMPTY_VALUE } from '../../lib/format';
 import { DefenseChip } from './gameUi';
 import { boxColumns, boxText, type BoxColumn } from './playerColumns';
-import { formatPoints, ReplayInjuryBadge, showsOut } from './shared';
+import { formatPoints, ReplayInjuryBadge, ReplayOutBadge, showsOut } from './shared';
 
 /** "@ BUF", "BUF" or "BYE". */
 export function opponentText(opponent: string | null, away: boolean, bye: boolean): string {
@@ -42,7 +42,7 @@ function WeekRow({ week, position, box, simFrom }: WeekRowProps) {
       <td className="replay-card__opp">
         {opponentText(week.opponent, week.away, week.bye)}
         {week.injury && <> <ReplayInjuryBadge injury={week.injury} /></>}
-        {showsOut(week.out, week.injury) && <span className="status-badge status-badge--out replay-drawer__badge">Out</span>}
+        {showsOut(week.out, week.injury) && <ReplayOutBadge className="replay-drawer__badge" />}
         {/* The week still to play shows how tough the matchup is, like the weeks after it. */}
         {!week.played && !week.bye && <DefenseChip rating={week.defense} position={position} />}
       </td>
