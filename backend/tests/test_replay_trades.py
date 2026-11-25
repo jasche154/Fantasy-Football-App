@@ -627,6 +627,21 @@ def test_an_ir_player_arriving_with_the_ir_slot_full_needs_a_roster_spot():
         rt.evaluate(full, SETTINGS, know, *deal)
 
 
+def test_the_value_hint_lands_the_users_ir_player_in_the_cpus_free_ir_slot(monkeypatch):
+    """The suggestion prices the CPU's cuts on the roster the deal really leaves it (as _side does): the user's
+    IR player takes its free IR slot instead of costing it a roster spot."""
+    state = on_ir(league()[0], USER, RB14)
+    seen = []
+    real = rt._cpu_drops
+    monkeypatch.setattr(rt, "_cpu_drops", lambda settings, know, kept, ir=(), before=(): (
+        seen.append((tuple(kept), tuple(ir))) or real(settings, know, kept, ir, before)))
+
+    verdict = rt.evaluate(state, SETTINGS, hurt(1, RB14), USER, RICH, [RB14], [P("RB", 2)])
+
+    assert not verdict.accepted and verdict.suggestion
+    assert len(seen) > 1 and all(RB14 in ir and RB14 not in kept for kept, ir in seen)
+
+
 def test_the_roster_limit_of_a_trade_ignores_the_ir_player():
     state = on_ir(league()[0], USER, SCRUB)
 

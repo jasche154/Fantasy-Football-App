@@ -347,10 +347,9 @@ def _suggestion(state: State, settings: Settings, know: Knowledge, mine: _Side, 
         return DEPTH_HINT
     if len(mine.sends) >= MAX_PLAYERS_PER_SIDE:
         return _points_text(missing)
-    base = tuple(pid for pid in theirs.team.roster if pid not in theirs.sends)
-
     def worth(receives: tuple[int, ...]) -> float:  # what they count receiving these for, net of cuts, spots freed
-        drops = _cpu_drops(settings, know, (*base, *receives), theirs.team.ir, rs.held(theirs.team)) or ()
+        after, ir = _landing(theirs.team, mine.team, theirs.sends, receives)      # as _side lands the deal
+        drops = _cpu_drops(settings, know, after, ir, rs.held(theirs.team)) or ()
         kept = [worth_of(pid) for pid in receives if pid not in drops]
         return (tv.depth_counted(kept, sent_charts) + tv.SPOT_VALUE * max(0, len(theirs.sends) - len(kept))
                 - _chart(know, [pid for pid in drops if pid not in receives], just_added))
