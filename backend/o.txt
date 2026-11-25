@@ -1,0 +1,1 @@
+{"detail":"The draft is at pick 23, not pick 1. Reload it."}

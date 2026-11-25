@@ -324,6 +324,8 @@ export interface ReplayCreateBody {
   seed?: number;
   /** Left out: the standard lineup. */
   starters?: ReplayStarters;
+  /** Bench spots, 1..10; left out: 6. */
+  bench?: number;
   /** Left out: the scoring preset as is. */
   scoring_rules?: ReplayScoringRules;
   /** The live season only: "now" drafts today and plays from the next week. Default "full". */

@@ -174,6 +174,7 @@ class CreateBody(BaseModel):
     starters: dict[str, int] | None = Field(None, max_length=len(replay_slots.SLOTS))   # slot -> count; None: standard
     scoring_rules: RulesBody | None = None              # None: the `scoring` preset as is
     start: Literal["full", "now"] = "full"              # "now": the live season, drafted today, from the next week
+    bench: int = Field(6, ge=replay_slots.BENCH_RANGE[0], le=replay_slots.BENCH_RANGE[1])
 
 
 def _lineup_and_scoring(body: CreateBody) -> tuple[dict[str, int], str, replay_scoring.ScoringRules | None]:
@@ -233,6 +234,7 @@ def create_game(body: CreateBody, session: Session = Depends(get_session)) -> di
         slot = body.draft_slot or int(rs.rng(seed, "slot").integers(1, body.teams + 1))
         settings = Settings(season=season, teams=body.teams, scoring=scoring, draft_slot=slot,
                             waiver_mode=body.waiver_mode, difficulty=body.difficulty, starters=starters,
+                            bench=body.bench,
                             scoring_rules=rules, adp_format=replay_adp_format.wanted(scoring, rules, starters),
                             **_window(body, kind, through))
         simulated = settings.sim_from is not None

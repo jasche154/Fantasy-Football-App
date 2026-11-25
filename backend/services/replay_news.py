@@ -7,6 +7,7 @@ Pure: no database, no Knowledge.
 - A suspension is exact.
 - Otherwise the first report misses the real week by -2..+2 (ERRORS / ERROR_ODDS), and the miss shrinks to
   zero as the real return nears. A report never names a week he has already missed (<= the current week).
+- A return after the season's last week reads "out for the season".
 - A real absence of FALSE_SEASON_GAP or more weeks: FALSE_SEASON_ODDS of first reading "out for the season",
   corrected CORRECTION_LEAD weeks before he really returns.
 - Truly season-ending: FAKE_RETURN_ODDS of first naming a return 4-8 weeks out, revised after 1-3 weeks.
@@ -44,9 +45,11 @@ def _text(tag: str, since: int, back: int | None) -> str:
     return f"{verb} since week {since}; expected back week {back}."
 
 
-def report(seed: int, player_id: int, since: int, true_return: int, week: int, tag: str) -> Report:
+def report(seed: int, player_id: int, since: int, true_return: int, week: int, tag: str,
+           last_week: int | None = None) -> Report:
     """What the news says before `week` about a player out since `since` who really returns at
-    `true_return` (0 = never). Never names a week <= `week`."""
+    `true_return` (0 = never). Never names a week <= `week`, nor one after `last_week` (the season's last week):
+    that reads out for the season."""
     rng = replay_state.rng(seed, "news", player_id, since)
     # every draw is made, always in this order, so a report never depends on which branch an earlier week took
     false_season = rng.random() < FALSE_SEASON_ODDS
@@ -66,6 +69,8 @@ def report(seed: int, player_id: int, since: int, true_return: int, week: int, t
         back = true_return + round(error * min(1.0, left))
     if back is not None:
         back = max(back, week + 1)
+    if back is not None and last_week is not None and back > last_week:
+        back = None
     return Report(since=since, back=back, text=_text(tag, since, back))
 
 

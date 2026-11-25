@@ -13,6 +13,7 @@ SUPERFLEX_POSITIONS = ("QB", "RB", "WR", "TE")
 ELIGIBLE = MappingProxyType({"FLEX": FLEX_POSITIONS, "SUPERFLEX": SUPERFLEX_POSITIONS})
 MAX_PER_SLOT = 3
 MAX_STARTERS = 12
+BENCH_RANGE = (1, 10)           # bench spots a new league may have (Settings.bench defaults to 6)
 
 STANDARD = MappingProxyType({"QB": 1, "RB": 2, "WR": 2, "TE": 1, "FLEX": 1, "K": 1, "DST": 1})
 PRESETS = MappingProxyType({

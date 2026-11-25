@@ -95,3 +95,13 @@ def test_open_streak_finds_the_streak_of_a_hard_tagged_player_only():
     assert news.open_streak(data, fakes.BREAKOUT_ID, 7) is None              # never tagged
     untold = fakes.tagged(data, {(fakes.BREAKOUT_ID, 7): fakes.Injury("O")})
     assert news.open_streak(untold, fakes.BREAKOUT_ID, 7) is None            # no returns entry: no news
+
+
+@pytest.mark.parametrize("since, true_return, week, tag", [(15, 0, 15, "O"), (14, 0, 16, "IR"), (12, 17, 16, "O"),
+                                                          (15, 19, 16, "SUS"), (17, 0, 17, "O")])
+def test_a_report_never_names_a_week_after_the_season(since, true_return, week, tag):
+    for seed in SEEDS:
+        report = news.report(seed, 7, since, true_return, week, tag, END)
+
+        assert report.back is None or week < report.back <= END
+        assert report.back is not None or report.text.startswith("Out for the season")

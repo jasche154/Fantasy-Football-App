@@ -293,7 +293,7 @@ def with_news(data: SeasonData, rows: Mapping[int, dict], fields: Mapping[int, d
     players an opportunity shock moves (replay_shocks: the market's reaction, which reads that news)."""
     out: dict[int, dict] = {}
     for pid, (expert, model_part, (since, back, tag)) in parts.items():
-        news = replay_news.report(seed, pid, since, back, week, tag)
+        news = replay_news.report(seed, pid, since, back, week, tag, data.last_week)
         chart, extra = _injured(data, rows[pid], news, week, end_week, expert, model_part)
         out[pid] = {**fields[pid], **extra, "chart": round(chart, 1), "news": news}
     return {**out, **_shocked(data, rows, fields, out, week)}
