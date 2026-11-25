@@ -22,7 +22,8 @@ seasons 2019-2025 by services/sim_next_year_fit.py and lives in sim_next_year.js
 - Starters. A QB's `starts` weight is a decayed share of recent starts, so a starter hurt late in the season
   (or one who changed teams after it) looks like a backup; in August the healthy incumbent is the starter
   again: on each team (after the moves) the QB with the most starts over the whole season (`season_starts`,
-  starts_by_team, each start labelled with that game's team: starts for his team plus those for a team he was
+  starts_by_team, each start labelled with that game's team, and the games a starter missed hurt counted as his:
+  starts for his team plus those for a team he was
   the main starter of, so a fill-in elsewhere does not take the job from the team's own starter while a signed
   starter does; a QB traded in mid-season keeps his old team's starts too, unless his new team's main starter
   started its week 1 and is still there (Brissett behind Lamar); starting week 1 counts one
@@ -33,9 +34,8 @@ seasons 2019-2025 by services/sim_next_year_fit.py and lives in sim_next_year.js
   in log(pick), not extrapolated above ROOKIE_PICK_FLOOR for non-QBs: the fit has almost none there),
   position-norm efficiency at his team's passer scale, and no games of evidence, so sim_talent.truth draws
   them the widest. A rookie QB is named the starter when his team has no starter
-  (nobody with STARTER_ROLE starts), or, when the incumbent is not an established starter (sim_qb.established
-  of his rank by last season's market value, sim_market.position_ranks: the user's choice, a rookie takes over
-  from weak starters only), when his pick makes week 1 very likely (week-1 chance ROOKIE_QB_FRANCHISE or more),
+  (nobody with STARTER_ROLE starts), or, when the incumbent is not an established starter (sim_qb.established_qbs
+  on the veterans' preseason ranks: the user's choice, a rookie takes over from weak starters only), when his pick makes week 1 very likely (week-1 chance ROOKIE_QB_FRANCHISE or more),
   or likely (ROOKIE_QB_NAMED) and the incumbent is a below-average passer; otherwise his starts weight is his
   week-1 chance, which puts him next in line when the holder is hurt or benched (sim_qb_jobs). A rookie with `hype` (offseason file) gets his role x
   hype ^ HYPE_ROLE (1: the coaches buy the hype; tuned so Jeremiah Smith, hype 1.2, finishes a top-12 WR
@@ -60,7 +60,7 @@ from functools import lru_cache
 from pathlib import Path
 from types import MappingProxyType
 
-from services import sim_market, sim_metrics
+from services import sim_market, sim_metrics, sim_qb
 from services.replay_adp_format import TWO_QB
 from services.replay_pool import PoolPlayer, SeasonData
 from services.replay_scoring import ScoringRules
@@ -222,19 +222,18 @@ def _qb_competition(players: dict[int, Player], rookie: Player, secure: Collecti
             players[incumbent.player_id] = replace(incumbent, starts=min(incumbent.starts, VETERAN_BACKUP_STARTS))
 
 
-def _established(world: World) -> set[int]:
-    """The QBs whose job is secure (sim_qb.established) by their rank in last season's market value."""
-    from services import sim_qb
-
-    return {pid for pid, rank in sim_market.position_ranks(world).items()
-            if world.players[pid].position == "QB" and sim_qb.established(rank)}
-
-
 def starts_by_team(data: SeasonData) -> dict[int, list[tuple[int, str | None]]]:
-    """{QB: [(week, team)] of the weeks he started} (sim_metrics.qb_starts), the `season_starts` of next_year."""
+    """{QB: [(week, team)] of the weeks he started (sim_metrics.qb_starts), plus the weeks he missed with an injury
+    tag while his team, one he started for, played}: the `season_starts` of next_year, so a starter's claim counts
+    the games he missed hurt."""
     teams = {pid: dict(games) for pid, games in data.team_by_week.items()}     # the game's team, not the one before it
-    return {pid: [(week, teams.get(pid, {}).get(week) or data.team_at(pid, week)) for week in weeks]
-            for pid, weeks in sim_metrics.qb_starts(data).items()}
+    out = {pid: [(week, teams.get(pid, {}).get(week) or data.team_at(pid, week)) for week in weeks]
+           for pid, weeks in sim_metrics.qb_starts(data).items()}
+    for pid, week in sorted(key for key in data.injuries if key[0] in out):
+        team, claimed = data.team_at(pid, week), {t for _, t in out[pid]}
+        if (pid, week) not in data.actual and team in claimed and data.schedule.opponent(team, week)                 and (week, team) not in out[pid]:
+            out[pid].append((week, team))
+    return {pid: sorted(weeks, key=lambda wt: wt[0]) for pid, weeks in out.items()}
 
 
 def restore_starters(players: dict[int, Player], season_starts: Mapping[int, Sequence[tuple[int, str | None]]]) -> None:
@@ -317,19 +316,23 @@ def _teams(world: World) -> dict[str, Team]:
 
 def next_year(world: World, players: Mapping[int, PoolPlayer], experience: Mapping[int, int],
               rookies: Mapping[int, Rookie], moves: Mapping[int, str | None],
-              season_starts: Mapping[int, Sequence[tuple[int, str | None]]] | None = None) -> tuple[World, dict[int, PoolPlayer]]:
+              season_starts: Mapping[int, Sequence[tuple[int, str | None]]] | None = None,
+              past: Collection[int] = ()) -> tuple[World, dict[int, PoolPlayer]]:
     """(the belief going into next season, its player pool: names, positions and teams, no ADP yet) from the
     belief at the end of this one. `players`: names and positions of the world's players; `experience`: seasons each has played
     through this one; `rookies`: {id: rookie} (rookie_ids); `moves`: {id: new team, or None = gone};
-    `season_starts`: (week, team) of each start a QB made this season (starts_by_team)."""
+    `season_starts`: (week, team) of each start a QB made this season (starts_by_team); `past`: the QBs established
+    by their real ADP of the seasons before (sim_qb.established_qbs, read by sim_setup.qb_inputs)."""
     teams = _teams(world)
     new = _veterans(world, experience, moves)
     restore_starters(new, season_starts or {})
     _fill_vacancies(new, teams)
+    secure = frozenset()
+    if any(r.position == "QB" for r in rookies.values()):     # the veterans' preseason ranks, before the rookies join
+        secure = sim_qb.established_qbs(sim_qb.preseason_ranks(World(MappingProxyType(new), MappingProxyType(teams))), past)
     for pid, rookie in sorted(rookies.items()):
         if rookie.team in teams and pid not in new:
             new[pid] = rookie_player(pid, rookie, replace(teams[rookie.team], passer=AVERAGE_PASSER))
-    secure = _established(world) if any(r.position == "QB" for r in rookies.values()) else set()
     for pid in sorted(rookies):
         if pid in new and new[pid].position == "QB":
             _qb_competition(new, new[pid], secure)

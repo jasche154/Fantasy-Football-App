@@ -215,10 +215,11 @@ def _market(tables: _Tables, base: SeasonData, belief: World, truth: World, seed
 
 
 def simulate(base: SeasonData, seed: int, from_week: int, prior: World | None = None,
-             carried: Mapping[int, sim_injuries.Spell] | None = None, rookies: Collection[int] = ()) -> SeasonData:
+             carried: Mapping[int, sim_injuries.Spell] | None = None, rookies: Collection[int] = (),
+             qbs: sim_qb_jobs.QbInputs = sim_qb_jobs.QbInputs()) -> SeasonData:
     """A new SeasonData with weeks from_week..base.last_week simulated (see the module docstring). `carried`:
     the truth's absences running into week 1 of a whole season (sim_carryover.draw); `rookies`: the players in
-    their first season (sim_talent.growth)."""
+    their first season (sim_talent.growth); `qbs`: the QB jobs' database inputs (sim_setup.qb_inputs)."""
     if not 1 <= from_week <= base.last_week:
         raise ValueError(f"Week {from_week} is outside the season (1-{base.last_week}).")
     scoring, last = scoring_of(base), base.last_week
@@ -231,9 +232,10 @@ def simulate(base: SeasonData, seed: int, from_week: int, prior: World | None = 
     absences = _absences(base, belief, seed, from_week, carried)
     returning: dict[int, sim_injuries.Spell] = {}
     buzz_weeks = sim_talent.change_weeks(from_week, last)          # false buzz only where true buzz can land
-    ranks = sim_talent.public_ranks(belief)                        # the public's ranks the rumours lean on
-    jobs = sim_qb_jobs.start(base, belief, from_week)              # who holds each QB job (sim_qb_jobs)
-    expected = sim_talent.expected_changes(belief, ranks, from_week, last)
+    ranks = sim_market.position_ranks(belief)                      # the public's ranks the rumours lean on
+    established = sim_qb_jobs.established_of(base, belief, from_week == 1 and prior is not None, qbs)
+    jobs = sim_qb_jobs.start(base, belief, from_week, established, qbs)    # who holds each QB job (sim_qb_jobs)
+    expected = sim_talent.expected_changes(belief)
     false_rate = sim_market.expected_hints(expected + sim_qb_jobs.expected_benchings(jobs, buzz_weeks[1] - buzz_weeks[0] + 1),
                                            buzz_weeks[1] - buzz_weeks[0] + 1)
     public = belief                                  # the latest public belief (last week's, for this week's tags)

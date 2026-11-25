@@ -92,7 +92,7 @@ def test_rookie_roles_fall_with_the_pick_and_are_not_extrapolated_above_the_floo
 
 
 def test_a_rookie_qb_starts_only_where_the_job_is_open_or_he_went_very_high(monkeypatch):
-    monkeypatch.setattr(ny, "_established", lambda world: set())           # a weak (not established) incumbent
+    monkeypatch.setattr(ny.sim_qb, "established_qbs", lambda ranks, past: frozenset())   # a weak incumbent
     rookie = Rookie("First Round Passer", "QB", "PIT", 10, "Penn State")
     rid = ny.ROOKIE_ID_BASE + 2027 * ny.ROOKIE_ID_SEASON + 10
     assert ny.ROOKIE_QB_NAMED <= ny._line("QB", "week1", 10) < ny.ROOKIE_QB_FRANCHISE
@@ -114,7 +114,7 @@ def test_an_established_incumbent_is_never_beaten_by_a_rookie_in_august():
     benched (sim_qb_jobs)."""
     first_pick = Rookie("Franchise Passer", "QB", "PIT", 1, "Ohio State")
     weak = _world((_player("PIT", "QB1", 0.92),))
-    assert pid("PIT", "QB1") in ny._established(weak)                      # a two-team world: every starter ranks high
+    assert pid("PIT", "QB1") in ny.sim_qb.established_qbs(ny.sim_qb.preseason_ranks(weak), ())   # two teams: all rank high
     for world in (None, weak):
         belief, _ = _next(world, rookies=(first_pick,))
         assert belief.players[pid("PIT", "QB1")].starts == 1.0
@@ -167,7 +167,7 @@ def test_each_start_counts_for_the_team_he_played_that_game_for(monkeypatch):
     """A QB traded before week 9 started week 9 for his new team (team_at would say the old one)."""
     from services import replay_pool, sim_metrics
 
-    data = SimpleNamespace(team_by_week={7: ((7, "ARI"), (8, "ARI"), (9, "BAL"))}, players={})
+    data = SimpleNamespace(team_by_week={7: ((7, "ARI"), (8, "ARI"), (9, "BAL"))}, players={}, injuries={})
     data.team_at = lambda player_id, week: replay_pool.SeasonData.team_at(data, player_id, week)
     monkeypatch.setattr(sim_metrics, "qb_starts", lambda _: {7: [7, 8, 9]})
     assert ny.starts_by_team(data) == {7: [(7, "ARI"), (8, "ARI"), (9, "BAL")]}
