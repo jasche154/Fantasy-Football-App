@@ -32,6 +32,12 @@ def superflex(starters: Mapping[str, int]) -> int:
     return starters.get("SUPERFLEX", 0)
 
 
+def own_slots(position: str, starters: Mapping[str, int]) -> int:
+    """Starting slots a position fills as its own: its slots, and every SUPERFLEX for a QB (superflex leagues
+    start two). A FLEX belongs to no one position."""
+    return starters.get(position, 0) + (superflex(starters) if position == "QB" else 0)
+
+
 def two_qb(starters: Mapping[str, int] | None) -> bool:
     """A league that starts two QBs (a SUPERFLEX slot, or 2+ QB slots): it drafts and ranks QBs as superflex
     leagues do (replay_chart.superflex_view: QBs where the 2-QB ADP list takes them)."""

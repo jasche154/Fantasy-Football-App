@@ -12,9 +12,10 @@ import pytest
 
 from services import (
     replay_counter, replay_fans as fans, replay_mood, replay_personas as rp, replay_state as rs,
-    replay_styles as st, replay_trade_ai as ai, replay_trade_value as tv, replay_trades as rt,
+    replay_styles as st, replay_trade_ai as ai, replay_trade_value as tv, replay_trades as rt, replay_values as rv,
 )
 from services.replay_news import Report
+from services.replay_slots import own_slots
 from services.replay_pool import SKILL
 from tests.test_replay_trades import (
     FAIR, NEEDS_RB, SETTINGS, USER, league, lock_free_agents, star, values,
@@ -273,7 +274,7 @@ def test_a_contending_contender_pays_more_for_starters_and_less_for_depth():
     state, know = league()
     state = with_team(results(state, CPU, [True] * 3), CPU, persona="contender")
     team = rs.team(state, CPU)
-    starters = st._starters(know, SETTINGS, team.roster)
+    starters = rv.starters(know, team.roster, SETTINGS)
     starter = next(pid for pid in team.roster if pid in starters and know.by_id[pid].position in SKILL)
     bench = next(pid for pid in team.roster if pid not in starters and know.by_id[pid].position in SKILL)
     mind = st.mind_for(state, SETTINGS, know, team, sends=(starter, bench))
@@ -403,7 +404,7 @@ def test_a_superflex_slot_counts_as_a_qb_slot_for_needs():
                                               "K": 1, "DST": 1})
     state, know = league(settings=superflex)
 
-    assert st.slots_for("QB", superflex.starters) == 2 and st.slots_for("RB", superflex.starters) == 2
+    assert own_slots("QB", superflex.starters) == 2 and own_slots("RB", superflex.starters) == 2
     one_qb = [t.id for t in state.teams if len(st._healthy(know, t.roster, "QB")) < 2]
     needs = st.position_needs(state, superflex, know)
     assert one_qb and all("QB" in needs[tid][0] for tid in one_qb)
@@ -442,6 +443,7 @@ def test_a_lowball_gets_a_value_reply_naming_the_player_asked_for():
 
     verdict = rt.evaluate(state, SETTINGS, know, USER, CPU, [worst], [best])
     assert not verdict.accepted and (verdict.decline, verdict.decline_player) == ("decline_value", best)
+    assert not chart(know, worst) > (1 - 0.15) * chart(know, best)          # a real lowball
 
 
 def _close_deal(state, know):
@@ -468,7 +470,8 @@ def test_a_cpu_high_on_the_player_asked_for_turns_down_what_it_would_take_withou
 
 def test_decline_need_only_when_the_lineup_loss_alone_sank_the_deal():
     """Over every 1-for-1 the user offers CPU 9 that it turns down while losing lineup value, the reply is
-    decline_need exactly when the same deal without the lineup loss would have passed."""
+    decline_need exactly when the lineup loss sank it (`lineup_led`: without it the deal passes, or it is bigger
+    than the value gap left), else a value reply."""
     state, know = league()
     cpu, user = rs.team(state, CPU), rs.user_team(state)
     seen = set()
@@ -479,10 +482,11 @@ def test_decline_need_only_when_the_lineup_loss_alone_sank_the_deal():
                     or side.cover is None or any(st.markup(know, side.mind, p) for p in side.sends):
                 continue
             kind = rt._decline(SETTINGS, know, side)[0]
-            flips = side.rescore(gain_per_week=0.0).score >= 0
-            assert kind == ("decline_need" if flips else "decline_value"), (mine, theirs)
-            seen.add(kind)
-    assert seen == {"decline_need", "decline_value"}
+            rest = side.rescore(gain_per_week=0.0).score
+            led = rest >= 0 or -side.tally.lineup > -rest
+            assert (kind == "decline_need") == led and kind in ("decline_need", "decline_close", "decline_value")
+            seen.add("decline_need" if led else "value")
+    assert seen == {"decline_need", "value"}
 
 
 def _stub_side(kind_flips: str, **more):
@@ -492,12 +496,14 @@ def _stub_side(kind_flips: str, **more):
     cpu, user = rs.team(state, CPU), rs.user_team(state)
     theirs = next(p for p in cpu.roster if know.by_id[p].position == "WR")
     mine = next(p for p in user.roster if know.by_id[p].position == "WR")
-    failing = tv.Tally(100.0, 90.0, 0.0, 0.0, more.pop("lineup", 0.0), -5.0)
+    failing = tv.Tally(100.0, 90.0, 0.0, 0.0, more.pop("lineup", 0.0), more.pop("score", -5.0))
 
     def rescore(**changed):
         flipped = {"attach": changed.get("attach") is False, "lineup": changed.get("gain_per_week") == 0.0,
-                   "deep": "persona" in changed}[kind_flips]
-        return replace(failing, score=5.0 if flipped else -5.0)
+                   "deep": "persona" in changed, "none": False}[kind_flips]
+        return replace(failing, score=5.0 if flipped else more_rest)
+
+    more_rest = more.pop("rest", -5.0)
 
     mind = replace(st.plain("balanced"), **more)
     side = reasons.Side(cpu, (theirs,), (mine,), (), cpu.roster, (mine,), (), 0.0, failing, True, mind, rescore)
@@ -510,12 +516,85 @@ def test_each_decline_reason_is_the_term_whose_removal_flips_the_answer(monkeypa
     know, side, theirs, mine = _stub_side("lineup", lineup=-20.0)
     assert rt._decline(SETTINGS, know, side)[0] == "decline_need"                     # lost a starter
     know, side, theirs, mine = _stub_side("deep")                                     # not deep there: no flip tried
-    assert rt._decline(SETTINGS, know, side) == ("decline_value", theirs, None)
+    assert rt._decline(SETTINGS, know, side) == ("decline_close", theirs, None)       # 5 short of 90: close
     monkeypatch.setattr(st, "markup", lambda know, mind, pid: 0.1 if pid == theirs else 0.0)
     know, side, theirs, mine = _stub_side("attach")
     assert rt._decline(SETTINGS, know, side) == ("decline_attached", theirs, None)
     know, side, theirs, mine = _stub_side("lineup", lineup=-20.0)                     # high on him, but the
     assert rt._decline(SETTINGS, know, side)[0] == "decline_need"                     # mark-up alone doesn't flip it
+
+
+@pytest.mark.parametrize("score, kind", [(-13.4, "decline_close"), (-13.6, "decline_value")])
+def test_a_value_reply_says_close_up_to_fifteen_percent_short_and_a_lowball_beyond(score, kind):
+    from services import replay_trade_reasons as reasons
+    know, side, theirs, mine = _stub_side("deep", score=score, rest=score)
+    assert reasons.CLOSE_SHARE * side.tally.received == pytest.approx(13.5)
+    assert rt._decline(SETTINGS, know, side) == (kind, theirs, None)
+
+
+def test_a_lineup_loss_bigger_than_the_value_gap_left_is_why_and_the_sentence_leads_with_it():
+    """Kamara for Josh Allen to a shark: he'd get more than he gives, but loses 78 of lineup value; without that
+    loss he'd still be 5 short (his margin), so the loss is the cause, not the value."""
+    from services import replay_trade_reasons as reasons
+    know, side, theirs, mine = _stub_side("none", lineup=-78.0, score=-83.4, rest=-5.4)
+    other = rs.user_team(league()[0])
+
+    assert reasons.lineup_led(side) and rt._decline(SETTINGS, know, side)[0] == "decline_need"
+    sentence = reasons._value_reason(side, other, know, 1.03)
+    assert sentence.startswith(f"{rt.VALUE_REASON}: It would weaken their starting lineup (worth 78")
+    small = replace(side, tally=replace(side.tally, lineup=-3.0))
+    assert not reasons.lineup_led(small) and "weaken" not in reasons._value_reason(small, other, know, 1.03).split(".")[0]
+
+
+def _rule_case(rule: str):
+    """CPU 9 asked for its best skill player for the user's best, blocked by `rule`."""
+    from tests.test_replay_trades import lock_free_agents as lock
+    state, know = league()
+    cpu, user = rs.team(state, CPU), rs.user_team(state)
+    theirs = max((p for p in cpu.roster if know.by_id[p].position in SKILL), key=lambda p: chart(know, p))
+    mine = max((p for p in user.roster if know.by_id[p].position in SKILL), key=lambda p: chart(know, p))
+    give = (mine,)
+    if rule == "traded":
+        state = replace(state, traded={theirs: state.week})
+    elif rule == "cap":
+        for _ in range(rs.MAX_TRADES_PER_WEEK):
+            state = rt.record_offer(state, CPU, 5, (), (), "accepted")
+    elif rule == "ir":
+        healthy = next(p for p in cpu.roster if p != theirs and know.by_id[p].position in SKILL)
+        state = with_team(state, CPU, roster=tuple(p for p in cpu.roster if p != healthy), ir=(healthy,))
+    elif rule == "lineup":
+        qbs = tuple(p for p in user.roster if know.by_id[p].position == "QB")
+        state, give = lock(state, know, "QB"), qbs
+    return state, know, give, (theirs,)
+
+
+@pytest.mark.parametrize("rule", ["traded", "cap", "ir", "lineup"])
+def test_a_league_rule_that_blocks_the_deal_is_the_reply_before_any_persona_reason(rule, fan_of_rival):
+    from services import replay_chat
+    state, know, give, get = _rule_case(rule)
+    hated = fans.club(know.by_id[give[0]].team)
+    state = with_team(state, CPU, persona="fan", fan_of=fan_of_rival(hated))     # a rival player in the deal too
+
+    verdict = rt.evaluate(state, SETTINGS, know, USER, CPU, give, get)
+    assert not verdict.accepted and verdict.decline == f"decline_rule_{rule}"
+    after = rt.record_offer(state, USER, CPU, give, get, "declined")
+    replied = replay_chat.decline_reply(after, know, 1, after.offers[-1].id, verdict)
+    assert replied.offers[-1].reply
+
+
+def test_every_declined_proposal_gets_a_reply_reason():
+    state, know = league()
+    user = rs.user_team(state)
+    mine = [p for p in user.roster if know.by_id[p].position in SKILL][:4]
+    declined = 0
+    for cpu in (t for t in state.teams if not t.is_user):
+        for theirs in [p for p in cpu.roster if know.by_id[p].position in SKILL][:4]:
+            for give in mine:
+                verdict = rt.evaluate(state, SETTINGS, know, USER, cpu.id, (give,), (theirs,))
+                if not verdict.accepted:
+                    declined += 1
+                    assert verdict.decline in rt.DECLINE_KINDS, (give, theirs, verdict.reasons)
+    assert declined > 50
 
 
 def test_the_reply_is_stored_on_the_declined_offer_and_kept_out_of_the_feed(fan_of_rival):
