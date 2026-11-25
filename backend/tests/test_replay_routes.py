@@ -819,3 +819,26 @@ def test_an_add_drop_body_refuses_a_bid():
 
     with pytest.raises(ValidationError):
         AddBody(add=1, bid=5)
+
+
+def test_a_proposal_for_a_player_in_a_cpus_ir_slot_is_answered_like_any_other(client, monkeypatch):
+    """The counter search once looked for his owner on active rosters only and crashed (a 500)."""
+    from services import replay_counter
+    monkeypatch.setattr(replay_counter.replay_personas, "counter_rate", lambda persona: 1.0)
+    game = post(client, "/games", {"season": SEASON, "seed": SEED, "teams": 12, "draft_slot": 12})["game"]["id"]
+    post(client, f"/games/{game}/draft/auto", whole_draft="true")
+    held = None
+    while held is None:
+        summary = get(client, f"/games/{game}")
+        assert summary["week"] <= fakes.INJURED_WEEKS[-1], "no CPU put anyone on IR"
+        for team in (t for t in summary["teams"] if not t["is_user"]):
+            ir = get(client, f"/games/{game}/team", team_id=team["team_id"])["ir"]
+            held = held or (team["team_id"], ir[0]["player"]["id"]) if ir else held
+        if held is None:
+            post(client, f"/games/{game}/advance", {"step": summary["next_action"]["step"], "week": summary["week"]})
+    mine = get(client, f"/games/{game}/team")["results"]
+    scrub = min((row for row in mine if row["player"]["position"] in SKILL), key=lambda row: row["value"])["player"]["id"]
+
+    answer = post(client, f"/games/{game}/trades/propose",
+                  {"to_team": held[0], "give": [scrub], "get": [held[1]], "week": get(client, f"/games/{game}")["week"]})
+    assert answer["executed"] is False and answer["verdict"]["reasons"]
