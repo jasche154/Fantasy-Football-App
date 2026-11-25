@@ -8,11 +8,13 @@ that costs the user least (never a "big_loss" for the user, never one needing a 
 pending Offer(counter_to=declined.id). The declined deal is re-checked with the user's own drops. It never
 counters a counter of its own counter: the user can only answer a counter in the week it was made, and a CPU
 counters at most once a week.
+
+`haggle_counter`: a haggler always comes back when the user declines his opening offer, at his normal edge.
 """
 from collections.abc import Iterator, Sequence
 from dataclasses import replace
 
-from services import replay_personas, replay_state as rs, replay_trades as rt
+from services import replay_personas, replay_state as rs, replay_trade_ai, replay_trades as rt
 from services.replay_state import Offer, Settings, State
 from services.replay_values import Knowledge
 
@@ -70,3 +72,18 @@ def counter_offer(state: State, settings: Settings, know: Knowledge, declined: O
         return state
     give, get = best[1]
     return rt.record_offer(state, cpu.id, declined.from_team, get, give, "pending", declined.id)
+
+
+def haggle_counter(state: State, settings: Settings, know: Knowledge, declined: Offer) -> State:
+    """A haggler always answers the user declining his opening offer (`declined`, his own, no counter itself)
+    with a counter at his normal edge for the same players of the user's (replay_trade_ai.haggle_deal), as a
+    pending Offer(counter_to=declined.id). Unchanged for anyone else, or when no such deal stands now."""
+    cpu, user = rs.team(state, declined.from_team), rs.user_team(state)
+    if (cpu.is_user or cpu.persona != "haggler" or declined.to_team != user.id or declined.status != "declined"
+            or declined.counter_to is not None or declined.week != state.week
+            or any(o.counter_to == declined.id for o in state.offers)):
+        return state
+    deal = replay_trade_ai.haggle_deal(state, settings, know, cpu, declined.get)
+    if deal is None:
+        return state
+    return rt.record_offer(state, cpu.id, user.id, deal[1], deal[0], "pending", declined.id)

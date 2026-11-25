@@ -12,6 +12,7 @@ numbers for the current week), so no CPU ever sees a result or a projection from
   under a positional limit, and swap a kicker or defense who does play only for STREAM_EDGE projected points
   (a streamer, about STREAMER_SHARE of CPUs picked once from the game's seed by `streamers`, for
   STREAMER_EDGE: it chases a matchup most weeks).
+- A fan never claims or adds his rival's players (replay_fans), unless one is the only way to field his lineup.
 - A CPU never drops a top-PROTECTED_RANK player (by HEALTHY value; per 12 teams, scaled by league size), one
   of the league's picks from rounds 1-EARLY_ROUNDS in its first EARLY_WEEKS weeks (unless the news has him out
   for the season), or an injured player who was above replacement or still has trade value (healthy chart
@@ -33,7 +34,8 @@ from collections import Counter
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
 
-from services import lineup_gain, replay_claim_ai as claim_ai, replay_ir, replay_state as rs, replay_values as rv
+from services import (lineup_gain, replay_claim_ai as claim_ai, replay_fans, replay_ir, replay_state as rs,
+                      replay_values as rv)
 from services import replay_waivers
 from services.replay_cover import cpu_cover  # noqa: F401  (re-exported: replay_game and tests call it here)
 from services.replay_pool import SKILL
@@ -273,7 +275,8 @@ def cpu_claims(state: State, settings: Settings, know: Knowledge, seed: int) -> 
     for team in state.teams:
         if team.is_user:
             continue
-        moves = _plan_claims([know.by_id[pid] for pid in team.roster], pool, _for_team(ctx, team))
+        mine = [v for v in pool if not replay_fans.banned(team, v.team)]
+        moves = _plan_claims([know.by_id[pid] for pid in team.roster], mine, _for_team(ctx, team))
         if moves:
             claims[team.id] = _priced(state, settings, seed, team.id, moves, weights, next_id)
             next_id += len(moves)
@@ -411,8 +414,10 @@ def _next_move(state: State, team_id: int, ctx: _Context, made: int) -> Move | N
     team = rs.team(state, team_id)
     roster, ctx = [ctx.know.by_id[pid] for pid in team.roster], _for_team(ctx, team)
     free = _unrostered(state, ctx.know, state.locked)
+    allowed = [v for v in free if not replay_fans.banned(team, v.team)]
     steps = (_cover, _fill_spot, _trim, _stream) if made < MAX_FREE_AGENT_MOVES else (_cover,)
-    return next((move for step in steps if (move := step(roster, free, ctx)) is not None), None)
+    found = next((move for step in steps if (move := step(roster, allowed, ctx)) is not None), None)
+    return found if found is not None or len(allowed) == len(free) else _cover(roster, free, ctx)
 
 
 def cpu_free_agency(state: State, settings: Settings, know: Knowledge, seed: int) -> State:

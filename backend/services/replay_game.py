@@ -5,8 +5,10 @@ each other.
     week, "wednesday"/"faab":   advance("wednesday") -> advance("play") -> ...
     week, no waivers:           advance("play") -> ...
 
-- Chat: a third CPU may react to any trade (`replay_chat.trade_reactions`) and every CPU offer to the user
-  carries its reason (`replay_chat.label_offers`).
+- Chat: a third CPU may react to any trade (`replay_chat.trade_reactions`), every CPU offer to the user
+  carries its reason (`replay_chat.label_offers`) and a CPU that turns the user's proposal down says why
+  (`replay_chat.decline_reply`, stored on the declined Offer as `reply`). A haggler always counters when the
+  user declines his opening offer (`replay_counter.haggle_counter`).
 - `start_week`: CPU IR moves, CPU free agency, then worried CPUs shop a player to the user
   (`replay_mood.refresh_shops`, with a message each: after the roster moves, so no shop is opened on a player
   his manager then drops or stashes), then CPU trades and a possible offer to the user, then every
@@ -52,6 +54,7 @@ __all__ = [
 ]
 
 WEDNESDAY, PLAY = "wednesday", "play"
+Proposed = tuple[State, Verdict, Offer | None]       # (state, verdict with the CPU's `reply`, its counter)
 STEPS = (WEDNESDAY, PLAY)
 SEASON_PHASES = ("waivers", "open")
 
@@ -133,7 +136,7 @@ def start_week(state: State, settings: Settings, data: SeasonData, seed: int) ->
     before = len(state.offers)
     state = replay_trade_ai.cpu_trades(state, settings, know, seed)
     made = [offer.id for offer in state.offers[before:]]
-    state = replay_chat.label_offers(replay_chat.trade_reactions(state, made, know, seed), know, seed, played)
+    state = replay_chat.label_offers(replay_chat.trade_reactions(state, made, know, seed), know, seed, played, settings)
     state = replace(state, locked=(), phase="open")
     return replay_waiver_ai.cpu_cover(state, settings, know, [team.id for team in state.teams])
 
@@ -243,7 +246,7 @@ def evaluate_trade(state: State, settings: Settings, data: SeasonData, to_team: 
 
 
 def _propose(state: State, settings: Settings, data: SeasonData, seed: int, to_team: int, give: Sequence[int],
-             get: Sequence[int], user_drops: Sequence[int], counter_to: int | None) -> tuple[State, Verdict, Offer | None]:
+             get: Sequence[int], user_drops: Sequence[int], counter_to: int | None) -> Proposed:
     know = knowledge(state, settings, data, seed=seed)
     before = len(state.offers)
     state, verdict = replay_trades.propose(state, settings, know, to_team, give, get, user_drops,
@@ -251,24 +254,28 @@ def _propose(state: State, settings: Settings, data: SeasonData, seed: int, to_t
     if verdict.accepted:            # the CPU fills any starting slot the deal emptied (waivers phase: at start_week)
         state = replay_chat.trade_reactions(state, [o.id for o in state.offers[before:]], know, seed)
         return replay_waiver_ai.cpu_cover(state, settings, know, [to_team]), verdict, None
-    if len(state.offers) == before:                 # the same proposal was already declined this week
-        return state, verdict, None
+    if len(state.offers) == before:                 # the same proposal was already declined this week: same reply
+        same = next((o for o in reversed(state.offers) if o.status == "declined" and o.to_team == to_team
+                     and (o.give, o.get) == (tuple(give), tuple(get)) and o.week == state.week), None)
+        return state, replace(verdict, reply=same.reply if same else None), None
+    state = replay_chat.decline_reply(state, know, seed, state.offers[-1].id, verdict)
     declined = state.offers[-1]
     countered = replay_counter.counter_offer(state, settings, know, declined, seed, user_drops)
-    countered = replay_chat.label_offers(countered, know, seed, data.as_of(state.week))
+    countered = replay_chat.label_offers(countered, know, seed, data.as_of(state.week), settings)
     answer = next((o for o in countered.offers[len(state.offers):] if o.counter_to == declined.id), None)
-    return countered, verdict, answer
+    return countered, replace(verdict, reply=declined.reply), answer
 
 
 def propose_trade(state: State, settings: Settings, data: SeasonData, seed: int, to_team: int, give: Sequence[int],
-                  get: Sequence[int], user_drops: Sequence[int] = ()) -> tuple[State, Verdict, Offer | None]:
+                  get: Sequence[int], user_drops: Sequence[int] = ()) -> Proposed:
     """The user offers a CPU a trade: (state, verdict, counter). A declined deal may get the CPU's counter
-    offer (pending, `counter_to` the user's declined offer); None otherwise."""
+    offer (pending, `counter_to` the user's declined offer; None otherwise) and carries its one-line reply in
+    `Verdict.reply` (None when only a league rule or the user's own side stopped it)."""
     return _propose(state, settings, data, seed, to_team, give, get, user_drops, None)
 
 
 def counter_offer(state: State, settings: Settings, data: SeasonData, seed: int, offer_id: int, give: Sequence[int],
-                  get: Sequence[int], user_drops: Sequence[int] = ()) -> tuple[State, Verdict, Offer | None]:
+                  get: Sequence[int], user_drops: Sequence[int] = ()) -> Proposed:
     """The user answers a CPU's pending offer with a deal of their own (`give`: what the user sends): the
     CPU's offer is marked "countered" (by `replay_trades.propose`) and the user's goes to the same CPU like
     `propose_trade`."""
@@ -281,11 +288,14 @@ def counter_offer(state: State, settings: Settings, data: SeasonData, seed: int,
 def respond_offer(state: State, settings: Settings, data: SeasonData, offer_id: int, accept: bool,
                   user_drops: Sequence[int] = (), *, seed: int) -> State:
     """The user answers a CPU's offer. OfferExpired (a ValueError) carries the state to save when the
-    offer no longer stands."""
+    offer no longer stands. Declining a haggler's opening offer brings his counter (a new pending Offer with
+    `counter_to` this one, labelled)."""
     know = knowledge(state, settings, data, seed=seed)
     state = replay_trades.respond(state, settings, know, offer_id, accept, user_drops)
     offer = next(o for o in state.offers if o.id == offer_id)
     if not accept:
-        return state
+        haggled = replay_counter.haggle_counter(state, settings, know, offer)
+        return state if haggled is state else replay_chat.label_offers(haggled, know, seed, data.as_of(state.week),
+                                                                         settings)
     state = replay_chat.trade_reactions(state, [offer_id], know, seed)
     return replay_waiver_ai.cpu_cover(state, settings, know, [offer.from_team])

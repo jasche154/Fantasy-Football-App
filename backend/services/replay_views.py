@@ -14,9 +14,13 @@ standings, matchup, team and playoffs only know weeks from K (asking for an earl
 player's page, the wire's stats and PlayerRow points show the real NFL weeks before K.
 
 Shared pieces
-  TeamRef    {team_id, name, is_user, tendency: string | null, mood: string | null}
+  TeamRef    {team_id, name, is_user, tendency: string | null, mood: string | null, needs: string[], deep: string[]}
       tendency      a one-line hint at how a CPU trades, from its hidden persona; null for the user and
-                    before 3 league weeks are played (the persona's name is never shown)
+                    before 3 league weeks are played (the persona's name is never shown; a fan's names his team
+                    and its rival: "Bears fan. Wants no Packers.")
+      needs, deep   positions where a CPU's weakest starter is weak / where it has a starter to spare, against the
+                    league's starters there (services/replay_styles.position_needs, the same the trade value
+                    uses); empty for the user, in the draft and once the season is over
       mood          who a CPU is down on and high on right now, e.g. "Worried about X. High on Y."
                     (services/replay_mood.py); null for the user, in the draft, before 3 NFL weeks of results are
                     known (replay_mood.moods_known: week 4 on, which is the first week of a league that jumped in at
@@ -179,9 +183,11 @@ GET  .../trades                   {open, deadline_week, max_players, offers: [Of
       open          Summary.trades_open
       Offer {id, week, status: pending | accepted | declined | expired | countered, from_team: TeamRef,
              to_team: TeamRef, give: PlayerRef[] (what from_team sends), get: PlayerRef[], counter_to: id | null,
-             message: string | null}
+             message: string | null, reply: string | null}
       counter_to    the offer this one answers (a counter), else null
       message       a CPU offer's one line to the user in his voice (why he offers it); null otherwise
+      reply         the CPU's one line when it turned the user's proposal down (POST trades/propose returns it too
+                    as `reply`); null otherwise and in old saves
       shops         players a worried CPU is shopping to the user this week (a little under his usual price; the
                     discount is never shown), with his message; empty once trades close
       offers: CPU offers the user can answer, each with a preview Verdict from the user's side (or null
@@ -194,7 +200,7 @@ from functools import cached_property
 
 from services import (
     replay_chat, replay_defense, replay_draft, replay_ir, replay_mood, replay_personas, replay_season,
-    replay_state as rs, replay_trades, replay_values as rv,
+    replay_state as rs, replay_styles, replay_trades, replay_values as rv,
 )
 from services.replay_pool import ALL_POSITIONS, SeasonData
 from services.replay_state import Event, Settings, State, Team, WeekResult
@@ -260,7 +266,15 @@ class Game:
     @cached_property
     def moods(self) -> dict[int, str | None]:
         """Each CPU's mood line now (replay_mood.mood_line), worked out once per request: team_ref asks per row."""
-        return {team.id: replay_mood.mood_line(self.know, team) for team in self.state.teams if not team.is_user}
+        return {team.id: replay_mood.mood_line(self.know, team, replay_personas.now(self.state, team))
+                for team in self.state.teams if not team.is_user}
+
+    @cached_property
+    def needs(self) -> dict[int, tuple[frozenset[str], frozenset[str]]]:
+        """replay_styles.position_needs now, once per request; empty in the draft and once the season is over."""
+        if self.state.phase in ("draft", "complete"):
+            return {}
+        return replay_styles.position_needs(self.state, self.settings, self.know)
 
     @cached_property
     def table(self) -> list[dict]:
@@ -272,11 +286,13 @@ class Game:
 
 def team_ref(game: Game, team: Team) -> dict:
     """tendency and mood: hints at a CPU's (hidden) persona and feelings, once it has played enough league weeks."""
-    tendency = None if team.is_user else replay_personas.tendency(team.persona, game.weeks_played)
+    tendency = None if team.is_user else replay_personas.tendency(team.persona, game.weeks_played, team.fan_of)
     # A mood is about his players' form: it needs played NFL weeks, not league weeks (a jump-in league has them).
     feels = not team.is_user and game.state.phase not in ("draft", "complete") and replay_mood.moods_known(game.state.week)
     mood = game.moods.get(team.id) if feels else None
-    return {"team_id": team.id, "name": team.name, "is_user": team.is_user, "tendency": tendency, "mood": mood}
+    needs, deep = game.needs.get(team.id, ((), ())) if not team.is_user else ((), ())
+    return {"team_id": team.id, "name": team.name, "is_user": team.is_user, "tendency": tendency, "mood": mood,
+            "needs": sorted(needs), "deep": sorted(deep)}
 
 
 def player_ref(value: ReplayValue) -> dict:

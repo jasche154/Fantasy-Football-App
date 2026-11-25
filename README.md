@@ -1168,20 +1168,61 @@ that week's games on; only scoring a week reads its real points.
   that takes it past one cuts its cheapest player there as part of the deal, counted in its value test like
   any cut of its own. A done deal or a drop expires every other pending offer naming a player who moved.
   When a CPU sends you an offer because it wants one of your players, it gives you 5-10% more trade value
-  than it gets, by persona (`replay_personas.OFFER_EDGE`: steady 5-6%, shark 5-7%, balanced 6-8%, panicky and
-  gambler 8-10%), judged as its own offer (`replay_trades.offer_multiple`) both when made and when you accept
+  than it gets, by persona (`replay_personas.OFFER_EDGE`: steady 5-6%, shark and dealer 5-7%, balanced, fan, stasher,
+  contender and a calm tilted manager 6-8%, panicky and gambler 8-10%; the haggler's opening offer is the
+  exception, see below), judged as its own offer (`replay_trades.offer_multiple`) both when made and when you accept
   it; a shop's offer is priced as before, at the shop discount. After a deal each starting slot
   the CPU can no longer fill needs a player it can add (unrostered, not out, not on waivers; in the waiver
   phase, when everyone unrostered is on waivers, anyone you haven't claimed), and it adds him
-  (`replay_cover.cpu_cover`): right away, or in the waiver phase once waivers clear. Each CPU has a hidden **persona** (balanced, panicky, shark, steady,
-  gambler: `services/replay_personas.py`, assigned from the league's seed at creation) that nudges what it
-  thinks a player is worth by up to 15% and how often it offers and counters; after 3 weeks a one-line
-  tendency hint is shown, never the persona. Panicky and gambler CPUs are also **emotional**: they price a
+  (`replay_cover.cpu_cover`): right away, or in the waiver phase once waivers clear. Each CPU has a hidden **persona**
+  (`services/replay_personas.py`, assigned from the league's seed at creation: at least one shark and one
+  panicky, no style on more than two CPUs; old saves keep theirs) that nudges what it thinks a player is worth
+  and how often it offers and counters; after 3 weeks a one-line tendency hint is shown, never the persona:
+  - balanced: the chart. panicky: marks a slumping player down (sells low). steady: won't sell a slumping star
+    cheap. gambler: chases hot streaks and pays most for the best player in a deal. shark: wants a 5% edge and
+    hunts buy-low stars (these nudges stay within 15% of the chart).
+  - **fan**: a seeded favourite NFL team (`Team.fan_of`, `services/replay_fans.py`); its players count 10% more
+    to him, his own and the ones he buys. He never takes a player of its rival (a fixed table: CHI-GB, DAL-PHI,
+    KC-LV, ...; OAK counts as LV): he turns such a trade down, never offers one, never drafts, claims or adds
+    one, unless nobody else can fill a starting slot. His tendency names both: "Bears fan. Wants no Packers."
+  - **stasher**: takes off only half the market's injury discount for an out player with a return date, so he
+    pays the most for hurt stars and looks at yours first.
+  - **haggler**: his opening offer to you gives 10-15% *less* than you send and says it is an opening offer;
+    decline it and he always comes back with a counter at 5-7% more for you (for the player he wanted most).
+  - **contender**: while he holds a playoff spot (from league week 4), anyone who would start for him this week
+    counts 9% more and his bench and out players 10% less; otherwise balanced.
+  - **dealer**: offers you a deal about every other week (50%), counters 90% of the time, looks at 2-for-2
+    swaps first and makes an extra CPU-CPU attempt half the weeks.
+  - **tilted**: balanced until he loses two league games in a row; then he prices like panicky, offers more
+    often (25%) and his offers give you more with each loss (2: 8-10%, 3: 10-13%, 4+: 12-15%).
+  **High on a player** (his mood line says "High on X"): he asks 8% more for him at the threshold, up to 15% for
+  a strong feeling, from anyone, CPUs included; worried caps his price at the chart, so a mood and a price never
+  point opposite ways. **Needs:** a CPU needs a position when its weakest starter there is under half the
+  league's median weakest starter (or it has too few), and is deep at one when it has a starter-quality player
+  (at least that median) more than its starting slots there (a superflex slot counts as a QB slot; a flex slot
+  belongs to no one position) (`replay_styles.position_needs`); the trade builder shows "Needs RB · Deep at
+  WR" under the mood. It pays 5% more on its net gain at a position it needs: what it gets there that would
+  start for it after the deal, less what it sends at that position (so swapping one back for a lesser one
+  earns nothing); 10% when it pays only from positions where it is deep (a team short at RB with many good WRs
+  gives a 5% better WR for a starting back); that and its lineup gain together add at most 10% of what it
+  gives. Chaining such deals barely pays: in the test league a greedy user gains 1.5% of his roster's chart value
+  in a week and 3.8% over four (1.3% without the bonus), because the re-trade lock keeps a player he just got for
+  two weeks. Every style stays inside the market guard (it never takes back under 80% of what it gives on the
+  plain chart), and a test trades round trips (one or two players each way) against every style: none leaves
+  the user more than 2 points ahead of the best measured (all at or below even except the stasher, +1.2%).
+  Leagues saved before these styles keep their old personas, but the need bonus and the "high on" mark-up apply
+  to their CPUs too. A haggler's "opening offer" line and a fan's refusal of a rival's player can give the style
+  away before the week-3 tendency hint does (intended). Panicky and gambler CPUs are also **emotional**: they price a
   hype move at 1.25x its calibrated size (`replay_personas.HYPE`, at most 8 chart points more), both when
   buying and when holding; the rest stay calm. Small on purpose: Javonte Williams' week-2 jump of 15 points
   becomes about 19 to an emotional CPU. **Counters:** a CPU that turns down a deal on value alone may
   answer with a counter offer it would take (`services/replay_counter.py`; one roll and at most one counter
-  per CPU per week), shown under Offers for you (an offer lapses when the week is played: the hub warns
+  per CPU per week). A CPU that says no tells you why in one line in its voice, under its name in the trade
+  window and in the trade history (`Offer.reply`): your player is a rival's (a fan), no roster or lineup room,
+  it is high on the player you asked for and would have taken the deal without that mark-up, it would take the
+  deal without the starter it loses (or if what it gets filled a need rather than a position where it is deep),
+  or not enough value: the first that is true, each tested by taking that one term away
+  (`services/replay_trade_reasons.py`); shown under Offers for you (an offer lapses when the week is played: the hub warns
   while one is waiting);
   you can counter a CPU's offer from the trade builder (the offer is marked "countered"). The **deadline**:
   trades are open through week 11 and its waiver phase, and close when you press Sim to Wednesday after
@@ -1231,11 +1272,11 @@ that week's games on; only scoring a week reads its real points.
   and a line that would run past 140 characters with long names gives way to one that fits. A third manager may react to a
   trade (at most 2 a week) and a shopping CPU messages you (at most 2 shops are open at once); these come on
   top of the 5, so a week can show up to 9 lines. Every CPU offer carries a one-line reason in
-  his voice (worried about a player, never one who might be hurt; high on yours, short at a position, a
-  counter, or a value pitch).
+  his voice (worried about a player, never one who might be hurt; a counter; a haggler's opening offer; high
+  on yours; buying low on a slumping or hurt player of yours; short at a position he needs; or a value pitch).
   In a league that started mid-season (or a simulated one) the chat counts the league's own weeks (moods and
   shops only need 3 NFL weeks of results, see above), and each line is dated with the real NFL week.
-  Lines come from a bank of 1,400+ clean lines in five voices, one per persona, so a manager sounds the same
+  Lines come from a bank of 2,300+ clean lines in eleven voices, one per persona, so a manager sounds the same
   all season; a game never repeats a line until that bucket is used up (except when every unused line runs
   past 140 characters once the names are in: then the next one that fits is reused), and the text is copied
   into the save.
@@ -1687,8 +1728,8 @@ League parameters accepted by every valuation endpoint: `scoring=ppr|half|std`,
 | | | The lineup, claim, add-drop, drop, IR, propose and counter bodies take the same optional `"week"` (the page sends it): 409 when the league has moved on, so a move made on an old page never lands in the next week. Once the season is over every move is a 422 "This season is over." |
 | GET | `/api/replay/games/{id}/trades` | CPU offers waiting for you (with a preview verdict), every past offer and trade (`counter_to` marks a counter), and whether trades are open |
 | POST | `/api/replay/games/{id}/trades/evaluate` | Body `{"to_team": 3, "give": [ids], "get": [ids], "drops": [ids]}`; that CPU's verdict with reasons (nothing changes) |
-| POST | `/api/replay/games/{id}/trades/propose` | Same body; the trade is carried out when the CPU accepts; a decline may come back with the CPU's `counter` offer |
-| POST | `/api/replay/games/{id}/trades/offers/{offer_id}/respond` | Body `{"accept": true, "drops": [ids]}`; answer a CPU's offer |
+| POST | `/api/replay/games/{id}/trades/propose` | Same body; the trade is carried out when the CPU accepts; a decline carries the CPU's one-line `reply` and may come back with its `counter` offer |
+| POST | `/api/replay/games/{id}/trades/offers/{offer_id}/respond` | Body `{"accept": true, "drops": [ids]}`; answer a CPU's offer (declining a haggler's opening offer returns his `counter`) |
 | POST | `/api/replay/games/{id}/trades/offers/{offer_id}/counter` | Body `{"give": [ids], "get": [ids], "drops": [ids]}`; counter a CPU's offer with your own deal (answers like propose) |
 
 Every replay `POST` under `/games` answers `{"game": <summary>, "events": [...]}` plus the action's own
