@@ -646,8 +646,8 @@ def test_players_go_on_ir_and_come_back_through_the_api(client, tmp_path_factory
     assert [p["id"] for p in swapped["events"][0]["players"]] == [first["id"], second["id"]]
     assert swapped["events"][0]["text"] == f"Your Team activated {first['name']} from IR and moved {second['name']} to IR"
     assert full == (422, f"The roster is full ({size} players): pick a player to drop to activate {second['name']}.")
-    assert [e["kind"] for e in activated["events"]] == ["drop", "ir"]
-    assert [p["id"] for p in activated["events"][1]["players"]] == [second["id"], free["id"]]
+    assert [e["kind"] for e in activated["events"]] == ["ir"]          # one event for the whole move
+    assert [p["id"] for p in activated["events"][0]["players"]] == [second["id"], free["id"]]
     assert moves["total"] == 3 and {e["kind"] for e in moves["results"]} == {"ir"}
     assert bad == [422] * 4 and after["ir"] == [] and len(after["results"]) == size
 
