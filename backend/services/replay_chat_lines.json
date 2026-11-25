@@ -2836,81 +2836,476 @@
  },
  "decline_value": {
   "balanced": [
-   "{you}, that's not enough for {player}.",
-   "Not quite enough value there. {player} is worth more to me.",
-   "I'd need more to give up {player}.",
-   "Fair try, but no. Add a little.",
-   "Not for {player}. Close, but not close enough."
+   "{you}, that's nowhere near enough for {player}.",
+   "That's a long way short for {player}. Not interested.",
+   "{player} is worth a lot more than that.",
+   "We're far apart on {player}. Try a real offer.",
+   "No. That offer for {player} isn't close."
   ],
   "panicky": [
-   "{you}, I can't give up {player} for that. I'd regret it all week.",
-   "Not enough for {player}! I'd be a wreck.",
-   "That scares me. {player} is worth more.",
-   "I'd need more for {player}. My nerves say no.",
-   "No, no. {player} for that? I'd never sleep."
+   "{you}, that for {player}? No way. That would ruin my whole week.",
+   "That's not even in the neighborhood for {player}. Please no.",
+   "{player} for that? I'd never forgive myself.",
+   "Way too little for {player}. I'm stressed just reading it.",
+   "No, no, no. {player} is worth so much more."
   ],
   "shark": [
    "{you}, that's a lowball for {player}. Try harder.",
    "Not even close for {player}.",
-   "I don't do favors. {player} costs more.",
+   "I don't do favors. {player} costs a lot more.",
    "Come back with a real offer for {player}.",
-   "That's cute. No."
+   "That's cute. No. {player} isn't on clearance."
   ],
   "steady": [
-   "{you}, I'd need more for {player}.",
-   "Not enough for {player}, I'm afraid.",
-   "{player} is worth more than that to me.",
-   "No, thanks. The value isn't there.",
-   "I'll keep {player} at that price."
+   "{you}, that's well short for {player}.",
+   "Not near enough for {player}, I'm afraid.",
+   "{player} is worth far more than that to me.",
+   "No, thanks. We're far apart on {player}.",
+   "I'll keep {player}. That's not a serious price."
   ],
   "gambler": [
-   "{you}, that's not enough juice for {player}!",
-   "{player} for that? I need a bigger payoff!",
-   "Not enough upside coming back. Pass!",
-   "Bring me more and we'll roll the dice on {player}.",
-   "That's a small bet for {player}. Go bigger!"
+   "{you}, that's a penny bet for {player}! No!",
+   "{player} for that? I need a real payoff!",
+   "That's nowhere near the pot for {player}. Pass!",
+   "Way too small for {player}. Go much bigger!",
+   "Ha! Not for {player}. That's not even a wager."
   ],
   "fan": [
-   "{you}, that's not enough for {player}.",
-   "I'd need more to let {player} go.",
-   "Not quite. {player} is worth more than that.",
-   "Fair try, friend, but no.",
-   "{player} stays at that price."
+   "{you}, that's nowhere near enough for {player}.",
+   "Not even close for {player}, friend.",
+   "{player} is worth a lot more than that.",
+   "We're far apart on {player}. No.",
+   "That offer for {player} misses by a mile."
   ],
   "stasher": [
-   "{you}, I can wait for a better offer for {player}.",
-   "Not enough for {player}. I'm a patient seller.",
-   "{player} is worth more than that. I'll wait.",
-   "No rush on my end. Come back with more.",
-   "That doesn't get {player} done."
+   "{you}, that's far too little for {player}. I'll wait.",
+   "Not close for {player}. I'm a patient seller.",
+   "{player} is worth much more. I'll hold.",
+   "Nowhere near for {player}. Come back with a real one.",
+   "That offer won't get {player}. Not even close."
   ],
   "haggler": [
-   "{you}, that's your opening offer for {player}? Try again.",
-   "Too low for {player}. Come up a bit.",
-   "Not at that price. {player} is worth more.",
-   "Interesting number. Wrong number. Higher.",
-   "{player} for that? Let's keep haggling."
+   "{you}, that's not an opening offer for {player}, that's a joke.",
+   "Way too low for {player}. Start over.",
+   "Even I don't open that low for {player}.",
+   "Not in the same ballpark for {player}. Higher. Much higher.",
+   "{player} for that? No haggling from there."
   ],
   "contender": [
-   "{you}, that doesn't help me win now. Not for {player}.",
-   "Not enough for {player}. Title teams don't take discounts.",
-   "{player} is worth more to a contender.",
-   "I need more back for {player}. Pass.",
-   "That makes my team worse. No."
+   "{you}, that's far short for {player}. Title teams don't sell cheap.",
+   "Not close for {player}. Pass.",
+   "{player} is worth much more to a contender.",
+   "That offer would gut my team for {player}. No.",
+   "We're far apart on {player}. Not happening."
+  ],
+  "dealer": [
+   "{you}, I love to deal, but not that far off for {player}.",
+   "That's way short for {player}. Come back with something real.",
+   "Not close for {player}, even for me.",
+   "We're miles apart on {player}. Try again!",
+   "Not for {player}. That's a big gap."
+  ],
+  "tilted": [
+   "{you}, everybody's lowballing me lately. That's way short for {player}.",
+   "Not for {player}. I'm not THAT desperate. Yet.",
+   "{player} for that? Even on my worst week, no.",
+   "That's nowhere near for {player}. My season's bad enough.",
+   "Way too little for {player}. Try me after another loss."
+  ]
+ },
+ "decline_close": {
+  "balanced": [
+   "{you}, that's close for {player}. Add a little and we can talk.",
+   "Not quite enough for {player}, but we're near.",
+   "I'd need a bit more to give up {player}.",
+   "Fair try. A small add and {player} could be yours.",
+   "Not for {player}. Close, but not close enough."
+  ],
+  "panicky": [
+   "{you}, so close for {player}! Just a little more and I'll stop worrying.",
+   "Almost enough for {player}. Almost. My nerves need a bit more.",
+   "{player} for that? Nearly. Please add something small.",
+   "I'm tempted on {player}. A tiny bit more and I'll say yes.",
+   "Close on {player}. I'd regret it a little less with one more piece."
+  ],
+  "shark": [
+   "{you}, you're near on {player}. Near isn't done. A bit more.",
+   "Close for {player}. I still want my edge.",
+   "Almost a deal for {player}. Sweeten it slightly.",
+   "{player} is nearly yours. Find the last few points.",
+   "You're in range on {player}. Not there."
+  ],
+  "steady": [
+   "{you}, that's close for {player}. A little more, please.",
+   "Nearly enough for {player}. Add a small piece.",
+   "{player} for a touch more and I'm in.",
+   "Close on {player}. I'm not in a rush.",
+   "Not quite for {player}. We're near, though."
+  ],
+  "gambler": [
+   "{you}, so close on {player}! Throw in a little more!",
+   "Almost a deal for {player}! One more chip!",
+   "{player}? Nearly there! Add a sweetener!",
+   "Close on {player}! A small extra and we roll!",
+   "We're near on {player}. Push it over the line!"
+  ],
+  "fan": [
+   "{you}, close for {player}. Add a little.",
+   "Nearly enough for {player}, friend.",
+   "{player} for a bit more and we're good.",
+   "Close on {player}. One small add?",
+   "Not quite for {player}, but almost."
+  ],
+  "stasher": [
+   "{you}, close for {player}. I can wait for a little more.",
+   "Nearly enough for {player}. Add a small piece.",
+   "{player} for a touch more. No rush either way.",
+   "We're near on {player}. Come up slightly.",
+   "Almost there for {player}. Patience, then a bit more."
+  ],
+  "haggler": [
+   "{you}, now we're talking about {player}. A little higher.",
+   "Close on {player}. Meet me a bit further.",
+   "{player}? Nearly. Come up a few points.",
+   "Good number for {player}. Not my number yet.",
+   "We're in haggling range on {player}. Add a bit."
+  ],
+  "contender": [
+   "{you}, close for {player}. Add a bit and we both win now.",
+   "Nearly enough for {player}. One more small piece.",
+   "{player} for a touch more and it's done.",
+   "Close on {player}. Title teams finish deals.",
+   "Not quite for {player}. Almost."
   ],
   "dealer": [
    "{you}, close! Add a little more for {player}.",
    "Not quite for {player}. Let's keep talking!",
    "Almost there. A bit more and {player} is yours.",
-   "I want to deal, but not at that price.",
+   "So near on {player}! Small add and we shake.",
    "{player} for a little more and we're done."
   ],
   "tilted": [
-   "{you}, everybody's lowballing me lately. Not enough for {player}.",
-   "Not for {player}. I'm not THAT desperate. Yet.",
-   "{player} for that? Even on my worst week, no.",
-   "No. My season's bad enough without that deal.",
-   "Not enough for {player}. Try me after another loss."
+   "{you}, close on {player}. Add a little and save my week.",
+   "Nearly enough for {player}. Just a bit more, please.",
+   "{player} for that plus a little? I could live with it.",
+   "Almost on {player}. Don't make me haggle, I'm tired.",
+   "Close for {player}. One more piece and it's yours."
+  ]
+ },
+ "decline_rule_traded": {
+  "balanced": [
+   "{you}, {player} was just traded. League rules say he can't move again yet.",
+   "Can't do it: {player} changed teams in the last two weeks.",
+   "{player} just got here. The league won't let him move again so soon.",
+   "Rules, not me: {player} was traded too recently.",
+   "Ask me again in a couple of weeks. {player} was just dealt."
+  ],
+  "panicky": [
+   "{you}, {player} was JUST traded. The rules won't let him move yet. Sorry!",
+   "I'd love to, but {player} changed teams too recently. Rules!",
+   "{player} only just arrived. The league says no for now.",
+   "Can't! {player} was traded in the last two weeks.",
+   "The rules say {player} has to stay put a little longer."
+  ],
+  "shark": [
+   "{you}, {player} was traded too recently. Rules. Try in two weeks.",
+   "{player} can't move yet. The league says so, not me.",
+   "Too soon for {player}. He was just dealt.",
+   "{player} is locked for now. Come back later.",
+   "League rule: {player} changed teams too recently."
+  ],
+  "steady": [
+   "{you}, {player} was just traded. He has to stay put for now.",
+   "Too soon for {player}. The rules say two weeks.",
+   "{player} just changed teams. Let's wait.",
+   "Can't move {player} yet. League rule.",
+   "{player} was dealt recently. Ask again later."
+  ],
+  "gambler": [
+   "{you}, {player} was just traded! Rules say he sits tight a bit!",
+   "Too soon for {player}! The league locks him for now!",
+   "{player} just got here! Can't spin him again yet!",
+   "No dice on {player} yet. Traded too recently!",
+   "League rule on {player}. Try me in two weeks!"
+  ],
+  "fan": [
+   "{you}, {player} was just traded. The rules say he stays put for now.",
+   "Too soon for {player}, friend. League rule.",
+   "{player} just changed teams. He can't move yet.",
+   "Can't do it: {player} was dealt in the last two weeks.",
+   "Ask me about {player} again in a couple of weeks."
+  ],
+  "stasher": [
+   "{you}, {player} was just traded. I'm good at waiting. So is the league.",
+   "Too soon for {player}. Two weeks, then we'll talk.",
+   "{player} just moved. The rules want him to stay put.",
+   "Can't trade {player} yet. League rule.",
+   "{player} is locked for now. Patience."
+  ],
+  "haggler": [
+   "{you}, {player} was just traded. Can't sell what I can't move.",
+   "{player} is off the market for now. League rules.",
+   "Too soon for {player}. Come back in two weeks with your best number.",
+   "No deal on {player} yet: he changed teams too recently.",
+   "The rules lock {player} for now. We can haggle later."
+  ],
+  "contender": [
+   "{you}, {player} was just traded. Rules lock him for now.",
+   "Too soon for {player}. The league won't allow it.",
+   "{player} just changed teams. Can't move him yet.",
+   "League rule: {player} stays put for two weeks.",
+   "Can't do {player} now. Ask again later."
+  ],
+  "dealer": [
+   "{you}, I'd deal, but {player} was just traded. Rules!",
+   "{player} is locked for now. Got anything else?",
+   "Too soon for {player}. Let's find another deal!",
+   "{player} just changed teams. Two weeks and we talk.",
+   "League says no on {player} for now. Something else?"
+  ],
+  "tilted": [
+   "{you}, {player} was just traded. Of course the rules stop this too.",
+   "Too soon for {player}. Even the league is against me.",
+   "{player} can't move yet. Naturally.",
+   "League rule on {player}. Story of my season.",
+   "Can't trade {player} yet. Figures."
+  ]
+ },
+ "decline_rule_cap": {
+  "balanced": [
+   "{you}, I've made all the trades I'm allowed this week.",
+   "That's my limit for the week. Ask me again next week.",
+   "I'm out of trades this week. League rule.",
+   "Can't do any more deals until next week.",
+   "Three trades this week already. Next week, maybe."
+  ],
+  "panicky": [
+   "{you}, I've already traded too much this week! The league says stop.",
+   "No more trades for me this week. I probably need the break.",
+   "I hit the weekly limit. Next week, I promise.",
+   "The rules cut me off this week. Sorry!",
+   "Out of trades this week. Probably for the best."
+  ],
+  "shark": [
+   "{you}, I've done my deals this week. Come back next week.",
+   "Weekly limit reached. Next week.",
+   "I'm capped this week. Hold that thought.",
+   "No more trades this week. The league says so.",
+   "Out of moves for the week. Try me later."
+  ],
+  "steady": [
+   "{you}, I've used up my trades this week.",
+   "That's enough deals for me this week.",
+   "League limit reached. Next week.",
+   "No more trades until next week.",
+   "I'm done dealing for this week."
+  ],
+  "gambler": [
+   "{you}, I've made my plays this week! Next week!",
+   "Out of trades this week! The league cut me off!",
+   "Weekly limit hit! Save it for next week!",
+   "No more spins this week! Rules!",
+   "I'm capped! Bring it back next week!"
+  ],
+  "fan": [
+   "{you}, I've made all my trades this week.",
+   "League limit, friend. Next week.",
+   "No more deals for me until next week.",
+   "I'm out of trades this week.",
+   "That's my weekly limit. Ask me later."
+  ],
+  "stasher": [
+   "{you}, I've done my deals this week. I can wait.",
+   "Weekly limit reached. Next week.",
+   "No more trades for me this week.",
+   "I'm capped this week. Patience.",
+   "Out of trades until next week."
+  ],
+  "haggler": [
+   "{you}, I'm out of trades this week. Keep that offer warm.",
+   "Weekly limit. We'll haggle next week.",
+   "No more deals this week. Save your number.",
+   "I'm capped. Bring it back next week, a bit higher.",
+   "League limit reached. Next week."
+  ],
+  "contender": [
+   "{you}, I've made my moves this week.",
+   "Weekly limit reached. Next week.",
+   "No more trades for me this week.",
+   "I'm capped this week. Ask again later.",
+   "Done dealing until next week."
+  ],
+  "dealer": [
+   "{you}, I've hit the weekly limit. Painful, I know.",
+   "Three deals already this week! Next week, first call.",
+   "The league cut me off this week. Next week!",
+   "Out of trades this week. Keep it on the table!",
+   "I'm capped. Call me first thing next week."
+  ],
+  "tilted": [
+   "{you}, I've already traded too much this week. Maybe that's the problem.",
+   "Weekly limit. The league won't let me spiral further.",
+   "No more trades this week. Probably for the best.",
+   "I'm capped this week. Figures.",
+   "Out of trades. Next week, if I'm still standing."
+  ]
+ },
+ "decline_rule_ir": {
+  "balanced": [
+   "{you}, I have to sort out my IR spot before I can trade.",
+   "My IR slot needs fixing first. Then we can talk.",
+   "Can't trade until I clear up my IR situation.",
+   "League rule: I have to fix my IR first.",
+   "Give me a moment to sort my IR, then ask again."
+  ],
+  "panicky": [
+   "{you}, my IR is a mess and the league won't let me trade until it's fixed!",
+   "I have to sort out my IR first. Everything is chaos.",
+   "Can't trade yet! My IR spot needs fixing.",
+   "IR first, trades later. The rules say so.",
+   "My IR situation is blocking everything. Sorry!"
+  ],
+  "shark": [
+   "{you}, IR to clean up first. Then we deal.",
+   "My IR slot needs sorting. Try again after.",
+   "Can't trade until my IR is fixed. Rules.",
+   "IR first. Come back once it's sorted.",
+   "League says fix the IR before any deal."
+  ],
+  "steady": [
+   "{you}, I need to sort my IR before trading.",
+   "My IR spot comes first.",
+   "Can't trade until my IR is in order.",
+   "IR first, then we can talk.",
+   "League rule: my IR has to be fixed first."
+  ],
+  "gambler": [
+   "{you}, gotta fix my IR before I can play!",
+   "IR first! Then let's deal!",
+   "My IR slot is blocking me! Hold on!",
+   "Can't trade until my IR's sorted!",
+   "League rule! IR first, fun later!"
+  ],
+  "fan": [
+   "{you}, I have to fix my IR spot first.",
+   "My IR needs sorting before any trade.",
+   "Can't trade until my IR is cleared up.",
+   "IR first, friend. Then we'll talk.",
+   "League rule: IR before trades."
+  ],
+  "stasher": [
+   "{you}, my IR needs sorting first. Ironic, I know.",
+   "Even I have to fix my IR spot before trading.",
+   "IR first. Then we'll talk about your guys.",
+   "Can't trade until my IR is in order.",
+   "League rule: clear the IR, then deal."
+  ],
+  "haggler": [
+   "{you}, I can't sell anything until my IR is sorted.",
+   "IR first. Then bring me your number.",
+   "My IR slot needs fixing before we haggle.",
+   "Can't deal until my IR is in order.",
+   "League rule: IR before business."
+  ],
+  "contender": [
+   "{you}, I have to fix my IR before any move.",
+   "IR first, then we talk trades.",
+   "My IR slot is holding me up. Soon.",
+   "Can't trade until the IR is sorted.",
+   "League rule: IR comes first."
+  ],
+  "dealer": [
+   "{you}, I want to deal, but my IR has to be fixed first!",
+   "IR first, then I'm all yours.",
+   "My IR is blocking my trades. Give me a minute!",
+   "Can't deal until my IR is cleaned up.",
+   "League rule on my IR. Back soon!"
+  ],
+  "tilted": [
+   "{you}, my IR is a mess too. Of course it is.",
+   "Can't trade until I fix my IR. Another thing going wrong.",
+   "IR first. Because nothing is ever simple for me.",
+   "My IR is blocking the deal. Figures.",
+   "League rule: IR first. Great."
+  ]
+ },
+ "decline_rule_lineup": {
+  "balanced": [
+   "{you}, that would leave you with nobody at {position}. Fix that first.",
+   "You'd have a hole at {position} after that. Can't do it.",
+   "That leaves your {position} spot empty, and nobody to pick up.",
+   "Check your lineup: you'd be short at {position}.",
+   "You'd have no one to start at {position}. Try another way."
+  ],
+  "panicky": [
+   "{you}, you'd have nobody at {position}! That stresses me out for you.",
+   "That leaves you empty at {position}. Please don't do that to yourself.",
+   "You'd be short at {position}. I can't watch.",
+   "Nobody at {position} for you after that? No!",
+   "That breaks your lineup at {position}. Rethink it."
+  ],
+  "shark": [
+   "{you}, you'd be empty at {position}. Fix your own roster first.",
+   "That leaves you nobody at {position}. Not my problem, but no.",
+   "You can't field a {position} after that. Try again.",
+   "Your lineup breaks at {position}. Come back with a plan.",
+   "Short at {position} after that. Pass."
+  ],
+  "steady": [
+   "{you}, you'd have nobody at {position} after that.",
+   "That leaves your {position} spot empty.",
+   "You'd be short at {position}. Let's not.",
+   "Check your {position} spot first.",
+   "That deal leaves you without a {position}."
+  ],
+  "gambler": [
+   "{you}, you'd have nobody at {position}! Even I won't take that bet for you!",
+   "Empty at {position}? That's too wild!",
+   "You'd be short at {position}! Rework it!",
+   "No {position} left for you after that! Pass!",
+   "Your lineup breaks at {position}! Try again!"
+  ],
+  "fan": [
+   "{you}, you'd have nobody at {position} after that.",
+   "That leaves your {position} spot empty, friend.",
+   "You'd be short at {position}. Let's fix that first.",
+   "No one at {position} for you? Can't do it.",
+   "Check your {position} spot before we deal."
+  ],
+  "stasher": [
+   "{you}, you'd be empty at {position}. Sort that out first.",
+   "That leaves you nobody at {position}.",
+   "You'd be short at {position}. Not a good idea.",
+   "No {position} left for you after that.",
+   "Fix your {position} spot, then come back."
+  ],
+  "haggler": [
+   "{you}, you'd have nobody at {position}. Bad deal for you, even by my standards.",
+   "That leaves you empty at {position}. Rework it.",
+   "Short at {position} after that. Try another package.",
+   "You'd be without a {position}. Not a deal.",
+   "Check your {position} spot, then make me an offer."
+  ],
+  "contender": [
+   "{you}, you'd have nobody at {position}. That's no way to play.",
+   "That leaves your {position} spot empty.",
+   "You'd be short at {position}. Rethink it.",
+   "No {position} for you after that.",
+   "Your lineup breaks at {position}. Fix it first."
+  ],
+  "dealer": [
+   "{you}, you'd be empty at {position}! Let's rework it!",
+   "That leaves you no {position}. Different package?",
+   "Short at {position} after that! Try again!",
+   "No {position} left for you. Let's fix it!",
+   "Your {position} spot breaks. Tweak it and we'll deal!"
+  ],
+  "tilted": [
+   "{you}, you'd have nobody at {position}. Join the club.",
+   "That leaves you empty at {position}. Trust me, it's no fun.",
+   "Short at {position} after that. Don't do it.",
+   "No {position} for you after that. Even I wouldn't.",
+   "Your lineup breaks at {position}. Fix it first."
   ]
  }
 }

@@ -38,8 +38,8 @@ from services import (lineup_gain, replay_ir, replay_personas, replay_state as r
 from services.replay_pool import SKILL
 from services.replay_state import Offer, Settings, State, Team
 from services.replay_trade_reasons import (  # noqa: F401 - re-exported: callers and tests use them from here
-    DECLINE_KINDS, VALUE_REASON, Side as _Side, decline as _decline, names as _names, rule_reasons as _rule_reasons,
-    side_reasons,
+    DECLINE_KINDS, VALUE_REASON, Side as _Side, decline as _decline, names as _names, rule_decline,
+    rule_reasons as _rule_reasons, side_reasons,
 )
 from services.replay_trade_rosters import (  # noqa: F401 - re-exported, as above
     cover, cpu_drops as _cpu_drops, free_agents, landing as _landing, positions as _positions,
@@ -263,7 +263,9 @@ def evaluate(state: State, settings: Settings, know: Knowledge, from_team: int, 
     reasons = [*_rule_reasons(state, know, sender, receiver, (*give, *get)),
                *side_reasons(theirs, sender, settings, know, _bar(state, settings, theirs, sender, offered, counter)),
                *side_reasons(mine, receiver, settings, know, _bar(state, settings, mine, receiver))]
-    decline = _decline(settings, know, theirs) if reasons else (None, None, None)
+    moved = (*give, *get)
+    decline = ((rule_decline(state, settings, know, receiver, moved, mine) or _decline(settings, know, theirs))
+               if reasons else (None, None, None))
     bonus = tv.premium(know, "balanced", give, mine.kept, just_added)
     value_give = round(_chart(know, give, just_added) + max(0.0, -bonus), 2)
     value_get = round(_chart(know, mine.kept, just_added) - _chart(know, mine.drops or (), just_added)
