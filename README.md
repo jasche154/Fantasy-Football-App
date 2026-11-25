@@ -312,7 +312,15 @@ produce an extreme matchup.
 - **What gets shown.** The projection is the if-active number times the chance to play.
   Each "If <teammate> sits" scenario shows the full upside.
 - **Avoiding double counting.** If a teammate is already ruled Out, experts and Vegas have
-  priced it in, so only the model's share of the boost is added.
+  priced it in, so only the model's share of the boost is added. The model's share is cut
+  again by the part of the player's rate built in games without that teammate (recency
+  weights, shrunk like the rate): a fill-in with four straight games without the starter
+  already has most of the bigger role in his rate. In the point-in-time backtest this cut
+  RMSE 6.74 -> 6.70 (2023), 6.91 -> 6.87 (2024) and 6.76 -> 6.66 (2025), with rank
+  correlation up each season.
+- **Backup quarterbacks sitting move nothing.** A QB with fewer games for the team than the
+  starter (mop-up duty only) leaves him no vacated work, so the starter isn't boosted when
+  his backup is inactive. A starter who sits still moves his work to the backup.
 - **Backup quarterbacks.** A backup QB only plays when everyone ahead of him on the depth
   chart (Sleeper's, else nflverse's) sits. His chance to play is the chance they all sit,
   with a 2% floor for QB2 (in-game injuries), and his rest-of-season share is one minus the
@@ -441,9 +449,11 @@ percentiles of how players with his projection actually scored, if he plays:
   model alone.
 - **Shape:** running backs and pass catchers who score mostly on touchdowns (last four games)
   get a lower floor; deep targets (high aDOT) a higher ceiling and a lower floor.
-- On 2026 (data the fit never saw), 7% of players finished below their floor and 12% above
+- On 2026 (data the fit never saw), 7% of players finished below their floor and 11% above
   their ceiling, against a 10% target. The old ranges, fit only on full-role games, had 31%
   below the floor.
+- The Accuracy view scores this season's saved projections against today's ranges (without
+  the shape adjustment, which isn't saved): weeks saved before a refit carry the old floors.
 
 **Matchup simulation** (`services/matchup_sim.py`). Each starter's score is drawn 20,000 times
 from his own skewed range, plus a separate draw for whether he plays (so injury risk is counted
@@ -646,13 +656,17 @@ weights are refit on every week so far (a week's weights only ever use earlier w
    top 24 at QB) who played, with each source group's points and the actual points.
 2. **Fit:** least squares shrunk toward the starting weights as if those were backed by 1,500
    player-weeks. The sources are 0.9+ correlated, so an unshrunk fit swings wildly week to
-   week (the old per-week fit put 0% on the model one week and 69% the next).
+   week (the old per-week fit put 0% on the model one week and 69% the next). The penalty is
+   scaled by how far the sources sit apart within a row, not by the points level: scaled by
+   the level, 1,500 "rows" really weighed like ~50,000, and 1,155 player-weeks moved the
+   weights by 0.05 points.
 3. **Limits:** props never below 15% (their value is late news the history can't show yet),
    every other group at least 5%. Under 300 rows, the starting weights stand.
 
-Through week 7 of 2026 the weights barely move from the start (props 30, experts 35, ESPN 15,
-model 20): the sources are close enough that seven weeks can't separate them yet, which is
-the honest answer. Yahoo's consensus alone is about as accurate as the blend, so the Accuracy
+Refit on 2026 weeks 1-10 the weights move to about props 25, experts 53, ESPN 17, model 5
+(the model is at its floor). Learned week by week (each week's weights from earlier weeks
+only) they cut next-week MAE 5.82 -> 5.78 and RMSE 7.29 -> 7.26 over weeks 3-11 against the
+starting weights. Yahoo's consensus alone is about as accurate as the blend, so the Accuracy
 view shows them side by side.
 
 **Backfilled weeks** (`services/history_backfill.py`). Weeks 1–6 of 2026 were rebuilt

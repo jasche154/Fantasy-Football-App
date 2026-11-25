@@ -28,7 +28,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from database.models import PlayerStatsWeekly, ProjectionHistory, PlayerSnapCountsWeekly
-from services import rankings_store
+from services import rankings_store, score_ranges
 from services.scoring import POINTS_PER_RECEPTION
 
 log = logging.getLogger(__name__)
@@ -68,10 +68,13 @@ def evaluate(rows: Iterable[ProjectionHistory], actuals: Mapping[tuple[int, int]
         blend_errors.append(blend_error)
         by_position[row.position].append(blend_error)
         signed[row.position].append(row.if_active - actual)
-        if row.floor is not None and row.ceiling is not None and row.play_prob >= 1:
+        # Scored against today's ranges: rows saved before a refit hold stale floors and ceilings.
+        # shortcut: no TD-share/aDOT shape (not stored), so a player's own spread is ignored.
+        quantiles = score_ranges.player_quantiles(row.position, row.if_active) if row.play_prob >= 1 else None
+        if quantiles:
             ranged += 1
-            below += actual < row.floor
-            above += actual > row.ceiling
+            below += actual < quantiles[score_ranges.FLOOR_INDEX]
+            above += actual > quantiles[score_ranges.CEILING_INDEX]
         for source, points in json.loads(row.sources).items():
             by_source[source].append((abs(points - actual), blend_error))
     sources = {name: {"n": len(pairs), "mae": round(mean(e for e, _ in pairs), 2),
