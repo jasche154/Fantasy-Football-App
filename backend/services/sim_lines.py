@@ -192,7 +192,7 @@ def week_lines(known: SeasonData, week: int, belief: World, out: Collection[int]
     """{home team: Line} for every game of `week` (see the module docstring). Pure; of `known` it reads only the
     scores before `week` and the schedule, plus the public `belief` of that week and `out` (its hard-tagged
     players)."""
-    rated = ratings(scores(known, week), week, prior)
+    rated = _rated(known, week, prior)
     lines = {}
     for game in known.schedule.games:
         if game.week != week or game.home_team not in belief.teams or game.away_team not in belief.teams:
@@ -219,12 +219,13 @@ def _posted(line: tuple | None, home: str, week: int) -> tuple[float | None, flo
     return out[0], out[1]
 
 
-def edges(known: SeasonData, week: int, belief: World, out: Collection[int],
-          prior: Mapping[str, Rating] | None = None) -> dict[str, float]:
+def edges(known: SeasonData, week: int, belief: World, prior: Mapping[str, Rating] | None = None) -> dict[str, float]:
     """{team: points its line adds to the belief's own mean}, against a league-average opponent on a neutral
     field (the line model with the other side at the league's level: rating 0, an average QB, no home edge,
-    no rest edge). What the public's rest-of-season values add for the team's scoring (sim_market.values)."""
-    rated = ratings(scores(known, week), week, prior)
+    no rest edge), with the players the belief has out (the set sim_market.values starts from). What the
+    public's rest-of-season values add for the team's scoring."""
+    out = {pid for pid, p in belief.players.items() if p.out_weeks > 0}
+    rated = _rated(known, week, prior)
     home_edge = stored()["margin"]["const"]
     out_edges = {}
     for team in sorted(belief.teams):
@@ -234,6 +235,18 @@ def edges(known: SeasonData, week: int, belief: World, out: Collection[int],
         line = predict(parts)
         out_edges[team] = (line.total + line.margin - home_edge) / 2 - mine
     return out_edges
+
+
+_last: list = []                 # (known, week, prior, Rated) of the last `_rated` (a week's lines and edges share it)
+
+
+def _rated(known: SeasonData, week: int, prior: Mapping[str, Rating] | None) -> Rated:
+    """`ratings` of `known`'s scores before `week`, kept for the next call with the same objects."""
+    if _last and _last[0] is known and _last[1] == week and _last[2] is prior:
+        return _last[3]
+    rated = ratings(scores(known, week), week, prior)
+    _last[:] = [known, week, prior, rated]
+    return rated
 
 
 def write(model: Mapping) -> None:

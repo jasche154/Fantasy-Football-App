@@ -189,13 +189,14 @@ def _hurt(world: World, team: str, out: set[int], dice) -> dict[int, sim_injurie
 def _market(tables: _Tables, base: SeasonData, belief: World, truth: World, seed: int, week: int, out: set[int],
             false_rate: float, ranks: Mapping[int, int], lines: Mapping[str, sim_lines.Line] | None = None,
             opinions: dict[str, dict[int, float]] | None = None,
-            team_prior: Mapping[str, sim_lines.Rating] | None = None) -> None:
+            team_prior: Mapping[str, sim_lines.Rating] | None = None, known: SeasonData | None = None) -> None:
     """The week's public tables (projections, expert ranks, buzz). `opinions`: the experts' memory, carried from
     week to week and updated here: {"z": each player's opinion (sim_market.opinion), "worth": the value each is
     ranked on (sim_market.held), "out": who was believed out}; `team_prior`: last season's team ratings (the expert values' scoring edges,
-    sim_lines.edges, are worked out only in a week whose expert ranks are drawn here)."""
+    sim_lines.edges, are worked out only in a week whose expert ranks are drawn here); `known`: the season as
+    known before the week, when already built."""
     scoring, last = scoring_of(base), base.last_week
-    known = _known(base, tables, week)
+    known = known if known is not None else _known(base, tables, week)
     snapshot = sorted(pid for pid, w in tables.projected if w == week)      # the snapshot's own (from_week only)
     for pid in snapshot:
         del tables.projected[(pid, week)]
@@ -216,7 +217,7 @@ def _market(tables: _Tables, base: SeasonData, belief: World, truth: World, seed
             dice = replay_state.rng(seed, "sim", "experts", rank_week)
             weekly = worth = edges = None
             if rank_week and opinions is not None:
-                edges = sim_lines.edges(known, week, belief, out, team_prior)
+                edges = sim_lines.edges(known, week, belief, team_prior)
                 weekly = sim_market.opinion(opinions["z"], [pid for pid in ids if pid in belief.players], dice)
                 fresh_worth = sim_market.values(belief, scoring, last - rank_week + 1, edges)
                 worth = sim_market.held(opinions["worth"], fresh_worth, belief, opinions["out"])
@@ -244,6 +245,8 @@ def simulate(base: SeasonData, seed: int, from_week: int, prior: World | None = 
     if not 1 <= from_week <= base.last_week:
         raise ValueError(f"Week {from_week} is outside the season (1-{base.last_week}).")
     scoring, last = scoring_of(base), base.last_week
+    # later weeks' lines are never read (as_of blanks them); dropping them once spares every week's as_of copy
+    base = replace(base, schedule=replay_pool._lines_through(base.schedule, from_week))
     tables = _real(base, from_week)
     belief = estimate(base, from_week, prior)
     truth = sim_talent.truth(belief, seed, from_week, last, rookies)
@@ -271,7 +274,7 @@ def simulate(base: SeasonData, seed: int, from_week: int, prior: World | None = 
         pregame = sim_lines.week_lines(known, week, public, public_out, team_prior, posted if week == from_week else None)
         lines.update({(home, week): line for home, line in pregame.items()})
         _market(tables, base, public, truth, seed, week, public_out,
-                false_rate if buzz_weeks[0] <= week <= buzz_weeks[1] else 0.0, ranks, pregame, opinions, team_prior)
+                false_rate if buzz_weeks[0] <= week <= buzz_weeks[1] else 0.0, ranks, pregame, opinions, team_prior, known)
         world = truth.at(week)
         played_teams, fresh = set(), set()
         for game in sorted((g for g in base.schedule.games if g.week == week), key=lambda g: g.home_team):

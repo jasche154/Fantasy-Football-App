@@ -182,7 +182,7 @@ def test_experts_revise_a_healthy_players_value_slowly_and_an_injured_ones_at_on
 
 def test_a_team_that_has_been_scoring_gets_a_scoring_edge_in_the_experts_values(data, belief):
     known = data.as_of(WEEK)
-    edges = sim_lines.edges(known, WEEK, belief, set())
+    edges = sim_lines.edges(known, WEEK, belief)
     rated = sim_lines.ratings(sim_lines.scores(known, WEEK), WEEK)
     best = max(rated.teams, key=lambda t: rated.teams[t].offense)
     worst = min(rated.teams, key=lambda t: rated.teams[t].offense)

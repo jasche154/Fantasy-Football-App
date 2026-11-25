@@ -136,7 +136,11 @@ def _side(world: World, team: str, opponent: str | None, out: Collection[int],
         rushers.append(qb)
     positions = {p.player_id: p.position for p in roster}
     snaps = _snaps(roster, qb, exits)
-    other_targets, other_carries = _other(world, team, form)
+    known = _sides.get(("other", id(world), team))        # a world's full roster never changes: once per team
+    if known is None or known[0] is not world:
+        known = (world, _other(world, team, form))
+        _sides[("other", id(world), team)] = known
+    other_targets, other_carries = known[1]
     return _Side(
         team=team,
         receivers=(*(p.player_id for p in receivers), OTHER),
@@ -163,7 +167,11 @@ def _side(world: World, team: str, opponent: str | None, out: Collection[int],
 def _side_of(world: World, team: str, opponent: str | None, out: Collection[int]) -> _Side:
     """`_side` with no exits, cached per World object (it is immutable; the entry keeps it alive, so its id is
     not reused while cached)."""
-    key = (id(world), team, opponent, frozenset(out))
+    ids = _sides.get((id(world), team))
+    if ids is None or ids[0] is not world:
+        ids = (world, frozenset(p.player_id for p in world.roster(team)))
+        _sides[(id(world), team)] = ids
+    key = (id(world), team, opponent, ids[1].intersection(out))      # only his team's players out matter
     hit = _sides.get(key)
     if hit is not None and hit[0] is world:
         return hit[1]

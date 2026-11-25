@@ -25,7 +25,7 @@ from services.sim_world import params
 
 FACTOR_RANGE = (0.02, 8.0)       # a side's factor stays in this range
 NEWTON_STEPS = 25                # on the closed form (microseconds each); stops at CLOSED_TOLERANCE
-CLOSED_TOLERANCE = 1e-4          # points, on the closed form
+CLOSED_TOLERANCE = 1e-3          # points, on the closed form
 TARGET_TOLERANCE = 0.05          # points, on the real means (else one correction)
 MIN_TARGET = 1.0                 # a side is never centred below this many points
 REGULATION_TIES = 0.043          # share of simulated games tied after regulation (measured over 6,000 draws, td_drives 5)
@@ -70,16 +70,19 @@ def _solve(tds: float, yards: float, rest: float, fg_scale: float, power: float,
     return f
 
 
-def factor(side, against: dict | None, target: float) -> float:
-    """The factor that makes `side`'s mean points (sim_game._mean_points against `against`) `target`."""
-    from services.sim_game import _mean_points, _side_means
+def factor(side, against: dict | None, target: float, m: dict | None = None) -> float:
+    """The factor that makes `side`'s mean points (sim_game._mean_points against `against`) `target`; `m`: its
+    means when already worked out."""
+    from services.sim_game import MAX_TD_RATE, _mean_points, _side_means
     from services.sim_lines import yards_power
-    power, m = yards_power(), _side_means(side)
+    power, m = yards_power(), m if m is not None else _side_means(side)
     tds = float(m["rec_td"].sum() + m["rush_td"].sum())
     yards = float(m["rec_yds"].sum() + m["rush_yds"].sum())
     closed, _ = _points_at(1.0, tds, yards, 0.0, side.fg_scale, power)
     rest = _mean_points(m, against) - closed            # return TDs and safeties: untouched by the factor
     f = _solve(tds, yards, rest, side.fg_scale, power, target)
+    if max(side.rec_td.max(), side.rush_td.max()) * f <= MAX_TD_RATE:
+        return f                                         # the closed form is exact
     got = _mean_points(_side_means(scaled(side, f, power)), against)
     if abs(got - target) >= TARGET_TOLERANCE:          # a TD rate hit the cap: aim past it by the miss
         f = _solve(tds, yards, rest, side.fg_scale, power, 2 * target - got, f)
@@ -91,7 +94,8 @@ def team_factor(world, team: str, out, shift: float) -> float:
     one per team, reused for every set of players out)."""
     from services.sim_game import _mean_points, _side_means, _side_of
     side = _side_of(world, team, None, out)
-    return factor(side, None, max(MIN_TARGET, _mean_points(_side_means(side), None) + shift))
+    m = _side_means(side)
+    return factor(side, None, max(MIN_TARGET, _mean_points(m, None) + shift), m)
 
 
 def centred(sides: dict, target: Mapping[str, float] | None = None, shift: Mapping[str, float] | None = None,
@@ -116,5 +120,5 @@ def centred(sides: dict, target: Mapping[str, float] | None = None, shift: Mappi
         if wanted is None and team in (shift or {}):
             wanted = _mean_points(means[team], against.get(team)) + shift[team]       # the truth minus the belief: OT in both
         out[team] = side if wanted is None else scaled(
-            side, factor(side, against.get(team), max(MIN_TARGET, wanted) - overtime), power)
+            side, factor(side, against.get(team), max(MIN_TARGET, wanted) - overtime, means[team]), power)
     return out

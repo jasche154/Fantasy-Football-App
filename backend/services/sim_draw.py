@@ -137,11 +137,14 @@ def _touchdowns(catches: np.ndarray, rec_rate: np.ndarray, carries: np.ndarray, 
         return tds[:len(catches)], tds[len(catches):]
     n = max(int(round(drives)), int(np.ceil(mean)) + 1)
     total = min(int(rng.binomial(n, mean / n)), int(plays.sum()))
-    for _ in range(total):
+    while total > 0:                         # shared out in proportion; a player past his plays gives the rest back
         weights = (plays - tds) * rates
         if weights.sum() <= 0:
             break
-        tds[int(rng.choice(len(weights), p=weights / weights.sum()))] += 1
+        tds += rng.multinomial(total, weights / weights.sum())
+        over = np.maximum(tds - plays, 0)
+        tds -= over
+        total = int(over.sum())
     return tds[:len(catches)], tds[len(catches):]
 
 
