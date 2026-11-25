@@ -32,7 +32,7 @@ class Insight:
     kind: str                  # "buy_low" or "sell_high"
     score: float
     games: int
-    ppg: float
+    ppg: float                 # over the games expected_ppg covers (Signals.matched_ppg), so the two compare
     expected_ppg: float
     fpoe_per_game: float
     td_diff: float | None
@@ -174,7 +174,7 @@ def find_insights(valuation: Valuation, kind: str, position: str | None = None,
             continue
         insights.append(Insight(
             player_id=player.player_id, name=player.name, position=player.position, team=player.team,
-            kind=kind, score=score, games=player.games_played, ppg=player.ppg,
+            kind=kind, score=score, games=player.games_played, ppg=signals.matched_ppg,
             expected_ppg=player.expected_ppg, fpoe_per_game=signals.fpoe_per_game,
             td_diff=signals.td_diff, recent_ppg=signals.recent_ppg, usage_trend=signals.usage_trend,
             trade_value=trade_value,

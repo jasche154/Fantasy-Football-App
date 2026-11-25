@@ -813,7 +813,8 @@ consensus. Offers rank by expected edge, your edge × a rough chance they accept
 
 ### Buy low / sell high
 Per player (3+ games):
-- **FPOE** = actual − expected fantasy points per game
+- **FPOE** = actual − expected fantasy points per game, both over the games that have expected points (the
+  card's "PPG vs xPPG" uses the same games, so it can differ slightly from his season PPG)
 - **TD luck** = actual TDs − expected TDs
 - **Usage trend** = expected points over the last 3 games vs the season
 - **Recent form** = last-3 PPG vs season PPG (other managers react to this)
