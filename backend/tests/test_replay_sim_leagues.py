@@ -20,6 +20,7 @@ from config import get_settings
 from database import populate_stats
 from database.db import get_session
 from database.models import Base, NflGame, PlayerStatsWeekly, ReplaySeasonData
+from api import replay_routes
 from services import replay_blob, replay_live, replay_pool, sim_next_year, sim_setup
 from services.replay_pool import SeasonData
 from tests import replay_fakes as fakes
@@ -165,8 +166,9 @@ def test_the_seasons_list_offers_the_live_and_the_future_season(client):
                      "reason": None}]
 
 
-def test_a_live_league_freezes_its_own_season_with_it(app):
+def test_a_live_league_freezes_its_own_season_with_it(app, monkeypatch):
     client, engine = app
+    monkeypatch.setattr(replay_routes, "_sim_seed", iter([7, 8]).__next__)
     game = post(client, "/games", {"season": LIVE, "seed": 7})["game"]
     other = _create(client, seed=8)
 
@@ -181,6 +183,19 @@ def test_a_live_league_freezes_its_own_season_with_it(app):
     assert [mine.actual[k] - theirs.actual[k] for k in mine.actual if k[1] == week][:3] == [-1, -1, -1]   # own future
     assert {k: v for k, v in mine.actual.items() if k[1] <= THROUGH} == {
         k: v for k, v in theirs.actual.items() if k[1] <= THROUGH}             # the same real past
+
+
+def test_the_client_seed_never_reaches_the_simulated_future(app, monkeypatch):
+    """Two leagues created with the same seed must not share a future: else one can be scouted and recreated."""
+    seeds: list[int] = []
+    real = sim_setup.build
+    monkeypatch.setattr(sim_setup, "build", lambda session, settings, seed: seeds.append(seed) or real(
+        session, settings, seed))
+    client, engine = app
+    games = [post(client, "/games", {"season": LIVE, "seed": 4242, "start": "now"})["game"] for _ in range(2)]
+
+    assert len(seeds) == 2 and seeds[0] != seeds[1] and 4242 not in seeds
+    assert games[0]["settings"]["draft_slot"] == games[1]["settings"]["draft_slot"]    # the rest stays seeded
 
 
 def test_a_league_that_starts_now_drafts_on_todays_market(app):
