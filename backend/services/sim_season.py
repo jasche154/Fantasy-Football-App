@@ -61,6 +61,7 @@ class _Tables:
     expert_ranks: dict
     expert_age: dict
     notes: dict
+    scores: dict                 # (team, week) -> points
 
     def season(self, base: SeasonData) -> SeasonData:
         team_by_week = {pid: tuple(sorted(games)) for pid, games in self.games.items() if games}
@@ -68,7 +69,8 @@ class _Tables:
                        projected=MappingProxyType(self.projected), team_by_week=MappingProxyType(team_by_week),
                        injuries=MappingProxyType(self.injuries), usage=MappingProxyType(self.usage),
                        box=MappingProxyType(self.box), expert_ranks=MappingProxyType(self.expert_ranks),
-                       expert_age=MappingProxyType(self.expert_age), notes=MappingProxyType(self.notes))
+                       expert_age=MappingProxyType(self.expert_age), notes=MappingProxyType(self.notes),
+                       scores=MappingProxyType(self.scores))
 
 
 def _real(base: SeasonData, from_week: int) -> _Tables:
@@ -81,7 +83,7 @@ def _real(base: SeasonData, from_week: int) -> _Tables:
                    usage=before(base.usage), box=before(base.box),
                    expert_ranks={k: v for k, v in base.expert_ranks.items() if k[1] <= from_week},
                    expert_age={w: v for w, v in base.expert_age.items() if w <= from_week},
-                   notes={k: v for k, v in base.notes.items() if k[1] <= from_week})
+                   notes={k: v for k, v in base.notes.items() if k[1] <= from_week}, scores=before(base.scores))
 
 
 def _known(base: SeasonData, tables: _Tables, week: int) -> SeasonData:
@@ -243,6 +245,7 @@ def simulate(base: SeasonData, seed: int, from_week: int, prior: World | None = 
 
 
 def _record(tables: _Tables, world: World, result, week: int) -> None:
+    tables.scores.update({(team, week): int(points) for team, points in result.points.items()})
     for pid, line in result.players.items():
         team = world.players[pid].team
         tables.actual[(pid, week)] = line.points

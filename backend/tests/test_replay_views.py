@@ -95,8 +95,9 @@ def hidden_changed(week: int):
     shaken = fakes.future_changed(DATA, after_week=week)
     usage = {key: replace(u, targets=u.targets + 5) if key[1] == week else u for key, u in shaken.usage.items()}
     box = {key: replace(b, rec=b.rec + 3) if key[1] == week else b for key, b in shaken.box.items()}
+    scores = {key: points + 9 if key[1] == week else points for key, points in shaken.scores.items()}
     return replace(fakes.patched(shaken, actual={key: points + 7.5 for key, points in DATA.actual.items()
-                                                 if key[1] == week}), usage=usage, box=box)
+                                                 if key[1] == week}), usage=usage, box=box, scores=scores)
 
 
 # ---------------- no hindsight ----------------

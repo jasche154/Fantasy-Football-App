@@ -4,6 +4,7 @@ import type {
   ReplayActionResult,
   ReplayActivityQuery,
   ReplayAdvanceResult,
+  ReplayBoxScore,
   ReplayChat,
   ReplayClaimBody,
   ReplayClaims,
@@ -132,6 +133,11 @@ export function getReplayPlayers(gameId: number, query: ReplayPlayersQuery = {},
 
 export function getReplayPlayer(gameId: number, playerId: number, signal?: AbortSignal): Promise<ReplayPlayerDetail> {
   return apiRequest(`${game(gameId)}/players/${playerId}`, { signal });
+}
+
+/** The box score of the NFL game `team` played in `week` (played weeks only). */
+export function getReplayBox(gameId: number, week: number, team: string, signal?: AbortSignal): Promise<ReplayBoxScore> {
+  return apiRequest(`${game(gameId)}/box`, { query: { week, team }, signal });
 }
 
 export function getReplayClaims(gameId: number, signal?: AbortSignal): Promise<ReplayClaims> {

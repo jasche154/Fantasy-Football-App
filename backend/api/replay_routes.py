@@ -355,6 +355,13 @@ def player(game_id: GameId, player_id: DbId, session: Session = Depends(get_sess
     return show(session, game_id, lambda game: league_views.player(game, player_id))
 
 
+@router.get("/games/{game_id}/box")
+def box_score(game_id: GameId, week: int = Query(ge=1, le=22), team: str = Query(min_length=2, max_length=3),
+              session: Session = Depends(get_session)) -> dict:
+    """A played NFL game's box score, both teams (`team` is either side)."""
+    return show(session, game_id, lambda game: league_views.box_score(game, week, team))
+
+
 @router.get("/games/{game_id}/claims")
 def claims(game_id: GameId, session: Session = Depends(get_session)) -> dict:
     return show(session, game_id, league_views.claims)

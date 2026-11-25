@@ -70,8 +70,8 @@ describe('TradesView offers', () => {
     expect(screen.getByText(/CPU managers accept a trade that is worth it to them on the 0-1000 trade chart/)).toBeInTheDocument();
     expect(screen.queryByText(/model ranks/)).not.toBeInTheDocument();
     expect(within(card).getByText('You give').parentElement).toHaveTextContent('Travis Etienne');
-    expect(within(card).getByText('You give').parentElement).toHaveTextContent('31.5 value');
-    expect(within(card).getByText('You get').parentElement).toHaveTextContent('35.0 value');
+    expect(within(card).getByText('You give').parentElement).toHaveTextContent('32 value');
+    expect(within(card).getByText('You get').parentElement).toHaveTextContent('35 value');
     expect(within(card).getByText(/Slight win for you/)).toBeInTheDocument();
     expect(within(card).getByRole('meter', { name: 'Trade balance' })).toHaveAttribute('aria-valuenow', '10');
     expect(within(card).getByText(/you \+3\.2, Blitz Brigade \+1\.1/)).toBeInTheDocument();
@@ -151,7 +151,7 @@ describe('TradesView builder', () => {
       { path: TRADES_PATH, reply: json(trades()) }]);
     const { rerender } = renderWithProviders(<TradesView {...viewProps()} />);
     await tickBothSides(userEvent.setup());
-    expect(await screen.findByText(/You give 31\.5 value, get 35\.0\./)).toBeInTheDocument();
+    expect(await screen.findByText(/You give 32 value, get 35\./)).toBeInTheDocument();
 
     isEtienneGone = true;
     rerender(<AppProviders><TradesView {...viewProps({ version: 1 })} /></AppProviders>);
@@ -173,7 +173,7 @@ describe('TradesView builder', () => {
     expect(screen.getByRole('button', { name: 'Propose trade' })).toBeDisabled();
     await tickBothSides(user);
 
-    expect(await screen.findByText(/You give 31\.5 value, get 35\.0\./)).toBeInTheDocument();
+    expect(await screen.findByText(/You give 32 value, get 35\./)).toBeInTheDocument();
     expect(api.callsTo(EVALUATE_PATH, 'POST').map((call) => call.body)).toEqual([{ to_team: 1, give: [ETIENNE.id], get: [MOSTERT.id], drops: [] }]);
     expect(screen.getByRole('meter', { name: 'Trade balance' })).toHaveAttribute('aria-valuenow', '40');
     expect(screen.getByText(/Big win for you/)).toBeInTheDocument();

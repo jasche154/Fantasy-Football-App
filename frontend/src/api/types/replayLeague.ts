@@ -209,6 +209,30 @@ export interface ReplayPlayerWeek {
   away: boolean;
 }
 
+/** One player's line in a played NFL game (GET .../box). box: null for K and DST. */
+export interface ReplayBoxPlayer {
+  id: number;
+  name: string;
+  position: ReplayPosition;
+  /** Fantasy points under the league's scoring. */
+  points: number;
+  box: ReplayBoxLine | null;
+}
+
+/** One side of a played NFL game. score: null when the season doesn't have it (an older league). */
+export interface ReplayBoxTeam {
+  team: string;
+  home: boolean;
+  score: number | null;
+  players: ReplayBoxPlayer[];
+}
+
+/** A played NFL game's box score: the away team first, then the home team. */
+export interface ReplayBoxScore {
+  week: number;
+  teams: [ReplayBoxTeam, ReplayBoxTeam];
+}
+
 /** A week after the current one: an estimate, never a projection. */
 export interface ReplayUpcomingWeek {
   week: number;

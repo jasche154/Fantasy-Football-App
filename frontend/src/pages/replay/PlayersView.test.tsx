@@ -246,7 +246,12 @@ describe('PlayersView table', () => {
     await user.selectOptions(screen.getByLabelText('Show'), 'Rostered');
     await user.type(screen.getByLabelText('Search'), ' mos');
     await waitFor(() => expect(lastQuery().get('search')).toBe('mos'));
-    expect(Object.fromEntries(lastQuery())).toEqual({ position: 'FLEX', search: 'mos', status: 'rostered', sort: 'value', dir: 'desc', stats: 'season', limit: '25', offset: '0' });
+    // A name searches every player, whatever Show says; clearing it goes back to the chosen filter.
+    expect(Object.fromEntries(lastQuery())).toEqual({ position: 'FLEX', search: 'mos', status: 'all', sort: 'value', dir: 'desc', stats: 'season', limit: '25', offset: '0' });
+    expect(screen.getByLabelText('Show')).toHaveValue('rostered');
+    await user.clear(screen.getByLabelText('Search'));
+    await waitFor(() => expect(lastQuery().get('search')).toBeNull());
+    expect(lastQuery().get('status')).toBe('rostered');
   });
 
   it('caps the search at the backend\'s 60 characters', async () => {

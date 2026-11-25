@@ -72,7 +72,7 @@ export function TradeSide({ title, players, onOpen }: TradeSideProps) {
         {players.map(({ player, value }) => (
           <li key={player.id}>
             <ReplayPlayerCell player={player} onOpen={onOpen} />
-            {value !== undefined && <span className="replay-trade__value">{formatNumber(value)}<span className="sr-only"> value</span></span>}
+            {value !== undefined && <span className="replay-trade__value">{formatInteger(value)}<span className="sr-only"> value</span></span>}
           </li>
         ))}
       </ul>
@@ -109,7 +109,7 @@ export function TradeVerdictView({ verdict, partner, isOffer = false }: TradeVer
       <BalanceMeter percentDifference={verdict.percent} />
       <p>
         <span className={`status-badge verdict--${copy.tone}`}><span aria-hidden="true">{copy.symbol} </span>{copy.label}</span>{' '}
-        on trade value. You give {formatNumber(verdict.value_give)} value, get {formatNumber(verdict.value_get)}.
+        on trade value. You give {formatInteger(verdict.value_give)} value, get {formatInteger(verdict.value_get)}.
         {isAdjusted && ' The totals count the best player in the deal a little extra and take off anyone you would drop.'}
       </p>
       <p>

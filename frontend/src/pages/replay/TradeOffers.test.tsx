@@ -150,7 +150,7 @@ describe('TradeVerdictView: the headline is trade value, the lineup is called ou
     renderTrades(trades({ offers: [offer({ verdict: hurt })] }));
     const card = await screen.findByRole('listitem', { name: 'Offer from Blitz Brigade' });
 
-    expect(within(card).getByText(/on trade value\. You give 801\.7 value, get 754\.0\./)).toBeInTheDocument();
+    expect(within(card).getByText(/on trade value\. You give 802 value, get 754\./)).toBeInTheDocument();
     expect(within(card).getByText(/count the best player in the deal a little extra/)).toBeInTheDocument();
     expect(within(card).getByText(/this costs your best lineup 60\.7 points over the rest of the season/)).toBeInTheDocument();
   });

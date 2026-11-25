@@ -111,6 +111,8 @@ class SeasonData:
     rules: ScoringRules | None = None                         # custom key settings on `scoring` (replay_scoring)
     adp_format: str = "ppr"                                   # the replay_adp list `players` carry (replay_adp_format)
     notes: Mapping[PlayerWeek, str] = field(default_factory=lambda: MappingProxyType({}))  # news before the week
+    # (team, week) -> points the team scored in that week's game: a result, like `actual` (as_of keeps played weeks)
+    scores: Mapping[tuple[str, int], int] = field(default_factory=lambda: MappingProxyType({}))
 
     def as_of(self, week: int) -> "SeasonData":
         """A copy holding only what was known before `week` was played (0 = draft time); cached.
@@ -180,6 +182,7 @@ def _as_of(data: SeasonData, week: int) -> SeasonData:
         notes=MappingProxyType({key: v for key, v in data.notes.items() if key[1] <= week and key[0] in players}),
         usage=MappingProxyType({key: v for key, v in data.usage.items() if key[1] < week and key[0] in players}),
         box=MappingProxyType({key: v for key, v in data.box.items() if key[1] < week and key[0] in players}),
+        scores=MappingProxyType({key: v for key, v in data.scores.items() if key[1] < week}),
         expert_ranks=MappingProxyType({key: v for key, v in data.expert_ranks.items() if key[1] <= week}),
         expert_age=MappingProxyType({w: v for w, v in data.expert_age.items() if w <= week}),
         returns=MappingProxyType({key: v for key, v in data.returns.items() if key[1] <= week}))
@@ -399,6 +402,8 @@ def _build(session: Session, season: int, scoring: str, rules: ScoringRules | No
     schedule = replace(loaded, games=tuple(replace(g, home_score=None, away_score=None) for g in loaded.games))
     last_week = max(game.week for game in schedule.games)
     weeks = min(through or last_week, last_week)      # the last week with real data
+    scores = {(team, g.week): points for g in loaded.games if g.week <= weeks
+              for team, points in ((g.home_team, g.home_score), (g.away_team, g.away_score)) if points is not None}
     two_way = _two_way(session)
     rescored = replay_scoring.scoring_settings(scoring, rules)
     skill_points, skill_teams, usage, box = _skill_games(session, season, rescored, schedule, weeks, two_way)
@@ -430,7 +435,7 @@ def _build(session: Session, season: int, scoring: str, rules: ScoringRules | No
                       injuries=MappingProxyType(injuries), usage=MappingProxyType(usage),
                       expert_ranks=MappingProxyType(expert_ranks), expert_age=MappingProxyType(expert_age),
                       returns=MappingProxyType(hard_tag_returns(injuries, actual, weeks)),
-                      box=MappingProxyType(box), rules=rules, adp_format=adp_format,
+                      box=MappingProxyType(box), rules=rules, adp_format=adp_format, scores=MappingProxyType(scores),
                       defense_prior=MappingProxyType(replay_defense.load_prior(session, season, rescored))))
 
 
@@ -453,4 +458,5 @@ def _relabel(data: SeasonData) -> SeasonData:
         players=MappingProxyType({pid: replace(p, adp_team=team(p.adp_team)) for pid, p in data.players.items()}),
         team_by_week=MappingProxyType({pid: tuple((week, team(code)) for week, code in games)
                                        for pid, games in data.team_by_week.items()}),
-        defense_prior=MappingProxyType({(team(code), position): v for (code, position), v in data.defense_prior.items()}))
+        defense_prior=MappingProxyType({(team(code), position): v for (code, position), v in data.defense_prior.items()}),
+        scores=MappingProxyType({(team(code), week): v for (code, week), v in data.scores.items()}))
