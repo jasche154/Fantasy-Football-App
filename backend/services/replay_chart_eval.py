@@ -9,14 +9,17 @@ for a regular lineup (QB, 2 RB, 2 WR, TE, FLEX, K, DST) and a superflex one (the
 scores each skill player's `chart` against his realised value from W to the league's last week (week 17:
 14 regular weeks and a 3-round, 6-team playoff):
 
-- target = points over replacement PER GAME HE PLAYED from W on (the user's rule: trade value cannot know
-  about an injury that has not happened yet, so games missed to an absence that starts after W are left
-  out, never counted as zeros). Scored only with at least MIN_GAMES games played (one-game samples dropped).
-- a player out at W (Knowledge's `out`): the absence known at W does count, and only it: target = his rate
-  in the games he played after coming back x the share of his team's remaining games he did NOT miss to
-  that absence (byes are not games; a suspension known at W is such an absence, a later one is not). Back
-  at no later week: 0. Back but fewer than MIN_GAMES games afterwards: dropped.
-- replacement: league.replacement_levels on the realised rates (players with MIN_GAMES+ games) for the
+- target = points over replacement per game from W on (`_games`): a game he played counts its points; a
+  team game he missed counts 0 (a benching, a lost role, a healthy scratch: busts are what the chart must
+  price), except while an injury or suspension that started after W is open (a hard tag since his last
+  game, as replay_pool.hard_tag_returns runs a streak): those games are left out, because trade value
+  cannot know about an injury that has not happened yet (the user's rule). A bye is no game. Scored with at
+  least MIN_GAMES counted games (one-game samples dropped).
+- a player out at W (Knowledge's `out`): the absence known at W counts, and only it: target = his rate from
+  his next real game on (the same rule, so a later injury is left out) x the share of his team's remaining
+  games he did NOT miss to that absence. Back with fewer than MIN_GAMES counted games: his games from
+  before W are added to them. Back at no later week: 0.
+- replacement: league.replacement_levels on everyone's rate from W (MIN_GAMES+ counted games) for the
   lineup's teams, starters, FLEX, SUPERFLEX and bench.
 
 Population: skill players whose healthy_chart is at least MIN_CHART (about the 110th pick: rosterable). The
@@ -36,41 +39,25 @@ import argparse  # noqa: E402
 import json
 import logging
 from collections import Counter, defaultdict
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 
-import numpy as np
 
 from services import replay_adp_format, replay_state as rs, replay_values as rv
 from services.league import replacement_levels
+from services.replay_chart_eval_stats import (  # noqa: F401 (re-exported)
+    BANDS, MIN_CHART, TIERS, Row, band, calibration, evaluate, held_out_error, realised_share, spearman,
+    tier,
+)
 from services.replay_pool import SKILL, SeasonData
 
 log = logging.getLogger(__name__)
 
 MIN_GAMES = 3                  # games played after W (after the return, for a player out at W) to be scored
-MIN_CHART = 50.0               # population: healthy_chart at least this
-BANDS = (800.0, 600.0, 400.0, 250.0, 100.0, MIN_CHART)     # chart bands, lower edges, best first
 WEEKS = (1, 4, 7, 10, 13)
 SEED = 0                       # the injury news noise (replay_news): one fixed draw
 REGULAR = dict(rs.DEFAULT_STARTERS)
 LINEUPS = {"regular": REGULAR, "superflex": {**REGULAR, "SUPERFLEX": 1}}
-TIERS = (1, 7, 13, 25, 37)     # position-rank tiers (first rank of each) for the held-out residuals
-
-
-@dataclass(frozen=True)
-class Row:
-    season: int
-    week: int
-    lineup: str
-    player_id: int
-    name: str
-    position: str
-    chart: float
-    healthy_chart: float
-    out: bool
-    target: float
-    rule: str                  # healthy | healthy_later_missed | out_back | out_season
-    pos_rank: int = 0          # by chart within his position that week
 
 
 def _seasons(text: str) -> list[int]:
@@ -86,48 +73,77 @@ def settings_for(season: int, lineup: str, scoring: str, teams: int, bench: int 
                        bench=bench, adp_format=replay_adp_format.wanted(scoring, None, starters))
 
 
-def _team_weeks(data: SeasonData, team: str | None, first: int, last: int) -> list[int]:
-    return [w for w in range(first, last + 1) if data.schedule.opponent(team, w) is not None]
+def _team_game(data: SeasonData, player_id: int, week: int) -> bool:
+    return data.schedule.opponent(data.team_at(player_id, week), week) is not None
+
+
+@dataclass(frozen=True)
+class Games:
+    points: tuple[float, ...]      # every game that counts: real points, 0 for a missed one
+    zeros: int                     # missed team games counted as 0 (no stat row, no open injury)
+    excused: int                   # missed team games left out (an injury or suspension streak open)
+
+
+def _games(data: SeasonData, player_id: int, first: int, last: int) -> Games:
+    """His games from `first` to `last` under the target's rule (module docstring)."""
+    points: list[float] = []
+    zeros = excused = 0
+    injured = False                                     # a hard tag since his last game
+    for week in range(first, last + 1):
+        if (player_id, week) in data.actual:
+            points.append(data.actual[(player_id, week)])
+            injured = False
+            continue
+        tag = data.injuries.get((player_id, week))
+        injured = injured or (tag is not None and tag.hard)
+        if not _team_game(data, player_id, week):
+            continue                                    # a bye
+        if injured:
+            excused += 1
+        else:
+            points.append(0.0)
+            zeros += 1
+    return Games(tuple(points), zeros, excused)
+
+
+def _rate(games: Games) -> float:
+    return sum(games.points) / len(games.points)
+
+
+def target(data: SeasonData, player_id: int, week: int, end_week: int, out: bool,
+           level: Mapping[str, float]) -> tuple[float, str] | None:
+    """(target, rule) for one player valued before `week`, or None when too few games to score him."""
+    replacement = level[data.players[player_id].position]
+    if not out:
+        games = _games(data, player_id, week, end_week)
+        if len(games.points) < MIN_GAMES:
+            return None
+        rule = "healthy_later_injury" if games.excused else "healthy_zero_games" if games.zeros else "healthy"
+        return _rate(games) - replacement, rule
+    back = next((w for w in range(week, end_week + 1) if (player_id, w) in data.actual), None)
+    if back is None:
+        return 0.0, "out_season"
+    team_weeks = [w for w in range(week, end_week + 1) if _team_game(data, player_id, w)]
+    share = 1 - sum(w < back for w in team_weeks) / max(1, len(team_weeks))
+    games, rule = _games(data, player_id, back, end_week), "out_back"
+    if len(games.points) < MIN_GAMES:                   # back late: his rate before the absence too
+        before = _games(data, player_id, 1, week - 1)
+        games, rule = Games(before.points + games.points, 0, 0), "out_back_short"
+    return (_rate(games) - replacement) * share, rule
 
 
 def realised(data: SeasonData, week: int, end_week: int, out: Mapping[int, bool],
-             league) -> tuple[dict[int, tuple[float, str]], Counter]:
-    """({player: (target, rule)}, counts of each rule incl. the dropped ones) for the skill players."""
-    rates: dict[int, tuple[float, int]] = {}            # (points per game played from `start`, games)
-    starts: dict[int, int] = {}
+             league) -> dict[int, tuple[float, str]]:
+    """{player: (target, rule)} for the skill players in `out` (True = out at `week`) that can be scored."""
+    rates = {}
     for pid, player in data.players.items():
-        if player.position not in SKILL:
-            continue
-        start = week
-        if out.get(pid):                                # the known absence ends at his next real game
-            start = next((w for w in range(week, end_week + 1) if (pid, w) in data.actual), end_week + 1)
-        games = [data.actual[(pid, w)] for w in range(start, end_week + 1) if (pid, w) in data.actual]
-        starts[pid] = start
-        if games:
-            rates[pid] = (sum(games) / len(games), len(games))
-    level = replacement_levels(((data.players[pid].position, rate) for pid, (rate, n) in rates.items()
-                                if n >= MIN_GAMES), league)
-    found: dict[int, tuple[float, str]] = {}
-    counts: Counter = Counter()
-    for pid, start in starts.items():
-        position, (rate, n) = data.players[pid].position, rates.get(pid, (0.0, 0))
-        if out.get(pid) and start > end_week:
-            found[pid] = (0.0, "out_season")
-            counts["out_season"] += 1
-            continue
-        if n < MIN_GAMES:
-            counts["out_dropped" if out.get(pid) else "healthy_dropped"] += 1
-            continue
-        over = rate - level[position]
-        team_weeks = _team_weeks(data, data.team_at(pid, week), week, end_week)
-        if out.get(pid):
-            missed = sum(w < start for w in team_weeks)
-            found[pid] = (over * (1 - missed / max(1, len(team_weeks))), "out_back")
-        else:
-            later = sum(w >= start and (pid, w) not in data.actual for w in team_weeks)
-            found[pid] = (over, "healthy_later_missed" if later else "healthy")
-        counts[found[pid][1]] += 1
-    return found, counts
+        if player.position in SKILL:
+            games = _games(data, pid, week, end_week)
+            if len(games.points) >= MIN_GAMES:
+                rates[pid] = _rate(games)
+    level = replacement_levels(((data.players[pid].position, rate) for pid, rate in rates.items()), league)
+    found = {pid: target(data, pid, week, end_week, is_out, level) for pid, is_out in out.items()}
+    return {pid: value for pid, value in found.items() if value is not None}
 
 
 def rows_for(data: SeasonData, lineup: str, settings: rs.Settings, weeks: Sequence[int]) -> tuple[list[Row], Counter]:
@@ -138,7 +154,7 @@ def rows_for(data: SeasonData, lineup: str, settings: rs.Settings, weeks: Sequen
     for week in weeks:
         know = rv.knowledge(data, league, week, end_week, SEED)
         pool = [v for v in know.values if v.position in SKILL and v.healthy_chart >= MIN_CHART]
-        targets, _ = realised(data, week, end_week, {v.player_id: v.out for v in pool}, league)
+        targets = realised(data, week, end_week, {v.player_id: v.out for v in pool}, league)
         in_pool = {v.player_id for v in pool}
         seen: Counter = Counter()
         for v in pool:
@@ -154,120 +170,26 @@ def rows_for(data: SeasonData, lineup: str, settings: rs.Settings, weeks: Sequen
     return rows, counts
 
 
-# ---------------- metrics ----------------
-
-def _ranks(values: Sequence[float]) -> np.ndarray:
-    """1-based ranks, ties averaged."""
-    array = np.asarray(values, dtype=float)
-    order = array.argsort(kind="mergesort")
-    ranks = np.empty(len(array))
-    ranks[order] = np.arange(1, len(array) + 1)
-    for value in np.unique(array):
-        tied = array == value
-        if tied.sum() > 1:
-            ranks[tied] = ranks[tied].mean()
-    return ranks
+ABSENCE_WEEKS = range(1, 11)    # weeks an absence is measured from (week 10 still sees 7+ games to its end)
+NEVER = -1                     # absences_unreported: never back that season
 
 
-def spearman(xs: Sequence[float], ys: Sequence[float]) -> float | None:
-    if len(xs) < 3:
-        return None
-    a, b = _ranks(xs), _ranks(ys)
-    if a.std() == 0 or b.std() == 0:
-        return None
-    return float(np.corrcoef(a, b)[0, 1])
-
-
-def _mean_spearman(rows: Sequence[Row], keep: Callable[[Row], bool]) -> float | None:
-    """Mean over (season, week) of the Spearman correlation among the kept rows."""
-    groups: dict[tuple[int, int], list[Row]] = defaultdict(list)
-    for row in rows:
-        if keep(row):
-            groups[(row.season, row.week)].append(row)
-    found = [r for r in (spearman([x.chart for x in g], [x.target for x in g]) for g in groups.values())
-             if r is not None]
-    return round(float(np.mean(found)), 3) if found else None
-
-
-def band(chart: float) -> str:
-    low = next((edge for edge in BANDS if chart >= edge), 0.0)
-    above = [edge for edge in BANDS if edge > low]
-    return f"{low:.0f}+" if not above else f"{low:.0f}-{min(above):.0f}"
-
-
-def calibration(rows: Iterable[Row]) -> dict[str, dict[str, tuple[float, int]]]:
-    """{band: {position | "ALL": (mean target, players)}}."""
-    cells: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
-    for row in rows:
-        cells[band(row.chart)][row.position].append(row.target)
-        cells[band(row.chart)]["ALL"].append(row.target)
-    return {b: {p: (round(float(np.mean(v)), 2), len(v)) for p, v in sorted(by.items())}
-            for b, by in sorted(cells.items(), key=lambda item: -float(item[0].split("+")[0].split("-")[0]))}
-
-
-def held_out_error(rows: Sequence[Row], scored: Callable[[Row], bool] = lambda row: True) -> dict:
-    """Leave-season-out: per held-out season, a position-blind curve (mean target per chart band) fitted on
-    the other seasons; RMSE of the held-out targets against it, and each position's (and position-rank
-    tier's) mean miss (bias). `scored`: which held-out rows are scored (the curve always uses every row)."""
-    seasons = sorted({r.season for r in rows})
-    errors: list[float] = []
-    bias: dict[str, list[float]] = defaultdict(list)
-    tiers: dict[str, list[float]] = defaultdict(list)
-    for held in seasons:
-        curve: dict[str, list[float]] = defaultdict(list)
-        for row in rows:
-            if row.season != held:
-                curve[band(row.chart)].append(row.target)
-        means = {b: float(np.mean(v)) for b, v in curve.items()}
-        for row in rows:
-            if row.season == held and band(row.chart) in means and scored(row):
-                miss = row.target - means[band(row.chart)]
-                errors.append(miss * miss)
-                bias[row.position].append(miss)
-                tiers[f"{row.position}{tier(row.pos_rank)}"].append(miss)
-    if not errors:
-        return {}
-    return {"rmse": round(float(np.sqrt(np.mean(errors))), 3),
-            **{f"bias_{p}": round(float(np.mean(v)), 3) for p, v in sorted(bias.items())},
-            "tiers": {name: (round(float(np.mean(v)), 2), len(v)) for name, v in sorted(tiers.items())}}
-
-
-def tier(pos_rank: int) -> str:
-    first = max(t for t in TIERS if t <= max(1, pos_rank))
-    later = [t for t in TIERS if t > first]
-    return f"{first}-{later[0] - 1}" if later else f"{first}+"
-
-
-def realised_share(rows: Sequence[Row]) -> float | None:
-    """Out players' targets over what healthy players of the same healthy_chart band produced: the share of
-    his value the known absence really cost him (compare with their mean chart / healthy_chart)."""
-    healthy: dict[str, list[float]] = defaultdict(list)
-    for row in rows:
-        if not row.out:
-            healthy[band(row.healthy_chart)].append(row.target)
-    means = {b: float(np.mean(v)) for b, v in healthy.items()}
-    out = [(row.target, means[band(row.healthy_chart)]) for row in rows
-           if row.out and band(row.healthy_chart) in means]
-    expected = sum(e for _, e in out)
-    return round(sum(t for t, _ in out) / expected, 3) if out and expected > 0 else None
-
-
-def evaluate(rows: Sequence[Row]) -> dict:
-    """The report for one lineup's rows."""
-    positions = sorted({r.position for r in rows})
-    out_rows = [r for r in rows if r.out]
-    return {
-        "players": len(rows),
-        "spearman": _mean_spearman(rows, lambda r: True),
-        "spearman_by_position": {p: _mean_spearman(rows, lambda r, p=p: r.position == p) for p in positions},
-        "held_out": held_out_error(rows),
-        "calibration": calibration(rows),
-        "out": {"players": len(out_rows), "spearman": _mean_spearman(out_rows, lambda r: True),
-                "held_out": held_out_error(rows, lambda r: r.out), "realised_share": realised_share(rows),
-                "calibration": calibration(out_rows),
-                "chart_share": round(float(np.mean([r.chart / r.healthy_chart for r in out_rows])), 3)
-                if out_rows else None},
-    }
+def absences_unreported(data: SeasonData) -> Counter:
+    """{team games missed counting this week (NEVER: not back that season): player-weeks} for the skill
+    players out with no hard tag (no projection, no news report: replay_chart_injury's unreported case), in
+    ABSENCE_WEEKS. 0 = he played that week after all."""
+    priors = rv._priors(data)
+    found: Counter = Counter()
+    for pid, player in data.players.items():
+        if player.position not in SKILL or priors.get(pid, 0.0) <= 0:
+            continue
+        for week in ABSENCE_WEEKS:
+            tag = data.injuries.get((pid, week))
+            if (tag is not None and tag.hard) or not rv._out_streak(data, pid, priors[pid], week):
+                continue
+            back = next((w for w in range(week, data.last_week + 1) if (pid, w) in data.actual), None)
+            found[NEVER if back is None else sum(_team_game(data, pid, w) for w in range(week, back))] += 1
+    return found
 
 
 def run(seasons: Sequence[int], weeks: Sequence[int], scoring: str, teams: int,
@@ -328,9 +250,22 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--lineups", default="regular,superflex")
     parser.add_argument("--bench", type=int, default=6, help="bench spots (0: value over the last starter)")
     parser.add_argument("--out", help="write the report (rows included) as JSON here")
+    parser.add_argument("--absences", action="store_true",
+                        help="measure games missed by unreported absences (replay_chart_injury.NO_REPORT_ODDS)")
     parser.add_argument("--compare", nargs=2, metavar=("BEFORE", "AFTER"),
                         help="score two saved reports on their common player-weeks (nothing is rebuilt)")
     args = parser.parse_args(argv)
+    if args.absences:
+        from database.db import SessionLocal
+        from services import replay_pool
+        found: Counter = Counter()
+        with SessionLocal() as session:
+            for season in _seasons(args.seasons):
+                found.update(absences_unreported(replay_pool.load_season_data(session, season, args.scoring)))
+        total = sum(found.values())
+        log.info("Unreported absences, %d player-weeks: %s", total,
+                 {missed: round(n / total, 4) for missed, n in sorted(found.items())})
+        return
     if args.compare:
         before, after = (json.loads(Path(path).read_text()) for path in args.compare)
         for lineup, pair in compare(before, after).items():
