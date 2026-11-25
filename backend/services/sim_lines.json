@@ -1,0 +1,36 @@
+{
+ "seasons": [
+  2018,
+  2019,
+  2020,
+  2021,
+  2022,
+  2023,
+  2024,
+  2025
+ ],
+ "ratings": {
+  "decay": 0.95,
+  "prior_games": 8.0,
+  "carry": 0.7,
+  "level_games": 64.0,
+  "level": 22.9222,
+  "home": 1.5726
+ },
+ "yards_power": 0.275,
+ "margin": {
+  "const": 1.6431,
+  "points": 0.8409,
+  "belief": 0.3034,
+  "qb_level": 6.2525,
+  "qb_change": 7.5497,
+  "rest": 1.0149
+ },
+ "total": {
+  "const": -10.6589,
+  "points": 0.583,
+  "belief": 0.2686,
+  "qb_level": 8.4076,
+  "qb_change": 4.2612
+ }
+}
