@@ -18,65 +18,65 @@
   "held_out": {
     "2024": {
       "before": {
-        "rmse": 7.707,
-        "mae": 6.046,
-        "rank_corr": 0.526
+        "rmse": 6.957,
+        "mae": 5.349,
+        "rank_corr": 0.63
       },
       "after": {
-        "rmse": 7.549,
-        "mae": 5.85,
-        "rank_corr": 0.529
+        "rmse": 6.894,
+        "mae": 5.175,
+        "rank_corr": 0.631
       }
     },
     "2025": {
       "before": {
-        "rmse": 7.654,
-        "mae": 6.006,
-        "rank_corr": 0.502
+        "rmse": 6.804,
+        "mae": 5.202,
+        "rank_corr": 0.638
       },
       "after": {
-        "rmse": 7.448,
-        "mae": 5.772,
-        "rank_corr": 0.506
+        "rmse": 6.685,
+        "mae": 4.989,
+        "rank_corr": 0.642
       }
     }
   },
   "positions": {
     "QB": {
-      "calibration": -0.03076,
-      "opp_pass_epa": -0.07304,
-      "opp_rush_epa": -0.00108,
-      "opp_sack": -0.11932,
-      "wind": -0.10247,
-      "cold": -0.06367,
-      "indoors": 0.00236
+      "calibration": -0.02825,
+      "opp_pass_epa": -0.07443,
+      "opp_rush_epa": 0.00376,
+      "opp_sack": -0.11724,
+      "wind": -0.1051,
+      "cold": -0.06776,
+      "indoors": -0.00199
     },
     "RB": {
-      "calibration": -0.07478,
-      "opp_pass_epa": -0.02271,
-      "opp_rush_epa": -0.00738,
-      "opp_sack": 0.03389,
-      "wind": -0.06201,
-      "cold": 0.06888,
-      "indoors": 0.00404
+      "calibration": -0.093,
+      "opp_pass_epa": -0.02483,
+      "opp_rush_epa": -0.00534,
+      "opp_sack": 0.03499,
+      "wind": -0.05775,
+      "cold": 0.0532,
+      "indoors": 0.00578
     },
     "WR": {
-      "calibration": -0.10746,
-      "opp_pass_epa": -0.05896,
-      "opp_rush_epa": -0.00257,
-      "opp_sack": -0.03441,
-      "wind": -0.01283,
-      "cold": -0.03567,
-      "indoors": 0.0394
+      "calibration": -0.12276,
+      "opp_pass_epa": -0.06128,
+      "opp_rush_epa": -0.00785,
+      "opp_sack": -0.03996,
+      "wind": -0.0181,
+      "cold": -0.05382,
+      "indoors": 0.0357
     },
     "TE": {
-      "calibration": -0.04447,
-      "opp_pass_epa": 0.00136,
-      "opp_rush_epa": -0.04196,
-      "opp_sack": -0.05042,
-      "wind": -0.14079,
-      "cold": -0.04186,
-      "indoors": 0.0024
+      "calibration": -0.06466,
+      "opp_pass_epa": 0.00264,
+      "opp_rush_epa": -0.03743,
+      "opp_sack": -0.05394,
+      "wind": -0.14044,
+      "cold": -0.0529,
+      "indoors": -0.00487
     }
   }
 }
