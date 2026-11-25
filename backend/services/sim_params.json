@@ -1195,10 +1195,10 @@
    "rec_cv": 0.68
   },
   "talent": {
-   "role_sd": 0.4,
+   "role_sd": 0.2,
    "evidence": 2,
    "floor": 0.2,
-   "season_spread": 2.0
+   "season_spread": 1.0
   },
   "market": {
    "two_qb_replacement": 30,

@@ -25,8 +25,10 @@ truth's dated role changes into a noisy hint.
   defenses at the real average ADP of the Nth one taken (`kdst_adp` in sim_params.json), stdev = a + b x adp
   as measured. A player believed out for the games left gets none.
 - `buzz`: before the week a change starts, HINT_RATE of true breakouts, busts and benchings get a news line;
-  false lines (random leads, backups and starting QBs) are added so that about PRECISION of all lines are true
-  (sim_season passes no false rate outside the weeks a change can start, so those weeks stay quiet).
+  false lines are added so that about PRECISION of all lines are true, each about a player the change could
+  plausibly happen to, weighted by how likely it is for him (sim_talent.rumors: backups break out, leads who
+  are not stars bust, low-rated starting QBs are benched; never a top-STAR_RANK player). sim_season passes no
+  false rate outside the weeks a change can start, so those weeks stay quiet.
 """
 from collections import defaultdict
 from collections.abc import Collection, Iterable, Mapping
@@ -164,28 +166,44 @@ def track_record(data: SeasonData) -> dict[int, float]:
     return {pid: sum(games) / len(games) for pid, games in totals.items() if len(games) >= RECORD_MIN_GAMES}
 
 
+def position_ranks(belief: World) -> dict[int, int]:
+    """{player: his rank at his position by the market's value (`values`, half PPR)}: how the public rates him.
+    sim_talent's benchings and rumours read it, and sim_next_year_fit fits the benchings on it."""
+    worth = values(belief, scoring_for("half"))
+    ranks: dict[int, int] = {}
+    for position in ("QB", "RB", "WR", "TE"):
+        order = sorted((pid for pid, p in belief.players.items() if p.position == position),
+                       key=lambda pid: (-worth.get(pid, 0.0), pid))
+        ranks.update({pid: rank for rank, pid in enumerate(order, start=1)})
+    return ranks
+
+
 def buzz(changes: Iterable[RoleChange], belief: World, week: int, dice: np.random.Generator,
-         false_rate: float, out: Collection[int] = ()) -> dict[tuple[int, int], str]:
+         false_rate: float, out: Collection[int] = (),
+         rumors: Mapping[str, Mapping[int, float]] | None = None) -> dict[tuple[int, int], str]:
     """{(player, week): news line} for `week` (see the module docstring). false_rate: the expected true lines
-    per week, from which the false ones are sized. Never about a player who is out that week (`out`: the
-    week's hard tags, or believed out): a role rumour about a player on IR makes no sense."""
+    per week, from which the false ones are sized. `rumors`: {kind: {player: weight}} (sim_talent.rumors), who
+    a false line may be about: a (kind, player) pair is drawn in proportion to its weight, so a false line is
+    about a change as plausible for him as the true ones are. Never about a player who is out that week (`out`:
+    the week's hard tags, or believed out): a role rumour about a player on IR makes no sense."""
     sidelined = set(out) | {pid for pid, p in belief.players.items() if p.out_weeks > 0}
     notes = {}
     for change in sorted(changes, key=lambda c: c.player_id):
         hinted = change.week == week and change.kind in BUZZ and dice.random() < HINT_RATE
         if hinted and change.player_id not in sidelined:
             notes[(change.player_id, week)] = BUZZ[change.kind]
-    candidates = sorted(pid for pid, p in belief.players.items() if pid not in sidelined and (
-        (p.position == "QB" and p.starts >= 0.5) or (p.position in ("RB", "WR", "TE") and p.targets + p.carries >= 0.08)))
+    pool = [(kind, pid, weight) for kind in sorted(rumors or {}) for pid, weight in sorted(rumors[kind].items())
+            if weight > 0 and pid not in sidelined]
     count = int(dice.poisson(false_rate * (1 - PRECISION) / PRECISION))
-    for pid in dice.choice(candidates, size=min(count, len(candidates)), replace=False) if candidates else ():
-        pid = int(pid)
-        kind = "bench" if belief.players[pid].position == "QB" else ("breakout", "bust")[int(dice.integers(2))]
-        notes.setdefault((pid, week), BUZZ[kind])
+    if pool and count:
+        weights = np.array([weight for _, _, weight in pool])
+        for i in dice.choice(len(pool), size=min(count, len(pool)), replace=False, p=weights / weights.sum()):
+            kind, pid, _ = pool[int(i)]
+            notes.setdefault((pid, week), BUZZ[kind])
     return notes
 
 
-def expected_hints(teams: int, weeks: int, knobs: Mapping) -> float:
-    """True buzz lines per week the talent model makes on average (sizes the false ones)."""
-    per_team = knobs["breakout_rate"] + knobs["bust_rate"] + knobs["bench_rate"]
-    return teams * per_team * HINT_RATE / max(1, weeks)
+def expected_hints(changes: float, weeks: int) -> float:
+    """True buzz lines per week from the season's expected true changes (sim_talent.expected_changes): sizes
+    the false ones."""
+    return changes * HINT_RATE / max(1, weeks)

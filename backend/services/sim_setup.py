@@ -69,17 +69,20 @@ def build(session: Session, settings: Settings, seed: int) -> tuple[bytes, Seaso
     """The whole season a new simulated league plays (real weeks before settings.sim_from, its own simulated
     future after), to be frozen with it: (its save's bytes, the season as the save holds it; replay_blob.freeze).
     NoDataError when the season's data is not ready."""
-    from services import sim_season                     # the engine, imported only when a league is built
+    from services import sim_next_year, sim_season      # the engine, imported only when a league is built
 
     if settings.sim_from is None:
         raise ValueError(f"{settings.season} is not a simulated season.")
     if settings.sim_from == 1:
         base, world, carried = _future_base(session, settings.season, settings, seed)
-        data = sim_season.simulate(base, seed, 1, prior=world, carried=carried)
+        rookies = [pid for pid in world.players if pid >= sim_next_year.ROOKIE_ID_BASE]     # this draft class
+        data = sim_season.simulate(base, seed, 1, prior=world, carried=carried, rookies=rookies)
     else:
         base = replay_pool.load_season_data(session, settings.season, settings.scoring, settings.scoring_rules,
                                             settings.adp_format, through=settings.sim_from - 1)
-        data = sim_season.simulate(with_status_now(session, base, settings.sim_from), seed, settings.sim_from)
+        rookies = [pid for pid, first in first_seasons(session).items() if first == settings.season]
+        data = sim_season.simulate(with_status_now(session, base, settings.sim_from), seed, settings.sim_from,
+                                   rookies=rookies)
         data = _market_adp(data, settings) if settings.start_week > 1 else data
     return replay_blob.freeze(data)
 
@@ -247,7 +250,7 @@ def _future_base(session: Session, season: int, settings: Settings, seed: int = 
     """The season after the newest one, from what is known today plus the league's `seed` (its draft:
     sim_rookie_draft; its carried injuries: sim_carryover), through sim_next_year. Raises NoDataError when it
     can't be built (future_problem says why)."""
-    from services import (sim_carryover, sim_market, sim_metrics, sim_next_year, sim_offseason, sim_rookie_draft,
+    from services import (sim_carryover, sim_market, sim_next_year, sim_offseason, sim_rookie_draft,
                           sim_world)
 
     problem = future_problem(session, season)
@@ -272,7 +275,7 @@ def _future_base(session: Session, season: int, settings: Settings, seed: int = 
     by_name = {r.name: r for r in sim_rookie_draft.run(rookies, played, world, moved, seed)}
     drafted = {pid: by_name[r.name] for pid, r in sim_next_year.rookie_ids(season, rookies).items()}  # ids: file picks
     belief, pool = sim_next_year.next_year(world, data.players, experience, drafted, moved,
-                                           sim_metrics.qb_starts(data))
+                                           sim_next_year.starts_by_team(data))
     schedule = _schedule(session, season, data)
     start = sim_carryover.next_week_one(data, schedule)
     carries = {pid: c for pid, c in sim_carryover.carried(data, start, injury_detail(session)).items()

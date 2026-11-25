@@ -41,7 +41,8 @@ from dataclasses import replace
 from functools import partial
 from pathlib import Path
 
-from services import replay_pool, sim_carryover, sim_depth, sim_fit, sim_injuries, sim_market, sim_metrics, sim_season, sim_world
+from services import (replay_pool, sim_carryover, sim_depth, sim_fit, sim_injuries, sim_market, sim_metrics, sim_season,
+                      sim_setup, sim_world)
 from services.replay_adp_format import TWO_QB
 from services.replay_pool import SeasonData
 from services.sim_world import World
@@ -99,7 +100,7 @@ def next_belief(session, real: SeasonData, offseason: dict) -> tuple[World, dict
                if pid not in world.players}
     experience = fit.experience(session, real.season - 1, offseason["picks"], offseason["first"])
     belief, pool = sim_next_year.next_year(world, previous.players, experience, rookies, real_moves(world, real),
-                                           sim_metrics.qb_starts(previous))
+                                           sim_next_year.starts_by_team(previous))
     return belief, pool, rookies
 
 
@@ -152,7 +153,8 @@ def _mid(session, season: int, seeds: list[int]) -> tuple[dict, dict]:
     real = replay_pool.load_season_data(session, season, SCORING)
     weeks = range(MID_WEEK, real.last_week + 1)
     base = cut(real, MID_WEEK)
-    sims = [_rest(sim_season.simulate(base, seed, MID_WEEK), weeks) for seed in seeds]
+    rookies = [pid for pid, first in sim_setup.first_seasons(session).items() if first == season]
+    sims = [_rest(sim_season.simulate(base, seed, MID_WEEK, rookies=rookies), weeks) for seed in seeds]
     return _rest(real, weeks), _mean(sims)
 
 
@@ -170,8 +172,8 @@ def _whole(data: SeasonData, rookies: set[int], real: SeasonData) -> dict[str, f
 def _full(session, season: int, seeds: list[int], offseason: dict) -> tuple[dict, dict]:
     real = replay_pool.load_season_data(session, season, SCORING)
     base, prior, rookies, carries = next_season(session, real, offseason)
-    sims = [_whole(sim_season.simulate(base, seed, 1, prior, sim_carryover.draw(carries, seed)), rookies, real)
-            for seed in seeds]
+    sims = [_whole(sim_season.simulate(base, seed, 1, prior, sim_carryover.draw(carries, seed), rookies=rookies), rookies,
+                   real) for seed in seeds]
     return _whole(real, rookies, real), _mean(sims)
 
 
