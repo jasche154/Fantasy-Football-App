@@ -39,7 +39,7 @@ from dataclasses import replace
 from functools import partial
 from pathlib import Path
 
-from services import replay_pool, sim_fit, sim_market, sim_metrics, sim_season, sim_world
+from services import replay_pool, sim_carryover, sim_depth, sim_fit, sim_market, sim_metrics, sim_season, sim_world
 from services.replay_adp_format import TWO_QB
 from services.replay_pool import SeasonData
 from services.sim_world import World
@@ -108,16 +108,26 @@ def market_inputs(session, real: SeasonData) -> tuple[str, dict[int, float]]:
     return listed, sim_market.track_record(replay_pool.load_season_data(session, real.season - 1, listed))
 
 
-def next_season(session, real: SeasonData, offseason: dict) -> tuple[SeasonData, World, set[int]]:
-    """(base, prior, rookie ids) for season `real.season` built like sim_setup._future_base from the season before it."""
+def _carries(session, real: SeasonData, belief: World) -> dict:
+    """Last season's injuries still healing at `real`'s week 1 (sim_carryover), for the belief's players."""
+    previous = replay_pool.load_season_data(session, real.season - 1, SCORING)
+    start = sim_carryover.week_one(real)
+    return {pid: c for pid, c in sim_carryover.carried(previous, start).items() if pid in belief.players} if start else {}
+
+
+def next_season(session, real: SeasonData, offseason: dict) -> tuple[SeasonData, World, set[int], dict]:
+    """(base, prior, rookie ids, carried injuries) for season `real.season` built like sim_setup._future_base from
+    the season before it."""
     from services import sim_next_year
 
     belief, pool, rookies = next_belief(session, real, offseason)
+    carries = _carries(session, real, belief)
+    belief = sim_carryover.with_expected(belief, carries)
     base = sim_next_year.season_base(real.season, belief, pool, real.schedule, SCORING, None, real.defense_prior)
     listed, record = market_inputs(session, real)          # our ADP priced like the real list it is compared with
     priced = sim_next_year.with_market_adp(replace(base, scoring=listed, adp_format=real.adp_format), belief,
                                            record=record, premium=sim_next_year.rookie_premium(rookies))
-    return replace(base, players=priced.players), belief, set(rookies) & set(base.players)
+    return replace(base, players=priced.players), belief, set(rookies) & set(base.players), carries
 
 
 def _mean(rows: list[dict[str, float]]) -> dict[str, float]:
@@ -152,13 +162,14 @@ def _whole(data: SeasonData, rookies: set[int], real: SeasonData) -> dict[str, f
     weeks = range(1, data.last_week + 1)
     return {**sim_metrics.season(data), **sim_metrics.rookies(data, rookies),
             **sim_metrics.adp_agreement(data, real, rookies), **sim_metrics.expert_agreement(data),
-            **sim_metrics.weekly(data, weeks)}
+            **sim_metrics.weekly(data, weeks), **sim_depth.metrics(data)}
 
 
 def _full(session, season: int, seeds: list[int], offseason: dict) -> tuple[dict, dict]:
     real = replay_pool.load_season_data(session, season, SCORING)
-    base, prior, rookies = next_season(session, real, offseason)
-    sims = [_whole(sim_season.simulate(base, seed, 1, prior), rookies, real) for seed in seeds]
+    base, prior, rookies, carries = next_season(session, real, offseason)
+    sims = [_whole(sim_season.simulate(base, seed, 1, prior, sim_carryover.draw(carries, seed)), rookies, real)
+            for seed in seeds]
     return _whole(real, rookies, real), _mean(sims)
 
 
