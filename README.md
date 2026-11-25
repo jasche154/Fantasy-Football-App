@@ -1366,15 +1366,21 @@ read the belief, so, as in a real season, the public learns the truth only from 
   goes to **overtime**: one side wins it with a field goal or a touchdown (credited to a receiver or a
   rusher, never one who left the game hurt, so the box score still adds up), and about 7% of overtimes end
   tied (4.3% of simulated games are tied after regulation), so ties stay as rare as real ones (0.29%). The hidden strength, the widened edge and the drive count are tuned so simulated
-  results against the sim's own line look like real results against Vegas (sim_eval 2021-2025, full / mid
-  mode: line vs result correlation 0.45 / 0.46 against 0.46 / 0.53, results around the line spread 12.4 / 13.0
-  against 12.6 / 12.0, margins of 21+ 14.9% / 17.6% against 16.9% / 17.2%, 35+ 1.5% / 1.3% against 2.1% /
-  1.7%, team scores mean 23.1 / 22.8 against 22.5 / 22.6, sd 9.7 / 9.8 against 9.9 / 10.1, ties 0.27% /
-  0.19% against 0.29% / 0.19%). Known gaps: shutouts are still rarer than real (0.7-1.0% of team scores
+  results against the sim's own line look like real results against Vegas (sim_eval 2021-2025, 3 seeds, full /
+  mid mode: line vs result correlation 0.45 / 0.45 against 0.46 / 0.53, results around the line spread 12.4 /
+  12.8 against 12.6 / 12.0, margins of 21+ 15.0% / 16.7% against 16.9% / 17.2%, 35+ 1.6% / 1.3% against 2.1% /
+  1.7%, team scores mean 23.0 / 22.8 against 22.5 / 22.6, sd 9.7 / 9.8 against 9.9 / 10.1, ties 0.29% /
+  0.19% against 0.29% / 0.19%). Known gaps: shutouts are still rarer than real (0.8% of team scores
   against 1.1-1.4%), a score of 13 is too common (5.5% against 3.6%), in the closest fifth of lines in the
-  mid-season mode a 21+ blowout is more common than real (14.6% against 7.9%), and since weak offenses now
-  kick fewer field goals (kickers average 8.0-8.1 points a game against a real 8.2; they were 8.6) their
-  points come more from touchdowns, so skill players score about 2 fantasy points a team-game more than real.
+  mid-season mode a 21+ blowout is more common than real (13.9% against 7.9%), and since weak offenses now
+  kick fewer field goals (kickers average 8.0-8.2 points a game against a real 8.2; they were 8.7-8.8) their
+  points come more from touchdowns, so skill players score about 2.3 / 2.1 fantasy points a team-game more
+  than real (it was 1.4 / 1.1), and the best quarterback's season about 1.2-1.5 points a game more. No setting
+  of the tuned knobs closes that without losing the game rows: weak offenses kicking every field goal
+  (`game.fg_power` 0) with half the hidden strength (`talent.strength_sd` 1.0) brings skill points back to 1.4
+  / 1.0 over real, but blowouts in the most lopsided fifth of lines fall to 20% (real 25%), shutouts to 0.4%
+  (real 1.1%), the line's correlation with the result to 0.41 and kickers rise to 8.5; field-goal power 0.5,
+  hidden strength 1.5 or 1.0, edge 1.0 and 4 or 6 drives each move skill points by 0.5 or less.
 - **Games are played top-down,** so box scores always add up (`services/sim_game.py`): first each
   team's targets and carries (its volume, a shared game draw for shootouts, the leader running more and the
   trailer passing more), then they are split among the active players by their roles (an injured player's
@@ -1476,7 +1482,7 @@ read the belief, so, as in a real season, the public learns the truth only from 
   (on injury news, a player ruled out or back, or a teammate at his position ruled out or back, is re-ranked
   at once: the backup whose starter just went on IR moves up that week; a quarterback benching is news for
   both of the team's quarterbacks the same way), so a healthy star no longer jumps from QB1 to QB9 and back: a
-  healthy top-16 quarterback's expert rank moves about 1.3-1.7 places a week (real: about 1.1; it moved about
+  healthy top-16 quarterback's expert rank moves about 1.2-1.5 places a week (real: about 1.1; it moved about
   five). Quarterback expert ranks still agree less with the week's projections than real ones (rank correlation
   about 0.6-0.68 against 0.72-0.75): QB values are bunched, and the projections follow each week's matchup line.
 
