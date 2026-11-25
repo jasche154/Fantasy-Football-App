@@ -18,8 +18,9 @@ rookie QB on his team (this season's draft, pick ROOKIE_PICKS or better, not the
 
 ESTABLISHED (`established_qbs`, the user's choice informed by the data: established starters never lose the job
 healthy): his preseason QB rank this season is CURRENT_RANK or better on a price that ignores games he is expected
-to miss (a real season: its real ADP, `market_ranks`; a season simulated whole: the per-game value of its
-preseason belief, `preseason_ranks`, as its ADP is discounted for injuries carried into it), OR his real preseason QB ADP rank was PAST_RANK or better in one of the
+to miss (a real season: its real ADP, `market_ranks`; a season simulated whole: the better of its ADP rank and
+the per-game value rank of its preseason belief, `preseason_ranks`, as its ADP is discounted for injuries carried
+into it), OR his real preseason QB ADP rank was PAST_RANK or better in one of the
 PAST_SEASONS seasons before (read by sim_setup.qb_inputs). An established holder never loses the job while
 healthy and always gets it back from a fill-in; nobody else is protected.
 

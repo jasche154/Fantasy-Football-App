@@ -61,11 +61,15 @@ def _qbs(world: World, team: str) -> list[Player]:
 
 
 def established_of(base: SeasonData, belief: World | None, whole: bool, inputs: QbInputs) -> frozenset[int]:
-    """The season's established QBs (sim_qb.established_qbs). The preseason rank: in a season simulated whole
-    from a prior World (`whole`: a future season, whose ADP is discounted for injuries carried into it) the
-    per-game value rank of its preseason `belief` (sim_qb.preseason_ranks); in a real season its real preseason
-    ADP rank (sim_qb.market_ranks), as a real season's belief, with no prior, rates every starting passer alike."""
-    ranks = sim_qb.preseason_ranks(belief) if whole else sim_qb.market_ranks(base)
+    """The season's established QBs (sim_qb.established_qbs). The preseason rank: in a real season its real
+    preseason ADP rank (sim_qb.market_ranks), as a real season's belief, with no prior, rates every starting
+    passer alike; in a season simulated whole from a prior World (`whole`: a future season, whose ADP is
+    discounted for injuries carried into it) the better of that and the per-game value rank of its preseason
+    `belief` (sim_qb.preseason_ranks), so neither a discount nor the value's order drops a top-12 QB."""
+    ranks = sim_qb.market_ranks(base)
+    if whole:
+        per_game = sim_qb.preseason_ranks(belief)
+        ranks = {pid: min(ranks.get(pid, sim_qb.UNRANKED), per_game.get(pid, sim_qb.UNRANKED)) for pid in {*ranks, *per_game}}
     return sim_qb.established_qbs(ranks, inputs.past)
 
 
