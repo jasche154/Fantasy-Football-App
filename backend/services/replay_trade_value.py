@@ -12,12 +12,16 @@ score = in + premium + spot + 0.5 x lineup - out x multiple x 1.03 (a shark also
   deal and v2 the other side's best. Signed: + when the CPU gets B, - when it sends him.
 - spot: SPOT_VALUE per roster spot the deal frees.
 - lineup: LINEUP_PER_WEEK x its lineup gain a week, clamped to +- LINEUP_CAP x out.
-The multiple is 1.00 (normal) or 1.08 (hard) against the user and 0.95 between CPUs; a CPU accepts at
-score >= 0 when `market_ok` (the anti-stupid guard on neutral chart values, with the same depth discount,
-whatever the persona) holds too.
+The multiple is 1.00 (normal) or 1.08 (hard) against the user and 0.95 between CPUs; for a CPU's own offer to
+the user it is 1 / ((1 + its persona's top edge) x 1.03), with no shark margin (replay_trades.offer_multiple):
+it pays up to that edge for a player it wants. A CPU accepts at score >= 0 when `market_ok` (the anti-stupid
+guard on neutral chart values, with the same depth discount, whatever the persona) holds too.
+Just picked up (`fresh`, from `replay_state.pickups`): a player his team added this week and worth
+under PICKUP_CHART_MAX counts PICKUP_SHARE of his value everywhere a trade is priced (both sides, the guard, the
+premium and the user's verdict), so a free-agent pickup can't be flipped for value the week he arrives.
 Pure: takes a Knowledge and the players, no state.
 """
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
 from services import replay_personas
@@ -35,6 +39,8 @@ OUT_SELL_SHARE = 0.5           # an out player sent to the user counts >= this x
 MARKET_GUARD = 0.80            # neutral market in >= this x out, whatever the persona
 SHARK_MARGIN = 0.05
 DEPTH_SHARE = 0.35             # a piece beyond the first extra one in a many-for-few deal counts at this share
+PICKUP_CHART_MAX = 100.0       # a player added this week and worth less than this (about the top 100)...
+PICKUP_SHARE = 0.5             # ...counts this share of his value in trades until the next week
 
 
 @dataclass(frozen=True)
@@ -47,14 +53,26 @@ class Tally:
     score: float               # accept at >= 0
 
 
-def _best(know: Knowledge, player_ids: Sequence[int]) -> float:
-    return max((know.by_id[pid].chart for pid in player_ids), default=0.0)
+def fresh(know: Knowledge, picked: Iterable[int]) -> frozenset[int]:
+    """Of the players picked up this week (`replay_state.pickups`), those who count PICKUP_SHARE."""
+    return frozenset(pid for pid in picked if pid in know.by_id and know.by_id[pid].chart < PICKUP_CHART_MAX)
 
 
-def premium(know: Knowledge, persona: str, sends: Sequence[int], kept: Sequence[int]) -> float:
+def chart(know: Knowledge, player_id: int, just_added: Collection[int] = ()) -> float:
+    """His chart value in a trade: PICKUP_SHARE of it when he is in `just_added` (from `fresh`)."""
+    value = know.by_id[player_id].chart
+    return value * PICKUP_SHARE if player_id in just_added else value
+
+
+def _best(know: Knowledge, player_ids: Sequence[int], just_added: Collection[int]) -> float:
+    return max((chart(know, pid, just_added) for pid in player_ids), default=0.0)
+
+
+def premium(know: Knowledge, persona: str, sends: Sequence[int], kept: Sequence[int],
+            just_added: Collection[int] = ()) -> float:
     """rate x (B - v2), + when the best player in the deal is among `kept`, - when among `sends`."""
     rate = GAMBLER_PREMIUM if persona == "gambler" else STAR_PREMIUM
-    return rate * (_best(know, kept) - _best(know, sends))
+    return rate * (_best(know, kept, just_added) - _best(know, sends, just_added))
 
 
 def depth_counted(worth: Sequence[float], sent: Sequence[float]) -> float:
@@ -68,13 +86,16 @@ def depth_counted(worth: Sequence[float], sent: Sequence[float]) -> float:
 
 def tally(know: Knowledge, persona: str, sends: Sequence[int], kept: Sequence[int], drops: Sequence[int],
           gain_per_week: float, multiple: float, to_user: bool, hype: float = 1.0,
-          markdown: Mapping[int, float] | None = None) -> Tally:
+          markdown: Mapping[int, float] | None = None, just_added: Collection[int] = (),
+          offered: bool = False) -> Tally:
     """The CPU sends `sends`, keeps `kept` of what it receives and cuts `drops` (its own players).
-    `markdown`: {player id: discount} it is shopping to the user (only applied when `to_user`)."""
+    `markdown`: {player id: discount} it is shopping to the user (only applied when `to_user`); `just_added`:
+    players who count PICKUP_SHARE (`fresh`); `offered`: its own offer to the user (no shark margin)."""
     cut = (markdown or {}) if to_user else {}
 
     def private(pid: int) -> float:
-        return replay_personas.private_value(know.by_id[pid], persona, hype)
+        value = replay_personas.private_value(know.by_id[pid], persona, hype)
+        return value * PICKUP_SHARE if pid in just_added else value
 
     def sell(pid: int, off: float = 0.0) -> float:
         value = know.by_id[pid]
@@ -84,20 +105,22 @@ def tally(know: Knowledge, persona: str, sends: Sequence[int], kept: Sequence[in
     sent = sum(sell(pid, cut.get(pid, 0.0)) for pid in sends)
     received = (depth_counted([private(pid) for pid in kept], [private(pid) for pid in sends])
                 - sum(private(pid) for pid in drops))
-    bonus = premium(know, persona, sends, kept)
+    bonus = premium(know, persona, sends, kept, just_added)
     spot = SPOT_VALUE * max(0, len(sends) - len(kept))
     cap = LINEUP_CAP * sum(sell(pid) for pid in sends)     # undiscounted: a shop moves his price by its discount only
     lineup = min(max(LINEUP_PER_WEEK * gain_per_week, -cap), cap)
     out = sent + max(0.0, -bonus)
-    margin = SHARK_MARGIN * out if persona == "shark" else 0.0
+    margin = SHARK_MARGIN * out if persona == "shark" and not offered else 0.0
     weight = LINEUP_WEIGHT if lineup > 0 else LINEUP_LOSS_WEIGHT
     score = received + max(0.0, bonus) + spot + weight * lineup - out * multiple * OUT_MARGIN - margin
     return Tally(round(sent, 2), round(received, 2), round(bonus, 2), spot, round(lineup, 2), round(score, 2))
 
 
-def market_ok(know: Knowledge, sends: Sequence[int], kept: Sequence[int], drops: Sequence[int]) -> bool:
+def market_ok(know: Knowledge, sends: Sequence[int], kept: Sequence[int], drops: Sequence[int],
+              just_added: Collection[int] = ()) -> bool:
     """The anti-stupid guard: on neutral chart values it gets back at least MARKET_GUARD of what it sends."""
-    chart = know.by_id
-    got = (depth_counted([chart[pid].chart for pid in kept], [chart[pid].chart for pid in sends])
-           - sum(chart[pid].chart for pid in drops))
-    return got >= MARKET_GUARD * sum(chart[pid].chart for pid in sends)
+    def worth(ids: Sequence[int]) -> list[float]:
+        return [chart(know, pid, just_added) for pid in ids]
+
+    got = depth_counted(worth(kept), worth(sends)) - sum(worth(drops))
+    return got >= MARKET_GUARD * sum(worth(sends))

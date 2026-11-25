@@ -694,13 +694,11 @@ def test_an_offer_that_no_longer_stands_is_saved_as_expired(client):
         post(client, game + "/advance", {"step": "play", "week": week})
         post(client, game + "/advance", {"step": "wednesday", "week": week + 1})
     offer = get(client, game + "/trades")["offers"][0]
-    post(client, game + "/drop", {"player_id": offer["get"][0]["id"]})     # the player the CPU asked for
+    post(client, game + "/drop", {"player_id": offer["get"][0]["id"]})     # the player the CPU asked for: the
+                                                                           # drop expires the offer at once
+    trades = get(client, game + "/trades")
 
-    answer = post(client, f"{game}/trades/offers/{offer['id']}/respond", {"accept": True})
-
-    assert (answer["accepted"], answer["expired"]) == (False, True) and answer["game"]["pending"]["offers"] == 0
-    assert answer["message"].startswith("That offer no longer stands. Not on Your Team's roster")
-    assert get(client, game + "/trades")["results"][0]["status"] == "expired"
+    assert trades["offers"] == [] and trades["results"][0]["status"] == "expired"
     assert refused(client, f"{game}/trades/offers/{offer['id']}/respond", {"accept": True}) == (
         422, "That offer is already expired.")
 

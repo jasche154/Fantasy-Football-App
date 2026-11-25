@@ -8,6 +8,9 @@
 - steady: trusts draft day (0.35 x star x (pre_chart - chart)): won't sell a slumping star cheap.
 - gambler: chases hot streaks (0.5 x a positive form_chart) and pays more for the best player in a deal.
 - shark: the chart, but wants a SHARK_MARGIN edge; hunts buy-low stars and offers the user the most.
+Offers: when a CPU offers the user a deal for a player it wants, it gives more value than it gets, by a share
+in its persona's `offer_edge` range (the user's call: careful managers nearer 5%, desperate or aggressive
+ones nearer 10%).
 Emotion: panicky and gambler managers are emotional (`hype_for`, stored once as Team.hype): they price an
 opportunity shock (replay_shocks, ReplayValue.shock_chart) at HYPE x its calibrated move, at most HYPE_CAP
 chart points beyond it, both when buying and when holding. Calm managers (and old saves) use 1.0.
@@ -28,6 +31,10 @@ HYPE = 1.25                    # an emotional manager's multiple on a shock's ch
 HYPE_CAP = 8.0                 # at most this many chart points beyond the calibrated move
 EMOTIONAL = ("panicky", "gambler")
 OFFER_RATE = {"balanced": 0.08, "panicky": 0.12, "shark": 0.30, "steady": 0.05, "gambler": 0.12}
+OFFER_EDGE = {                 # (least, most) extra value a CPU gives in its own offer to the user
+    "steady": (0.05, 0.06), "shark": (0.05, 0.07), "balanced": (0.06, 0.08),
+    "gambler": (0.08, 0.10), "panicky": (0.08, 0.10),
+}
 COUNTER_RATE = {"balanced": 0.5, "panicky": 0.4, "shark": 0.8, "steady": 0.3, "gambler": 0.6}
 TENDENCY = {
     "balanced": "Trades on fair value",
@@ -74,6 +81,10 @@ def private_value(value: ReplayValue, persona: str, hype: float = 1.0) -> float:
 
 def offer_rate(persona: str) -> float:
     return OFFER_RATE.get(persona, OFFER_RATE["balanced"])
+
+
+def offer_edge(persona: str) -> tuple[float, float]:
+    return OFFER_EDGE.get(persona, OFFER_EDGE["balanced"])
 
 
 def counter_rate(persona: str) -> float:
