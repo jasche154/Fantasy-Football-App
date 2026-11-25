@@ -187,13 +187,14 @@ def espn_with(bad) -> dict:
     "junk", None, {"player": "junk"},
     {"player": {"id": "abc", "fullName": "Bad D", "defaultPositionId": 16, "stats": []}},
     {"player": {"id": -16001, "fullName": "Bad D", "defaultPositionId": 16,
-                "stats": [{"statSourceId": 1, "statSplitTypeId": 1, "scoringPeriodId": 1, "appliedTotal": "x"}]}},
+                "stats": [{"id": f"11{SEASON}1", "statSourceId": 1, "statSplitTypeId": 1, "scoringPeriodId": 1,
+                           "appliedTotal": "x"}]}},
     {"player": {"id": 5, "fullName": "Bad K", "defaultPositionId": 5, "stats": ["junk"]}},
 ])
 def test_espn_skips_a_malformed_entry_and_keeps_the_good_ones(bad):
-    good = {p.name for p in espn_history.parse_week(espn_payload(1), 1)}
+    good = {p.name for p in espn_history.parse_week(espn_payload(1), SEASON, 1)}
 
-    assert {p.name for p in espn_history.parse_week(espn_with(bad), 1)} == good
+    assert {p.name for p in espn_history.parse_week(espn_with(bad), SEASON, 1)} == good
 
 
 @pytest.mark.parametrize("bad", [

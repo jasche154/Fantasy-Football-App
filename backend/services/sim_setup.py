@@ -3,7 +3,8 @@ that reads the database; the engine (services/sim_season, sim_world, sim_market)
 
 - live: the season in progress (replay_live.current_live), real through week N, weeks N+1.. simulated from the
   league's own seed. The base is loaded real through week N only, so week N+1's injury report and expert ranks
-  are simulated from what is known through N (the real ones, published during the week, are never read). A
+  are simulated from what is known through N (the real ones, published during the week, are never read), except
+  that each player's Sleeper status at creation seeds week N+1's hard tags (`with_status_now`). A
   league may start "now" (Settings.start_week = N + 1): it drafts on today's market ADP (`_market_adp`: the
   belief before week N + 1 of its own simulated season, the one that week's simulated expert snapshot came
   from), in the league's format.
@@ -18,6 +19,8 @@ The season is built once, when its league is created, and frozen into the save (
 """
 import logging
 from dataclasses import replace
+from types import MappingProxyType
+from typing import NamedTuple
 
 from sqlalchemy.orm import Session
 
@@ -71,14 +74,15 @@ def build(session: Session, settings: Settings, seed: int) -> tuple[bytes, Seaso
     if settings.sim_from is None:
         raise ValueError(f"{settings.season} is not a simulated season.")
     if settings.sim_from == 1:
-        base, world = _future_base(session, settings.season, settings)
+        base, world, carried = _future_base(session, settings.season, settings, seed)
         rookies = [pid for pid in world.players if pid >= sim_next_year.ROOKIE_ID_BASE]     # this draft class
-        data = sim_season.simulate(base, seed, 1, prior=world, rookies=rookies)
+        data = sim_season.simulate(base, seed, 1, prior=world, carried=carried, rookies=rookies)
     else:
         base = replay_pool.load_season_data(session, settings.season, settings.scoring, settings.scoring_rules,
                                             settings.adp_format, through=settings.sim_from - 1)
         rookies = [pid for pid, first in first_seasons(session).items() if first == settings.season]
-        data = sim_season.simulate(base, seed, settings.sim_from, rookies=rookies)
+        data = sim_season.simulate(with_status_now(session, base, settings.sim_from), seed, settings.sim_from,
+                                   rookies=rookies)
         data = _market_adp(data, settings) if settings.start_week > 1 else data
     return replay_blob.freeze(data)
 
@@ -93,6 +97,45 @@ def _market_adp(data: SeasonData, settings: Settings) -> SeasonData:
     week = settings.start_week
     return sim_next_year.with_market_adp(replace(data, adp_format=settings.adp_format),
                                          sim_world.estimate(data, week), data.last_week - week + 1)
+
+
+def with_status_now(session: Session, base: SeasonData, week: int) -> SeasonData:
+    """`base` with week `week`'s tags (the first simulated week of a live league) from each player's current
+    Sleeper status, read once when the league is created: public news of today, so no hindsight, and never for a
+    real week. Without it a player hurt in the last real game (Drake Maye, 2026 week 10) starts the simulation
+    healthy. Out / Doubtful / IR / PUP / suspended become a hard tag that sim_season carries as an open absence
+    (its length drawn by the injury model); Questionable and healthy are left to the model. A player already
+    hard-tagged in the last real week keeps that streak, and a status older than availability's freshness window
+    is not news of this week."""
+    from datetime import datetime, timedelta, timezone
+    from types import MappingProxyType
+
+    from sqlalchemy import select
+
+    from database.models import PlayerStatus
+    from integrations.weekly_sources import utc
+    from services.availability import SLEEPER_FRESH_HOURS
+    from services.replay_injuries import MAX_TEXT
+    from services.replay_pool import Injury
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=SLEEPER_FRESH_HOURS)
+    added = {}
+    for pid, status, body, fetched in session.execute(select(
+            PlayerStatus.player_id, PlayerStatus.injury_status, PlayerStatus.injury_body_part,
+            PlayerStatus.fetched_at).where(PlayerStatus.injury_status.is_not(None))):
+        tag = SLEEPER_TAGS.get(status.upper())
+        last = base.injuries.get((pid, week - 1))
+        if (tag is None or pid not in base.players or (pid, week) in base.injuries or (last and last.hard)
+                or utc(fetched) < cutoff):
+            continue
+        added[(pid, week)] = Injury(tag, None, (body or "").strip()[:MAX_TEXT] or None)
+    return replace(base, injuries=MappingProxyType({**base.injuries, **added})) if added else base
+
+
+# Sleeper injury_status (upper-cased) -> the replay tag that week's absence starts from (services/availability's
+# SLEEPER_ZERO plus Doubtful, which plays about 3% of the time)
+SLEEPER_TAGS = {"OUT": "O", "DOUBTFUL": "O", "DNR": "O", "NA": "O", "COV": "O", "IR": "IR", "IR-R": "IR",
+                "NFI": "IR", "PUP": "PUP", "SUS": "SUS"}
 
 
 # ---------------- the future season ----------------
@@ -180,11 +223,29 @@ def _season_end(session: Session, season: int, settings: Settings):
     return sim_world.estimate(data, data.last_week + 1)
 
 
-def _future_base(session: Session, season: int, settings: Settings) -> tuple[SeasonData, object]:
-    """(the season to simulate: every player of the new belief, the schedule, preseason ADP and week-1
-    projections, no games; the prior World) for the season after the newest one, from what is known today
-    (sim_next_year). Raises NoDataError when it can't be built (future_problem says why)."""
-    from services import sim_market, sim_next_year, sim_offseason, sim_world
+class Future(NamedTuple):
+    base: SeasonData             # every player of the new belief, the schedule, preseason ADP, week-1 projections
+    belief: object               # the prior World (sim_world.World)
+    carried: dict                # {player: sim_injuries.Spell}: the truth's absences running into week 1
+
+
+def injury_detail(session: Session) -> dict[int, tuple[str | None, str | None]]:
+    """{player: (body detail, notes)} of the current injury statuses (e.g. ("Knee - ACL", "Surgery"))."""
+    from sqlalchemy import select
+
+    from database.models import PlayerStatus
+
+    rows = session.execute(select(PlayerStatus.player_id, PlayerStatus.injury_body_part, PlayerStatus.injury_notes)
+                           .where(PlayerStatus.injury_body_part.is_not(None)))
+    return {pid: (body, notes) for pid, body, notes in rows}
+
+
+def _future_base(session: Session, season: int, settings: Settings, seed: int = 0) -> Future:
+    """The season after the newest one, from what is known today plus the league's `seed` (its draft:
+    sim_rookie_draft; its carried injuries: sim_carryover), through sim_next_year. Raises NoDataError when it
+    can't be built (future_problem says why)."""
+    from services import (sim_carryover, sim_market, sim_next_year, sim_offseason, sim_rookie_draft,
+                          sim_world)
 
     problem = future_problem(session, season)
     if problem:
@@ -201,15 +262,21 @@ def _future_base(session: Session, season: int, settings: Settings) -> tuple[Sea
     # shortcut: experience counts seasons since a player's first database season (2018 on), so a veteran from
     # before 2018 looks younger than he is until the cap bucket; store birth dates or draft years to fix it.
     experience = {pid: newest - first + 1 for pid, first in first_seasons(session).items() if first <= newest}
-    drafted = sim_next_year.rookie_ids(season, rookies)
-    belief, pool = sim_next_year.next_year(world, data.players, experience, drafted,
-                                           {matched[m.name]: m.team for m in moves if m.name in matched},
+    moved = {matched[m.name]: m.team for m in moves if m.name in matched}
+    by_name = {r.name: r for r in sim_rookie_draft.run(rookies, data.schedule.games, world, moved, seed)}
+    drafted = {pid: by_name[r.name] for pid, r in sim_next_year.rookie_ids(season, rookies).items()}  # ids: file picks
+    belief, pool = sim_next_year.next_year(world, data.players, experience, drafted, moved,
                                            sim_next_year.starts_by_team(data))
-    prior = _defense_prior(data)
-    base = sim_next_year.season_base(season, belief, pool, _schedule(session, season, data), settings.scoring,
-                                     settings.scoring_rules, prior, settings.adp_format, sim_market.track_record(data),
-                                     sim_next_year.rookie_premium(drafted))
-    return base, belief
+    schedule = _schedule(session, season, data)
+    start = sim_carryover.next_week_one(data, schedule)
+    carries = {pid: c for pid, c in sim_carryover.carried(data, start, injury_detail(session)).items()
+               if pid in belief.players} if start else {}
+    belief = sim_carryover.with_expected(belief, carries)
+    base = sim_next_year.season_base(season, belief, pool, schedule, settings.scoring,
+                                     settings.scoring_rules, _defense_prior(data), settings.adp_format,
+                                     sim_market.track_record(data), sim_next_year.rookie_premium(drafted))
+    base = replace(base, notes=MappingProxyType({(pid, 0): sim_carryover.note(c) for pid, c in carries.items()}))
+    return Future(base, belief, sim_carryover.draw(carries, seed))
 
 
 # ---------------- the seasons list ----------------

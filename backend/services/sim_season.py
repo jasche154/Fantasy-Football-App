@@ -6,13 +6,18 @@ from_week's own rows when base carries them: its injury tags and expert ranks ar
 the snapshot) and its projections, which say who exists for from_week's belief (a new season's depth players,
 sim_next_year), are replaced by the simulated ones (a player only they admit to SeasonData.as_of keeps
 MIN_PROJECTION, so a backup QB stays in view before his first game). A live league's base (sim_setup.build) is
-real only through from_week - 1, so it carries none: from_week's tags and expert ranks are simulated like any
-later week's, from what is known through from_week - 1 (a half-published mid-week injury report is never read).
+real only through from_week - 1, so it carries no from_week rows but the hard tags sim_setup.with_status_now
+takes from today's Sleeper statuses: from_week's other tags and expert ranks are simulated like any later
+week's, from what is known through from_week - 1 (a half-published mid-week injury report is never read).
 
 1. belief = sim_world.estimate(base, from_week, prior); truth = sim_talent.truth(belief, seed, ...).
 2. Absences already running: a player hard-tagged at the snapshot with no game since (results before from_week
-   only) misses from_week's game, none over a bye, and sim_injuries.open_spell more games. At from_week 1 with
-   no real games, sim_injuries.preseason.
+   only) misses from_week's game, none over a bye, and sim_injuries.open_spell more games. A suspension (SUS)
+   or the commissioner's exempt list (EXE) carries too, keeping its tag: neither is an injury, so its length
+   comes from the injury tables it resembles (CARRIED: a suspension's remaining length is unknown here and
+   usually short, the O table; the exempt list is open-ended, the IR table's long tail). At from_week 1 with
+   no real games, sim_injuries.preseason, or `carried`'s absence (last season's long injury, sim_carryover).
+   A whole season's split backfields may be won during it (sim_depth.resolutions: more dated role changes).
 3. Each week W, in order:
    - tags known before W: sitting players get sim_injuries.tag (byes included), a player's first game back
      may carry return_tag's Q, and healthy regulars (PHANTOM_MIN_SNAP in the latest public belief, never the
@@ -32,7 +37,7 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass, replace
 from types import MappingProxyType
 
-from services import replay_pool, replay_state, sim_injuries, sim_market, sim_talent
+from services import replay_pool, replay_state, sim_depth, sim_injuries, sim_market, sim_talent
 from services.replay_pool import Injury, SeasonData, hard_tag_returns
 from services.sim_game import on_field, play
 from services.sim_world import World, estimate, scoring_of
@@ -40,6 +45,7 @@ from services.sim_world import World, estimate, scoring_of
 FULL_EXPOSURE_SNAP = 20.0        # a player who really plays (a recorded game) carries the full injury hazard
 PHANTOM_MIN_SNAP = 50.0          # healthy regulars this involved may be listed Q/D (the fit counted relevant ones)
 INJURY_POSITIONS = ("QB", "RB", "WR", "TE", "K")
+CARRIED = {"SUS": "O", "EXE": "IR"}   # non-injury hard tags an open absence keeps: the open_spell table each draws from
 UNKNOWN_BODY = "Undisclosed"
 
 
@@ -48,6 +54,7 @@ class _Absence:                  # mutable bookkeeping inside one simulate() cal
     spell: sim_injuries.Spell
     left: int                    # team games still to miss
     missed: int = 0              # games missed so far
+    tag: str | None = None       # a carried SUS / EXE keeps its own tag (None: sim_injuries.tag)
 
 
 @dataclass
@@ -97,7 +104,7 @@ def _streak(base: SeasonData, tagged: Mapping[int, Injury], pid: int, team: str,
     if not known:
         return None
     injury = tagged[max(known)]
-    if injury.tag not in replay_pool.IR_TAGS or any((pid, w) in base.actual for w in range(max(known), week)):
+    if injury.tag not in (*replay_pool.IR_TAGS, *CARRIED) or any((pid, w) in base.actual for w in range(max(known), week)):
         return None
     missed, w = 0, week - 1
     while w >= 1 and (pid, w) not in base.actual and not (w in tagged and not tagged[w].hard):
@@ -106,7 +113,8 @@ def _streak(base: SeasonData, tagged: Mapping[int, Injury], pid: int, team: str,
     return injury, missed
 
 
-def _absences(base: SeasonData, belief: World, seed: int, from_week: int) -> dict[int, _Absence]:
+def _absences(base: SeasonData, belief: World, seed: int, from_week: int,
+              carried: Mapping[int, sim_injuries.Spell] | None = None) -> dict[int, _Absence]:
     dice = replay_state.rng(seed, "sim", "absences")
     real_games = any(week < from_week for _, week in base.actual)
     by_player: dict[int, dict[int, Injury]] = defaultdict(dict)
@@ -119,6 +127,7 @@ def _absences(base: SeasonData, belief: World, seed: int, from_week: int) -> dic
             continue
         if from_week == 1 and not real_games:
             spell = sim_injuries.preseason(dice, player.position)
+            spell = (carried or {}).get(pid, spell)          # last season's injury, still healing (sim_carryover)
             if spell is not None:
                 out[pid] = _Absence(spell, spell.games_out)
             continue
@@ -127,10 +136,13 @@ def _absences(base: SeasonData, belief: World, seed: int, from_week: int) -> dic
             injury, before = running
             # open_spell's "this game": from_week's, or over a bye his last missed one (the next if none yet)
             now = 1 if base.schedule.opponent(player.team, from_week) or not before else 0
-            left = sim_injuries.open_spell(dice, player.position, injury.tag, before + now)
+            left = sim_injuries.open_spell(dice, player.position, CARRIED.get(injury.tag, injury.tag), before + now)
+            kept = injury.tag if injury.tag in CARRIED else None
             spell = replace(sim_injuries.draw(dice, player.position), games_out=before + now + left, exit_share=1.0,
                             body=injury.injury or UNKNOWN_BODY)
-            out[pid] = _Absence(spell, left + now, before)
+            if kept:                                     # no injury: no Q on his return
+                spell = replace(spell, questionable_back=False)
+            out[pid] = _Absence(spell, left + now, before, kept)
     return out
 
 
@@ -138,7 +150,8 @@ def _tags(base: SeasonData, public: World, absences: Mapping[int, _Absence], ret
           week: int, from_week: int, dice) -> dict[int, Injury]:
     """The tags known before `week` (the snapshot's own at from_week win). Phantom candidates and their draw order
     come from `public`, a belief from before the week, never the truth."""
-    tags = {pid: sim_injuries.tag(a.spell, a.missed) for pid, a in absences.items() if a.left > 0}
+    tags = {pid: Injury(a.tag) if a.tag else sim_injuries.tag(a.spell, a.missed)
+            for pid, a in absences.items() if a.left > 0}
     for pid, spell in returning.items():
         back = sim_injuries.return_tag(spell)
         if back is not None and pid in public.players and base.schedule.opponent(public.players[pid].team, week):
@@ -192,19 +205,25 @@ def _market(tables: _Tables, base: SeasonData, belief: World, truth: World, seed
             tables.expert_age[rank_week] = sim_market.EXPERT_AGE["ros" if rank_week else "pre"]
     tables.notes.update(sim_market.buzz(truth.changes, belief, week, replay_state.rng(seed, "sim", "buzz", week),
                                         false_rate, out, sim_talent.rumors(belief, ranks) if false_rate else None))
+    tags = {pid: injury for (pid, w), injury in tables.injuries.items() if w == week}
+    tables.notes.update(sim_depth.fill_ins(belief, out, tags, base.players, week))
 
 
 def simulate(base: SeasonData, seed: int, from_week: int, prior: World | None = None,
-             rookies: Collection[int] = ()) -> SeasonData:
-    """A new SeasonData with weeks from_week..base.last_week simulated (see the module docstring); `rookies`:
-    the players in their first season (sim_talent.growth)."""
+             carried: Mapping[int, sim_injuries.Spell] | None = None, rookies: Collection[int] = ()) -> SeasonData:
+    """A new SeasonData with weeks from_week..base.last_week simulated (see the module docstring). `carried`:
+    the truth's absences running into week 1 of a whole season (sim_carryover.draw); `rookies`: the players in
+    their first season (sim_talent.growth)."""
     if not 1 <= from_week <= base.last_week:
         raise ValueError(f"Week {from_week} is outside the season (1-{base.last_week}).")
     scoring, last = scoring_of(base), base.last_week
     tables = _real(base, from_week)
     belief = estimate(base, from_week, prior)
     truth = sim_talent.truth(belief, seed, from_week, last, rookies)
-    absences = _absences(base, belief, seed, from_week)
+    if from_week == 1:
+        split = sim_depth.resolutions(belief, truth, seed, sim_talent.change_weeks(from_week, last))
+        truth = replace(truth, changes=tuple(sorted((*truth.changes, *split), key=lambda c: (c.week, c.player_id))))
+    absences = _absences(base, belief, seed, from_week, carried)
     returning: dict[int, sim_injuries.Spell] = {}
     buzz_weeks = sim_talent.change_weeks(from_week, last)          # false buzz only where true buzz can land
     ranks = sim_talent.public_ranks(belief)                        # the public's ranks the rumours lean on

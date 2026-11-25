@@ -24,6 +24,13 @@ def test_the_2027_file_loads_with_the_users_pick():
     assert raw["as_of"] == "2026-11-23" and raw["sources"]
 
 
+def test_a_lock_is_read_and_defaults_to_false():
+    raw = _raw()
+    raw["rookies"][0]["lock"] = True
+    rookies, _ = so.parse(raw)
+    assert rookies[0].lock and not any(r.lock for r in rookies[1:])
+
+
 def test_missing_season_has_nothing():
     assert so.load(1999) == ((), ())
 
@@ -34,6 +41,7 @@ def test_missing_season_has_nothing():
     (lambda raw: raw["rookies"][2].update(pick=300), "pick 300"),
     (lambda raw: raw["rookies"][2].update(hype=0.5), "hype 0.5"),
     (lambda raw: raw["rookies"][2].update(hype="big"), "hype 'big'"),
+    (lambda raw: raw["rookies"][2].update(lock="yes"), "lock 'yes'"),
     (lambda raw: raw["rookies"][3].update(pick=raw["rookies"][4]["pick"]), "used twice"),
     (lambda raw: raw["moves"].append({**raw["moves"][0]}), "listed twice"),
     (lambda raw: raw["moves"].append({"name": "Jeremiah Smith Jr.", "position": "WR", "team": None, "note": "x"}),

@@ -194,9 +194,10 @@ def test_a_spot_opened_by_an_ir_move_is_filled_within_the_limits():
 
 # ---------------- trades ----------------
 
-def test_trades_ignore_the_positional_limits():
-    """The limits are for waivers. A CPU with two quarterbacks may take a third, and one with seven receivers
-    an eighth, when the value is there: no deal is turned down for its positions."""
+def test_a_trade_past_a_limit_cuts_one_there_and_names_no_limit_reason():
+    """A CPU with two quarterbacks may take a third, and one with seven receivers an eighth, but the deal
+    itself cuts its cheapest one there (counted in its tally like any cut of its own): no CPU carries more
+    after a trade than its limit or than it already did."""
     state, know = league()
     theirs = roster(state, know, TWO_QBS)
     others = [v.player_id for v in theirs if v.position in ("RB", "WR")]
@@ -206,3 +207,5 @@ def test_trades_ignore_the_positional_limits():
 
     assert held(state, know, FULL_AT_WR)["WR"] == rv.position_cap("WR", SETTINGS) == 7
     assert not any(OVER in reason for verdict in (*added, one_more) for reason in verdict.reasons)
+    assert all([know.by_id[pid].position for pid in verdict.their_drops] == ["QB"] for verdict in added)
+    assert [know.by_id[pid].position for pid in one_more.their_drops] == ["WR"]

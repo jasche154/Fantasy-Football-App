@@ -5,8 +5,9 @@ a player like Puka Nacua in week 2 of 2023 sits below replacement and adds nothi
 waiver run a CPU also looks at his real points from weeks already played (`ReplayValue.recent_points`, built
 from `data.as_of(week)`, never this week or later):
 
-- hot (`is_hot`): a skill player, not out, who played within the last HOT_RECENT_WEEKS weeks and whose mean
-  over his last HOT_GAMES games beats his ros_ppg by HOT_MIN_GAP or more.
+- hot (`is_hot`): a skill player, not out, with at least HOT_GAMES real games, who played within the last
+  HOT_RECENT_WEEKS weeks and whose mean over his last HOT_GAMES games beats his ros_ppg by HOT_MIN_GAP or
+  more. One big game is not a streak (Mike Gesicki after week 1 of 2026 cost a CPU its round-7 tight end).
 - hot rate: HOT_WEIGHT x that mean + the rest x ros_ppg. `HotProjector` counts a hot player at that rate for
   the weeks after this one (this week's projection is unchanged), for every CPU, its own players included.
 - Up to MAX_HOT hot free agents join the claim short list (biggest gap first), and one is claimed for
@@ -53,7 +54,7 @@ def hot_rate(value: ReplayValue) -> float:
 
 
 def is_hot(know: Knowledge, value: ReplayValue) -> bool:
-    return (value.position in SKILL and not value.out and bool(value.recent_points)
+    return (value.position in SKILL and not value.out and len(value.recent_points) >= HOT_GAMES
             and value.last_game_week >= know.week - HOT_RECENT_WEEKS and hot_gap(value) >= HOT_MIN_GAP)
 
 

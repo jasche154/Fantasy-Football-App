@@ -50,9 +50,9 @@ SOURCES = ("espn", "sleeper")               # in order of preference
 
 PlayerWeek = tuple[int, int]                # (player_id, week)
 
-TAGS = ("Q", "D", "O", "IR", "PUP", "SUS")
-HARD_TAGS = ("O", "IR", "PUP", "SUS")       # cannot play this week: forces `out`
-PRESEASON_TAGS = ("IR", "PUP", "SUS")       # a week-1 tag of these is a preseason move: known at the draft
+TAGS = ("Q", "D", "O", "IR", "PUP", "SUS", "EXE")      # EXE: the commissioner's exempt list
+HARD_TAGS = ("O", "IR", "PUP", "SUS", "EXE")    # cannot play this week: forces `out`
+PRESEASON_TAGS = ("IR", "PUP", "SUS", "EXE")    # a week-1 tag of these is a preseason move: known at the draft
 IR_TAGS = ("O", "IR", "PUP")                # may go on IR (a suspension is not an injury)
 PRACTICE = ("DNP", "LP", "FP")
 

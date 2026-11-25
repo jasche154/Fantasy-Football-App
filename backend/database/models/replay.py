@@ -73,7 +73,7 @@ class ReplayProjection(Base):
 
 
 class ReplayInjury(Base):
-    """A player's injury tag for one past week: the official report (Q/D/O) or his roster status (IR/PUP/SUS)."""
+    """A player's injury tag for one past week: the official report (Q/D/O) or his roster status (IR/PUP/SUS/EXE)."""
 
     __tablename__ = "replay_injuries"
     __table_args__ = (Index("ux_replay_injuries_key", "season", "week", "player_id", unique=True),)
@@ -82,7 +82,7 @@ class ReplayInjury(Base):
     season: Mapped[int]
     week: Mapped[int]
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id"))
-    tag: Mapped[str]                           # Q | D | O | IR | PUP | SUS
+    tag: Mapped[str]                           # Q | D | O | IR | PUP | SUS | EXE (commissioner exempt list)
     practice: Mapped[str | None]               # DNP | LP | FP
     injury: Mapped[str | None]
 

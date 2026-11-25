@@ -20,8 +20,8 @@ export type ReplayPhase = 'draft' | 'waivers' | 'open' | 'complete';
 export type ReplayWaiverMode = 'wednesday' | 'faab' | 'none';
 export type ReplayDifficulty = 'normal' | 'hard';
 export type ReplayEventKind = 'draft' | 'add' | 'drop' | 'claim' | 'trade' | 'result' | 'playoffs' | 'champion' | 'ir';
-/** O, IR, PUP and SUS mean he does not play; O, IR and PUP may go on IR. */
-export type ReplayInjuryTag = 'Q' | 'D' | 'O' | 'IR' | 'PUP' | 'SUS';
+/** O, IR, PUP, SUS and EXE (the commissioner's exempt list) mean he does not play; O, IR and PUP may go on IR. */
+export type ReplayInjuryTag = 'Q' | 'D' | 'O' | 'IR' | 'PUP' | 'SUS' | 'EXE';
 export type ReplayPractice = 'DNP' | 'LP' | 'FP';
 
 export interface ReplayInjury {
@@ -208,6 +208,8 @@ export interface ReplayPagination {
 export interface ReplayPricedPlayer {
   player: ReplayPlayerRef;
   value: number;
+  /** Why `value` is below his chart value (a player picked up this week); null when it isn't. */
+  note?: string | null;
 }
 
 export type ReplayFairLabel = 'fair' | 'slight_win' | 'big_win' | 'slight_loss' | 'big_loss';

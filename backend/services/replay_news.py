@@ -5,6 +5,9 @@ Built from `SeasonData.returns` (the one sanctioned leak: the real return week),
 Pure: no database, no Knowledge.
 
 - A suspension is exact.
+- The commissioner's exempt list (EXE) is indefinite: the text never names a week, and the week valuations read
+  (`back`) is a guess made without the real return (FAKE_RETURN_WEEKS after he went on the list, then always
+  the next week).
 - Otherwise the first report misses the real week by -2..+2 (ERRORS / ERROR_ODDS), and the miss shrinks to
   zero as the real return nears. A report never names a week he has already missed (<= the current week).
 - A return after the season's last week reads "out for the season".
@@ -43,6 +46,8 @@ class Report:
 
 
 def _text(tag: str, since: int, back: int | None) -> str:
+    if tag == "EXE":
+        return f"On the commissioner's exempt list since week {since}; out indefinitely."
     if back is None:
         return f"Out for the season ({tag} since week {since})."
     verb = "Suspended" if tag == "SUS" else f"Out ({tag})"
@@ -65,6 +70,8 @@ def report(seed: int, player_id: int, since: int, true_return: int, week: int, t
     long_tag = tag in SEASON_TAGS
     if tag == "SUS":
         back = true_return or None
+    elif tag == "EXE":
+        back = since + fake_weeks
     elif not true_return:
         hopeful = not long_tag or (fake_return and week < since + revised_after)
         back = since + fake_weeks if hopeful else None

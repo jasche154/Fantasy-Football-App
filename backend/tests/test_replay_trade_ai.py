@@ -13,6 +13,8 @@ from statistics import mean
 import pytest
 
 from services import replay_personas, replay_state as rs, replay_trade_ai as ai, replay_trades as rt
+from services import replay_values as rv
+from services.replay_pool import SKILL
 from tests import replay_fakes as fakes
 from tests.test_replay_trades import chart_knowledge
 
@@ -186,6 +188,18 @@ def test_trades_are_carried_out_and_leave_every_roster_legal(seasons):
         assert len(events) == len(trades(season))
 
 
+def test_no_cpu_trade_takes_a_team_past_a_position_limit(seasons):
+    """2026: Colston Loveland came as a third tight end and was cut the next week; deals now plan that cut."""
+    for season in seasons.values():
+        for week, offer in trades(season):
+            know = knowledge(week.week)
+            for team_id in (offer.from_team, offer.to_team):
+                before, after = (Counter(know.by_id[pid].position for pid in rs.held(rs.team(state, team_id)))
+                                 for state in (week.before, week.after))
+                for position in SKILL:
+                    assert after[position] <= max(rv.position_cap(position, SETTINGS), before[position])
+
+
 def test_a_traded_player_is_not_traded_again_within_two_weeks(seasons):
     for season in seasons.values():
         last: dict[int, int] = {}
@@ -204,11 +218,13 @@ def test_the_user_gets_at_most_one_offer_a_week_and_each_passes_the_cpus_own_tes
         for week, offer in offers(season):
             know = knowledge(week.week)
 
-            verdict = rt.evaluate(week.after, SETTINGS, know, USER, offer.from_team, offer.get, offer.give)
+            verdict = rt.evaluate(week.after, SETTINGS, know, USER, offer.from_team, offer.get, offer.give,
+                                  offered=True)
+            persona = rs.team(week.after, offer.from_team).persona
 
             assert offer.to_team == USER and offer.week == week.week
             assert verdict.accepted and verdict.your_drops == (), (week.week, offer, verdict.reasons)
-            assert ai.fair_for_user(SETTINGS, know, verdict.value_give, verdict.value_get)
+            assert ai.generous(persona, verdict.value_give, verdict.value_get), (persona, verdict)
             assert not verdict.fair_label.endswith("loss")
     assert sum(len(offers(season)) for season in seasons.values()) >= len(SEEDS)
 
@@ -242,7 +258,7 @@ def test_an_out_player_on_the_active_roster_is_in_the_search():
     tradable = [v.player_id for v in ai._tradable(state, know, owner)]
 
     assert know.by_id[star].out and star in tradable and len(tradable) == ai.TOP_SKILL
-    assert ai._packages([know.by_id[star]]) == [(know.by_id[star].chart, (star,))]
+    assert ai._packages(know, [know.by_id[star]], frozenset()) == [(know.by_id[star].chart, (star,))]
 
 
 def test_a_shark_looks_first_at_slumping_stars_and_sells_its_hot_players():
@@ -282,16 +298,18 @@ def test_cpu_trades_can_move_a_player_who_is_out(monkeypatch):
         map(rs.to_json, after))
 
 
-def test_on_hard_an_offer_still_gives_the_cpu_its_premium():
+def test_on_hard_an_offer_is_still_generous_and_stands_as_the_cpus_own_but_not_as_a_user_proposal():
     hard = fakes.fake_settings(difficulty="hard")
     made = [(week, offer) for seed in range(3) for week, offer in offers(play(seed, hard))]
 
     assert made
     for week, offer in made:
         know = knowledge(week.week, hard)
-        verdict = rt.evaluate(week.after, hard, know, USER, offer.from_team, offer.get, offer.give)
+        deal = (week.after, hard, know, USER, offer.from_team, offer.get, offer.give)
+        verdict = rt.evaluate(*deal, offered=True)
         assert verdict.accepted and verdict.score >= 0
-        assert ai.fair_for_user(hard, know, verdict.value_give, verdict.value_get)
+        assert ai.generous(rs.team(week.after, offer.from_team).persona, verdict.value_give, verdict.value_get)
+        assert not rt.evaluate(*deal).accepted          # the same deal proposed by the user pays the hard premium
 
 
 # ---------------- determinism, bounds, speed ----------------
