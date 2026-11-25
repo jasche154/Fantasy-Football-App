@@ -5,6 +5,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from services import replacement_eval
+
 MIN_CHART = 50.0               # population: healthy_chart at least this
 BANDS = (800.0, 600.0, 400.0, 250.0, 100.0, MIN_CHART)     # chart bands, lower edges, best first
 TIERS = (1, 7, 13, 25, 37)     # position-rank tiers (first rank of each) for the held-out residuals
@@ -24,26 +26,11 @@ class Row:
     rule: str                  # healthy | healthy_later_missed | out_back | out_season
     pos_rank: int = 0          # by chart within his position that week
 
-def _ranks(values: Sequence[float]) -> np.ndarray:
-    """1-based ranks, ties averaged."""
-    array = np.asarray(values, dtype=float)
-    order = array.argsort(kind="mergesort")
-    ranks = np.empty(len(array))
-    ranks[order] = np.arange(1, len(array) + 1)
-    for value in np.unique(array):
-        tied = array == value
-        if tied.sum() > 1:
-            ranks[tied] = ranks[tied].mean()
-    return ranks
-
-
 def spearman(xs: Sequence[float], ys: Sequence[float]) -> float | None:
-    if len(xs) < 3:
+    """replacement_eval.spearman, None for fewer than 3 values or a side with no spread."""
+    if len(xs) < 3 or np.std(xs) == 0 or np.std(ys) == 0:
         return None
-    a, b = _ranks(xs), _ranks(ys)
-    if a.std() == 0 or b.std() == 0:
-        return None
-    return float(np.corrcoef(a, b)[0, 1])
+    return replacement_eval.spearman(xs, ys)
 
 
 def _mean_spearman(rows: Sequence[Row], keep: Callable[[Row], bool]) -> float | None:
