@@ -174,7 +174,7 @@ def test_a_fair_deal_across_positions_is_accepted_and_carried_out():
 def test_the_suggested_player_is_the_one_worth_closest_to_what_is_missing():
     state, know = league()
 
-    verdict = judge(DEEP_AT_WR, [SCRUB], [P("RB", 30)])
+    verdict = judge(NEEDS_RB, [SCRUB], [P("RB", 36)])        # (CPU 5 has seven receivers: it would cut SCRUB)
 
     named = next(v for v in know.values if verdict.suggestion == f"Add {v.name} to make this fair.")
     assert -verdict.score <= named.chart <= rt.SUGGEST_WITHIN * -verdict.score
@@ -475,7 +475,9 @@ def test_declining_an_offer_only_marks_it_declined():
 
 @pytest.mark.parametrize("change, why", [
     (lambda s: s, "Value is too far apart"),                                        # the CPU's test fails now
-    (lambda s: rs.release(s, SETTINGS, RICH, P("RB", 2)), "Not on CPU 2's roster"),   # the player is gone
+    (lambda s: rs.with_team(s, replace(rs.team(s, RICH), roster=tuple(p for p in rs.team(s, RICH).roster
+                                                                       if p != P("RB", 2)))),
+     "Not on CPU 2's roster"),                                                     # the player is gone
     (lambda s: replace(s, week=2), "It was made in week 1."),                       # last week's offer
 ])
 def test_an_offer_that_no_longer_stands_expires_with_the_reason(change, why):

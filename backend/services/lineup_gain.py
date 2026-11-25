@@ -135,14 +135,22 @@ class Projector:
         return self.healthy_rate(value) * factor * (self.available(value, ahead) if ahead > 0 else 1.0)
 
 
-def week_lineup(values: Sequence, week: int, projector: Projector, settings) -> tuple[float, set[int]]:
-    """(points, starter ids) of the best QB/RB/WR/TE lineup that week."""
-    pool = [SimpleNamespace(player_id=v.player_id, position=v.position, projection=projector.points(v, week))
-            for v in values if v.position in mt.MODELED]
-    best = mt.best_lineup(pool, settings)
-    by_id = {p.player_id: p.projection for p in pool}
-    starters = {pid for ids in best.values() for pid in ids}
-    return sum(by_id[pid] for pid in starters), starters
+def week_lineup(values: Sequence, week: int, projector: Projector, settings) -> tuple[float, frozenset[int]]:
+    """(points, starter ids) of the best QB/RB/WR/TE lineup that week. Cached on the projector, whose points
+    never change, by (week, players, settings): CPU waiver plans ask about the same rosters thousands of times.
+    Players are taken in id order, so ties never depend on the roster's order."""
+    modeled = sorted((v for v in values if v.position in mt.MODELED), key=lambda v: v.player_id)
+    key = (week, tuple(v.player_id for v in modeled), settings)
+    cache = projector.__dict__.setdefault("_lineups", {})    # also a stand-in projector that skips __init__
+    cached = cache.get(key)
+    if cached is None:
+        pool = [SimpleNamespace(player_id=v.player_id, position=v.position, projection=projector.points(v, week))
+                for v in modeled]
+        best = mt.best_lineup(pool, settings)
+        by_id = {p.player_id: p.projection for p in pool}
+        starters = frozenset(pid for ids in best.values() for pid in ids)
+        cached = cache[key] = (sum(by_id[pid] for pid in starters), starters)
+    return cached
 
 
 def season_points(values: Sequence, horizon_: Horizon, projector: Projector, settings) -> float:

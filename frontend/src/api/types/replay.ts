@@ -208,6 +208,8 @@ export interface ReplayPagination {
 export interface ReplayPricedPlayer {
   player: ReplayPlayerRef;
   value: number;
+  /** Why `value` is below his chart value (a player picked up this week); null when it isn't. */
+  note?: string | null;
 }
 
 export type ReplayFairLabel = 'fair' | 'slight_win' | 'big_win' | 'slight_loss' | 'big_loss';

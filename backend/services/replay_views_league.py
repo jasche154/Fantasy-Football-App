@@ -6,7 +6,7 @@ documented at the top of services/replay_views.py; the same no-hindsight rule ho
 import json
 
 from database.models import ReplayLeague
-from services import replay_chat, replay_season, replay_state as rs, replay_trades
+from services import replay_chat, replay_season, replay_state as rs, replay_trade_value, replay_trades
 from services.replay_state import Chat, Offer, Team
 from services.replay_trades import Verdict
 from services.replay_views import (
@@ -112,12 +112,17 @@ def claims(game: Game) -> dict:
                         for place, claim in enumerate(mine, start=1)]}
 
 
+PICKUP_NOTE = (f"Just picked up: counts {replay_trade_value.PICKUP_SHARE:.0%} of his value in trades this week")
+
+
 def verdict(game: Game, found: Verdict) -> dict:
-    """A trade verdict from the user's side: "give" is what the user sends."""
+    """A trade verdict from the user's side: "give" is what the user sends. A row priced below his chart value
+    is a player picked up this week (replay_trade_value.fresh) and says so in its `note`."""
     by_id = game.know.by_id
 
     def priced(pairs: tuple[tuple[int, float], ...]) -> list[dict]:
-        return [{"player": player_ref(by_id[pid]), "value": value} for pid, value in pairs]
+        return [{"player": player_ref(by_id[pid]), "value": value,
+                 "note": PICKUP_NOTE if value < by_id[pid].chart else None} for pid, value in pairs]
 
     return {"accepted": found.accepted, "reasons": list(found.reasons), "fair_label": found.fair_label,
             "value_give": round(found.value_give, 1), "value_get": round(found.value_get, 1),
@@ -140,7 +145,7 @@ def _preview(game: Game, offer: Offer) -> dict:
     """A CPU's pending offer judged from the user's side (the user would send `offer.get`)."""
     try:
         found = replay_trades.evaluate(game.state, game.settings, game.know, game.user.id, offer.from_team,
-                                       offer.get, offer.give)
+                                       offer.get, offer.give, offered=True)
     except ValueError as exc:               # e.g. the user's roster would overflow: accepting needs a drop
         return {"verdict": None, "note": str(exc)}
     return {"verdict": verdict(game, found), "note": None}

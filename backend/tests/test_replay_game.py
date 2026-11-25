@@ -369,12 +369,19 @@ def test_the_user_can_answer_a_cpu_offer_until_it_no_longer_stands():
     accepted = rs.user_team(rg.respond_offer(state, settings, DATA, offer.id, True, seed=11)).roster
     declined = rg.respond_offer(state, settings, DATA, offer.id, False, seed=11)
     without_him = rg.drop(state, settings, DATA, offer.get[0], seed=11)
+    know = rg.knowledge(state, settings, DATA, seed=11)
+    mirrored = (state, settings, know, rs.user_team(state).id, offer.from_team, offer.get, offer.give)
 
     assert set(offer.give) <= set(accepted) and not set(offer.get) & set(accepted)
     assert [o.status for o in declined.offers if o.id == offer.id] == ["declined"]
-    assert rg.evaluate_trade(state, settings, DATA, offer.from_team, offer.get, offer.give, seed=11).accepted
-    with pytest.raises(rg.OfferExpired, match="no longer stands") as refused:
+    assert replay_trades.evaluate(*mirrored, offered=True).accepted         # it stands as the CPU's own offer
+    assert [o.status for o in without_him.offers if o.id == offer.id] == ["expired"]   # the drop expired it
+    with pytest.raises(ValueError, match="already expired"):
         rg.respond_offer(without_him, settings, DATA, offer.id, True, seed=11)
+    gone = rs.with_team(state, replace(rs.user_team(state), roster=tuple(
+        pid for pid in rs.user_team(state).roster if pid != offer.get[0])))     # he left some other way
+    with pytest.raises(rg.OfferExpired, match="no longer stands") as refused:
+        rg.respond_offer(gone, settings, DATA, offer.id, True, seed=11)
     assert [o.status for o in refused.value.state.offers if o.id == offer.id] == ["expired"]
 
 

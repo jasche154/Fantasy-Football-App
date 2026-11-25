@@ -12,8 +12,10 @@ numbers for the current week), so no CPU ever sees a result or a projection from
   under a positional limit, and swap a kicker or defense who does play only for STREAM_EDGE projected points
   (a streamer, about STREAMER_SHARE of CPUs picked once from the game's seed by `streamers`, for
   STREAMER_EDGE: it chases a matchup most weeks).
-- A CPU never drops a top-PROTECTED_RANK player (by HEALTHY value; per 12 teams, scaled by league size) or an injured player who was above
-  replacement (except, to cover a slot nobody plays in while its IR slot is taken, one tagged IR or PUP
+- A CPU never drops a top-PROTECTED_RANK player (by HEALTHY value; per 12 teams, scaled by league size), one
+  of the league's picks from rounds 1-EARLY_ROUNDS in its first EARLY_WEEKS weeks (unless the news has him out
+  for the season), or an injured player who was above replacement or still has trade value (healthy chart
+  >= KEEP_OUT_CHART) with a return date in the news (except, to cover a slot nobody plays in while its IR slot is taken, one tagged IR or PUP
   outside the top PROTECTED_RANK), and never into a roster that can't field a lineup. For a claim or an
   open spot it drops only one of its DROPPABLE_COUNT least valuable skill players. A kicker or defense is
   only ever swapped for another one.
@@ -46,6 +48,14 @@ MAX_FREE_AGENT_MOVES = 2          # per CPU per week (covering a starting slot i
 DROPPABLE_COUNT = 4               # a CPU only drops one of its lowest skill players by healthy value
 PROTECTED_RANK = 100              # never a player in the league's top 100 by healthy value (12 teams; scaled
                                   # by league size, else nearly every rostered player of an 8-team league is safe)
+EARLY_ROUNDS = 8                  # draft picks from these rounds (pick 96 of 12 teams: the depth PROTECTED_RANK
+EARLY_WEEKS = 4                   # covers) stay through the league's first 4 weeks: about three games before a
+                                  # manager gives up on a mid-round pick (2026: a CPU cut its round-7 TE after one)
+KEEP_OUT_CHART = 50.0             # an out player with this healthy chart (about the top 125) is kept while he is
+                                  # expected back: a manager stashes him (2026: a CPU cut Jordyn Tyson, 63, a
+                                  # week before his return; he was worth 246 three weeks later)
+TRIM_CLOSE = 5.0                  # healthy values this close (season points over replacement) are a tie in
+                                  # `_trim`, which then keeps the higher trade value
 MIN_FILL_GAIN = 0.0               # a player for an open roster spot must add more than this over the season
 STREAM_EDGE = 4.0                 # projected points a free-agent K / DST must beat the team's own by (real
                                   # seasons: a league's CPUs make about 56 such swaps a season at 2.0, nearly
@@ -80,11 +90,30 @@ def protected_rank(settings: Settings) -> int:
     return PROTECTED_RANK * settings.teams // 12
 
 
-def _context(know: Knowledge, settings: Settings) -> _Context:
+def _season_over(value: ReplayValue | None) -> bool:
+    """Does the news have him out for the season?"""
+    return value is not None and value.out and value.news is not None and value.news.back is None
+
+
+def _coming_back(value: ReplayValue) -> bool:
+    """Does the news name a week he is expected back?"""
+    return value.news is not None and value.news.back is not None
+
+
+def early_picks(state: State, settings: Settings, know: Knowledge) -> frozenset[int]:
+    """The league's picks from rounds 1-EARLY_ROUNDS while it is in its first EARLY_WEEKS weeks."""
+    if state.week >= settings.start_week + EARLY_WEEKS:
+        return frozenset()
+    return frozenset(pick.player_id for pick in state.picks
+                     if pick.round <= EARLY_ROUNDS and not _season_over(know.by_id.get(pick.player_id)))
+
+
+def _context(know: Knowledge, settings: Settings, state: State | None = None) -> _Context:
     horizon = rv.horizon(know, settings)
     valued = sorted((v for v in know.values if v.healthy_value > 0), key=lambda v: (-v.healthy_value, v.player_id))
+    top = frozenset(v.player_id for v in valued[:protected_rank(settings)])
     return _Context(know, settings, horizon, rv.projector(know),
-                    frozenset(v.player_id for v in valued[:protected_rank(settings)]),
+                    top | (early_picks(state, settings, know) if state is not None else frozenset()),
                     CLAIM_GAIN_PER_WEEK * sum(horizon.weights.values()))
 
 
@@ -109,11 +138,12 @@ def _unrostered(state: State, know: Knowledge, also_taken: Iterable[int] = ()) -
 
 def _spare(roster: Sequence[ReplayValue], know: Knowledge, protected: frozenset[int]) -> list[ReplayValue]:
     """Every skill player a CPU could bear to lose, least valuable first (by healthy value, so an injury
-    alone never makes a good player droppable)."""
+    alone never makes a good player droppable; nor one out a while who still has trade value)."""
     def safe(value: ReplayValue) -> bool:
         if value.position not in SKILL or value.player_id in protected:
             return False                              # (replacement levels exist for skill positions only)
-        return not (value.out and value.last_projection > know.replacement[value.position])
+        return not (value.out and (value.last_projection > know.replacement[value.position]
+                                   or (value.healthy_chart >= KEEP_OUT_CHART and _coming_back(value))))
 
     return sorted((v for v in roster if safe(v)), key=lambda v: (v.healthy_value, v.ros_ppg, -v.player_id))
 
@@ -230,7 +260,7 @@ def cpu_claims(state: State, settings: Settings, know: Knowledge, seed: int) -> 
     left out). Hand the result to `replay_waivers.process_claims`. Claim ids start at `state.next_id` and are
     never stored. Hot players count at their hot rate (a fresh `HotProjector`, never the shared one) and
     need `claim_ai.HOT_CLAIM_GAIN_PER_WEEK`; `seed` drives the FAAB bids (0 outside FAAB)."""
-    base = _context(know, settings)
+    base = _context(know, settings, state)
     weights = sum(base.horizon.weights.values())
     rates = claim_ai.hot_rates(know)
     ctx = replace(base, projector=claim_ai.HotProjector(know, rates), hot=frozenset(rates),
@@ -335,7 +365,7 @@ def _trim(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: _Cont
     open spot best, as long as that is no step down in value."""
     idle = len(rv.idle_slots(ctx.know, [v.player_id for v in roster], ctx.settings))
     held = Counter(v.position for v in (*roster, *ctx.stash))
-    for out in _spare(roster, ctx.know, ctx.protected):
+    for out in _close_by_chart(_spare(roster, ctx.know, ctx.protected)):
         left = [v for v in roster if v is not out]
         if (held[out.position] > rv.position_cap(out.position, ctx.settings)
                 and len(rv.idle_slots(ctx.know, [v.player_id for v in left], ctx.settings)) <= idle):
@@ -343,6 +373,18 @@ def _trim(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: _Cont
             if move is not None and ctx.know.by_id[move[0]].healthy_value >= out.healthy_value:
                 return move[0], out.player_id
     return None
+
+
+def _close_by_chart(spare: Sequence[ReplayValue]) -> list[ReplayValue]:
+    """`spare` (least valuable first) with each run of healthy values within TRIM_CLOSE of its lowest one
+    reordered by trade value, lowest first: the model can't tell them apart (often all 0), the market can."""
+    runs: list[list[ReplayValue]] = []
+    for value in spare:
+        if runs and value.healthy_value - runs[-1][0].healthy_value <= TRIM_CLOSE:
+            runs[-1].append(value)
+        else:
+            runs.append([value])
+    return [v for run in runs for v in sorted(run, key=lambda v: (v.healthy_chart, v.player_id))]
 
 
 def _stream(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: _Context) -> Move | None:
@@ -378,7 +420,7 @@ def cpu_free_agency(state: State, settings: Settings, know: Knowledge, seed: int
     never a player in `state.locked`, and at most MAX_FREE_AGENT_MOVES each unless a starting slot still
     has nobody who plays. Works in any phase; the dropped players go on waivers through
     `replay_state.release`. `seed` (the game's) only picks the `streamers`."""
-    base = _context(know, settings)
+    base = _context(know, settings, state)
     cpus = [team_id for team_id in state.waiver_order if not rs.team(state, team_id).is_user]
     streaming = streamers(seed, sorted(cpus))
     for team_id in cpus:
@@ -426,7 +468,7 @@ def cpu_ir(state: State, settings: Settings, know: Knowledge, seed: int) -> Stat
     """Every CPU's IR moves for this week, in waiver-priority order: at most one activation (IR-18) and then
     one placement into an empty slot (IR-19). Never the user's team; a second call changes nothing. `seed`
     is unused (no randomness)."""
-    ctx = _context(know, settings)
+    ctx = _context(know, settings, state)
     for team_id in state.waiver_order:
         if rs.team(state, team_id).is_user:
             continue

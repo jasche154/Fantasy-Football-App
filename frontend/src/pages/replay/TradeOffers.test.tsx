@@ -160,5 +160,15 @@ describe('TradeVerdictView: the headline is trade value, the lineup is called ou
     const card = await screen.findByRole('listitem', { name: 'Offer from Blitz Brigade' });
     expect(within(card).queryByText(/costs your best lineup/)).not.toBeInTheDocument();
     expect(within(card).queryByText(/a little extra/)).not.toBeInTheDocument();
+    expect(within(card).queryByText(/Just picked up/)).not.toBeInTheDocument();
+  });
+
+  it('notes a player who counts half because he was just picked up', async () => {
+    const note = 'Just picked up: counts 50% of his value in trades this week';
+    const fresh = verdict({ value_give: 15.8, give: [{ player: ETIENNE, value: 15.8, note }] });
+    renderTrades(trades({ offers: [offer({ verdict: fresh })] }));
+    const card = await screen.findByRole('listitem', { name: 'Offer from Blitz Brigade' });
+
+    expect(within(card).getByText(`${ETIENNE.name}: ${note}.`)).toBeInTheDocument();
   });
 });

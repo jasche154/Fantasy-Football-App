@@ -970,8 +970,13 @@ that week's games on; only scoring a week reads its real points.
   come last either way.
 - **CPU rosters:** at most 2 QB, 2 TE, 1 K, 1 DST, 6 RB and 7 WR. A CPU takes one extra only while nobody
   it has at that starting slot plays that week, and trims it afterwards. A CPU never drops a top-100
-  player (100 in a 12-team league, scaled to the league size: 66 with 8 teams, 116 with 14), and drops an
-  injured player it would otherwise keep only in one case: a starting slot has nobody who plays, its IR
+  player (100 in a 12-team league, scaled to the league size: 66 with 8 teams, 116 with 14), nor in the
+  league's first 4 weeks one of the league's picks from rounds 1-8 (`replay_waiver_ai.EARLY_ROUNDS` /
+  `EARLY_WEEKS`: about three games before a manager gives up on a mid-round pick) unless the news has him out
+  for the season. It keeps an injured player who was above replacement, or who has a healthy chart of 50 or
+  more (`KEEP_OUT_CHART`) and a return date in the news; when it trims back to a positional limit, players
+  whose season values are within 5 points (`TRIM_CLOSE`, often all 0) are cut cheapest on the chart first. It
+  drops an injured player it would otherwise keep only in one case: a starting slot has nobody who plays, its IR
   slot is taken, and the player is on IR or PUP and outside that top group; he then goes
   for a free agent who plays. It streams kickers and defenses: a unit that plays is swapped only for one
   projected `replay_waiver_ai.STREAM_EDGE` (4) points better; one on a bye or without a projection is
@@ -1054,8 +1059,9 @@ that week's games on; only scoring a week reads its real points.
   week, more once fewer than 8 runs remain), never more than 40% of what is left until the last 4 waiver
   runs, with seeded noise of up to 20% either way; each of a CPU's claims is bid against the same budget.
 - **Breakout claims:** at a waiver run (Wednesday or FAAB; free agency and "none" leagues are unchanged), a
-  CPU also looks at "hot" players: a skill player not out, who played in the last two weeks and whose mean
-  over his last two games is at least 6 points over his `ros_ppg`. It values him at a hot rate (half that
+  CPU also looks at "hot" players: a skill player not out, with at least two real games, who played in the
+  last two weeks and whose mean over his last two games is at least 6 points over his `ros_ppg` (one big
+  game is not a streak). It values him at a hot rate (half that
   recent mean, half `ros_ppg`) for the weeks after this one and claims him with half the usual bar (half a
   lineup point a week), so a breakout is claimed soon after his big game rather than once his projections
   catch up.
@@ -1080,7 +1086,16 @@ that week's games on; only scoring a week reads its real points.
   in full but at most 15% of what it sends (`LINEUP_CAP`), so a CPU can accept a deal that costs its lineup
   when the value is right (selling its QB in a one-QB league), as real managers do. A player on IR can be traded: he takes the receiving team's free IR slot, else a
   roster spot (which may force a drop). A CPU
-  sells you an out player only for at least half his healthy chart value. After a deal each starting slot
+  sells you an out player only for at least half his healthy chart value. A player his team added or claimed
+  this week and worth under 100 on the chart counts half (`replay_trade_value.PICKUP_SHARE`) in every trade
+  price until the next week, for the CPU and in your verdict alike (the row says "Just picked up"), so a
+  pickup can't be flipped for value the week he arrives. A CPU's positional limits hold in trades too: a deal
+  that takes it past one cuts its cheapest player there as part of the deal, counted in its value test like
+  any cut of its own. A done deal or a drop expires every other pending offer naming a player who moved.
+  When a CPU sends you an offer because it wants one of your players, it gives you 5-10% more trade value
+  than it gets, by persona (`replay_personas.OFFER_EDGE`: steady 5-6%, shark 5-7%, balanced 6-8%, panicky and
+  gambler 8-10%), judged as its own offer (`replay_trades.offer_multiple`) both when made and when you accept
+  it; a shop's offer is priced as before, at the shop discount. After a deal each starting slot
   the CPU can no longer fill needs a player it can add (unrostered, not out, not on waivers; in the waiver
   phase, when everyone unrostered is on waivers, anyone you haven't claimed), and it adds him
   (`replay_cover.cpu_cover`): right away, or in the waiver phase once waivers clear. Each CPU has a hidden **persona** (balanced, panicky, shark, steady,

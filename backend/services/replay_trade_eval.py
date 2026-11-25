@@ -221,7 +221,8 @@ def _tally(state: State, settings: Settings, know: rv.Knowledge, cpu: Team, give
     own_cuts = tuple(pid for pid in verdict.their_drops if pid not in gets)
     per_week = verdict.their_gain / max(1e-9, sum(rv.horizon(know, settings).weights.values()))
     return tv.tally(know, cpu.persona, gives, kept, own_cuts, per_week,
-                    rt.needed_multiple(settings, rs.user_team(state)), True, cpu.hype, rs.markdowns(state, cpu.id))
+                    rt.needed_multiple(settings, rs.user_team(state)), True, cpu.hype, rs.markdowns(state, cpu.id),
+                    tv.fresh(know, rs.pickups(state)))
 
 
 def judge(data: SeasonData, case: dict, seed: int, personas=PERSONAS) -> list[Result]:

@@ -104,6 +104,7 @@ export function TradeVerdictView({ verdict, partner, isOffer = false }: TradeVer
   const copy = VERDICT_COPY[verdict.fair_label];
   const isAdjusted = Math.abs(sumValues(verdict.give) - verdict.value_give) > 0.05
     || Math.abs(sumValues(verdict.get) - verdict.value_get) > 0.05;
+  const noted = [...verdict.give, ...verdict.get].filter((row) => row.note);
   return (
     <div className="replay-verdict">
       <BalanceMeter percentDifference={verdict.percent} />
@@ -112,6 +113,7 @@ export function TradeVerdictView({ verdict, partner, isOffer = false }: TradeVer
         on trade value. You give {formatNumber(verdict.value_give)} value, get {formatNumber(verdict.value_get)}.
         {isAdjusted && ' The totals count the best player in the deal a little extra and take off anyone you would drop.'}
       </p>
+      {noted.map((row) => <p key={row.player.id} className="hint">{row.player.name}: {row.note}.</p>)}
       <p>
         Points added to each best lineup over the rest of the season: you {formatSigned(verdict.your_gain)}, {partner}{' '}
         {formatSigned(verdict.their_gain)}.
