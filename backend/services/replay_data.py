@@ -38,7 +38,7 @@ from integrations import adp_history, espn_history, sleeper_projections
 from integrations.adp_history import PAUSE_SECONDS, AdpEntry, HistoryClient, HistoryError, SeasonMatcher, name_key
 from integrations.espn_history import WeekProjection
 from integrations.weekly_sources import normalize_team
-from services import replay_experts, replay_live, replay_pool, system_status
+from services import replay_adp_format, replay_experts, replay_live, replay_pool, system_status
 from services.replay_experts import load_expert_ranks
 from services.replay_injuries import load_injuries
 
@@ -206,12 +206,15 @@ def adp_player(matcher: SeasonMatcher, entry: AdpEntry, crosswalk: dict[str, str
             or matcher.by_name(entry.name, entry.position))
 
 
-def adp_rows(season: int, ffc: Sequence[tuple[AdpEntry, int | None]],
-             mfl: Sequence[tuple[AdpEntry, int | None]]) -> list[dict]:
-    """FFC's ADP as published, then the players only MFL has, one pick apart after FFC's last pick."""
+def adp_rows(season: int, ffc: Sequence[tuple[AdpEntry, int | None]], mfl: Sequence[tuple[AdpEntry, int | None]],
+             others: Sequence[Sequence[tuple[AdpEntry, int | None]]] = ()) -> list[dict]:
+    """FFC's ADP as published; a player it leaves out but another FFC list of the season has (`others`, the one to
+    trust most first) at his ADP and spread there, the same site's 12-team scale (a thin list, like 2026's half-PPR,
+    drops top players); then the players in no FFC list, one pick apart after the last pick, in MFL's order (MFL's
+    picks are not on FFC's scale: its real drafts include dynasty and keeper leagues)."""
     rows: list[dict] = []
     seen: set[int] = set()
-    for entry, player_id in ffc:
+    for entry, player_id in (*ffc, *(pair for other in others for pair in other)):
         if player_id is not None and player_id not in seen:
             seen.add(player_id)
             rows.append({"season": season, "player_id": player_id, "adp": entry.adp, "stdev": entry.stdev,
@@ -224,6 +227,23 @@ def adp_rows(season: int, ffc: Sequence[tuple[AdpEntry, int | None]],
             rows.append({"season": season, "player_id": player_id, "adp": pick, "stdev": None,
                          "source": adp_history.MFL, "team": entry.team})
     return rows
+
+
+def _donor_formats(adp_format: str) -> list[str]:
+    """The FFC lists that fill a player this format's list leaves out: PPR first (FFC's deepest), then the nearest."""
+    nearest = replay_adp_format.NEAREST.get(adp_format, replay_adp_format.NEAREST["ppr"])
+    return [fmt for fmt in dict.fromkeys(("ppr", *nearest)) if fmt != adp_format]
+
+
+def _stored_ffc(session: Session, season: int, skip: set[str]) -> dict[str, list[tuple[AdpEntry, int]]]:
+    """The season's stored FFC rows of the formats this run does not fetch, as adp_rows' `others`."""
+    stored: dict[str, list[tuple[AdpEntry, int]]] = {}
+    for row in session.scalars(select(ReplayAdp).where(
+            ReplayAdp.season == season, ReplayAdp.source == adp_history.FFC, ReplayAdp.format.not_in(skip))
+            .order_by(ReplayAdp.adp)):
+        entry = AdpEntry(adp_history.FFC, "", "", row.adp, row.stdev, row.team)
+        stored.setdefault(row.format, []).append((entry, row.player_id))
+    return stored
 
 
 def _ffc_lists(client: HistoryClient, season: int, formats: Iterable[str]
@@ -264,7 +284,8 @@ def load_adp(session: Session, season: int, client: HistoryClient, force: bool =
     forced run. If MFL or the id crosswalk fails, every stored format is left exactly as it is (never shrunk) and
     the error reported; a format with nothing stored gets FFC alone for now. The summary's counts are the PPR list's
     (when this run fetched it), plus rows per format.
-    shortcut: MFL's PPR real-draft list fills every format's tail (past FFC's last pick the order barely
+    A player one format's list leaves out takes his ADP from the season's other FFC lists (adp_rows), fetched now
+    or stored. shortcut: MFL's PPR real-draft list fills every format's tail (past FFC's last pick the order barely
     differs); fetch MFL per format (IS_PPR=0, 2-QB leagues) if the tail ever matters."""
     stored = {(fmt, source): rows for fmt, source, rows in session.execute(
         select(ReplayAdp.format, ReplayAdp.source, func.count()).where(ReplayAdp.season == season)
@@ -299,7 +320,9 @@ def load_adp(session: Session, season: int, client: HistoryClient, force: bool =
     mfl_pairs = [(e, adp_player(matcher, e, crosswalk, {})) for e in mfl]
     via_mfl = {(name_key(e.name), e.position): pid for e, pid in mfl_pairs if pid is not None}
     pairs = {fmt: [(e, adp_player(matcher, e, crosswalk, via_mfl)) for e in entries] for fmt, entries in lists.items()}
-    by_format = {fmt: adp_rows(season, fmt_pairs, mfl_pairs) for fmt, fmt_pairs in pairs.items()}
+    donors = {**_stored_ffc(session, season, set(pairs)), **pairs}
+    by_format = {fmt: adp_rows(season, fmt_pairs, mfl_pairs, [donors[d] for d in _donor_formats(fmt) if d in donors])
+                 for fmt, fmt_pairs in pairs.items()}
     session.execute(delete(ReplayAdp).where(ReplayAdp.season == season, ReplayAdp.format.in_(list(by_format))))
     rows = [{**row, "format": fmt} for fmt, fmt_rows in by_format.items() for row in fmt_rows]
     if rows:

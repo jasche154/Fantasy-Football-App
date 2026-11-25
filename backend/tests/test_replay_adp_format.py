@@ -148,6 +148,46 @@ def test_a_failed_request_for_a_format_is_retried_on_the_next_run(db):
     assert again["formats"] == {"2qb": 7} and ffc_paths(sites) == ["2qb"]
 
 
+def without(name: str) -> dict:
+    return {**FFC_PAYLOAD, "players": [p for p in FFC_PAYLOAD["players"] if p["name"] != name]}
+
+
+def test_a_player_a_thin_list_leaves_out_takes_his_adp_from_another_ffc_list_not_the_tail():
+    # 2026 half-PPR: FFC's thin list left out Drake London (13.1 in PPR), so MFL's tail put him at pick 172
+    half = [(adp_history.AdpEntry("ffc", "A", "RB", 1.5, 0.5), 1), (adp_history.AdpEntry("ffc", "B", "WR", 170.0), 2)]
+    ppr = [(adp_history.AdpEntry("ffc", "London", "WR", 13.1, 2.4, "ATL"), 3), (adp_history.AdpEntry("ffc", "B", "WR", 160.0), 2)]
+    std = [(adp_history.AdpEntry("ffc", "London", "WR", 20.0, 5.0), 3), (adp_history.AdpEntry("ffc", "C", "K", 180.0), 5)]
+    mfl = [(adp_history.AdpEntry("mfl", "London", "WR", 12.0), 3), (adp_history.AdpEntry("mfl", "D", "TE", 25.0), 4)]
+
+    rows = replay_data.adp_rows(SEASON, half, mfl, [ppr, std])
+
+    assert [(r["player_id"], r["adp"], r["stdev"], r["source"], r["team"]) for r in rows] == [
+        (1, 1.5, 0.5, "ffc", None), (2, 170.0, None, "ffc", None), (3, 13.1, 2.4, "ffc", "ATL"),
+        (5, 180.0, None, "ffc", None), (4, 181.0, None, "mfl", None)]   # only a player in no FFC list goes last
+
+
+def test_a_list_missing_a_player_borrows_the_ppr_lists_adp_first(db):
+    std = {**FFC_PAYLOAD, "players": [{**p, "adp": 70.0} if p["name"] == "Mike Williams" else p
+                                      for p in FFC_PAYLOAD["players"]]}
+    sites = Sites(formats={"half": without("Mike Williams"), "std": std, "2qb": without("Mike Williams")})
+
+    replay_data.load_adp(db, SEASON, HistoryClient(sites.client(), pause=0))
+
+    assert adp_by_gsis(db, "half")["00-MW1"] == (80.0, "ffc") and adp_by_gsis(db, "2qb")["00-MW1"] == (80.0, "ffc")
+    assert adp_by_gsis(db, "half")["00-HURT"] == (151.0, "mfl")       # the tail still starts after the last pick
+
+
+def test_a_format_fetched_alone_borrows_from_the_stored_ffc_lists(db):
+    replay_data.load_adp(db, SEASON, HistoryClient(Sites().client(), pause=0))
+    db.execute(ReplayAdp.__table__.delete().where(ReplayAdp.format == "half"))
+    db.commit()
+
+    again = replay_data.load_adp(db, SEASON, HistoryClient(Sites(formats={"half": without("Mike Williams")}).client(),
+                                                           pause=0))
+
+    assert again["formats"] == {"half": 7} and adp_by_gsis(db, "half")["00-MW1"] == (80.0, "ffc")
+
+
 # ---------------- which list a league reads ----------------
 
 @pytest.mark.parametrize(("scoring", "rules", "starters", "want"), [
