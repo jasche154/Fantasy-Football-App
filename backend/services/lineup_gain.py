@@ -40,7 +40,7 @@ REGULAR_DECAY = 0.95
 PLAYOFF_MIN = 0.1
 DEFAULT_PLAYOFF_ODDS = 0.6
 HANDCUFF_MULTIPLE = 2.0           # drop your own starter's handcuff only for an add worth 2x as much
-MAX_LINEUPS = 20_000              # lineup solves cached per projector (replay_values keeps 64 projectors)
+MAX_LINEUPS = 3_000               # lineup solves cached per projector, ~1 KB each (a fake 12-team season peaks near 2,600)
 
 
 def _after_injury(weeks_ahead: int, missed: float) -> float:

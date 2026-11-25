@@ -298,3 +298,26 @@ def test_the_lineup_cache_is_capped(monkeypatch):
     assert 0 < len(fresh._lineups) <= 3
     assert answers == [lineup_gain.week_lineup(roster, week, rv.projector.__wrapped__(knowledge), knowledge.league)
                        for week in range(5, 12)]
+
+
+def test_one_projectors_lineup_solves_fit_under_the_cap(monkeypatch):
+    """A fake 12-team league's weeks of waiver plans and games never fill a projector's cache (so the cap,
+    which bounds memory, never costs a re-solve), and the cache stays well short of the cap."""
+    from services import replay_game as rg
+
+    peak = {}
+    solve = lineup_gain.week_lineup
+
+    def counted(values, week, projector, settings):
+        found = solve(values, week, projector, settings)
+        peak[id(projector)] = max(peak.get(id(projector), 0), len(projector._lineups))
+        return found
+
+    monkeypatch.setattr(lineup_gain, "week_lineup", counted)
+    settings = fakes.fake_settings(waiver_mode="wednesday")
+    data = fakes.fake_season(settings.season, settings.scoring)
+    state = rg.auto_draft(rg.create_game(settings, data, 1), settings, data, 1)
+    while state.phase != "complete" and state.week <= 8:
+        state = rg.advance(state, settings, data, 1, rg.WEDNESDAY if state.phase == "waivers" else rg.PLAY)
+
+    assert peak and max(peak.values()) < lineup_gain.MAX_LINEUPS

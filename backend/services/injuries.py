@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 from database.models import DepthChartEntry
 from services.projections import PlayerSeason
 from services.schedule_strength import Schedule
-from services.weekly_model import rate_share
+from services.weekly_model import RECENCY_HALF_LIFE, rate_share
 from services.availability import (  # noqa: F401  (re-exported)
     BACKUP_FLOOR, DEFAULT_RATES, HEALTHY, HEALTHY_AVAILABILITY, INACTIVE_LAST_WEEK_PLAYS, SIT_RISK, SLEEPER_ZERO, Availability,
     _rate_cache, backup_qb_availability, learned_play_rates, load_availability, play_probability, qb_depth,
@@ -148,11 +148,12 @@ def _behind(qb: PlayerSeason, other: PlayerSeason, team: str, schedule: Schedule
 def vacated_boosts(seasons: Iterable[PlayerSeason], rates: Mapping[int, float],
                    availability: Mapping[int, Availability], depth: Mapping[int, tuple[str, int]],
                    schedule: Schedule, week: int,
-                   priors: Mapping[int, float] | None = None) -> dict[int, tuple[Boost, ...]]:
+                   priors: Mapping[int, float] | None = None,
+                   half_life: float | None = RECENCY_HALF_LIFE) -> dict[int, tuple[Boost, ...]]:
     """{player_id: boosts} for teammates of players likely to miss the game.
 
     `rates` are each player's projected points per game before any injury adjustment;
-    `priors` the last-season rates they were shrunk toward (for Boost.in_rate).
+    `priors` the last-season rates they were shrunk toward and `half_life` their recency (for Boost.in_rate).
     """
     priors = priors or {}
     seasons = list(seasons)
@@ -192,7 +193,7 @@ def vacated_boosts(seasons: Iterable[PlayerSeason], rates: Mapping[int, float],
                 boosts[player.player_id].append(Boost(
                     player.player_id, absent.player_id, absent.name, avail.label,
                     round(full, 2), round(full * sit_chance, 2), method,
-                    round(rate_share(player, without, priors.get(player.player_id)), 3)))
+                    round(rate_share(player, without, priors.get(player.player_id), half_life), 3)))
     return {pid: tuple(sorted(b, key=lambda x: -x.full_points)) for pid, b in boosts.items()}
 
 
@@ -282,8 +283,10 @@ def ros_role_losses(seasons: Iterable[PlayerSeason], current_week: int, schedule
 def build_context(session: Session, seasons: Iterable[PlayerSeason], rates: Mapping[int, float],
                   season: int, week: int, schedule: Schedule, use_live: bool = True,
                   exclude_rate_season: int | None = None,
-                  priors: Mapping[int, float] | None = None) -> InjuryContext:
-    """use_live adds Sleeper tags and today's depth chart: only for the current week."""
+                  priors: Mapping[int, float] | None = None,
+                  half_life: float | None = RECENCY_HALF_LIFE) -> InjuryContext:
+    """use_live adds Sleeper tags and today's depth chart: only for the current week. `half_life` is the one
+    `rates` were built with."""
     seasons = list(seasons)
     availability = load_availability(session, season, week, use_live, exclude_rate_season)
     availability = {**usage_availability(seasons, availability, week, schedule), **availability}
@@ -291,5 +294,5 @@ def build_context(session: Session, seasons: Iterable[PlayerSeason], rates: Mapp
         availability = {**availability, **backup_qb_availability(qb_depth(session), availability)}
     depth = _depth(session) if use_live else {}
     return InjuryContext(availability=availability,
-                         boosts=vacated_boosts(seasons, rates, availability, depth, schedule, week, priors),
+                         boosts=vacated_boosts(seasons, rates, availability, depth, schedule, week, priors, half_life),
                          returning=returning_competition(seasons, availability, week, schedule))

@@ -23,6 +23,7 @@ from database.db import get_session
 from database.models import Base, NflGame, PlayerStatsWeekly, PlayerStatus, ReplaySeasonData
 from api import replay_routes
 from services import replay_blob, replay_live, replay_pool, sim_next_year, sim_setup
+from services.availability import SLEEPER_FRESH_HOURS
 from services.replay_pool import SeasonData
 from tests import replay_fakes as fakes
 from tests.test_replay_routes import _snapshot, get, post, refused
@@ -254,9 +255,51 @@ def test_todays_sleeper_status_seeds_the_first_simulated_week_and_no_real_one(ap
                      (suspended, week): replay_pool.Injury("SUS"),       # ir: his real O streak carries on its own
                      (stale_ir, week): replay_pool.Injury("IR", None, "Knee"),   # IR lasts: an old sync still counts
                      (hurt_after, week): replay_pool.Injury("IR", None, "Elbow")}    # newer than the game he played
-    assert "2 statuses older than" in caplog.text
+    assert "2 of 7 statuses older than" in caplog.text and "WARNING" not in caplog.text
     assert all(seeded.injuries[key] == injury for key, injury in hard.injuries.items())
     assert seeded.actual == base.actual
+
+
+def _kicked_off(base, week: int, hours_ago: float):
+    """`base` with every week-`week` game kicked off `hours_ago` hours ago (US Eastern, as nflverse lists it)."""
+    local = datetime.now(timezone.utc) - timedelta(hours=hours_ago + 5)
+    games = tuple(replace(g, gameday=local.date().isoformat(), gametime=local.strftime("%H:%M"))
+                  if g.week == week else g for g in base.schedule.games)
+    return replace(base, schedule=replace(base.schedule, games=games))
+
+
+def test_an_ir_player_activated_during_a_bye_week_is_not_tagged_again(app):
+    """IR fetched four days ago, then he played week N - 2 and had his bye in week N - 1: activated, stale tag."""
+    _, engine = app
+    week = THROUGH + 1
+    on_bye = sorted(pid for pid in FULL.players if (pid, THROUGH - 1) in FULL.actual
+                    and (pid, THROUGH) not in FULL.actual and (pid, THROUGH) not in FULL.box
+                    and not any(key[0] == pid and key[1] >= THROUGH - 1 for key in FULL.injuries))
+    activated, still_out = on_bye[0], on_bye[1]
+    with Session(engine) as session:
+        _sleeper(session, {activated: ("IR", "Hamstring")}, hours_old=96)          # before his week N - 2 game
+        _sleeper(session, {still_out: ("IR", "Knee")}, hours_old=24)              # after it
+        base = _kicked_off(replay_pool.load_season_data(session, LIVE, "half", through=THROUGH), THROUGH - 1, 48)
+        seeded = sim_setup.with_status_now(session, base, week)
+        session.query(PlayerStatus).delete()
+        session.commit()
+
+    assert (activated, week) not in seeded.injuries and seeded.injuries[(still_out, week)].tag == "IR"
+
+
+def test_mostly_stale_statuses_warn_with_counts_only(app, caplog):
+    _, engine = app
+    out, hurt = _played_last_week(2)
+    caplog.set_level(logging.INFO, logger="services.sim_setup")
+    with Session(engine) as session:
+        _sleeper(session, {out: ("Out", "Hip"), hurt: ("Doubtful", "Toe")}, hours_old=48)
+        base = replay_pool.load_season_data(session, LIVE, "half", through=THROUGH)
+        assert sim_setup.with_status_now(session, base, THROUGH + 1) is base
+        session.query(PlayerStatus).delete()
+        session.commit()
+
+    warned = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert [r.getMessage() for r in warned] == [f"Week {THROUGH + 1} status: 2 of 2 statuses older than {SLEEPER_FRESH_HOURS}h skipped"]
 
 
 def test_a_live_league_starts_its_simulation_from_todays_sleeper_status(app, monkeypatch):

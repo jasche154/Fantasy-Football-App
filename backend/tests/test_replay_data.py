@@ -216,8 +216,12 @@ def test_espn_kickers_and_defenses_carry_espns_total_and_zero_projections_are_dr
     assert not {"Rams D/ST", "Hurt Star", "Some Linebacker"} & set(projections)
 
 
-def test_espn_lines_for_another_week_are_ignored():
-    assert espn_history.parse_week(espn_payload(2), SEASON, 1) == []
+def test_espn_lines_for_another_week_are_ignored_with_a_warning(caplog):
+    payload = espn_payload(2)
+
+    assert espn_history.parse_week(payload, SEASON, 1) == []
+    assert f"ESPN {SEASON} week 1: {len(payload['players'])} players, no projected lines read" in caplog.text
+    assert "http" not in caplog.text.lower()
 
 
 def last_years_line(entry: dict, applied: float, stats: dict) -> dict:

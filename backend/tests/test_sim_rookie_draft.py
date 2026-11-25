@@ -109,3 +109,33 @@ def test_a_team_that_signs_another_teams_starter_needs_no_qb():
     assert "QB" in rd.needs(world, {signed: "BAL"})["BAL"]                # his decayed weight alone: a backup
     need = rd.needs(world, {signed: "BAL"}, starts)
     assert "QB" not in need["BAL"] and "QB" in need["LAC"]
+
+
+def test_prospects_nobody_takes_go_to_the_first_open_slots_after_the_last_pick(monkeypatch):
+    monkeypatch.setattr(rd, "TAKE_WITHOUT_NEED", 0.0)        # a rank-262 prospect no team needs is never taken
+    late = (Rookie("Late Back", "RB", "KC", 262, "Iowa"), Rookie("Late End", "TE", "KC", 262, "Utah"))
+    locked = Rookie("Locked Passer", "QB", "DAL", 3, "USC", lock=True)
+    order = list(TEAMS)
+    for seed in range(6):
+        drafted = {r.name: r for r in rd.draft((CLASS[0], locked, *late), order, {}, seed)}
+        last = drafted["Star Receiver"].pick
+        open_slots = [s for s in range(last + 1, last + 4) if s != locked.pick][:2]
+        assert sorted((drafted[r.name].pick, drafted[r.name].team) for r in late) == [   # in board order
+            (s, order[(s - 1) % 32]) for s in open_slots], seed
+        assert (drafted["Locked Passer"].team, drafted["Locked Passer"].pick) == ("DAL", 3)
+
+
+def test_a_much_stronger_home_team_wins_most_of_its_simulated_games():
+    strong, weak = TEAMS[0], TEAMS[1]
+    played = [Game(w, strong, weak, 35, 10, None, None) for w in range(1, 5)]     # +25 a game: a rating gap
+    left = [Game(w, strong, weak, None, None, None, None) for w in range(5, 9)]
+    rematch = [Game(w, weak, strong, None, None, None, None) for w in range(5, 9)]
+    home_wins = sum(rd.final_wins(played + left, s)[strong] - 4 for s in range(50)) / 200
+    away_wins = sum(rd.final_wins(played + rematch, s)[strong] - 4 for s in range(50)) / 200
+    assert home_wins > 0.75 and away_wins > 0.65 and home_wins > away_wins   # rating first, home edge on top
+
+
+def test_the_home_edge_favors_the_home_side_of_an_even_matchup():
+    even = [Game(w, TEAMS[0], TEAMS[1], None, None, None, None) for w in range(1, 1001)]
+    wins = rd.final_wins(even, seed=7)
+    assert wins[TEAMS[0]] > wins[TEAMS[1]] + 30                  # P(home) = Phi(1.5 / 13.5) = 0.544

@@ -5,6 +5,7 @@ change without notice; this client is for personal use and caches results. Proje
 stats are stored rather than ESPN's points, so they can be scored with any league settings.
 """
 import json
+import logging
 
 import httpx
 from sqlalchemy.orm import Session
@@ -12,6 +13,8 @@ from sqlalchemy.orm import Session
 from integrations.weekly_sources import (
     USER_AGENT, PlayerMatcher, SourceError, replace_snapshot, source_row,
 )
+
+log = logging.getLogger(__name__)
 
 URL = "https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/{season}/segments/0/leaguedefaults/3"
 SOURCE = "espn"
@@ -77,9 +80,16 @@ def projected_stats(player: dict, season: int, week: int) -> dict[str, float] | 
     return stats if any(stats.values()) else None
 
 
+def warn_if_empty(players: list, found: int, season: int, week: int) -> None:
+    """A payload with players but no projected line in it: ESPN likely changed its line ids or stat layout."""
+    if players and not found:
+        log.warning("ESPN %s week %s: %d players, no projected lines read", season, week, len(players))
+
+
 def projection_rows(payload: dict, season: int, week: int, matcher: PlayerMatcher) -> list[dict]:
     rows = []
-    for entry in payload.get("players") or []:
+    players = payload.get("players") or []
+    for entry in players:
         player = entry.get("player") or {}
         position = POSITION_IDS.get(player.get("defaultPositionId"))
         stats = projected_stats(player, season, week) if position else None
@@ -92,6 +102,7 @@ def projection_rows(payload: dict, season: int, week: int, matcher: PlayerMatche
         owned = (player.get("ownership") or {}).get("percentOwned")
         row["pct_rostered"] = round(float(owned), 1) if isinstance(owned, (int, float)) else None
         rows.append(row)
+    warn_if_empty(players, len(rows), season, week)
     return rows
 
 

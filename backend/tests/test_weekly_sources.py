@@ -328,6 +328,17 @@ def test_espn_rows_map_stats_and_skip_byes(session, seeded):
     assert json.loads(row["stats"]) == {"rec_yds": 91.0, "rec_tds": 0.8, "rec": 8.0, "two_pt": 0.02}
 
 
+def test_espn_payload_with_players_but_no_lines_warns_with_counts_only(session, seeded, caplog):
+    payload = espn_payload()
+
+    assert espn.projection_rows(payload, SEASON, WEEK + 1, PlayerMatcher(session)) == []   # no line for that week
+    assert espn.projection_rows({"players": []}, SEASON, WEEK, PlayerMatcher(session)) == []
+    espn.projection_rows(payload, SEASON, WEEK, PlayerMatcher(session))
+
+    assert [r.getMessage() for r in caplog.records if r.levelname == "WARNING"] == [
+        f"ESPN {SEASON} week {WEEK + 1}: 3 players, no projected lines read"]
+
+
 def test_espn_lines_without_an_id_are_matched_by_their_fields():
     def line(season, stats, **extra):
         return {"statSourceId": 1, "scoringPeriodId": WEEK, "statSplitTypeId": 1, "stats": stats,

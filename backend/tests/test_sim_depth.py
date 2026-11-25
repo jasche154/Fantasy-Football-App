@@ -1,4 +1,5 @@
 """sim_depth: split backfields, measured on any season and won during a simulated one (no hindsight)."""
+import json
 from dataclasses import replace
 from types import MappingProxyType
 
@@ -102,3 +103,14 @@ def test_the_news_says_why_a_backup_qb_starts():
     notes = sim_depth.fill_ins(world, {1}, {1: Injury("IR", None, "Knee")}, names, 5)
     assert notes == {(2, 5): "Expected to start while Passer 1 is out (IR, Knee)."}
     assert sim_depth.fill_ins(world, {2}, {}, names, 5) == {}          # a backup out changes nothing
+
+
+def test_a_refit_keeps_the_tuned_resolve_rate_and_refuses_a_corrupt_file(tmp_path, monkeypatch):
+    depth = sim_depth
+    monkeypatch.setattr(depth, "PATH", tmp_path / "sim_depth.json")
+    assert depth.stored_resolve_rate() == 0.5                              # no file yet
+    depth.PATH.write_text(json.dumps({"resolve_rate": 0.37}), encoding="utf-8")
+    assert depth.stored_resolve_rate() == 0.37
+    depth.PATH.write_text("{not json", encoding="utf-8")
+    with pytest.raises(ValueError):
+        depth.stored_resolve_rate()

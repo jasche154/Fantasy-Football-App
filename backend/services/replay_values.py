@@ -281,7 +281,7 @@ def league_settings(settings: "replay_state.Settings") -> LeagueSettings:
                           superflex=replay_slots.superflex(settings.starters) > 0)
 
 
-@lru_cache(maxsize=64)
+@lru_cache(maxsize=16)       # x lineup_gain.MAX_LINEUPS solves each: tens of MB at most
 def projector(know: Knowledge) -> lineup_gain.Projector:
     """Week-by-week points for lineup_gain: this week's projection now, the healthy rate afterwards.
 

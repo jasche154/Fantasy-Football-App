@@ -108,9 +108,9 @@ def with_status_now(session: Session, base: SeasonData, week: int) -> SeasonData
     (its length drawn by the injury model); Questionable and healthy are left to the model. A player already
     hard-tagged in the last real week keeps that streak, and an Out / Doubtful status older than availability's
     freshness window is not news of this week (skipped, counted in the log); IR / PUP / suspended last weeks, so
-    they count however old the sync is, unless he played in week - 1 after it was fetched (activated since)."""
+    they count however old the sync is, unless he played a game that kicked off after it was fetched (activated
+    since, also during a bye week). Most statuses stale means the Sleeper sync has stopped: logged at WARNING."""
     from datetime import timedelta, timezone
-    from types import MappingProxyType
 
     from sqlalchemy import select
 
@@ -121,7 +121,7 @@ def with_status_now(session: Session, base: SeasonData, week: int) -> SeasonData
     from services.replay_pool import Injury
 
     cutoff = datetime.now(timezone.utc) - timedelta(hours=SLEEPER_FRESH_HOURS)
-    added, stale = {}, 0
+    added, stale, read = {}, 0, 0
     for pid, status, body, fetched in session.execute(select(
             PlayerStatus.player_id, PlayerStatus.injury_status, PlayerStatus.injury_body_part,
             PlayerStatus.fetched_at).where(PlayerStatus.injury_status.is_not(None))):
@@ -129,23 +129,29 @@ def with_status_now(session: Session, base: SeasonData, week: int) -> SeasonData
         last = base.injuries.get((pid, week - 1))
         if tag is None or pid not in base.players or (pid, week) in base.injuries or (last and last.hard):
             continue
-        if utc(fetched) < cutoff and (tag not in LONG_TAGS or _played_since(base, pid, week - 1, utc(fetched))):
+        read += 1
+        if utc(fetched) < cutoff and (tag not in LONG_TAGS or _played_since(base, pid, week, utc(fetched))):
             stale += 1
             continue
         added[(pid, week)] = Injury(tag, None, (body or "").strip()[:MAX_TEXT] or None)
     if stale:
-        log.info("Week %s status: %s statuses older than %sh skipped", week, stale, SLEEPER_FRESH_HOURS)
+        level = logging.WARNING if stale * 2 > read else logging.INFO
+        log.log(level, "Week %s status: %s of %s statuses older than %sh skipped", week, stale, read, SLEEPER_FRESH_HOURS)
     return replace(base, injuries=MappingProxyType({**base.injuries, **added})) if added else base
 
 
 def _played_since(base: SeasonData, pid: int, week: int, fetched: datetime) -> bool:
-    """He played in `week` after the status was fetched (activated since). A tag fetched after that game's kickoff
-    (hurt Sunday, IR Tuesday) is newer than the game; a game with no known kickoff counts as after the sync."""
-    if (pid, week) not in base.actual and (pid, week) not in base.box:
-        return False
-    game = base.schedule.game(base.team_at(pid, week + 1), week)
-    kickoff = game.kickoff if game else None
-    return kickoff is None or fetched < kickoff
+    """He played a game before `week` that kicked off after the status was fetched (activated since, a bye week
+    after it or not). A tag fetched after a game's kickoff (hurt Sunday, IR Tuesday) is newer than that game; a
+    week - 1 game with no known kickoff counts as after the sync, an older one as before it."""
+    for w in range(1, week):
+        if (pid, w) not in base.actual and (pid, w) not in base.box:
+            continue
+        game = base.schedule.game(base.team_at(pid, w + 1), w)
+        kickoff = game.kickoff if game else None
+        if (kickoff is None and w == week - 1) or (kickoff is not None and fetched < kickoff):
+            return True
+    return False
 
 
 # Sleeper injury_status (upper-cased) -> the replay tag that week's absence starts from (services/availability's

@@ -104,7 +104,7 @@ def project_week(session: Session, data: SeasonData, week: int, settings: Weekly
         key = ("context", week, settings.half_life, settings.usage_weight)
         if key not in cache:
             cache[key] = build_context(session, before, rates, season, week, schedule, use_live=False,
-                                       exclude_rate_season=season, priors=priors)
+                                       exclude_rate_season=season, priors=priors, half_life=settings.half_life)
         context = cache[key]
     games_this_week = {p.player_id: next((g for g in p.games if g.week == week), None) for p in current}
     played = {pid: (g.fantasy_points if g else None) for pid, g in games_this_week.items()}

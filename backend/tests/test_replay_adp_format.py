@@ -162,8 +162,19 @@ def test_a_player_a_thin_list_leaves_out_takes_his_adp_from_another_ffc_list_not
     rows = replay_data.adp_rows(SEASON, half, mfl, [ppr, std])
 
     assert [(r["player_id"], r["adp"], r["stdev"], r["source"], r["team"]) for r in rows] == [
-        (1, 1.5, 0.5, "ffc", None), (2, 170.0, None, "ffc", None), (3, 13.1, 2.4, "ffc", "ATL"),
-        (5, 180.0, None, "ffc", None), (4, 181.0, None, "mfl", None)]   # only a player in no FFC list goes last
+        (1, 1.5, 0.5, "ffc", None), (2, 170.0, None, "ffc", None), (3, 13.1, 2.4, "ffc_borrowed", "ATL"),
+        (5, 180.0, None, "ffc_borrowed", None), (4, 181.0, None, "mfl", None)]   # only a player in no FFC list goes last
+
+
+def test_the_2qb_list_borrows_a_qb_from_a_1qb_list_at_superflex_prices():
+    two_qb = [(adp_history.AdpEntry("ffc", "A", "QB", 1.5, 0.5), 1)]
+    ppr = [(adp_history.AdpEntry("ffc", "Q", "QB", 60.0, 5.0), 2), (adp_history.AdpEntry("ffc", "W", "WR", 30.0, 2.0), 3)]
+
+    rows = replay_data.adp_rows(SEASON, two_qb, [], [ppr], replay_chart.SUPERFLEX_QB_ADP)
+
+    assert [(r["player_id"], r["adp"], r["stdev"], r["source"]) for r in rows] == [
+        (1, 1.5, 0.5, "ffc"), (2, 60.0 * replay_chart.SUPERFLEX_QB_ADP, 5.0 * replay_chart.SUPERFLEX_QB_ADP,
+                               "ffc_borrowed"), (3, 30.0, 2.0, "ffc_borrowed")]
 
 
 def test_a_list_missing_a_player_borrows_the_ppr_lists_adp_first(db):
@@ -173,7 +184,8 @@ def test_a_list_missing_a_player_borrows_the_ppr_lists_adp_first(db):
 
     replay_data.load_adp(db, SEASON, HistoryClient(sites.client(), pause=0))
 
-    assert adp_by_gsis(db, "half")["00-MW1"] == (80.0, "ffc") and adp_by_gsis(db, "2qb")["00-MW1"] == (80.0, "ffc")
+    assert adp_by_gsis(db, "half")["00-MW1"] == (80.0, "ffc_borrowed")
+    assert adp_by_gsis(db, "2qb")["00-MW1"] == (80.0, "ffc_borrowed")
     assert adp_by_gsis(db, "half")["00-HURT"] == (151.0, "mfl")       # the tail still starts after the last pick
 
 
@@ -185,7 +197,22 @@ def test_a_format_fetched_alone_borrows_from_the_stored_ffc_lists(db):
     again = replay_data.load_adp(db, SEASON, HistoryClient(Sites(formats={"half": without("Mike Williams")}).client(),
                                                            pause=0))
 
-    assert again["formats"] == {"half": 7} and adp_by_gsis(db, "half")["00-MW1"] == (80.0, "ffc")
+    assert again["formats"] == {"half": 7} and adp_by_gsis(db, "half")["00-MW1"] == (80.0, "ffc_borrowed")
+
+
+def test_a_borrowed_row_is_never_lent_again(db):
+    # half borrowed Mike Williams from PPR; PPR alone, refetched without him, must not take him back from half
+    replay_data.load_adp(db, SEASON, HistoryClient(Sites(formats={"half": without("Mike Williams"),
+                                                                  "std": without("Mike Williams"),
+                                                                  "2qb": without("Mike Williams")}).client(), pause=0))
+    db.execute(ReplayAdp.__table__.delete().where(ReplayAdp.format == "ppr"))
+    db.commit()
+
+    replay_data.load_adp(db, SEASON, HistoryClient(Sites(formats={"ppr": without("Mike Williams")}).client(),
+                                                           pause=0))
+
+    assert adp_by_gsis(db, "half")["00-MW1"] == (80.0, "ffc_borrowed")
+    assert "00-MW1" not in adp_by_gsis(db)                                 # in no FFC list of its own, nor MFL
 
 
 # ---------------- which list a league reads ----------------

@@ -167,6 +167,12 @@ def _week(pmf: dict[int, float], u: float) -> int:
     return max(pmf)
 
 
+def stored_resolve_rate() -> float:
+    """The tuned resolve_rate a refit keeps: 0.5 before the file exists; a file that can't be read raises (as
+    sim_fit.write), so a refit never silently resets the tuned value."""
+    return json.loads(PATH.read_text(encoding="utf-8")).get("resolve_rate", 0.5) if PATH.exists() else 0.5
+
+
 def fit(seasons: list[int]) -> dict:
     """The real committees of `seasons` (the shape of sim_depth.json, resolve_rate kept from the stored file)."""
     from database.db import SessionLocal
@@ -182,16 +188,12 @@ def fit(seasons: list[int]) -> dict:
     weeks: dict[int, int] = defaultdict(int)
     for c in won:
         weeks[c["week"]] += 1
-    try:
-        tuned = json.loads(PATH.read_text(encoding="utf-8")).get("resolve_rate", 0.5)
-    except (OSError, ValueError):
-        tuned = 0.5
     return {"seasons": seasons, "committee_rate": round(len(rows) / teams, 4),
             "resolved": round(len(won) / max(1, len(rows)), 4),
             "leader": round(sum(c["leader_won"] for c in won) / max(1, len(won)), 4),
             "weeks": {str(w): round(n / len(won), 4) for w, n in sorted(weeks.items())},
             "post_ratio": round(sum(c["ratio"] for c in won) / max(1, len(won)), 4),
-            "resolve_rate": tuned, "counts": {"committees": len(rows), "won": len(won), "team_seasons": teams}}
+            "resolve_rate": stored_resolve_rate(), "counts": {"committees": len(rows), "won": len(won), "team_seasons": teams}}
 
 
 def main() -> None:

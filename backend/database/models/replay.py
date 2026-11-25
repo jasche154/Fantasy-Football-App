@@ -50,7 +50,7 @@ class ReplayAdp(Base):
     format: Mapped[str] = mapped_column(default="ppr", server_default="ppr")
     adp: Mapped[float]
     stdev: Mapped[float | None]
-    source: Mapped[str]                        # "ffc" or "mfl"
+    source: Mapped[str]                        # "ffc", "ffc_borrowed" (another format's FFC list) or "mfl"
     # The ADP source's team code. End-of-season, so hindsight for anyone who moved: replay_pool uses it
     # only for a drafted player who never plays.
     team: Mapped[str | None]

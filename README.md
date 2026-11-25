@@ -922,7 +922,9 @@ that week's games on; only scoring a week reads its real points.
   (Fantasy Football Calculator's 12-team PPR, half-PPR, non-PPR and 2-QB mock drafts, every season
   2018-2025; a player one list leaves out but another FFC list of the season has takes his ADP and spread
   from that list, PPR first, then the nearest format, because FFC's thinner lists drop top players (2026's
-  half-PPR list had no Drake London; he went 13th in PPR); MyFantasyLeague's PPR real drafts fill each list's
+  half-PPR list had no Drake London; he went 13th in PPR; such a row is stored as source `ffc_borrowed` and never
+  lent on again, and a QB the 2-QB list borrows from a 1-QB list has his ADP and spread x `SUPERFLEX_QB_ADP`);
+  MyFantasyLeague's PPR real drafts fill each list's
   tail past the last pick with the players no FFC list has). A league drafts
   from its own list (`services/replay_adp_format.py`): a superflex league (a SFLX slot or 2+ QB slots) the
   2-QB list, otherwise its scoring's list, and custom scoring the preset nearest its points per reception
@@ -1353,10 +1355,12 @@ read the belief, so, as in a real season, the public learns the truth only from 
   created** (`sim_setup.with_status_now`): Out, Doubtful, IR, PUP, suspended (and Sleeper's other zero-chance
   statuses) become a hard tag in the first simulated week, so a player hurt in the last real game (Drake Maye,
   2026 week 10) starts the simulation out, for a length the injury model draws; Questionable is left to the
-  model. Out / Doubtful statuses older than 18 hours (their count is logged) and players already hard-tagged
+  model. Out / Doubtful statuses older than 18 hours (their count is logged, at WARNING when most statuses
+  are that old: the sync has stopped) and players already hard-tagged
   in the last real week are left alone; IR, PUP and suspended last for weeks, so they count however old the
-  sync is, except a stale one fetched before the kickoff of a game he then played in the last real week (he has
-  been activated since; a tag fetched after that game, hurt Sunday and placed on IR Tuesday, still counts). Real weeks never change.
+  sync is, except a stale one fetched before the kickoff of any game he then played (he has been activated
+  since, a bye week after it or not; a tag fetched after that game, hurt Sunday and placed on IR Tuesday, still
+  counts). Real weeks never change.
   On purpose, simulated players get hurt **about a quarter less often** than real ones (`INJURY_SCALE = 0.75`
   in `sim_injuries.py` multiplies the per-game and preseason injury chances, in whole simulated seasons and
   in the live season's simulated weeks alike); how long an injury lasts stays real, and an absence already

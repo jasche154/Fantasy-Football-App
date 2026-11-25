@@ -201,7 +201,7 @@ def rumors(belief: World, ranks: Mapping[int, int]) -> dict[str, dict[int, float
 def expected_changes(belief: World, ranks: Mapping[int, int], from_week: int, last_week: int) -> float:
     """The true changes a season makes on average (sizes the false buzz: sim_market.expected_hints)."""
     knobs, share = settings(), _share(from_week, last_week)
-    starters = [max(qbs, key=lambda p: (p.starts, -p.player_id)) for team in belief.teams
+    starters = [_starter(qbs) for team in belief.teams
                 if (qbs := [p for p in belief.roster(team) if p.position == "QB"])]
     return (len(belief.teams) * (knobs["breakout_rate"] + knobs["bust_rate"])
             + share * sum(bench_chance(ranks.get(p.player_id, UNRANKED)) for p in starters))

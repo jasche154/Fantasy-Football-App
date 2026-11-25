@@ -86,8 +86,9 @@ def _projection(player: dict, season: int, week: int) -> WeekProjection | None:
 def parse_week(payload: Any, season: int, week: int) -> list[WeekProjection]:
     """Every player ESPN projected above zero for the season's week."""
     entries = (payload.get("players") or []) if isinstance(payload, dict) else []
-    return parse_rows("ESPN projections", entries,
-                      lambda entry: _projection(entry.get("player") or {}, season, week))
+    rows = parse_rows("ESPN projections", entries, lambda entry: _projection(entry.get("player") or {}, season, week))
+    espn.warn_if_empty(entries, len(rows), season, week)
+    return rows
 
 
 def week_projections(http: HistoryClient, season: int, week: int) -> list[WeekProjection]:
