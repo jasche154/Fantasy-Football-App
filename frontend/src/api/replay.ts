@@ -4,6 +4,7 @@ import type {
   ReplayActionResult,
   ReplayActivityQuery,
   ReplayAdvanceResult,
+  ReplayBoxScore,
   ReplayChat,
   ReplayClaimBody,
   ReplayClaims,
@@ -134,6 +135,11 @@ export function getReplayPlayer(gameId: number, playerId: number, signal?: Abort
   return apiRequest(`${game(gameId)}/players/${playerId}`, { signal });
 }
 
+/** The box score of the NFL game `team` played in `week` (played weeks only). */
+export function getReplayBox(gameId: number, week: number, team: string, signal?: AbortSignal): Promise<ReplayBoxScore> {
+  return apiRequest(`${game(gameId)}/box`, { query: { week, team }, signal });
+}
+
 export function getReplayClaims(gameId: number, signal?: AbortSignal): Promise<ReplayClaims> {
   return apiRequest(`${game(gameId)}/claims`, { signal });
 }
@@ -157,9 +163,12 @@ export function replayDraftAuto(gameId: number, wholeDraft?: boolean, overall?: 
   return post(`${game(gameId)}/draft/auto`, undefined, { whole_draft: wholeDraft, overall: overall ?? undefined });
 }
 
+/** The week the page shows, sent with a move: the server answers 409 when the league has moved on. */
+const at = (week?: number) => (week == null ? {} : { week });
+
 /** `starters` null: back to the best lineup. */
-export function setReplayLineup(gameId: number, starters: ReplayLineup | null): Promise<ReplayLineupResult> {
-  return post(`${game(gameId)}/lineup`, { starters });
+export function setReplayLineup(gameId: number, starters: ReplayLineup | null, week?: number): Promise<ReplayLineupResult> {
+  return post(`${game(gameId)}/lineup`, { starters, ...at(week) });
 }
 
 export function submitReplayClaim(gameId: number, body: ReplayClaimBody): Promise<ReplayActionResult> {
@@ -185,17 +194,17 @@ export function replayAddDrop(gameId: number, body: ReplayClaimBody): Promise<Re
   return post(`${game(gameId)}/add-drop`, body);
 }
 
-export function replayDrop(gameId: number, playerId: number): Promise<ReplayActionResult> {
-  return post(`${game(gameId)}/drop`, { player_id: playerId });
+export function replayDrop(gameId: number, playerId: number, week?: number): Promise<ReplayActionResult> {
+  return post(`${game(gameId)}/drop`, { player_id: playerId, ...at(week) });
 }
 
 /** Moves an active player tagged O, IR or PUP into the IR slot. */
-export function replayIrPlace(gameId: number, playerId: number): Promise<ReplayActionResult> {
-  return post(`${game(gameId)}/ir/place`, { player_id: playerId });
+export function replayIrPlace(gameId: number, playerId: number, week?: number): Promise<ReplayActionResult> {
+  return post(`${game(gameId)}/ir/place`, { player_id: playerId, ...at(week) });
 }
 
 /** Brings a player back from IR; `drop` makes room on a full roster, `swap` (an injured active player) takes the slot instead. */
-export function replayIrActivate(gameId: number, playerId: number, options: { drop?: number; swap?: number } = {}): Promise<ReplayActionResult> {
+export function replayIrActivate(gameId: number, playerId: number, options: { drop?: number; swap?: number; week?: number } = {}): Promise<ReplayActionResult> {
   return post(`${game(gameId)}/ir/activate`, { player_id: playerId, ...options });
 }
 

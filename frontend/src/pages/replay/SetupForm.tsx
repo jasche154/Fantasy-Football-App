@@ -10,7 +10,7 @@ import { SelectField } from '../../components/SelectField';
 import { Skeleton } from '../../components/StatusViews';
 import { useAction } from '../../hooks/useAction';
 import { useAsync, type AsyncResult } from '../../hooks/useAsync';
-import { LeagueFormatFields, presetRules, sameStarters, ScoringFields, STANDARD_STARTERS, startersBody } from './LeagueRulesFields';
+import { DEFAULT_BENCH, LeagueFormatFields, presetRules, sameStarters, ScoringFields, STANDARD_STARTERS, startersBody } from './LeagueRulesFields';
 import { NOW_PLAYOFF_TEAMS, nowSummary, PAST, RadioCards, SeasonKind, StartChoice } from './SeasonChoice';
 import { adpSource } from './shared';
 
@@ -23,7 +23,6 @@ const DEFAULT_PLAYOFF_END: ReplayPlayoffEndWeek = 17;
 const MIN_PLAYOFF_TEAMS = 4;
 const MAX_PLAYOFF_TEAMS = 8;
 const MAX_NAME_LENGTH = 60;
-const BENCH = 6;                 // backend Settings.bench: not configurable yet
 const STEP_LABELS: Record<string, string> = { starting: 'starting', game_results: 'game results', adp: 'ADP', projections: 'projections',
   injuries: 'injury reports', snaps: 'snap counts' };
 
@@ -141,6 +140,7 @@ export function SetupForm({ onCreated }: { onCreated: (game: ReplaySummary) => v
   const [waiverMode, setWaiverMode] = useState<ReplayWaiverMode>('wednesday');
   const [difficulty, setDifficulty] = useState<ReplayDifficulty>('normal');
   const [starters, setStarters] = useState(STANDARD_STARTERS);
+  const [bench, setBench] = useState(DEFAULT_BENCH);
   const [rules, setRules] = useState<ReplayScoringRules>(presetRules('half'));
 
   const { data: loaded, reload } = seasons;
@@ -199,6 +199,7 @@ export function SetupForm({ onCreated }: { onCreated: (game: ReplaySummary) => v
             playoff_teams: playoffTeams ?? undefined,       // untouched: the server's default for the league size
             // Left out when standard / equal to the preset: the server's defaults.
             starters: sameStarters(starters, STANDARD_STARTERS) ? undefined : startersBody(starters),
+            bench: bench === DEFAULT_BENCH ? undefined : bench,
             scoring_rules: isCustom ? rules : undefined,
             start: isLive ? (isNow ? 'now' : 'full') : undefined,
           });
@@ -245,7 +246,7 @@ export function SetupForm({ onCreated }: { onCreated: (game: ReplaySummary) => v
                 wasStartedHere={prepare.status === 'success'} onPrepare={startPrepare} />
               {isPollFailure && <p className="hint" role="status">Couldn't check the progress just now. Trying again…</p>}
               {prepare.status === 'error' && <p className="error-text" role="alert">{errorMessage(prepare.error)}</p>}
-              <LeagueFormatFields starters={starters} bench={BENCH} onChange={setStarters} />
+              <LeagueFormatFields starters={starters} bench={bench} onChange={setStarters} onBench={setBench} />
               <ScoringFields scoring={scoring} rules={rules} onScoring={setScoring} onRules={setRules} />
               <RadioCards legend="Waivers" options={WAIVER_MODES} value={waiverMode} onChange={setWaiverMode} />
               <RadioCards legend="Difficulty" options={DIFFICULTIES} value={difficulty} onChange={setDifficulty} />

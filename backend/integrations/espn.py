@@ -5,6 +5,7 @@ change without notice; this client is for personal use and caches results. Proje
 stats are stored rather than ESPN's points, so they can be scored with any league settings.
 """
 import json
+import logging
 
 import httpx
 from sqlalchemy.orm import Session
@@ -12,6 +13,8 @@ from sqlalchemy.orm import Session
 from integrations.weekly_sources import (
     USER_AGENT, PlayerMatcher, SourceError, replace_snapshot, source_row,
 )
+
+log = logging.getLogger(__name__)
 
 URL = "https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/{season}/segments/0/leaguedefaults/3"
 SOURCE = "espn"
@@ -31,7 +34,7 @@ TEAMS = {1: "ATL", 2: "BUF", 3: "CHI", 4: "CIN", 5: "CLE", 6: "DAL", 7: "DEN", 8
 
 def fetch_week(http: httpx.Client, season: int, week: int) -> dict:
     player_filter = {"players": {
-        "filterStatsForTopScoringPeriodIds": {"value": 1, "additionalValue": [f"11{season}{week}"]},
+        "filterStatsForTopScoringPeriodIds": {"value": 1, "additionalValue": [line_id(season, week)]},
         "filterSlotIds": {"value": SLOT_IDS}, "limit": PLAYER_LIMIT,
         "sortPercOwned": {"sortPriority": 1, "sortAsc": False}}}
     try:
@@ -48,24 +51,48 @@ def fetch_week(http: httpx.Client, season: int, week: int) -> dict:
         raise SourceError("ESPN projections returned a non-JSON response.") from exc
 
 
-def projected_stats(player: dict, week: int) -> dict[str, float] | None:
+def line_id(season: int, week: int) -> str:
+    """ESPN's id for a season-week's projected weekly line (source, split, season, week)."""
+    return f"{PROJECTED}{WEEKLY_SPLIT}{season}{week}"
+
+
+def projected_line(player: dict, season: int, week: int) -> dict | None:
+    """The player's projected line for this season's week. In season ESPN also sends last season's line for
+    the same week number (a bye week then has only that one), so the line is picked by its id; a line without
+    one is picked by its fields, season included (one without a seasonId can't be told apart: skipped)."""
+    wanted = line_id(season, week)
+
+    def matches(line: dict) -> bool:
+        if "id" in line:
+            return line["id"] == wanted
+        return (line.get("statSourceId"), line.get("statSplitTypeId"), line.get("seasonId"),
+                line.get("scoringPeriodId")) == (PROJECTED, WEEKLY_SPLIT, season, week)
+    return next((line for line in player.get("stats") or [] if isinstance(line, dict) and matches(line)), None)
+
+
+def projected_stats(player: dict, season: int, week: int) -> dict[str, float] | None:
     """The player's projected stat line for the week, or None (bye week / no projection)."""
-    for line in player.get("stats") or []:
-        if (line.get("statSourceId") == PROJECTED and line.get("scoringPeriodId") == week
-                and line.get("statSplitTypeId") == WEEKLY_SPLIT and line.get("stats")):
-            raw = line["stats"]
-            stats = {key: float(raw[stat_id]) for stat_id, key in STAT_IDS.items() if raw.get(stat_id)}
-            stats["two_pt"] = sum(float(raw.get(stat_id) or 0) for stat_id in TWO_POINT_IDS)
-            return stats
-    return None
+    raw = (projected_line(player, season, week) or {}).get("stats")
+    if not raw:
+        return None
+    stats = {key: float(raw[stat_id]) for stat_id, key in STAT_IDS.items() if raw.get(stat_id)}
+    stats["two_pt"] = sum(float(raw.get(stat_id) or 0) for stat_id in TWO_POINT_IDS)
+    return stats if any(stats.values()) else None
+
+
+def warn_if_empty(players: list, found: int, season: int, week: int) -> None:
+    """A payload with players but no projected line in it: ESPN likely changed its line ids or stat layout."""
+    if players and not found:
+        log.warning("ESPN %s week %s: %d players, no projected lines read", season, week, len(players))
 
 
 def projection_rows(payload: dict, season: int, week: int, matcher: PlayerMatcher) -> list[dict]:
     rows = []
-    for entry in payload.get("players") or []:
+    players = payload.get("players") or []
+    for entry in players:
         player = entry.get("player") or {}
         position = POSITION_IDS.get(player.get("defaultPositionId"))
-        stats = projected_stats(player, week) if position else None
+        stats = projected_stats(player, season, week) if position else None
         if not stats or not player.get("fullName"):
             continue
         team = TEAMS.get(player.get("proTeamId"))
@@ -75,6 +102,7 @@ def projection_rows(payload: dict, season: int, week: int, matcher: PlayerMatche
         owned = (player.get("ownership") or {}).get("percentOwned")
         row["pct_rostered"] = round(float(owned), 1) if isinstance(owned, (int, float)) else None
         rows.append(row)
+    warn_if_empty(players, len(rows), season, week)
     return rows
 
 

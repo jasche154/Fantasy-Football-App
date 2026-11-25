@@ -102,7 +102,7 @@ def relevant(data: SeasonData) -> dict[int, str]:
 
 
 def _hurt(injury) -> bool:
-    return (injury is not None and injury.tag != "SUS"
+    return (injury is not None and injury.tag not in ("SUS", "EXE")
             and not (injury.injury or "").lower().startswith(NOT_INJURY))
 
 
@@ -388,6 +388,7 @@ def main(argv: list[str] | None = None) -> None:
     if args.check:
         sim, real = check(), si.stored()["real"]
         for position in TOP:
-            log.info("%s missed/player-season real %.2f sim %.2f | lengths real %s sim %s", position,
-                     real["missed_per_player"][position], sim["missed_per_player"][position],
+            log.info("%s missed/player-season real %.2f target %.2f sim %.2f | lengths real %s sim %s", position,
+                     real["missed_per_player"][position], real["missed_per_player"][position] * si.INJURY_SCALE,
+                     sim["missed_per_player"][position],
                      real["length_hist"][position], sim["length_hist"][position])

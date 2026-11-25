@@ -51,6 +51,14 @@ export interface ReplayViewProps {
   isBusy: boolean;
   actError: string | null;
   openPlayer: (playerId: number) => void;
+  /** A game named in the URL (#/play?...&view=matchup&week=W&team=T): the Matchup tab opens on it. */
+  matchupAt?: MatchupAt;
+}
+
+/** One league game: a week and either of its teams. */
+export interface MatchupAt {
+  week: number;
+  teamId: number;
 }
 
 // ---------------- tabs and the URL ----------------
@@ -66,8 +74,8 @@ export const REPLAY_VIEWS: readonly { value: ReplayView; label: string }[] = [
 ];
 
 /** The game screen's URL for a tab (#/play?game=ID&view=...). */
-export function viewHash(gameId: number, view: ReplayView): string {
-  return buildHash(paths.play, { game: gameId, view });
+export function viewHash(gameId: number, view: ReplayView, at?: MatchupAt): string {
+  return buildHash(paths.play, at ? { game: gameId, view, week: at.week, team: at.teamId } : { game: gameId, view });
 }
 
 // ---------------- formatting ----------------
@@ -108,12 +116,13 @@ interface ReplayPlayerCellProps {
 
 const TAG_WORDS: Record<ReplayInjuryTag, string> = {
   Q: 'Questionable', D: 'Doubtful', O: 'Out', IR: 'Injured reserve', PUP: 'Physically unable to perform', SUS: 'Suspended',
+  EXE: "Commissioner's exempt list",
 };
 const PRACTICE_WORDS: Record<ReplayPractice, string> = { DNP: 'did not practice', LP: 'limited practice', FP: 'full practice' };
-const HARD_TAGS: readonly ReplayInjuryTag[] = ['O', 'IR', 'PUP', 'SUS'];
+const HARD_TAGS: readonly ReplayInjuryTag[] = ['O', 'IR', 'PUP', 'SUS', 'EXE'];
 const IR_TAGS: readonly ReplayInjuryTag[] = ['O', 'IR', 'PUP'];
 
-/** O, IR, PUP, SUS: he does not play this week. */
+/** O, IR, PUP, SUS, EXE: he does not play this week. */
 export function isHardTag(injury: ReplayInjury | null | undefined): boolean {
   return !!injury && HARD_TAGS.includes(injury.tag);
 }
@@ -185,6 +194,14 @@ export function showsOut(out: boolean | undefined, injury: ReplayInjury | null |
   return !!out && !isHardTag(injury);
 }
 
+/** Why "Out" can sit next to a Q or D tag: the tag is the week's injury report, Out is the pre-game projection. */
+export const OUT_REASON = 'Out: no projection for this game, so he is not expected to play';
+
+/** The plain Out badge (see showsOut), its reason on hover. */
+export function ReplayOutBadge({ className = '' }: { className?: string }) {
+  return <span className={`status-badge status-badge--out${className ? ` ${className}` : ''}`} title={OUT_REASON}>Out<span className="sr-only">: {OUT_REASON.replace(/^Out: /, '')}</span></span>;
+}
+
 /** The user's IR players who lost their tag block adds, claims and trades; null when nothing is blocked. */
 export function irBlockedText(game: ReplaySummary): string | null {
   if (game.ir_blocked.length === 0 || !EDIT_PHASES.includes(game.phase)) return null;
@@ -216,7 +233,7 @@ export function ReplayPlayerCell({ player, info = {}, onOpen }: ReplayPlayerCell
         {info.opponent && !info.bye && <span className="player-cell__team">vs {info.opponent}</span>}
         {info.bye && <span className="status-badge status-badge--missing">Bye</span>}
         {player.injury && <ReplayInjuryBadge injury={player.injury} />}
-        {showsOut(info.out, player.injury) && <span className="status-badge status-badge--out">Out</span>}
+        {showsOut(info.out, player.injury) && <ReplayOutBadge />}
         <ReplayBuzzChip text={info.buzz} onOpen={onOpen && (() => onOpen(player.id))} />
         {info.trade_locked && (
           <span className="status-badge status-badge--missing" title="Traded in the last two weeks, so he can't be traded yet">Trade-locked</span>

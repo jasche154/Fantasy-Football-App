@@ -39,6 +39,36 @@ def test_weekly_and_season_metrics_cover_the_report(data):
     assert season["ADP vs finish r RB"] > 0.5          # the fake season mostly plays to its ADP
 
 
+def test_injury_metrics_count_new_injuries_per_game_played_and_missed_share(data):
+    from services.replay_pool import Injury
+
+    weeks = range(1, data.last_week + 1)
+    before = sim_metrics.injuries(data, weeks)
+    assert set(before) == {f"{name} {p}" for p in sim_metrics.SKILL for name in ("new inj/game", "missed share")}
+    rb = min((p.adp, pid) for pid, p in data.players.items() if p.position == "RB" and p.adp)[1]
+    games = [w for w in weeks if (rb, w) in data.actual]
+    a, b = games[3], games[5]                         # he misses game a (any injury tag: a Q ruled out counts)...
+    actual = {k: v for k, v in data.actual.items() if k not in {(rb, a), (rb, b)}}
+    tagged = replace(data, actual=MappingProxyType(actual),
+                     injuries=MappingProxyType({**data.injuries, (rb, a): Injury("Q", "DNP", "Knee"),
+                                                (rb, b): Injury("SUS", None, "Suspension")}))   # ... b isn't one
+    after = sim_metrics.injuries(tagged, weeks)
+    assert after["new inj/game RB"] > before["new inj/game RB"]
+    assert after["missed share RB"] > before["missed share RB"]
+    assert all(after[k] == before[k] for k in before if not k.endswith("RB"))
+    shares = [after[f"missed share {p}"] for p in sim_metrics.SKILL]
+    assert all(0 <= s <= 1 for s in shares)
+    assert set(sim_metrics.injuries(data, range(12, 18))) <= set(sim_metrics.weekly(data, range(12, 18)))
+
+
+def test_injury_targets_scale_the_real_rates():
+    from services import sim_injuries
+
+    real = {"new inj/game RB": 0.06, "missed share RB": 0.16, "RB1 q50": 12.0}
+    assert sim_eval.injury_targets(real) == pytest.approx(
+        {"new inj/game RB": 0.06 * sim_injuries.INJURY_SCALE, "missed share RB": 0.16 * sim_injuries.INJURY_SCALE})
+
+
 def test_the_mid_season_base_knows_nothing_from_the_cut_on(data):
     base = sim_eval.cut(data, 12)
     assert max(w for _, w in base.actual) == 11 and base.known_before is None

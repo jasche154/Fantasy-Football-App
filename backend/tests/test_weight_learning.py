@@ -35,6 +35,15 @@ def test_pooled_fit_moves_toward_the_accurate_source_but_stays_near_the_prior(mo
     assert wl.fit_pooled(samples) == DEFAULT_WEIGHTS                            # too few rows: the prior
 
 
+def test_pooled_fit_keeps_the_prior_when_no_row_has_two_sources(monkeypatch):
+    """Single-source rows (the rest filled with the row mean) never disagree: nothing to learn, and no
+    singular solve."""
+    monkeypatch.setattr(wl, "MIN_POOLED_ROWS", 10)
+    keys = list(DEFAULT_WEIGHTS)
+    samples = [Sample({keys[i % len(keys)]: 3.0 + i * 0.37}, 4.0 + i * 0.3) for i in range(400)]
+    assert wl.fit_pooled(samples) == wl.constrain(DEFAULT_WEIGHTS)
+
+
 def _seed_history(session, seeded, week, final=True, players=120):
     session.add(NflGame(game_id=f"lw{week}", season=2026, week=week, game_type="REG", home_team="AAA",
                         away_team="BBB", home_score=24 if final else None, away_score=20 if final else None))
@@ -104,3 +113,20 @@ def test_weights_learned_under_the_old_five_source_blend_are_ignored(session):
                                                    "yahoo_consensus": 0.1, "espn": 0.1})))
     session.commit()
     assert wl.effective_weights(session) == (dict(DEFAULT_WEIGHTS), None)
+
+
+def test_pseudo_rows_count_as_rows_even_when_sources_agree_closely():
+    # Real sources are 0.9+ correlated: they differ by a couple of points around a ~12 point level.
+    # 1,200 rows where the experts are clearly best must move the weights, not stay at the prior.
+    import random
+
+    rng = random.Random(0)
+    samples = []
+    for _ in range(1200):
+        truth = rng.uniform(4, 24)
+        samples.append(Sample({"experts": truth + rng.gauss(0, 0.5), "espn": truth + rng.gauss(0, 3),
+                               "model": truth + rng.gauss(0, 3), "vegas_props": truth + rng.gauss(0, 3)},
+                              truth + rng.gauss(0, 6)))
+    fit = wl.fit_pooled(samples)
+    assert fit["experts"] > DEFAULT_WEIGHTS["experts"] + 0.1
+    assert fit["experts"] < wl.fit_pooled(samples, pseudo_rows=1)["experts"]   # still shrunk toward the prior

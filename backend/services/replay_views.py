@@ -20,9 +20,9 @@ Shared pieces
       mood          who a CPU is down on and high on right now, e.g. "Worried about X. High on Y."
                     (services/replay_mood.py); null for the user, in the draft, before 3 NFL weeks of results are
                     known (replay_mood.moods_known: week 4 on, which is the first week of a league that jumped in at
-                    week 4 or later), or with no
+                    week 4 or later), once the season is over, or with no
                     feelings
-  Injury     {tag: Q | D | O | IR | PUP | SUS, practice: DNP | LP | FP | null, injury: string | null}
+  Injury     {tag: Q | D | O | IR | PUP | SUS | EXE, practice: DNP | LP | FP | null, injury: string | null}
   PlayerRef  {id, name, position, team, injury: Injury | null, hype: {reason} | null}
       team          his NFL team as known before the week shown, or null
       hype          the trade market is hyping him: an opportunity shock (services/replay_shocks.py) lifted his
@@ -30,9 +30,10 @@ Shared pieces
                     out for the season", "he won the backfield" (the UI shows "role jumped after <reason>").
                     Null otherwise, for a move down, and always in a preseason draft room.
       injury        his tag in the CURRENT week, wherever the ref appears (events, offers, verdicts, claims). Only a
-                    PlayerRow built for another week (team / matchup with ?week=) carries that week's tag. Always null
-                    in a preseason draft room (a jump-in league's draft room shows its start week's tags).
-                    O, IR, PUP and SUS mean he does not play; O, IR and PUP may go on IR.
+                    PlayerRow built for another week (team / matchup with ?week=) carries that week's tag. In a preseason
+                    draft room only week 1's preseason moves (IR, PUP, SUS, EXE: replay_pool.PRESEASON_TAGS),
+                    else null (a jump-in league's draft room shows its start week's tags).
+                    O, IR, PUP, SUS and EXE (exempt list) mean he does not play; O, IR and PUP may go on IR.
   PlayerRow  {player: PlayerRef, opponent, bye, out, projection, points, ros_ppg, value, rank, pos_rank, adp,
               pre_rank, expert_rank, news: {back, text} | null, buzz: string | null, games, ppg, trade_locked,
               defense}
@@ -51,7 +52,7 @@ Shared pieces
                     a rumour, right only some of the time. Null otherwise (always in a real replay).
       games, ppg    real games and points a game BEFORE that week
       out           no projection in his team's latest game week (this one, or the one before a bye), or an
-                    O / IR / PUP / SUS tag this week
+                    O / IR / PUP / SUS / EXE tag this week
       trade_locked  traded in the last two weeks
       defense       DefenseRating (services/replay_defense.py) of that week's opponent vs his position, as known
                     before that week; null for K/DST, a bye, an unknown team or nothing known
@@ -63,11 +64,13 @@ Shared pieces
                     "Consolation")
   Event      {id, week, kind, team: TeamRef | null, text, players: PlayerRef[]}
       kind          draft | add | drop | claim | trade | ir | result | playoffs | champion
-      an add or claim with a drop is ONE event (no separate "drop"): players = [added, dropped]
+      an add, claim or IR activation with a drop is ONE event (no separate "drop"): players = [added, dropped]
   Page       {total, limit, offset, results: [...]}
   Verdict    {accepted, reasons: string[], fair_label, value_give, value_get, percent, your_gain, their_gain,
               give: [{player: PlayerRef, value}], get: [same], your_drops: PlayerRef[], their_drops: PlayerRef[],
               suggestion: string | null}
+      value_give / value_get and each player's value are chart numbers (1 decimal); the UI shows them as whole
+      numbers, rounded half up like PlayerRow.value (`whole`), so a player reads the same on every screen.
       "give" is always what the USER sends. percent: (get - give) / the larger, a fraction; above 0 the
       user gets more. fair_label: fair | slight_win | big_win | slight_loss | big_loss (for the user).
       your_gain / their_gain: season-weighted lineup points each side gains.
@@ -184,6 +187,7 @@ GET  .../trades                   {open, deadline_week, max_players, offers: [Of
       offers: CPU offers the user can answer, each with a preview Verdict from the user's side (or null
       and a note saying why it cannot be accepted as is). results: every other offer and trade, newest first.
 """
+import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from functools import cached_property
@@ -270,7 +274,7 @@ def team_ref(game: Game, team: Team) -> dict:
     """tendency and mood: hints at a CPU's (hidden) persona and feelings, once it has played enough league weeks."""
     tendency = None if team.is_user else replay_personas.tendency(team.persona, game.weeks_played)
     # A mood is about his players' form: it needs played NFL weeks, not league weeks (a jump-in league has them).
-    feels = not team.is_user and game.state.phase != "draft" and replay_mood.moods_known(game.state.week)
+    feels = not team.is_user and game.state.phase not in ("draft", "complete") and replay_mood.moods_known(game.state.week)
     mood = game.moods.get(team.id) if feels else None
     return {"team_id": team.id, "name": team.name, "is_user": team.is_user, "tendency": tendency, "mood": mood}
 
@@ -320,6 +324,11 @@ def result_of(state: State, week: int) -> WeekResult | None:
     return next((result for result in state.results if result.week == week), None)
 
 
+def whole(chart: float) -> int:
+    """A chart value as shown: half up, as the browser rounds a verdict's values (round() would send 512.5 as 512)."""
+    return math.floor(chart + 0.5)
+
+
 def player_row(game: Game, know: Knowledge, player_id: int) -> dict:
     """A PlayerRow as of `know.week`."""
     value, week = know.by_id[player_id], know.week
@@ -328,7 +337,7 @@ def player_row(game: Game, know: Knowledge, player_id: int) -> dict:
     bye = bool(week) and value.team is not None and opponent is None
     return {"player": player_ref(value), "opponent": "BYE" if bye else opponent, "bye": bye, "out": value.out,
             "projection": round(value.projection, 2), "points": points, "ros_ppg": value.ros_ppg,
-            "value": round(value.chart), "rank": value.rank, "pos_rank": value.pos_rank, "adp": value.adp,
+            "value": whole(value.chart), "rank": value.rank, "pos_rank": value.pos_rank, "adp": value.adp,
             "pre_rank": value.pre_rank, "expert_rank": value.expert_rank, "news": news(value),
             "buzz": buzz(game, player_id, week), "games": value.games, "ppg": value.ppg,
             "defense": replay_defense.ratings(game.full_season.as_of(week)).rating(opponent, value.position),

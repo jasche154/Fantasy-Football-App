@@ -20,9 +20,12 @@ bye is behind him.
   is below his prior.
 
 - healthy_chart = w x value_at(expert rank) + (1 - w) x value_at(model rank), x BYE_BUMP once the bye is
-  past. The model rank is his fractional position rank on `model_ppg` (ros_ppg moved toward his last real
-  games). w = EXPERT_WEIGHT for a snapshot at most EXPERT_FRESH_DAYS old, halved per further week; before
-  the first in-season snapshot the preseason ranks stand in (ageing a week per week played).
+  past, never above CHART_MAX (nor after an opportunity shock). The model rank is his fractional position
+  rank on `model_ppg` (ros_ppg moved toward his last real games). w = EXPERT_WEIGHT for a snapshot at most
+  EXPERT_FRESH_DAYS old, halved per further week; before the first in-season snapshot the preseason ranks
+  stand in (ageing a week per week played). A season with no expert ranks at all (2018-19) has the ranks of
+  ros_ppg (the sites' slow consensus) stand in at EXPERT_WEIGHT from week 1 (STAND_IN_EXPERTS): the model
+  alone swung QBs 124 -> 495 -> 633 in three weeks; this halves the weekly moves and ranks no worse.
 - chart: with a news report (replay_news), healthy_chart x share of games he plays x AVAILABILITY_SHARE (0 if
   out for the season; from his second week out only the model half is discounted, the experts already price
   it). Out without a report: healthy_chart x the OUT_SHARE availability replay_values gives him.
@@ -58,6 +61,7 @@ BYE_BUMP = 1.03                # once his bye is behind him
 AVAILABILITY_SHARE = 0.9       # chart x share_played x this, when a news report exists
 DAYS_PER_WEEK = 7
 SUPERFLEX_QB_ADP = 0.4         # superflex without a 2-QB ADP list: a QB's ADP x this
+STAND_IN_EXPERTS = True        # a season with no expert ranks at all: ros_ppg ranks stand in at EXPERT_WEIGHT
 
 
 @lru_cache(maxsize=64)
@@ -257,6 +261,7 @@ def base_charts(data: SeasonData, rows: Sequence[dict], priors: Mapping[int, flo
     fields: dict[int, dict] = {}
     parts: dict[int, tuple[float, float, tuple[int, int, str]]] = {}
     source = "model"
+    no_experts = not data.expert_ranks and STAND_IN_EXPERTS     # 2018-19: no expert ranks were ever loaded
     for position, group in by_position.items():
         ranks = [listed[r["player_id"]] for r in group if r["player_id"] in listed]
         w = age_weight if ranks else 0.0
@@ -267,12 +272,17 @@ def base_charts(data: SeasonData, rows: Sequence[dict], priors: Mapping[int, flo
                                           stars[r["player_id"]]) for r in group}
         model = fractional_ranks(replay_role.model_scores(data, group, form, week))
         plain = fractional_ranks({r["player_id"]: r["ros_ppg"] for r in group})
+        consensus = {pid: float(listed.get(pid, last + UNLISTED_GAP)) for pid in stars}
+        if no_experts and week > 0:             # the sites' own slow consensus (ros_ppg) stands in for the experts
+            consensus, w = plain, EXPERT_WEIGHT
         for row in group:
             pid = row["player_id"]
             bump = BYE_BUMP if _bye_done(data, row["team"], week) else 1.0
-            expert = w * value_at(curve, position, listed.get(pid, last + UNLISTED_GAP)) * bump if w else 0.0
+            expert = w * value_at(curve, position, consensus[pid]) * bump if w else 0.0
             model_value = value_at(curve, position, model[pid])
             model_part = (1 - w) * model_value * bump
+            if expert + model_part > CHART_MAX:         # the bye bump never lifts anyone past the top of the scale
+                expert, model_part = (part * CHART_MAX / (expert + model_part) for part in (expert, model_part))
             streak = replay_news.open_streak(data, pid, week)
             if streak is not None:
                 parts[pid] = (expert, model_part, streak)
@@ -293,7 +303,7 @@ def with_news(data: SeasonData, rows: Mapping[int, dict], fields: Mapping[int, d
     players an opportunity shock moves (replay_shocks: the market's reaction, which reads that news)."""
     out: dict[int, dict] = {}
     for pid, (expert, model_part, (since, back, tag)) in parts.items():
-        news = replay_news.report(seed, pid, since, back, week, tag)
+        news = replay_news.report(seed, pid, since, back, week, tag, data.last_week)
         chart, extra = _injured(data, rows[pid], news, week, end_week, expert, model_part)
         out[pid] = {**fields[pid], **extra, "chart": round(chart, 1), "news": news}
     return {**out, **_shocked(data, rows, fields, out, week)}
@@ -322,7 +332,7 @@ def _shocked(data: SeasonData, rows: Mapping[int, dict], fields: Mapping[int, di
                                 lambda position, rank: value_at(curve, position, rank))
     for pid, (delta, shock) in found.items():
         now = news.get(pid, fields[pid])
-        moved = max(0.0, now["healthy_chart"] + delta)
+        moved = min(CHART_MAX, max(0.0, now["healthy_chart"] + delta))
         chart = now["chart"] * moved / now["healthy_chart"]          # > 0: moves() scales delta by it
         other = data.players[shock.other].name if shock.other in data.players else None
         missed = 1.0 - availability.get(shock.other, 1.0)

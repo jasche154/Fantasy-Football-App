@@ -65,7 +65,7 @@ def test_who_should_i_start_shows_the_best_lineup_and_changes(session, league):
     reply = answer_directly(session, ask("Who should I start this week?"))
     assert reply is not None and "Best lineup for week" in reply.reply
     assert "- RB: RB Player 01" in reply.reply
-    assert "Changes to make:\n- Start RB Player 01 (8.7) over RB Player 20" in reply.reply
+    assert "Changes to make:\n- Start RB Player 01 (8.6) over RB Player 20" in reply.reply
 
 
 def test_a_lineup_without_changes_says_so_and_lists_alerts_and_locks():

@@ -16,11 +16,19 @@ def test_the_2027_file_loads_with_the_users_pick():
     rookies, moves = so.load(2027)
     assert 45 <= len(rookies) <= 60 and 10 <= len(moves) <= 30
     smith = next(r for r in rookies if r.name == "Jeremiah Smith")
-    assert (smith.team, smith.position, smith.pick) == ("MIA", "WR", 1)
+    assert (smith.team, smith.position, smith.pick) == ("MIA", "WR", 1) and smith.hype > 1.0    # the user's hype
+    assert all(r.hype == 1.0 for r in rookies if r is not smith)
     assert all(r.team in TEAMS and 1 <= r.pick <= so.MAX_PICK for r in rookies)
     assert any(m.team is None for m in moves) and all(m.note for m in moves)
     raw = _raw()
     assert raw["as_of"] == "2026-11-23" and raw["sources"]
+
+
+def test_a_lock_is_read_and_defaults_to_false():
+    raw = _raw()
+    raw["rookies"][0]["lock"] = True
+    rookies, _ = so.parse(raw)
+    assert rookies[0].lock and not any(r.lock for r in rookies[1:])
 
 
 def test_missing_season_has_nothing():
@@ -31,6 +39,9 @@ def test_missing_season_has_nothing():
     (lambda raw: raw["rookies"][0].update(team="XXX"), "unknown team code 'XXX'"),
     (lambda raw: raw["rookies"][1].update(position="LB"), "position 'LB'"),
     (lambda raw: raw["rookies"][2].update(pick=300), "pick 300"),
+    (lambda raw: raw["rookies"][2].update(hype=0.5), "hype 0.5"),
+    (lambda raw: raw["rookies"][2].update(hype="big"), "hype 'big'"),
+    (lambda raw: raw["rookies"][2].update(lock="yes"), "lock 'yes'"),
     (lambda raw: raw["rookies"][3].update(pick=raw["rookies"][4]["pick"]), "used twice"),
     (lambda raw: raw["moves"].append({**raw["moves"][0]}), "listed twice"),
     (lambda raw: raw["moves"].append({"name": "Jeremiah Smith Jr.", "position": "WR", "team": None, "note": "x"}),

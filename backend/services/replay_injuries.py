@@ -1,6 +1,6 @@
 """Replay League: each past week's injury tags (step 5 of replay_data.prepare_season).
 
-Q, D and O come from the official weekly injury report; IR, PUP and SUS from the weekly roster status
+Q, D and O come from the official weekly injury report; IR, PUP, SUS and EXE from the weekly roster status
 (nflverse, through nflreadpy). Both are known before that week's games: a player hurt in game W is still
 active in week W's roster and on a reserve list from W + 1. `injury_rows` is pure; `download` is the only
 network code, and nflreadpy is imported inside it, never at import time (this module is loaded at app start).
@@ -25,6 +25,7 @@ NO_TAG = ("R02", "R03", "R06", "R62")       # retired, did not report, left squa
 NO_CARRY = ("R05", "R27", "R59")            # non-football injury or illness, COVID list: no carried injury text
 NOT_INJURY = ("not injury related", "rest", "personal", "coach")   # report text naming no injury: never carried
 ACTIVE = ("ACT", "INA")
+NOT_HURT = ("SUS", "EXE")                   # roster moves that are no injury: no practice status or injury text
 MAX_TEXT = 60
 REPORT_COLUMNS = ["season", "week", "game_type", "gsis_id", "team", "report_status", "practice_status",
                   "report_primary_injury", "practice_primary_injury"]
@@ -40,7 +41,9 @@ def _practice(text: str | None) -> str | None:
 
 def roster_tag(status: str | None, abbr: str | None) -> str | None:
     """The tag a weekly roster status gives (None for active, cut, holdouts and the reserve lists in NO_TAG:
-    retired, did not report, left squad, 2020 opt-out)."""
+    retired, did not report, left squad, 2020 opt-out). EXE: the commissioner's exempt list (Josh Gordon 2020)."""
+    if status == "EXE":
+        return "EXE"
     if status == "PUP" or (status == "RES" and abbr == "R04"):
         return "PUP"
     if status == "SUS" or (status == "RES" and abbr in SUSPENDED):
@@ -101,7 +104,7 @@ def injury_rows(season: int, reports: list[dict], rosters: list[dict], player_id
             if tag is None:
                 continue
             practice = injury = None
-            if tag != "SUS":                                                      # D5
+            if tag not in NOT_HURT:                                               # D5
                 practice = _practice((report or {}).get("practice_status"))
                 injury = own
                 if injury is None and tag in IR_TAGS and (roster or {}).get("status_description_abbr") not in NO_CARRY:

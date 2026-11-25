@@ -181,7 +181,7 @@ describe('ClaimsPanel FAAB', () => {
     await user.clear(bid);
     await user.type(bid, '17');
     await user.click(dialog.getByRole('button', { name: 'Submit claim' }));
-    await waitFor(() => expect(api.callsTo(CLAIMS, 'POST')[0]?.body).toEqual({ add: MOSTERT.id, bid: 17 }));
+    await waitFor(() => expect(api.callsTo(CLAIMS, 'POST')[0]?.body).toEqual({ add: MOSTERT.id, week: 5, bid: 17 }));
     expect(await screen.findByText('Claim for Raheem Mostert is in for $17. It is settled on “Sim to Wednesday”.')).toBeInTheDocument();
   });
 
@@ -191,7 +191,7 @@ describe('ClaimsPanel FAAB', () => {
     const dialog = within(await screen.findByRole('dialog', { name: 'Claim Raheem Mostert' }));
     await user.click(await dialog.findByRole('button', { name: 'Submit claim' }));
     expect(dialog.queryByRole('spinbutton')).not.toBeInTheDocument();
-    await waitFor(() => expect(api.callsTo(CLAIMS, 'POST')[0]?.body).toEqual({ add: MOSTERT.id }));
+    await waitFor(() => expect(api.callsTo(CLAIMS, 'POST')[0]?.body).toEqual({ add: MOSTERT.id, week: 5 }));
     expect(screen.queryByText(/\$\d+ left/)).not.toBeInTheDocument();
   });
 });
@@ -210,6 +210,6 @@ describe('PlayersView claim dialog', () => {
 
     await user.click(none);
     await user.click(dialog.getByRole('button', { name: 'Submit claim' }));
-    await waitFor(() => expect(api.callsTo(CLAIMS, 'POST')[0]?.body).toEqual({ add: MOSTERT.id }));
+    await waitFor(() => expect(api.callsTo(CLAIMS, 'POST')[0]?.body).toEqual({ add: MOSTERT.id, week: 5 }));
   });
 });

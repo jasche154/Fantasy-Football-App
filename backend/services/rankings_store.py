@@ -40,7 +40,7 @@ MODEL_FILES = ("weekly_rankings.py", "weekly_adjust.py", "weekly_model.py", "inj
                "valuation.py", "projections.py", "ros_consensus.py", "schedule_strength.py",
                "projection_ranges.json", "score_ranges.py", "score_ranges.json",
                "injury_recovery.py", "injury_recovery.json", "injury_news.py",
-               "threshold_odds.py", "props_calibration.py")
+               "threshold_odds.py", "props_calibration.py", "projection_factors.py", "projection_factors.json")
 SNAPSHOT_TTL = timedelta(days=21)
 KEY_FILE = SERVICES_DIR.parent / ".snapshot_key"
 SIGNATURE_BYTES = 32

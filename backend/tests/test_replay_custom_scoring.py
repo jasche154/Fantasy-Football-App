@@ -241,6 +241,13 @@ def test_create_a_superflex_league_with_custom_scoring(client):
     assert len(flexed) == 1 and flexed[0]["player"]["position"] in ("QB", "RB", "WR", "TE")
 
 
+def test_create_sets_the_bench_and_refuses_one_out_of_range(client):
+    status, answer = create(client, bench=3)
+
+    assert status == 200 and answer["game"]["settings"]["roster_size"] == 9 + 3
+    assert create(client, bench=0)[0] == 422 and create(client, bench=11)[0] == 422
+
+
 def test_preset_equal_rules_make_the_same_league_as_the_preset(client):
     plain = create(client)[1]["game"]
     same = create(client, scoring_rules={"reception": 0.5}, starters=dict(rs.DEFAULT_STARTERS))[1]["game"]

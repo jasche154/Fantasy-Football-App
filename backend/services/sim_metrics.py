@@ -8,7 +8,11 @@ Tiers are preseason ADP position ranks (QB / TE: 1-12, 13-24; RB / WR: 1-12, 13-
   PROJECTED_MIN or more), the same-team QB-WR and QB-TE correlation of (actual - projection), tiered players
   sitting out per week by position (team plays, no game), and team skill points per game (mean, spread
   across games, spread of season means), K and D/ST points per game, and the count of skill games of 25+ /
-  30+ / 35+ points (BIG_GAMES; ADP-free).
+  30+ / 35+ points (BIG_GAMES; ADP-free), and `injuries`.
+- injuries(data, weeks): for the top-150 ADP skill players, by position: new injuries per game played (he played
+  a game in `weeks` and missed his team's next one with an injury tag, any of Q/D/O/IR/PUP: the sim_injuries fit's
+  own definition, since a real player ruled out on game day often keeps his Q/D) and the share of his team's
+  games in `weeks` he missed with an injury tag.
 - season(data): ADP position rank vs final position rank (Spearman), breakouts (top-12 finishers drafted
   outside the top 24 or undrafted), busts (top-12 ADP finishing outside the top 24), games missed per
   top-150 ADP player, and the leaderboard.
@@ -24,6 +28,7 @@ import numpy as np
 
 from services.replacement_eval import spearman  # noqa: F401  (tied values share their average rank)
 from services.replay_pool import SeasonData
+from services.sim_injuries_fit import _hurt
 
 TIER_SIZE = 12
 TIERS = {"QB": 2, "RB": 3, "WR": 3, "TE": 2}
@@ -33,6 +38,7 @@ TOP_FINISH, BREAKOUT_ADP, BUST_FINISH = 12, 24, 24
 TOP_ADP_FOR_MISSED = 150
 BIG_GAMES = (25, 30, 35)         # skill games of this many points or more, counted
 LEADERS = (1, 6, 12, 24)         # leaderboard: mean points per game of the top N finishers at a position
+SPLIT_WEEK, HALF_GAMES = 9, 4    # second_half: weeks 1-9 against 10 on, this many games in each
 
 
 def adp_ranks(data: SeasonData) -> dict[int, int]:
@@ -89,7 +95,31 @@ def weekly(data: SeasonData, weeks: Iterable[int]) -> dict[str, float]:
                 sitting[data.players[pid].position] += 1
     for position in SKILL:
         out[f"sitting/wk {position}"] = sitting[position] / max(1, len(weeks))
-    return {**out, **_team_scores(data, weeks, teams)}
+    return {**out, **_team_scores(data, weeks, teams), **injuries(data, weeks)}
+
+
+def injuries(data: SeasonData, weeks: Iterable[int]) -> dict[str, float]:
+    """New injuries per game played and missed share, by position (see the module docstring)."""
+    weeks = set(weeks)
+    played, new, games, missed = (defaultdict(int) for _ in range(4))
+    top = sorted((p.adp, pid) for pid, p in data.players.items() if p.adp and p.position in SKILL)[:TOP_ADP_FOR_MISSED]
+    for _, pid in top:
+        position = data.players[pid].position
+        team_games = [w for w in range(1, data.last_week + 1) if data.schedule.opponent(data.team_at(pid, w), w)]
+        hurt = [(pid, w) not in data.actual and _hurt(data.injuries.get((pid, w))) for w in team_games]
+        for i, week in enumerate(team_games):
+            if week not in weeks:
+                continue
+            games[position] += 1
+            missed[position] += hurt[i]
+            if (pid, week) in data.actual and i + 1 < len(team_games):
+                played[position] += 1
+                new[position] += hurt[i + 1]
+    out = {}
+    for position in SKILL:
+        out[f"new inj/game {position}"] = new[position] / max(1, played[position])
+        out[f"missed share {position}"] = missed[position] / max(1, games[position])
+    return out
 
 
 def _scores(data: SeasonData, weeks: set[int], tier_of: dict) -> dict[str, float]:
@@ -231,7 +261,22 @@ def rookies(data: SeasonData, ids: set[int]) -> dict[str, float]:
     later = [pid for pid in qbs if pid not in first and starts.get(pid)]
     return {"rookie ADP vs finish r": spearman([data.players[p].adp for p in drafted], [-totals.get(p, 0.0) for p in drafted]),
             "rookie top-24 finishes": float(top24), "rookie QB wk1 starters": float(len(first)),
-            "rookie QB later starters": float(len(later))}
+            "rookie QB later starters": float(len(later)), **second_half(data, ids)}
+
+
+def second_half(data: SeasonData, rookies: set[int]) -> dict[str, float]:
+    """Points a game after SPLIT_WEEK minus before, for the backs and receivers with HALF_GAMES games in each
+    half: the rookies' mean and the veterans' (rookies grow, sim_talent.growth)."""
+    games: dict[int, list[list[float]]] = defaultdict(lambda: [[], []])
+    for (pid, week), points in data.actual.items():
+        if pid in data.players and data.players[pid].position in ("RB", "WR", "TE"):
+            games[pid][week > SPLIT_WEEK].append(points)
+    change = {pid: float(np.mean(b) - np.mean(a)) for pid, (a, b) in games.items()
+              if len(a) >= HALF_GAMES and len(b) >= HALF_GAMES}
+    mine = [v for pid, v in change.items() if pid in rookies]
+    rest = [v for pid, v in change.items() if pid not in rookies]
+    return {"rookie 2nd-half ppg change": float(np.mean(mine)) if mine else float("nan"),
+            "veteran 2nd-half ppg change": float(np.mean(rest)) if rest else float("nan")}
 
 
 def adp_agreement(data: SeasonData, real: SeasonData, rookies: Iterable[int] = (),

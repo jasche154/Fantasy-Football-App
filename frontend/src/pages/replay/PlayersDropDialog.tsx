@@ -3,7 +3,7 @@ import type { ReplayPlayerRef, ReplayPlayerRow, ReplaySummary, ReplayTeam } from
 import { AsyncView } from '../../components/AsyncView';
 import { Skeleton } from '../../components/StatusViews';
 import type { AsyncResult } from '../../hooks/useAsync';
-import { formatNumber, pluralize } from '../../lib/format';
+import { formatInteger, pluralize } from '../../lib/format';
 import { ReplayDrawer, ReplayPlayerCell, type KeyedAct } from './shared';
 
 /** The key of the move the dialog sends. */
@@ -122,7 +122,7 @@ export function Chooser({ target, game, roster, earlierNoDrop, moves, bidding, o
           <label key={row.player.id} className="replay-drop__option">
             <input type="radio" name="replay-drop" checked={choice === row.player.id} onChange={() => setPicked(row.player.id)} />
             <ReplayPlayerCell player={row.player} info={row} />
-            <span className="replay-drop__value">Value {formatNumber(row.value)}</span>
+            <span className="replay-drop__value">Value {formatInteger(row.value)}</span>
           </label>
         ))}
       </fieldset>

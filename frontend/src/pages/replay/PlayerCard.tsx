@@ -1,11 +1,11 @@
 import { useId } from 'react';
 import type { ReplayPlayerDetail, ReplayPlayerWeek, ReplayPosition, ReplayWireRow } from '../../api/types';
 import { Tabs } from '../../components/Tabs';
-import { formatNumber } from '../../lib/format';
+import { formatInteger } from '../../lib/format';
 import { ADVANCED_POSITIONS, PlayerAdvanced } from './PlayerAdvanced';
 import { PlayerGameLog } from './PlayerGameLog';
 import { PlayerUpcoming } from './PlayerUpcoming';
-import { formatPoints, hypeLabel, injuryLabel, ReplayHypeStar, ReplayInjuryBadge, ReplayPositionChip, showsOut } from './shared';
+import { formatPoints, hypeLabel, injuryLabel, ReplayHypeStar, ReplayInjuryBadge, ReplayOutBadge, ReplayPositionChip, showsOut } from './shared';
 
 function statusText(player: ReplayWireRow): string {
   if (player.owner) return player.owner.is_user ? 'On your team' : `Rostered by ${player.owner.name}`;
@@ -20,7 +20,7 @@ function Header({ row }: { row: ReplayWireRow }) {
         <ReplayPositionChip position={row.player.position} /> {row.player.team ?? 'No team'} · {row.pos_rank} · {statusText(row)}
         {row.player.hype && <> <ReplayHypeStar player={row.player} /></>}
         {injury && <> <ReplayInjuryBadge injury={injury} /></>}
-        {showsOut(row.out, injury) && <span className="status-badge status-badge--out replay-drawer__badge">Out</span>}
+        {showsOut(row.out, injury) && <ReplayOutBadge className="replay-drawer__badge" />}
         {row.trade_locked && <span className="status-badge status-badge--missing replay-drawer__badge">Trade-locked</span>}
       </p>
       {/* Hover isn't there on touch or for the keyboard: the full label in plain text. */}
@@ -37,7 +37,7 @@ function Tiles({ row }: { row: ReplayWireRow }) {
     { label: 'Points', value: formatPoints(row.season_points) },
     { label: 'Per game', value: formatPoints(row.ppg) },
     { label: 'Rest of season', value: formatPoints(row.ros_ppg) },
-    { label: 'Trade value', value: formatNumber(row.value) },
+    { label: 'Trade value', value: formatInteger(row.value) },
   ];
   return (
     <dl className="replay-card__tiles">
@@ -68,12 +68,13 @@ interface WeeksTabsProps {
   position: ReplayPosition;
   weeks: readonly ReplayPlayerWeek[];
   simFrom: number | null;
+  onOpenGame?: (week: number, team: string, opener: HTMLElement) => void;
 }
 
 /** Game log, plus an Advanced tab (usage and efficiency) for skill players; K and DST get the game log alone. */
-function WeeksTabs({ name, position, weeks, simFrom }: WeeksTabsProps) {
-  if (!ADVANCED_POSITIONS.includes(position)) return <PlayerGameLog name={name} position={position} weeks={weeks} simFrom={simFrom} />;
-  const log = <PlayerGameLog name={name} position={position} weeks={weeks} hasHeading={false} simFrom={simFrom} />;
+function WeeksTabs({ name, position, weeks, simFrom, onOpenGame }: WeeksTabsProps) {
+  if (!ADVANCED_POSITIONS.includes(position)) return <PlayerGameLog name={name} position={position} weeks={weeks} simFrom={simFrom} onOpenGame={onOpenGame} />;
+  const log = <PlayerGameLog name={name} position={position} weeks={weeks} hasHeading={false} simFrom={simFrom} onOpenGame={onOpenGame} />;
   return (
     <Tabs label={`${name} stats`} className="replay-adv__tabs" tabs={[
       { id: 'log', label: 'Game log', panel: log },
@@ -86,10 +87,12 @@ interface PlayerCardProps {
   detail: ReplayPlayerDetail;
   /** The league's first simulated week (Summary.sim_from): its weeks from there on are marked Sim. */
   simFrom?: number | null;
+  /** Opens a played week's NFL box score from the game log. */
+  onOpenGame?: (week: number, team: string, opener: HTMLElement) => void;
 }
 
 /** The player card: who he is and his news, five season numbers, rumors, his game log (and advanced stats) and the weeks ahead. */
-export function PlayerCard({ detail, simFrom = null }: PlayerCardProps) {
+export function PlayerCard({ detail, simFrom = null, onOpenGame }: PlayerCardProps) {
   const { player: row, weeks, upcoming, defense_basis: basis } = detail;
   const { name, position } = row.player;
   return (
@@ -100,7 +103,7 @@ export function PlayerCard({ detail, simFrom = null }: PlayerCardProps) {
       {/* During the draft there are no weeks yet. */}
       {weeks.length === 0
         ? <p className="hint">The season has not started: these are his preseason numbers.</p>
-        : <WeeksTabs name={name} position={position} weeks={weeks} simFrom={simFrom} />}
+        : <WeeksTabs name={name} position={position} weeks={weeks} simFrom={simFrom} onOpenGame={onOpenGame} />}
       <PlayerUpcoming name={name} position={position} upcoming={upcoming} basis={basis} simFrom={simFrom} />
     </div>
   );

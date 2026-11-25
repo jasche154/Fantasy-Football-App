@@ -4,7 +4,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
-from api.deps import Position, league_params, valuation_or_503
+from api.deps import DbId, Position, league_params, valuation_or_503
 from config import get_settings
 from database.db import get_session
 from fastapi import HTTPException
@@ -72,7 +72,7 @@ def flags_for(rankings: WeeklyRankings, valuation: Valuation) -> dict[int, tuple
 
 
 @router.get("/rankings/weekly/{player_id}/explain")
-def weekly_explain(player_id: int, week: int | None = Week, league: LeagueSettings = Depends(league_params),
+def weekly_explain(player_id: DbId, week: int | None = Week, league: LeagueSettings = Depends(league_params),
                    session: Session = Depends(get_session)) -> dict:
     """Step-by-step reasoning behind one player's Week X projection."""
     valuation = valuation_or_503(session, league)

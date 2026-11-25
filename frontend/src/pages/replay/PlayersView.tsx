@@ -85,12 +85,13 @@ export function PlayersView({ game, version, act, isBusy, openPlayer }: ReplayVi
   const [view, setView] = useState<StatsView>('box');
   const [search, setSearch] = useState('');
   const query = useDebouncedValue(search.trim(), SEARCH_DELAY_MS);
+  const sentStatus = query ? 'all' : status;           // a name searches every player; clearing it restores Show
   // A week past the current one can't be asked for (a new game after a reload): fall back to the season.
   const shown = stats.span === 'week' && (stats.week ?? 0) > game.week ? SEASON_STATS : stats;
   const columns = statColumns(shown.span, shown.week, tab, view);
   const sort = visibleSort(chosenSort, columns);       // a hidden column never sorts the table
   if (sort !== chosenSort) setSort(sort);              // ...nor comes back when its column does
-  const filterKey = [tab, status, sort.key, sort.direction, shown.span, shown.week, query].join('|');
+  const filterKey = [tab, sentStatus, sort.key, sort.direction, shown.span, shown.week, query].join('|');
   const [page, setPage] = useState({ filterKey, offset: 0 });
   const offset = page.filterKey === filterKey ? page.offset : 0;      // a new filter starts on its first page
   const [target, setTarget] = useState<DropTarget | null>(null);
@@ -103,7 +104,7 @@ export function PlayersView({ game, version, act, isBusy, openPlayer }: ReplayVi
   const showClaims = game.phase === 'waivers' || game.pending.claims > 0 || (isFaab && game.phase !== 'draft');
   const players = useAsync(
     (signal) => getReplayPlayers(game.id, {
-      position: positionParam(tab), search: query, status, sort: sort.key, dir: sort.direction, stats: shown.span,
+      position: positionParam(tab), search: query, status: sentStatus, sort: sort.key, dir: sort.direction, stats: shown.span,
       stat_week: shown.week ?? undefined, limit: PAGE_SIZE, offset,
     }, signal).then((data) => ({ ...data, shown, tab })),  // headers come from their rows' span, never over a stale page
     [game.id, version, filterKey, offset],
@@ -113,7 +114,8 @@ export function PlayersView({ game, version, act, isBusy, openPlayer }: ReplayVi
   const claimedIds = new Set(claims.data?.results.map((claim) => claim.add.player.id));
   // No moves while anything reloads: the roster decides whether an add needs a drop, and a button on a
   // stale table or claim list would act on rows or a claim order that no longer exist.
-  const moves = usePlayerMoves(act, isBusy || [players, claims, team].some((state) => state.status === 'loading'));
+  const moves = usePlayerMoves(act, isBusy || [players, claims, team].some((state) => state.status === 'loading'),
+    `${game.week}:${game.phase}`);
   const earlierNoDrop = claims.data?.results.filter((claim) => claim.drop === null).length ?? 0;
 
   // An add or a drop can empty the last page: step back to the new last page.
@@ -127,13 +129,13 @@ export function PlayersView({ game, version, act, isBusy, openPlayer }: ReplayVi
     const { id, name } = row.player;
     // Without a known open spot the dialog asks who to drop (and shows the roster's error when it failed to load).
     if (!team.data || team.data.results.length >= game.settings.roster_size) return setTarget({ row, kind: 'add' });
-    void moves.run(addKey(id), () => replayAddDrop(game.id, { add: id }), `Added ${name}.`);
+    void moves.run(addKey(id), () => replayAddDrop(game.id, { add: id, week: game.week }), `Added ${name}.`);
   };
 
   const confirm = async (drop: ReplayPlayerRef | null, bid?: number) => {
     if (!target) return;
     const { id, name } = target.row.player;
-    const body = drop ? { add: id, drop: drop.id } : { add: id };
+    const body = drop ? { add: id, drop: drop.id, week: game.week } : { add: id, week: game.week };
     const dropping = drop ? `, dropping ${drop.name}` : '';
     const forBid = bid === undefined ? '' : ` for $${bid}`;
     const sent = target.kind === 'claim'
@@ -151,6 +153,7 @@ export function PlayersView({ game, version, act, isBusy, openPlayer }: ReplayVi
       <div className="weekly-controls replay-players__filters">
         <PositionTabs value={tab} onChange={setTab} withFlex />
         <SelectField label="Show" isInline value={status} options={STATUS_OPTIONS} onChange={(value) => setStatus(value as ReplayStatusFilter)} />
+        {query && <span className="hint replay-players__search-note" role="status">Searching all players</span>}
         <StatsPicker game={game} value={shown} onChange={setStats} />
         <ViewSwitch value={view} onChange={setView} />
         <div className="field field--inline replay-players__search">
@@ -163,7 +166,7 @@ export function PlayersView({ game, version, act, isBusy, openPlayer }: ReplayVi
         {(data) => (
           <>
             {data.results.length === 0
-              ? <EmptyState title="No players match">Try another position, status or name.</EmptyState>
+              ? <EmptyState title="No players match">{query ? 'Try another position or name.' : 'Try another position, status or name.'}</EmptyState>
               : (
                 <PlayersTable game={game} week={data.week} rows={data.results} columns={statColumns(data.shown.span, data.shown.week, data.tab, view)} sort={sort}
                   onSort={(key) => setSort(nextSort(sort, key, sortDirection))} claimedIds={claimedIds} moves={moves}

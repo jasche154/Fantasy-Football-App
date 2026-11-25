@@ -88,7 +88,7 @@ only *explains* numbers that came back from a tool call. Every output is labeled
   "random"), draft against CPU managers who only know that summer's ADP, then play it week by week with
   Wednesday waivers, FAAB bidding or free agency only, and trades; matchups are scored with the players' real points. Every number shown
   before a week is played is point-in-time (preseason ADP, that week's pre-game ESPN/Sleeper projection).
-  Players carry Yahoo-style injury tags (Q, D, O, IR, PUP, SUS) from that week's official report and roster
+  Players carry Yahoo-style injury tags (Q, D, O, IR, PUP, SUS, EXE = commissioner's exempt list) from that week's official report and roster
   status; a tagged starter raises a lineup warning. Each team has one IR slot: a player tagged O, IR or PUP
   can be moved there, which frees his roster spot, and can trade places with another injured player. When
   he loses the tag you must activate him (dropping someone if the roster is full) or drop him before you
@@ -218,7 +218,7 @@ Open <http://localhost:5173>. The UI talks to `http://localhost:8000` by default
 | **Player page** | Weekly chart of actual vs expected points, game log, NGS stats, projection, signals. **Position percentiles** rank his season stats against his position (green = good, red = bad, grey for context stats like aDOT; "Small sample" until he has enough volume). **What changed** compares his last 3 games with the earlier games (snap share, target share, air-yard share, targets, carries, pass attempts) and flags big moves |
 | **Odds & Props** | Pick a week: every game's kickoff, closing spread and total, and each team's implied total. **Show props** opens the player props stored for that game (expected passing/rushing/receiving yards, receptions, TDs implied by the lines) with how long before kickoff they were bought. Props appear game by game on game day; before that the page says why they're missing |
 | **Ask AI** | Ask questions in plain English; each answer shows which tools it used |
-| **Replay League** | A game: replay a past season against CPU managers. **Start:** under **New league** pick what to play (a past season, or a simulated one: the live season with **Full season** or **Jump in now**, or next season), then a season (or Random), 4–16 teams, the **league format** (Standard, Superflex or Double flex as a start, then 0–3 starters per slot: QB, RB, WR, TE, FLEX, SFLX (superflex: a QB, RB, WR or TE), K, DST; at least one QB or SFLX, at most 12 starters; in superflex the CPUs value and draft quarterbacks much earlier), the **scoring** (PPR, half or standard as a base, then points per reception 0–1.5, a TE premium of +0.5 or +1 per catch, 4 or 6 points per passing TD and −1 or −2 per turnover; played games always score exactly, but with custom settings the pre-game projections are estimates converted from the sites' PPR and standard numbers), your draft slot, the playoff weeks (14–16, 15–17 by default, or 16–18 when the season has a week 18) and how many teams make the playoffs (4–8, default 4 under 10 teams, 6 under 14, else 8), waivers (Wednesday waivers; FAAB bidding: $100 per team, blind bids, the highest bid wins, ties go by waiver priority, winning bids show in the activity log; or free agency only) and difficulty, then **Create league and draft**. Saved leagues are listed above the form (Resume, Delete). **Draft:** the board lists who is left by **Rank** (the preseason expert rank, or the ADP order for 2018–2019, as Yahoo shows a rank next to ADP), with the round that rank implies (**Rd**), ADP and the preseason projection (points a game); sort by Rank, ADP or Proj. Press **Draft** next to a player on your turn, or auto-pick one pick or the rest; the CPUs pick in between. **The week loop:** the one primary button at the top says what comes next. **Play week N** scores the week with the real results; then every unrostered player is on waivers, you put in claims on the Players tab (with a bid in a FAAB league), and **Sim to Wednesday** settles them (by priority, or by bid in FAAB) and lets the CPUs move; then lineups, free-agent adds and trades are open again until you play the next week. **Tabs:** My Team (set your lineup with Move, drop players, look at any team or past week), Matchup (your game and the week's scoreboard), Players (the waiver wire with each player's usage over his last 3 games, adds and claims), Trades (players CPUs are shopping to you, CPU offers with each manager's message, and a builder that shows the CPU's verdict and mood before you propose) and League (standings, schedule, scoreboard, activity, and the league chat where the CPU managers talk after every week). The regular season runs until the playoff weeks you chose; then the top seeds play a title bracket (top seeds get a bye when it has 5–7 teams) and everyone else plays for the places below. **No hindsight:** nothing on screen comes from a week you have not played. Before a week is played you see only its pre-game projection; points, records and standings stop at the last week played, the My Team and Matchup week pickers end at the current week, and later weeks on the League scoreboard show the pairings only |
+| **Replay League** | A game: replay a past season against CPU managers. **Start:** under **New league** pick what to play (a past season, or a simulated one: the live season with **Full season** or **Jump in now**, or next season), then a season (or Random), 4–16 teams, the **league format** (Standard, Superflex, Double flex, each with a short note, or **Custom**, which shows 1–10 bench spots (6 by default) and 0–3 starters per slot: QB, RB, WR, TE, FLEX, SFLX (superflex: a QB, RB, WR or TE), K, DST; at least one QB or SFLX, at most 12 starters; in superflex the CPUs value and draft quarterbacks much earlier), the **scoring** (PPR, half or standard, or **Custom**, which keeps the last preset as the base and shows points per reception 0–1.5, a TE premium of +0.5 or +1 per catch, 4 or 6 points per passing TD and −1 or −2 per turnover; played games always score exactly, but with custom settings the pre-game projections are estimates converted from the sites' PPR and standard numbers), your draft slot, the playoff weeks (14–16, 15–17 by default, or 16–18 when the season has a week 18) and how many teams make the playoffs (4–8, default 4 under 10 teams, 6 under 14, else 8), waivers (Wednesday waivers; FAAB bidding: $100 per team, blind bids, the highest bid wins, ties go by waiver priority, winning bids show in the activity log; or free agency only) and difficulty, then **Create league and draft**. Saved leagues are listed above the form (Resume, Delete). **Draft:** the board lists who is left by **Rank** (the preseason expert rank, or the ADP order for 2018–2019, as Yahoo shows a rank next to ADP), with the round that rank implies (**Rd**), ADP and the preseason projection (points a game); sort by Rank, ADP or Proj. Press **Draft** next to a player on your turn, or auto-pick one pick or the rest; the CPUs pick in between. **The week loop:** the one primary button at the top says what comes next. **Play week N** scores the week with the real results; then every unrostered player is on waivers, you put in claims on the Players tab (with a bid in a FAAB league), and **Sim to Wednesday** settles them (by priority, or by bid in FAAB) and lets the CPUs move; then lineups, free-agent adds and trades are open again until you play the next week. **Tabs:** My Team (set your lineup with Move, drop players, look at any team or past week), Matchup (your game and the week's scoreboard), Players (the waiver wire with each player's usage over his last 3 games, adds and claims; Show starts on available players, and typing a name searches every player, rostered ones with their team, until the box is cleared), Trades (players CPUs are shopping to you, CPU offers with each manager's message, and a builder that shows the CPU's verdict and mood before you propose) and League (standings, schedule, scoreboard, activity, and the league chat where the CPU managers talk after every week). The regular season runs until the playoff weeks you chose; then the top seeds play a title bracket (top seeds get a bye when it has 5–7 teams) and everyone else plays for the places below. **No hindsight:** nothing on screen comes from a week you have not played. Before a week is played you see only its pre-game projection; points, records and standings stop at the last week played, the My Team and Matchup week pickers end at the current week, and later weeks on the League scoreboard show the pairings only |
 | **Settings** | League scoring, size, superflex, and TE premium (used everywhere); connect Yahoo; check integrations. **System** shows when the auto-update last ran and what it did, Odds API credits left, data freshness and the last backup, with **Back up now**. **API access** takes the token when the backend has `API_TOKEN` set |
 
 ## How the numbers work
@@ -312,7 +312,17 @@ produce an extreme matchup.
 - **What gets shown.** The projection is the if-active number times the chance to play.
   Each "If <teammate> sits" scenario shows the full upside.
 - **Avoiding double counting.** If a teammate is already ruled Out, experts and Vegas have
-  priced it in, so only the model's share of the boost is added.
+  priced it in, so only the model's share of the boost is added. The model's share is cut
+  again by the part of the player's rate built in games without that teammate (recency
+  weights, shrunk like the rate): a fill-in with four straight games without the starter
+  already has most of the bigger role in his rate. In the point-in-time backtest this cut
+  RMSE 6.74 -> 6.70 (2023), 6.91 -> 6.87 (2024) and 6.76 -> 6.66 (2025), with rank
+  correlation up each season.
+- **Backup quarterbacks sitting move nothing.** A QB behind the other on the depth chart (when
+  it lists both), else with fewer passing yards a game for the team (mop-up duty only), leaves
+  him no vacated work, so the starter isn't boosted when his backup is inactive. A starter who
+  sits still moves his work to the backup, even one who has started more games since he got
+  hurt.
 - **Backup quarterbacks.** A backup QB only plays when everyone ahead of him on the depth
   chart (Sleeper's, else nflverse's) sits. His chance to play is the chance they all sit,
   with a 2% floor for QB2 (in-game injuries), and his rest-of-season share is one minus the
@@ -342,6 +352,12 @@ season left out.
 
 The grid search (`--ablation` for the table above) chose these settings:
 - **Recency:** a half-life of 4 games (a game four weeks ago counts half).
+- **Snap-share trend:** the rate is multiplied by `1 + 0.10 x trend`, where trend = the last 3
+  games' average snap share / the season's average - 1 (capped at +-1, 0 before 5 games or
+  without snap counts). A WR whose snaps rose from 60% to 78% over the last 3 games gets about
+  +3%. "Why?" mentions it under Recent production when it moves the rate 1% or more. One weight
+  for every position (`USAGE_TREND_WEIGHT` in `services/weekly_model.py`), least squares on
+  2021-2025 backtest player-weeks; `--ablation` includes a run without it.
 - **Vegas:** implied team total^0.5.
 - **Schedule strength: 0.5.** Inside the model it adds nothing beyond Vegas lines, which
   already price the defense. It's kept at 0.5, at a cost of about 0.02 MAE, because schedule
@@ -356,11 +372,38 @@ the 10th/90th percentile of actual ÷ projected points.
 - Example: a WR projected for 16+ has a floor of about 0.40× his projection (a 20-point
   projection floors near 8, not 2).
 
+### Usage signals tested (2026-11)
+Each candidate was fit on earlier seasons only and scored on the next one (2023 fit on 2021–22,
+2024 on 2021–23, 2025 on 2021–24), same player-weeks as the production backtest. Kept only if
+RMSE and rank correlation both improved in 2024 and 2025 (and not worse in 2023).
+
+| Candidate | 2023 RMSE / rank r | 2024 RMSE / rank r | 2025 RMSE / rank r | Result |
+|---|---|---|---|---|
+| Production before | 6.703 / 0.6321 | 6.871 / 0.6314 | 6.660 / 0.6457 | |
+| Actual vs expected points weight (now 60/40; fitted 0.6, 0.6, 0.7) | 6.703 / 0.6321 | 6.871 / 0.6315 | 6.662 / 0.6458 | dropped: 60/40 is already the fitted optimum |
+| Same, per position | 6.702 / 0.6323 | 6.874 / 0.6303 | 6.663 / 0.6455 | dropped |
+| Faster half-life for expected points | 6.705 / 0.6321 | 6.875 / 0.6304 | 6.661 / 0.6451 | dropped (training picked a slower one) |
+| **Snap-share trend, one weight** | 6.703 / 0.6323 | **6.866 / 0.6317** | **6.658 / 0.6468** | **kept** |
+| Snap-share trend, per position | 6.708 / 0.6291 | 6.866 / 0.6321 | 6.654 / 0.6471 | dropped: 2023 worse, weights flip sign |
+| Target-share trend | 6.711 / 0.6302 | 6.873 / 0.6316 | 6.657 / 0.6464 | dropped |
+| Carry-share trend | 6.701 / 0.6320 | 6.869 / 0.6316 | 6.659 / 0.6459 | dropped: within noise |
+| Air-yards-share trend | 6.705 / 0.6316 | 6.865 / 0.6317 | 6.658 / 0.6459 | dropped: 2023 worse, sign says mean reversion |
+| WOPR trend | 6.710 / 0.6306 | 6.871 / 0.6310 | 6.657 / 0.6467 | dropped |
+| Opportunity (carries + targets) trend | 6.715 / 0.6291 | 6.880 / 0.6305 | 6.661 / 0.6455 | dropped |
+| Expected-points trend | 6.713 / 0.6296 | 6.895 / 0.6291 | 6.661 / 0.6456 | dropped |
+| NGS separation (WR/TE) | 6.702 / 0.6312 | 6.872 / 0.6330 | 6.660 / 0.6461 | dropped |
+| NGS rush yards over expected per carry (RB) | 6.708 / 0.6319 | 6.862 / 0.6322 | 6.669 / 0.6455 | dropped |
+
+Trends are the last 3 games' average over the season's average, minus 1. The snap trend's gain is
+small (about 0.1% RMSE; a week-clustered bootstrap puts it below zero in 100% / 84% of draws for
+2024 / 2025), so it is a nudge, not a new signal. Expected points already carry most of what the
+usage shares know. FTN route participation isn't loaded, so it wasn't tested.
+
 ### Model adjustments: calibration, EPA matchup, weather
 `python -m services.projection_factors --fit` refits these and prints how they do on held-out seasons.
 - **What it does:** multiplies the model's number, and only the model's (props and experts
   already price matchups and weather), by `1 + b . x` per position:
-  - **Calibration:** the raw model ran 3–11% high depending on position.
+  - **Calibration:** the raw model runs 3–12% high depending on position.
   - **EPA matchup:** the opponent's EPA allowed per dropback and per run, and its sack rate,
     from data before the week.
   - **Weather:** wind over 10 mph and cold under 40°F outdoors, and domes.
@@ -380,14 +423,18 @@ the 10th/90th percentile of actual ÷ projected points.
 
 | Held-out season | RMSE | MAE | Rank correlation |
 |---|---|---|---|
-| 2024 (fit on 2021–23) | 7.71 → **7.55** | 6.05 → **5.85** | 0.526 → **0.529** |
-| 2025 (fit on 2021–24) | 7.65 → **7.45** | 6.01 → **5.77** | 0.502 → **0.506** |
+| 2024 (fit on 2021–23) | 6.96 → **6.89** | 5.35 → **5.18** | 0.630 → **0.631** |
+| 2025 (fit on 2021–24) | 6.80 → **6.69** | 5.20 → **4.99** | 0.638 → **0.642** |
+
+(Refit with the snap-share trend and the current injury layer. The first fit, on the older model,
+went 7.71 → 7.55 and 7.65 → 7.45 RMSE; the "before" model has since improved, so there is less
+left for the factors to fix.)
 
 Most of the gain is calibration (getting the level right). The matchup and weather terms add
 a little to ranking; Vegas totals already price in most of what they know.
 
-**Overfitting check.** Each season is scored by a fit on earlier seasons only. The held-out
-gain (−0.19 to −0.21 RMSE) matches the in-sample gain (7.74 → 7.53 on 2021–24), and the
+**Overfitting check** (first fit). Each season is scored by a fit on earlier seasons only. The held-out
+gain (−0.19 to −0.21 RMSE) matched the in-sample gain (7.74 → 7.53 on 2021–24), and the
 results barely move between ridge 0 and 2000, so the few adjustment terms are not memorizing
 noise. The production ridge (20) stays. Learned source weights move in small capped steps.
 
@@ -441,9 +488,11 @@ percentiles of how players with his projection actually scored, if he plays:
   model alone.
 - **Shape:** running backs and pass catchers who score mostly on touchdowns (last four games)
   get a lower floor; deep targets (high aDOT) a higher ceiling and a lower floor.
-- On 2026 (data the fit never saw), 7% of players finished below their floor and 12% above
+- On 2026 (data the fit never saw), 7% of players finished below their floor and 11% above
   their ceiling, against a 10% target. The old ranges, fit only on full-role games, had 31%
   below the floor.
+- The Accuracy view scores this season's saved projections against today's ranges (without
+  the shape adjustment, which isn't saved): weeks saved before a refit carry the old floors.
 
 **Matchup simulation** (`services/matchup_sim.py`). Each starter's score is drawn 20,000 times
 from his own skewed range, plus a separate draw for whether he plays (so injury risk is counted
@@ -646,13 +695,17 @@ weights are refit on every week so far (a week's weights only ever use earlier w
    top 24 at QB) who played, with each source group's points and the actual points.
 2. **Fit:** least squares shrunk toward the starting weights as if those were backed by 1,500
    player-weeks. The sources are 0.9+ correlated, so an unshrunk fit swings wildly week to
-   week (the old per-week fit put 0% on the model one week and 69% the next).
+   week (the old per-week fit put 0% on the model one week and 69% the next). The penalty is
+   scaled by how far the sources sit apart within a row, not by the points level: scaled by
+   the level, 1,500 "rows" really weighed like ~50,000, and 1,155 player-weeks moved the
+   weights by 0.05 points.
 3. **Limits:** props never below 15% (their value is late news the history can't show yet),
    every other group at least 5%. Under 300 rows, the starting weights stand.
 
-Through week 7 of 2026 the weights barely move from the start (props 30, experts 35, ESPN 15,
-model 20): the sources are close enough that seven weeks can't separate them yet, which is
-the honest answer. Yahoo's consensus alone is about as accurate as the blend, so the Accuracy
+Refit on 2026 weeks 1-10 the weights move to about props 25, experts 53, ESPN 17, model 5
+(the model is at its floor). Learned week by week (each week's weights from earlier weeks
+only) they cut next-week MAE 5.82 -> 5.78 and RMSE 7.29 -> 7.26 over weeks 3-11 against the
+starting weights. Yahoo's consensus alone is about as accurate as the blend, so the Accuracy
 view shows them side by side.
 
 **Backfilled weeks** (`services/history_backfill.py`). Weeks 1–6 of 2026 were rebuilt
@@ -813,7 +866,8 @@ consensus. Offers rank by expected edge, your edge × a rough chance they accept
 
 ### Buy low / sell high
 Per player (3+ games):
-- **FPOE** = actual − expected fantasy points per game
+- **FPOE** = actual − expected fantasy points per game, both over the games that have expected points (the
+  card's "PPG vs xPPG" uses the same games, so it can differ slightly from his season PPG)
 - **TD luck** = actual TDs − expected TDs
 - **Usage trend** = expected points over the last 3 games vs the season
 - **Recent form** = last-3 PPG vs season PPG (other managers react to this)
@@ -866,7 +920,12 @@ that week's games on; only scoring a week reads its real points.
   tail again while a season has none.
   **ADP per draft format:** `replay_adp` holds one list per `format`: `ppr`, `half`, `std` and `2qb`
   (Fantasy Football Calculator's 12-team PPR, half-PPR, non-PPR and 2-QB mock drafts, every season
-  2018-2025; MyFantasyLeague's PPR real drafts fill each list's tail past FFC's last pick). A league drafts
+  2018-2025; a player one list leaves out but another FFC list of the season has takes his ADP and spread
+  from that list, PPR first, then the nearest format, because FFC's thinner lists drop top players (2026's
+  half-PPR list had no Drake London; he went 13th in PPR; such a row is stored as source `ffc_borrowed` and never
+  lent on again, and a QB the 2-QB list borrows from a 1-QB list has his ADP and spread x `SUPERFLEX_QB_ADP`);
+  MyFantasyLeague's PPR real drafts fill each list's
+  tail past the last pick with the players no FFC list has). A league drafts
   from its own list (`services/replay_adp_format.py`): a superflex league (a SFLX slot or 2+ QB slots) the
   2-QB list, otherwise its scoring's list, and custom scoring the preset nearest its points per reception
   (0.75 -> PPR, 0.25 -> half). The list is chosen once, at creation, and saved with the league
@@ -884,16 +943,17 @@ that week's games on; only scoring a week reads its real points.
   draft uses the last cheatsheet taken before week 1's first kickoff (the Thursday opener). A failed
   download or import is reported and never blocks the season; without ranks the values use the app's model
   ranks only ("model ranks" on the Trades screen).
-- **Injuries and IR:** Q, D and O come from the official injury report; IR, PUP and SUS from the weekly
-  roster status (PUP = status PUP or reserve code R04; suspended = SUS or R40/R33/R30; every other
+- **Injuries and IR:** Q, D and O come from the official injury report; IR, PUP, SUS and EXE from the weekly
+  roster status (PUP = status PUP or reserve code R04; suspended = SUS or R40/R33/R30; EXE = status EXE,
+  the commissioner's exempt list, with no injury text (Josh Jacobs 2026 weeks 1-6); every other
   reserve list = IR, except the lists that are not an injury (retired R02, did not report R03, left squad
   R06, the 2020 opt-outs R62), which get no tag, like holdouts; the game-day inactive list is not used).
   A report from a club that is not on the player's roster rows that week is ignored (a player traded
   after his game). An O, IR or PUP tag without text takes last week's injury text unless that text names
   no injury (rest, personal, "not injury related"). A roster status wins over a report tag, and a hard
-  tag is carried over the player's bye. O, IR, PUP and SUS mean "out" this week even if a stale
+  tag is carried over the player's bye. O, IR, PUP, SUS and EXE mean "out" this week even if a stale
   projection exists; Q and D are information only.
-  IR rules: one slot per team; a player is eligible by his tag only (O, IR or PUP: not a suspension,
+  IR rules: one slot per team; a player is eligible by his tag only (O, IR or PUP: not a suspension or EXE,
   not just "no projection"); he does not count against the roster, can't start and can't be traded; he
   can swap places with another eligible player; a team whose IR player lost his tag can't add, claim or
   trade until it activates (dropping someone if full) or drops him, and a CPU in that state declines every
@@ -901,9 +961,10 @@ that week's games on; only scoring a week reads its real points.
   tags are known (when the waiver phase opens, again at the waiver run and at the start of the week), and
   still count an IR player for their positional limits and their view of the rest of the season. A
   week's final report and roster status are shown from the start of that week (before its waiver run),
-  like its projection. The draft shows no tags: it is held with what the ADP knew, and some week-1
-  statuses came later. Week-1 tags appear when the draft ends, and the CPUs make their week-1 moves
-  first, as they do every week.
+  like its projection. The draft shows only week 1's IR, PUP, suspension and exempt-list tags (`replay_pool.PRESEASON_TAGS`):
+  those are preseason moves (2021: Gus Edwards' and J.K. Dobbins' ACLs), and a CPU counts such a player at
+  twice his ADP (`replay_draft.OUT_PUSH`), so it waits on him. A week-1 O or Q is game-week news and
+  appears when the draft ends, and the CPUs make their week-1 moves first, as they do every week.
 - **Draft:** a snake draft, 15 rounds by default (QB, 2 RB, 2 WR, TE, FLEX, K, DST, 6 bench). CPUs follow
   ADP: each takes the lowest `(ADP + noise) x need x taste` among the best players left, with position
   caps, K and DST in the last rounds, and never reaches further than a round of picks past the current
@@ -913,8 +974,13 @@ that week's games on; only scoring a week reads its real points.
   come last either way.
 - **CPU rosters:** at most 2 QB, 2 TE, 1 K, 1 DST, 6 RB and 7 WR. A CPU takes one extra only while nobody
   it has at that starting slot plays that week, and trims it afterwards. A CPU never drops a top-100
-  player (100 in a 12-team league, scaled to the league size: 66 with 8 teams, 116 with 14), and drops an
-  injured player it would otherwise keep only in one case: a starting slot has nobody who plays, its IR
+  player (100 in a 12-team league, scaled to the league size: 66 with 8 teams, 116 with 14), nor in the
+  league's first 4 weeks one of the league's picks from rounds 1-8 (`replay_waiver_ai.EARLY_ROUNDS` /
+  `EARLY_WEEKS`: about three games before a manager gives up on a mid-round pick) unless the news has him out
+  for the season. It keeps an injured player who was above replacement, or who has a healthy chart of 50 or
+  more (`KEEP_OUT_CHART`) and a return date in the news; when it trims back to a positional limit, players
+  whose season values are within 5 points (`TRIM_CLOSE`, often all 0) are cut cheapest on the chart first. It
+  drops an injured player it would otherwise keep only in one case: a starting slot has nobody who plays, its IR
   slot is taken, and the player is on IR or PUP and outside that top group; he then goes
   for a free agent who plays. It streams kickers and defenses: a unit that plays is swapped only for one
   projected `replay_waiver_ai.STREAM_EDGE` (4) points better; one on a bye or without a projection is
@@ -941,7 +1007,15 @@ that week's games on; only scoring a week reads its real points.
   stays with the backs, 60% for receivers, 50% for tight ends, split by rate). Judged out of sample
   (2021-2025, weeks 2-11, against real points from that week on): per-position rank correlation 0.475 ->
   0.478, better in 4 of 5 seasons. A usage-share signal (a back's share of his team's touches) was tried and
-  left out: it moved players the wrong way more often than the right one.
+  left out: it moved players the wrong way more often than the right one. 2018 and 2019 have no expert
+  ranks, and the model alone swung values hard (Deshaun Watson 2019: 124 -> 495 -> 633 in three weeks): there
+  the ranks of `ros_ppg` (the sites' slow consensus) stand in for the experts at the same 0.65 weight.
+  Median week-to-week move of a top-24 QB 0.40 -> 0.26 (log; 2018 0.53 -> 0.29), and Spearman against real
+  points from then on 0.484 -> 0.495 (2018 0.500 -> 0.512); seasons with expert ranks are unchanged. Nothing
+  goes above 1000, the bye bump and hype included; values show as whole numbers on every screen (lists,
+  card, roster, trade builder, offers), rounded half up, so a player reads the same everywhere.
+  Before this, a trade verdict showed one decimal (e.g. 836.8) while lists showed whole numbers, and the
+  lists rounded half to even (512.5 -> 512 next to 513 in a deal); every season, 2027 included, worked the same.
 - **Market reaction (hype):** trade values model what managers would pay, not only the forecast, and CPUs
   price deals with the same values, so you can buy before or sell into a move. `services/replay_shocks.py`
   detects events the market reacts to on little or no game sample, from point-in-time data only: a teammate
@@ -972,7 +1046,11 @@ that week's games on; only scoring a week reads its real points.
 - **Injury news:** a player who is out carries a report of when he is due back (`services/replay_news.py`).
   It is built from the week he really returned, blurred by seeded noise (off by up to two weeks, a few
   false "out for the season" calls, season-ending injuries first reported as a return weeks out) that
-  shrinks as the return nears; it never names a week already reached. This is the one sanctioned use of
+  shrinks as the return nears; it never names a week already reached. Only an IR or PUP tag is ever
+  called "out for the season": a plain O tag is week-to-week news (Cam Newton 2019: O from week 3, IR in
+  week 10), so it names a return, the next week once the first guess has passed, until he goes to IR. A
+  suspension is reported exactly. The commissioner's exempt list reads "out indefinitely" and never names a
+  week; the values guess one (4-8 weeks after he went on the list, then the next week) without the real return. This is the one sanctioned use of
   later data (a beat report would know as much). Shown under a tagged player on the Players and Trades
   screens.
 - **The week:** Wednesday waivers by rolling priority (CPUs claim when a player adds about a lineup point
@@ -988,8 +1066,9 @@ that week's games on; only scoring a week reads its real points.
   week, more once fewer than 8 runs remain), never more than 40% of what is left until the last 4 waiver
   runs, with seeded noise of up to 20% either way; each of a CPU's claims is bid against the same budget.
 - **Breakout claims:** at a waiver run (Wednesday or FAAB; free agency and "none" leagues are unchanged), a
-  CPU also looks at "hot" players: a skill player not out, who played in the last two weeks and whose mean
-  over his last two games is at least 6 points over his `ros_ppg`. It values him at a hot rate (half that
+  CPU also looks at "hot" players: a skill player not out, with at least two real games, who played in the
+  last two weeks and whose mean over his last two games is at least 6 points over his `ros_ppg` (one big
+  game is not a streak). It values him at a hot rate (half that
   recent mean, half `ros_ppg`) for the weeks after this one and claims him with half the usual bar (half a
   lineup point a week), so a breakout is claimed soon after his big game rather than once his projections
   catch up.
@@ -1007,9 +1086,23 @@ that week's games on; only scoring a week reads its real points.
   smallest pieces past the first extra one count at
   `replay_trade_value.DEPTH_SHARE` (35%), so five bench players worth twice a starter on the chart still
   don't buy him, while a fair 2-for-1 is unchanged. It also refuses a deal
-  that loses it 20% of market value (counted with the same depth discount). Declines come with the reasons. A player on IR can be traded: he takes the receiving team's free IR slot, else a
+  that loses it 20% of market value (counted with the same depth discount). Declines come with the reasons.
+  The verdict's headline ("Slight loss for you") is on trade value; its totals add the best-player premium
+  and take off your drops (it says so when they differ from the rows), and a lineup loss of 10 or more
+  points over the rest of the season gets its own warning under the lineup line. A CPU's lineup loss counts
+  in full but at most 15% of what it sends (`LINEUP_CAP`), so a CPU can accept a deal that costs its lineup
+  when the value is right (selling its QB in a one-QB league), as real managers do. A player on IR can be traded: he takes the receiving team's free IR slot, else a
   roster spot (which may force a drop). A CPU
-  sells you an out player only for at least half his healthy chart value. After a deal each starting slot
+  sells you an out player only for at least half his healthy chart value. A player his team added or claimed
+  this week and worth under 100 on the chart counts half (`replay_trade_value.PICKUP_SHARE`) in every trade
+  price until the next week, for the CPU and in your verdict alike (the row says "Just picked up"), so a
+  pickup can't be flipped for value the week he arrives. A CPU's positional limits hold in trades too: a deal
+  that takes it past one cuts its cheapest player there as part of the deal, counted in its value test like
+  any cut of its own. A done deal or a drop expires every other pending offer naming a player who moved.
+  When a CPU sends you an offer because it wants one of your players, it gives you 5-10% more trade value
+  than it gets, by persona (`replay_personas.OFFER_EDGE`: steady 5-6%, shark 5-7%, balanced 6-8%, panicky and
+  gambler 8-10%), judged as its own offer (`replay_trades.offer_multiple`) both when made and when you accept
+  it; a shop's offer is priced as before, at the shop discount. After a deal each starting slot
   the CPU can no longer fill needs a player it can add (unrostered, not out, not on waivers; in the waiver
   phase, when everyone unrostered is on waivers, anyone you haven't claimed), and it adds him
   (`replay_cover.cpu_cover`): right away, or in the waiver phase once waivers clear. Each CPU has a hidden **persona** (balanced, panicky, shark, steady,
@@ -1020,7 +1113,8 @@ that week's games on; only scoring a week reads its real points.
   buying and when holding; the rest stay calm. Small on purpose: Javonte Williams' week-2 jump of 15 points
   becomes about 19 to an emotional CPU. **Counters:** a CPU that turns down a deal on value alone may
   answer with a counter offer it would take (`services/replay_counter.py`; one roll and at most one counter
-  per CPU per week), shown under Offers for you;
+  per CPU per week), shown under Offers for you (an offer lapses when the week is played: the hub warns
+  while one is waiting);
   you can counter a CPU's offer from the trade builder (the offer is marked "countered"). The **deadline**:
   trades are open through week 11 and its waiver phase, and close when you press Sim to Wednesday after
   week 11's games (in a league without waivers, once week 11 is played). CPUs also trade with each other
@@ -1099,7 +1193,10 @@ that week's games on; only scoring a week reads its real points.
   user's games outlined; slots not decided yet say "To be decided". Until the seeds lock, round one is drawn
   from the current standings and marked Projected. Below it, each consolation pool (the places it decides,
   its teams, or who will join it) with its games week by week; a week not paired yet says when it will be.
-  On a phone the columns stack.
+  On a phone the columns stack. A game whose teams are set and whose week has come is a link to that game
+  on the Matchup tab (`#/play?game=ID&view=matchup&week=W&team=T`; the current week's opens its preview);
+  later weeks and a projected round one aren't links. The **Standings** table sorts by PF or PA (click the
+  header, again to flip); Seed (or Finish) goes back to the standings order, the only order with the cut line.
 - **Limits of "no hindsight":** a week's projection is the sites' final pre-game number, and it is
   already visible at that week's Wednesday waiver run. An expert snapshot taken on a Friday already knows
   that week's Thursday game. Injury news is built from the real return week (noisy, see above). A player appears on the board and the wire once
@@ -1140,7 +1237,9 @@ and the API sends no result of an unplayed week. The look ("Game Night", `styles
   yards a game and TD:INT, each blank when there is nothing to divide by. Click a column header to sort
   on the server (again to flip); players without the number come last either way.
 - **Player card:** his status, five stat tiles, a game log of played weeks (opponent, projection, points,
-  box line) and the weeks to come: opponent (@ when away), a **matchup chip** and an **Est.**, his
+  box line; a played week's opponent opens that NFL game's **box score**: the final score, then one tab per
+  team with every pool player's passing, rushing and receiving line and fantasy points under the league's
+  scoring, K and DST points included; Back returns to the card) and the weeks to come: opponent (@ when away), a **matchup chip** and an **Est.**, his
   rest-of-season rate x the opponent's defense factor (not a site projection; none on a bye or while the
   injury news has him out).
 - **Matchup ratings** (`services/replay_defense.py`): how many points each NFL defense gives up to a
@@ -1195,7 +1294,7 @@ trades, IR, playoffs, no hindsight) are the same as in a past season. A new leag
   and plays weeks 1 to N with the real results, then the simulated rest. **Jump in now** drafts today and
   plays from week N+1: the draft knows everything real through week N (results, tags, projections and
   expert ranks); week N+1's injury report and expert ranks are simulated from that, like every later week's
-  (the real ones, published during the week, are not read), and the ADP is today's market (what a draft held under the
+  (the real ones, published during the week, are not read; the Jump in now choice says so), and the ADP is today's market (what a draft held under the
   current public view would look like, below), not August's. Its defaults: 4 playoff teams (the smallest
   bracket, so the longest regular season), the trade deadline two thirds of the way through the weeks
   left, and at least 3 regular-season weeks must be left (otherwise pick a later championship week or
@@ -1207,8 +1306,9 @@ trades, IR, playoffs, no hindsight) are the same as in a past season. A new leag
 - **The future season** (2027) is simulated whole, starting from what is known today: the public view of
   every player at the end of the newest season so far (2026 through its last finished week, so it moves as
   2026 is played), carried through an offseason (below). It needs that season prepared first.
-- **Every league is frozen:** each new simulated league rolls its own rest of the season from its seed,
-  so two leagues on 2026 play out differently, and the whole season (the real weeks too) is saved with the
+- **Every league is frozen:** each new simulated league rolls its own rest of the season from a
+  server-side seed (never the `seed` sent to create it, so a league can't be recreated to scout a future
+  already played), so two leagues on 2026 play out differently, and the whole season (the real weeks too) is saved with the
   league (table `replay_season_data`, `services/replay_blob.py`, compressed versioned JSON). New real data
   (a finished week, an nflverse stat correction, an updated offseason file) reaches every league created
   after it, with no restart or Prepare needed (the season cache is keyed on the data), and never one created
@@ -1217,6 +1317,11 @@ trades, IR, playoffs, no hindsight) are the same as in a past season. A new leag
   screens (the server log records why, never the save's contents); it is still listed and can be deleted.
   If building a new league's season fails unexpectedly, the create answers 500 with the error's type only
   (the full trace is in the server log) and nothing is saved: never a league without its season.
+  A saved season is decoded once per server run (about 1.5 s, ~9 MB in memory) and kept for the next
+  12 simulated leagues opened (`replay_blob.CACHED`, was 4): the first screen of a league after a restart
+  takes ~1.7 s, the next ~0.35 s, and switching between up to 12 simulated leagues never decodes again.
+  Simulated games keep each team's final score (`SeasonData.scores`, shown on box scores once played);
+  a league saved before that loads with no scores.
 - **How the UI marks it:** the saved-leagues list puts a **Live 2026** or **Simulated** chip after the
   name; the game screen shows "2026 · simulated from week 12" or "2027 · simulated season" under the
   scorebug; on a player's card every simulated week in the game log and the weeks ahead carries a small
@@ -1243,19 +1348,49 @@ read the belief, so, as in a real season, the public learns the truth only from 
   of the game he finished, the body part, how often he comes back listed Q, and how often a healthy starter
   is listed Q or D and plays anyway (who counts as a starter there comes from the public belief, never the
   truth). A long absence is tagged IR, like the real reports. Defenses are never hurt. A player already out
-  when the simulation starts sits a fitting number of further games.
+  when the simulation starts sits a fitting number of further games; a suspension (SUS) or exempt-list (EXE)
+  absence carries on too, keeping its tag and with no Q on his return (lengths from the week-to-week table for
+  a suspension, whose real length the data doesn't hold, and from the long-tailed IR table for the exempt
+  list, which is open-ended). A live league also reads each player's **Sleeper status once, when it is
+  created** (`sim_setup.with_status_now`): Out, Doubtful, IR, PUP, suspended (and Sleeper's other zero-chance
+  statuses) become a hard tag in the first simulated week, so a player hurt in the last real game (Drake Maye,
+  2026 week 10) starts the simulation out, for a length the injury model draws; Questionable is left to the
+  model. Out / Doubtful statuses older than 18 hours (their count is logged, at WARNING when most statuses
+  are that old: the sync has stopped) and players already hard-tagged
+  in the last real week are left alone; IR, PUP and suspended last for weeks, so they count however old the
+  sync is, except a stale one fetched before the kickoff of any game he then played (he has been activated
+  since, a bye week after it or not; a tag fetched after that game, hurt Sunday and placed on IR Tuesday, still
+  counts). Real weeks never change.
+  On purpose, simulated players get hurt **about a quarter less often** than real ones (`INJURY_SCALE = 0.75`
+  in `sim_injuries.py` multiplies the per-game and preseason injury chances, in whole simulated seasons and
+  in the live season's simulated weeks alike); how long an injury lasts stays real, and an absence already
+  running in the real weeks is carried over untouched. `sim_eval` reports, by position, new injuries per
+  game played and the share of games missed for the real seasons, the target (real x 0.75) and the
+  simulation.
 - **Hidden talent:** every player's true role and efficiency differ from his reputation by a random draw,
   widest for rookies and players with few games, smallest for veterans with a full season
   (`services/sim_talent.py`); teams' volume and defenses move the same way. During the season some
-  players **break out** (a backup's role grows), some **bust** (a lead player's shrinks) and some starting
-  quarterbacks are **benched** (a poor passer more often; in a whole simulated season a team with a promising rookie behind its
-  starter usually turns to him before the season is out). These spreads and rates are tuned so a
+  players **break out** (a backup's role grows), some **bust** (a lead player's shrinks, but never one of the
+  top 12 at his position by the public's rating: real stars lose work to injuries, not to a coach's whim) and
+  some starting quarterbacks are **benched**. The benching chance depends on how the public rates the
+  starter among the 32 starters, fitted on real week-1 starters 2019-2025 who lost the job while healthy:
+  about 1% a season for the top-rated one, 4-5% around 12th, 15% around 24th and 27% for the lowest (real:
+  0 of 42 top-6 starters, 2 of 42 ranked 7-12, 9 of 84 ranked 13-24, 11 of 56 ranked 25-32); in a whole
+  simulated season a team with a promising rookie behind its starter usually turns to him before the
+  season is out. **Rookies grow:** about a quarter of the running backs, receivers and tight ends in their first season get a bigger role
+  around mid-season (x1.6 from a week between 8 and 11), fitted on real rookies 2019-2025 against veterans
+  with the same first half (real rookies gain about 6% more role than such veterans after week 9, the
+  small-role ones about 15%; their points per touch do not grow). In the live season only the simulated
+  weeks can carry a step; the public learns it from the games. These spreads and rates are tuned so a
   simulated season reshuffles like a real one (preseason rank against final rank, breakouts, busts).
 - **Buzz:** before the week a breakout, bust or benching starts, a news line is published for 60% of
   them ("Beat reporters say his role is growing; expect more work.", "Reports say his snaps and touches are
-  shrinking.", "Reports say his starting job is in danger."), and false lines about other starters are added
-  so only about 60% of all lines are true, in the same weeks a change can start (never the first simulated
-  week or the last two). It shows as a small **Buzz** chip (named "Buzz: ..." for screen readers and voice control, tooltip "Buzz (a rumor): ...") on player rows
+  shrinking.", "Reports say his starting job is in danger."), and false lines are added so only about 60% of
+  all lines are true, in the same weeks a change can start (never the first simulated week or the last two).
+  A false line is only about a change that could plausibly happen to him, as often as it really does: a
+  backup's role growing, a lead player who is not a top-12 star losing work, or a starting quarterback outside
+  the top 12 losing his job (weighted by his benching chance), so an elite starter never reads "his starting
+  job is in danger". It shows as a small **Buzz** chip (named "Buzz: ..." for screen readers and voice control, tooltip "Buzz (a rumor): ...") on player rows
   and the draft board (press it to open his card), and under **News** on his card. It is the only way the truth reaches the screen
   before the games, and it is right only some of the time.
 - **Projections, expert ranks and ADP** are computed from the belief each week (`services/sim_market.py`):
@@ -1274,23 +1409,79 @@ read the belief, so, as in a real season, the public learns the truth only from 
 - **Aging:** each veteran's role grows or fades by his position's curve for his years in the league (1, 2,
   3, 4-5, 6-8, 9+), big and small roles move partway back toward the usual one, and each team's
   returning players are rescaled so the curve moves work between teammates without changing the team's
-  total. Efficiency regresses toward the position norm. All of it is measured from real seasons 2019-2025
-  (`sim_next_year.json`). On each team the QB who started the most games last season is the starter again in August.
+  total. Efficiency regresses toward the position norm, a quarterback's rushing with its own (much weaker)
+  regression measured on quarterbacks: a scrambler keeps most of his edge. A receiver's yards and TDs per
+  catch are split into his own part and his quarterback's: his own regresses, the quarterback's moves with the
+  August starter's passing (so a great passer's receivers stay good, and a QB change moves them). How much of
+  the measured regression the preseason belief applies is fitted on whole seasons: each real season 2021-2025
+  rebuilt from the year before, against what players really scored. Applying all of it left the August
+  belief too flat (real stars outscored it by 1.5-3 points a game); the fitted share is none at every
+  position (the end-of-season belief is already shrunk enough), which made the preseason values match real
+  points a game (slope about 1, lower error). The measured regressions still size the hidden talent's
+  offseason spread (what last season leaves unexplained). All of it is measured from real seasons 2019-2025 (`sim_next_year.json`). On each
+  team the QB who started the most games last season is the starter again in August; starts made for
+  another team count only when he was that team's main starter (a five-game fill-in elsewhere does not take
+  the job from the team's own starter, a signed starter does). A quarterback traded in mid-season keeps his
+  old team's starts too, unless his new team's main starter opened its season and is still there: Jacoby
+  Brissett's Arizona starts do not beat Lamar Jackson in Baltimore, while a starter traded at the deadline to
+  a team led by a fill-in keeps the job.
 - **Rookies** get the role a player taken at that pick and position really had as a rookie, and the widest
   talent draw. A rookie QB starts week 1 when his team has no starter, or when his pick makes it likely and
   the incumbent is a below-average passer; otherwise he is next in line. Real drafters pay for a rookie's
   upside, so the market (ADP and the preseason expert ranks, not his role or talent) multiplies his value by
   a premium fitted on the real rookie ADPs of all of 2019-2025 at once, then checked on held-out seasons
   (`rookie_premium` in `sim_next_year.json`; allowed to fall with the pick but never to rise). The fitted
-  premium is flat by position, the same at every pick: x1.22 for a running back, x1.10 for a receiver,
-  x1.05 for a tight end, none for a quarterback (rookie QBs already go where real ones do).
+  premium is flat by position, the same at every pick: x1.22 for a running back, x1.16 for a receiver,
+  x1.11 for a tight end, x1.05 for a quarterback (refitted with the stars-level model).
 - **The offseason file** `backend/sim_data/offseason_2027.json` is meant to be edited by hand. `rookies`:
   one entry per player with `name`, `position` (QB/RB/WR/TE/K), `team` (schedule code, e.g. MIA, LA, LV,
-  WAS), `pick` (projected overall pick, 1-262) and `college`. `moves`: `name` (as the app spells him),
+  WAS), `pick` (projected overall pick, 1-262: the prospect's rank on the consensus board), `college`, and
+  optionally `lock` (default `false`; `true` pins him to that `team` and `pick` in every league) and `hype`
+  (1-3, default 1) for a prospect rated beyond his pick: the market's rookie premium and his expected role
+  are both multiplied by it (his talent is still drawn around that role, with a rookie's wide spread, so he
+  can still bust). Jeremiah Smith carries 1.2, set so his average ADP across leagues lands near where Marvin
+  Harrison Jr.'s did as a rookie (14.5 in 2024's PPR ADP): over 20 league seeds (the seeded draft put him on
+  13 different teams) his ADP averaged 12.3 (1-30), and he finished a top-12 receiver 35% of the time,
+  top-24 55% and outside the top 36 20%. `moves`: `name` (as the app spells him),
   `position`, `team` (the new team, or `null` for retired / out of the league) and a `note`. Names must be
   unique across both lists; everyone else stays on his team. A bad entry greys out the 2027 card with the
   file name and the problem; a move whose name matches nobody is skipped (logged as a warning). Saved
   leagues keep the offseason they were built with.
+- **A seeded draft** (`services/sim_rookie_draft.py`): unless `lock`ed, where a rookie lands depends on the
+  league's seed, decided once when the league is created (same seed, same draft). The 2026 standings are
+  finished from the real results so far, each game left won with a probability from the two teams' points
+  differential a game; the draft order is fewest wins first. Each prospect's board spot is his `pick` x a
+  random ~30% miss, and the team on the clock takes the best prospect whose spot has come up and that it
+  needs: a QB unless its August starter (as above, after the moves; not a starter hurt late, whose recent
+  starts look like a backup's) is established (a full season's evidence, average-ish passing), an
+  RB/WR/TE when its room is below the league's median. A consensus top pick goes near the top regardless;
+  a QB slides past teams that don't need one through round 2. The drafted pick then sets his rookie role,
+  his market premium and his place on his new team's depth chart. Shortcut: playoffs, strength-of-schedule
+  tiebreaks and traded picks are not modeled.
+- **Starters and split backfields:** each team's starters come from the belief (role weights fitted on
+  2025-2026 games, a QB's starts and passing quality), so a veteran with a track record keeps his job and a
+  rookie is next in line unless his draft capital says otherwise; when a starter is hurt his backup plays,
+  and the backup's card says why ("Expected to start while Justin Herbert is out (IR, Knee).").
+  A team whose RB2 has 60%+ of its RB1's work opens with a **committee** (`services/sim_depth.py`); in
+  2018-2025 about a quarter of teams did, about half of those committees were won during the season, the
+  early leader won about three in four, mostly in weeks 5-9, and the loser kept about 0.38 of the winner's
+  work (`python -m services.sim_depth --fit --seasons 2018-2025` -> `sim_depth.json`). In a simulated
+  season the winner and the week are seeded; the public learns it only from the games (and the usual
+  60%-true buzz).
+- **Injuries carried over** (`services/sim_carryover.py`): a player still on the injury report at the
+  newest 2026 week starts 2027 healing. His injury (the live status's detail when there is one, e.g.
+  "Knee - ACL" + "Surgery", else the report's body part) gives a typical return time (ACL and a repaired
+  Achilles about 48 weeks, a pectoral or PCL 20, a Lisfranc 26, a hamstring 4, ...; a generic knee, foot or
+  ankle operation doubles its entry), counted from the week he was hurt to 2027's week 1. The market prices
+  the expected games missed (his teammates gain meanwhile), his card's news says when he is expected back,
+  and the truth draws his real recovery around it (lognormal, a quarter of the time), so in some leagues he
+  is ready for week 1 and in others he opens on IR with the usual noisy "expected back week N" reports.
+  `python -m services.sim_carryover --check --seasons 2018-2024` compares the model with real cross-season
+  returns: of the 493 players still tagged at the end of a 2018-2024 season who played the next one,
+  34.9% missed its week 1 against 25.4% of healthy players (box scores also miss depth players, so only
+  the ~10-point gap means anything). The old reports carry only coarse body parts ("Knee"), which this
+  table reads as short injuries, so the check cannot validate the detailed entries (the table rests on the
+  published return times) and that ~10-point excess for generic injuries is not modeled.
 - **Schedule:** until the real 2027 schedule is in the database, it is built by the NFL's rotation
   formula (`services/sim_schedule.py`: 6 division games, a division of each conference, two same-place
   games and the 17th game), seeded by the season so every 2027 league shares it; the same-place games use
@@ -1308,6 +1499,8 @@ read the belief, so, as in a real season, the public learns the truth only from 
 - The live season's preseason ADP is MyFantasyLeague's PPR list for every format until Fantasy Football
   Calculator has one. MyFantasyLeague's ADP request can't be limited to drafts held before week 1, so a list
   first fetched in-season also counts a few late drafts (a little hindsight in a **Full season** draft).
+- The seeded draft ignores playoffs, tiebreaks and traded picks, and its board noise and need rules are set
+  by hand, not fitted on past drafts.
 - The rookies and moves in the 2027 file are a snapshot of mock drafts and reports (dated in the file), not
   facts.
 
@@ -1323,6 +1516,8 @@ python -m services.sim_eval --set talent.role_sd=0.4 --save-tuned   # try a valu
 python -m services.sim_eval --fit [--seasons 2021-2025]             # refit the game model (sim_params.json)
 python -m services.sim_injuries --fit --seasons 2018-2025 [--check] # refit injuries (sim_injuries.json)
 python -m services.sim_next_year_fit --fit [--seasons 2019-2025]    # refit the offseason + rookie premium (sim_next_year.json)
+python -m services.sim_depth --fit --seasons 2018-2025              # refit split backfields (sim_depth.json)
+python -m services.sim_carryover --check --seasons 2018-2024        # carried injuries vs real cross-season returns
 ```
 
 `sim_eval`'s **mid** mode takes a real season as known before week 12, simulates the rest and compares it
@@ -1330,7 +1525,11 @@ with what really happened (weekly point ranges, projection error, QB-receiver co
 out, K and D/ST points); **full** builds a season exactly like the future one, from the season before with
 that year's real rookies, moves and schedule, and compares the whole season (preseason rank against final
 rank, breakouts, busts, games missed, how its ADP agrees with the real ADP, overall and for the rookies, and
-how its preseason expert ranks agree with its ADP).
+how its preseason expert ranks agree with its ADP). Both modes end with an injury table: for the top-150
+ADP skill players, new injuries per game played (he played and missed his team's next game with any injury
+tag: a real player ruled out on game day often keeps his Q or D, while a simulated one is always O or IR, so
+counting only O/IR would undercount the real rate by about a third) and the share of team games missed,
+with the real value, the target and the simulated one.
 
 ## API reference
 
@@ -1406,6 +1605,7 @@ League parameters accepted by every valuation endpoint: `scoring=ppr|half|std`,
 | GET | `/api/replay/games/{id}/activity?kind=&limit=&offset=` | The league log (picks, moves, trades, results), newest first |
 | GET | `/api/replay/games/{id}/players?position=&search=&status=&sort=&dir=&stats=&stat_week=&limit=&offset=` | The player pool (default: unrostered) with status, projection, value, points so far, usage over his last 3 games, the opponent's matchup rating and a stat line (`stats` `season`, `last4` or `week` with `stat_week` 1..current); `sort` any column (`value`, `projection`, `ros_ppg`, `adp`, `points`, `name`, `ppg`, `last`, `line_points`, `line_projection` or a box key such as `rec_yds`), `dir` `asc`/`desc`; 422 on a bad value |
 | GET | `/api/replay/games/{id}/players/{player_id}` | One player's weeks so far (projection, real points, box line, opponent and its rating, usage, value by week; from the week he entered the pool), the weeks to come with an estimate and rating, what the ratings rest on, and who owns him |
+| GET | `/api/replay/games/{id}/box?week=&team=` | A played NFL game's box score (either team names it): both teams' final scores (null in a league saved before scores were kept) and every pool player's line and fantasy points; 422 for an unplayed week or a team without a game |
 | GET | `/api/replay/games/{id}/claims` | Your pending waiver claims in order (with their bids), the waiver priority, and in a FAAB league every team's budget left |
 | POST | `/api/replay/games/{id}/claims` | Body `{"add": id, "drop": id, "bid": 12}`; a waiver claim (before the week's waiver run). `bid` (whole dollars, 0 to your budget left) is required in a FAAB league and refused otherwise |
 | POST | `/api/replay/games/{id}/claims/{claim_id}/bid` | Body `{"bid": 20}`; change a pending claim's bid (FAAB, before the waiver run) |
@@ -1416,6 +1616,7 @@ League parameters accepted by every valuation endpoint: `scoring=ppr|half|std`,
 | POST | `/api/replay/games/{id}/ir/place` | Body `{"player_id": id}`; move a player tagged O, IR or PUP this week to your IR slot |
 | POST | `/api/replay/games/{id}/ir/activate` | Body `{"player_id": id, "drop": id, "swap": id}` (`drop` and `swap` optional, not both); bring him back, dropping `drop` when the roster is full or moving the injured `swap` to IR in his place |
 | POST | `/api/replay/games/{id}/advance` | Body `{"step": "wednesday", "week": 3}` runs the waivers, `"play"` plays the week (409 if `week` is not the league's current week) |
+| | | The lineup, claim, add-drop, drop, IR, propose and counter bodies take the same optional `"week"` (the page sends it): 409 when the league has moved on, so a move made on an old page never lands in the next week. Once the season is over every move is a 422 "This season is over." |
 | GET | `/api/replay/games/{id}/trades` | CPU offers waiting for you (with a preview verdict), every past offer and trade (`counter_to` marks a counter), and whether trades are open |
 | POST | `/api/replay/games/{id}/trades/evaluate` | Body `{"to_team": 3, "give": [ids], "get": [ids], "drops": [ids]}`; that CPU's verdict with reasons (nothing changes) |
 | POST | `/api/replay/games/{id}/trades/propose` | Same body; the trade is carried out when the CPU accepts; a decline may come back with the CPU's `counter` offer |

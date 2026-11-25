@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { event, MOSTERT, NINERS, OPPONENT_TEAM_ID, playerRow, RESULT_EVENTS, summary, tagged, TUCKER, USER_TEAM_ID } from './fixtures';
 import {
-  canGoOnIr, ConfirmButton, EventList, formatPoints, formatRecord, groupEvents, injuryLabel, isHardTag, ordinal, PositionTabs, positionParam,
+  canGoOnIr, ConfirmButton, EventList, formatPoints, formatRecord, groupEvents, injuryLabel, isHardTag, ordinal, OUT_REASON, PositionTabs, positionParam,
   ReplayDrawer, ReplayInjuryBadge, ReplayIrBlockedNotice, ReplayPlayerCell, TeamSelect, viewHash,
 } from './shared';
 
@@ -31,13 +31,14 @@ describe('hype star', () => {
 
 describe('injury tags', () => {
   it('labels, tones and classifies every tag', () => {
-    const cases = (['Q', 'D', 'O', 'IR', 'PUP', 'SUS'] as const).map((tag) => {
+    const cases = (['Q', 'D', 'O', 'IR', 'PUP', 'SUS', 'EXE'] as const).map((tag) => {
       const injury = tagged(MOSTERT, tag).injury!;
       return [tag, injuryLabel(injury), isHardTag(injury), canGoOnIr(injury)];
     });
     expect(cases).toEqual([
       ['Q', 'Questionable', false, false], ['D', 'Doubtful', false, false], ['O', 'Out', true, true],
       ['IR', 'Injured reserve', true, true], ['PUP', 'Physically unable to perform', true, true], ['SUS', 'Suspended', true, false],
+      ['EXE', "Commissioner's exempt list", true, false],
     ]);
     expect([isHardTag(null), canGoOnIr(undefined)]).toEqual([false, false]);
     expect(injuryLabel(tagged(MOSTERT, 'Q', 'LP', 'Hamstring').injury!)).toBe('Questionable: Hamstring (limited practice)');
@@ -62,7 +63,8 @@ describe('injury tags', () => {
     unmount();
     render(<ReplayPlayerCell player={tagged(MOSTERT, 'Q')} info={{ out: true }} />);
     expect(screen.getByText('Q')).toBeInTheDocument();
-    expect(screen.getByText('Out', { selector: '.status-badge' })).toBeInTheDocument();
+    // Q (the injury report) next to Out (no pre-game projection) says why on hover, so they don't read as a contradiction.
+    expect(screen.getByText('Out', { selector: '.status-badge' })).toHaveAttribute('title', OUT_REASON);
   });
 
   it('shows the IR banner only while blocked and roster moves are open', () => {

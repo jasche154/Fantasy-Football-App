@@ -65,6 +65,7 @@ describe('SetupForm simulated seasons', () => {
     expect(screen.getByRole('radio', { name: /Full season/ })).toBeChecked();
 
     await user.click(screen.getByRole('radio', { name: /Jump in now \(draft today, play week 10 on\)/ }));
+    expect(screen.getByText(/Week 10’s injury tags and expert ranks are already simulated/)).toBeInTheDocument();
     // The bracket that keeps the most weeks: 4 teams, and what that means in weeks.
     expect(screen.getByLabelText('Playoff teams')).toHaveValue('4');
     expect(screen.getByText(nowSummary(9, 17, 4))).toHaveTextContent('plays weeks 10-15 (6 weeks), then the playoffs in weeks 16-17. Trade deadline: week 13.');

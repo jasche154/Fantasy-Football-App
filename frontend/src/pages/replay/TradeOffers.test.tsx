@@ -142,3 +142,33 @@ describe('TradesView: while the list reloads', () => {
     expect(await screen.findByText('No offers are waiting for your answer.')).toBeInTheDocument();
   });
 });
+
+describe('TradeVerdictView: the headline is trade value, the lineup is called out', () => {
+  it('warns about a big lineup loss next to a mild value headline and explains totals that are not the rows', async () => {
+    const hurt = verdict({ fair_label: 'slight_loss', percent: -0.06, value_give: 801.7, value_get: 754, your_gain: -60.7,
+      give: [{ player: ETIENNE, value: 744.1 }], get: [{ player: MOSTERT, value: 754 }] });
+    renderTrades(trades({ offers: [offer({ verdict: hurt })] }));
+    const card = await screen.findByRole('listitem', { name: 'Offer from Blitz Brigade' });
+
+    expect(within(card).getByText(/on trade value\. You give 802 value, get 754\./)).toBeInTheDocument();
+    expect(within(card).getByText(/count the best player in the deal a little extra/)).toBeInTheDocument();
+    expect(within(card).getByText(/this costs your best lineup 60\.7 points over the rest of the season/)).toBeInTheDocument();
+  });
+
+  it('stays quiet when the lineup barely moves and the totals are the rows', async () => {
+    renderTrades(trades({ offers: [offer()] }));
+    const card = await screen.findByRole('listitem', { name: 'Offer from Blitz Brigade' });
+    expect(within(card).queryByText(/costs your best lineup/)).not.toBeInTheDocument();
+    expect(within(card).queryByText(/a little extra/)).not.toBeInTheDocument();
+    expect(within(card).queryByText(/Just picked up/)).not.toBeInTheDocument();
+  });
+
+  it('notes a player who counts half because he was just picked up', async () => {
+    const note = 'Just picked up: counts 50% of his value in trades this week';
+    const fresh = verdict({ value_give: 15.8, give: [{ player: ETIENNE, value: 15.8, note }] });
+    renderTrades(trades({ offers: [offer({ verdict: fresh })] }));
+    const card = await screen.findByRole('listitem', { name: 'Offer from Blitz Brigade' });
+
+    expect(within(card).getByText(`${ETIENNE.name}: ${note}.`)).toBeInTheDocument();
+  });
+});

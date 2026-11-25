@@ -35,4 +35,16 @@ describe('Kicker / defense views and model accuracy', () => {
     expect(screen.getByRole('region', { name: 'Backtest' })).toHaveTextContent('7.65 → 7.45');
     expect(screen.getByRole('region', { name: 'Learned weights' })).toHaveTextContent('After week 7 (265 players): vegas props 33%');
   });
+
+  it('does not call eleven weeks a small sample', async () => {
+    mockFetch([META_ROUTE, { path: '/api/model/accuracy', reply: json({
+      season: 2026, backtest: null, weight_history: [],
+      live: { n: 3445, weeks: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], blend_mae: 4.14, bias_by_position: {},
+        range: { n: 2982, below_floor: 0.2, above_ceiling: 0.11 } },
+    }) }]);
+    renderWithProviders(<AccuracyView />);
+    const live = await screen.findByRole('region', { name: 'This season' });
+    expect(live).toHaveTextContent('Floors have been too high this season.');
+    expect(live).not.toHaveTextContent('small sample');
+  });
 });

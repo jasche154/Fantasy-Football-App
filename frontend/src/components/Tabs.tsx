@@ -11,12 +11,14 @@ interface TabsProps {
   label: string;
   tabs: readonly TabItem[];
   className?: string;
+  /** The tab open at first (default the first one). */
+  initial?: number;
 }
 
-/** WAI-ARIA tabs: the first tab starts open; arrow keys, Home and End move between tabs (automatic activation). */
-export function Tabs({ label, tabs, className }: TabsProps) {
+/** WAI-ARIA tabs: the `initial` tab (the first by default) starts open; arrow keys, Home and End move between tabs (automatic activation). */
+export function Tabs({ label, tabs, className, initial = 0 }: TabsProps) {
   const base = useId();
-  const [active, setActive] = useState(0);
+  const [active, setActive] = useState(initial);
   const buttons = useRef<(HTMLButtonElement | null)[]>([]);
   const current = Math.min(active, tabs.length - 1);
 

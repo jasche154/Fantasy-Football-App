@@ -36,7 +36,7 @@ def _client(data, url: str = "sqlite://") -> Iterator[TestClient]:
                            **({"poolclass": StaticPool} if url == "sqlite://" else {}))
     Base.metadata.create_all(engine)
     with Session(engine) as session:
-        fakes.seed_db(session, data)
+        fakes.seed_db(session, data, scores=True)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
 
     def override() -> Iterator[Session]:
@@ -132,7 +132,11 @@ def _week_two_waivers(client: TestClient, game: str, seen: dict) -> None:
     drop = min((r for r in rows if not r["starting"] and r["player"]["position"] in SKILL),
                key=lambda r: r["value"])["player"]["id"]
     for add in wire:
-        post(client, game + "/claims", {"add": add, "drop": drop})
+        post(client, game + "/claims", {"add": add, "drop": drop, "week": 2})
+    seen["stale_actions"] = [refused(client, game + path, {**body, "week": 1}) for path, body in (
+        ("/lineup", {"starters": None}), ("/claims", {"add": wire[0], "drop": drop}), ("/drop", {"player_id": drop}),
+        ("/add-drop", {"add": wire[0], "drop": drop}), ("/ir/place", {"player_id": drop}),
+        ("/ir/activate", {"player_id": drop}), ("/trades/propose", seen["deal"]))]
     first = get(client, game + "/claims")
     order = [row["id"] for row in first["results"]][::-1]
     seen["wire"], seen["claim_twice"] = wire, refused(client, game + "/claims", {"add": wire[0], "drop": drop})
@@ -154,7 +158,9 @@ def _snapshot(client: TestClient, game: str) -> dict[str, dict]:
     lines = {f"players {stats} {sort}": get(client, game + "/players", status="all", stats=stats, sort=sort, dir="asc",
                                             limit=200, **({"stat_week": LEAK_WEEK - 1} if stats == "week" else {}))
              for stats in ("season", "last4", "week") for sort in ("line_points", "rush_yds", "line_projection")}
-    return {**teams, **lines, "players": {"results": pool}, "matchup": get(client, game + "/matchup"),
+    boxes = {f"box {g.home_team}": get(client, game + "/box", week=LEAK_WEEK - 1, team=g.home_team)
+             for g in DATA.schedule.games if g.week == LEAK_WEEK - 1}
+    return {**teams, **lines, **boxes, "players": {"results": pool}, "matchup": get(client, game + "/matchup"),
             **{f"player {pid}": get(client, f"{game}/players/{pid}") for pid in sorted(ids)}}
 
 
@@ -181,8 +187,11 @@ def story(client) -> dict:
             seen["snapshot"] = _snapshot(client, game)
         seen["played"].append(post(client, game + "/advance", {"step": "play", "week": week}))
     seen["after_end"] = refused(client, game + "/advance", {"step": "play", "week": summary["week"]})
+    seen["over"] = [refused(client, game + path, body) for path, body in (
+        ("/lineup", {"starters": None}), ("/add-drop", {"add": 1}), ("/claims", {"add": 1}))]
     seen["final"] = {name: get(client, f"{game}/{name}") for name in (
-        "team", "matchup", "scoreboard", "standings", "schedule", "activity", "chat", "players", "claims", "trades", "draft")}
+        "team", "matchup", "scoreboard", "standings", "schedule", "activity", "chat", "players", "claims", "trades", "draft",
+        "playoffs")}
     seen["final"]["summary"] = summary
     return seen
 
@@ -316,6 +325,22 @@ def test_time_only_moves_forward_one_step_at_a_time(story):
     assert story["stale"] == (409, "This league is in week 1, not week 2. Reload it.")
     assert story["wrong_step"][0] == 422 and "play week 1 instead" in story["wrong_step"][1]
     assert story["after_end"] == (422, "This season is over.")
+
+
+def test_an_action_from_a_page_showing_an_old_week_is_refused(story):
+    assert story["stale_actions"] == [(409, "This league is in week 2, not week 1. Reload it.")] * 7
+
+
+def test_a_finished_season_refuses_every_move_and_shows_no_moods(story):
+    assert story["over"] == [(422, "This season is over.")] * 3
+    assert not _moods(story["final"]["playoffs"])
+
+
+def _moods(value) -> list:
+    """Every non-null "mood" anywhere in a response."""
+    if isinstance(value, dict):
+        return [m for key, item in value.items() for m in ([item] if key == "mood" and item else _moods(item))]
+    return [m for item in value for m in _moods(item)] if isinstance(value, list) else []
 
 
 def test_every_week_is_played_to_a_champion(story):
@@ -482,6 +507,20 @@ def test_unknown_games_players_and_teams_are_reported(client, story):
     assert refused(client, game + "/drop", {"player_id": 0})[0] == 422
 
 
+def test_a_played_games_box_score_has_the_real_final_score(client, story):
+    game, played = story["path"], next(g for g in DATA.schedule.games if g.week == 2)
+
+    shown = get(client, game + "/box", week=2, team=played.away_team)
+
+    assert [(side["team"], side["score"]) for side in shown["teams"]] == [
+        (played.away_team, DATA.scores[(played.away_team, 2)]), (played.home_team, DATA.scores[(played.home_team, 2)])]
+    assert all(side["players"] for side in shown["teams"])
+    for query in ({"week": 2, "team": "XYZ"}, {"week": 21, "team": played.home_team}, {"week": 0, "team": "KC"},
+                  {"week": 2}, {"team": played.home_team}):
+        assert refused(client, game + "/box", method="GET", **query)[0] == 422, query
+    assert refused(client, "/games/999999/box", method="GET", week=2, team="KC")[0] == 404
+
+
 def test_the_wire_sorts_any_column_either_way_and_shows_the_chosen_stats(client, story):
     game = story["path"]
 
@@ -646,8 +685,8 @@ def test_players_go_on_ir_and_come_back_through_the_api(client, tmp_path_factory
     assert [p["id"] for p in swapped["events"][0]["players"]] == [first["id"], second["id"]]
     assert swapped["events"][0]["text"] == f"Your Team activated {first['name']} from IR and moved {second['name']} to IR"
     assert full == (422, f"The roster is full ({size} players): pick a player to drop to activate {second['name']}.")
-    assert [e["kind"] for e in activated["events"]] == ["drop", "ir"]
-    assert [p["id"] for p in activated["events"][1]["players"]] == [second["id"], free["id"]]
+    assert [e["kind"] for e in activated["events"]] == ["ir"]          # one event for the whole move
+    assert [p["id"] for p in activated["events"][0]["players"]] == [second["id"], free["id"]]
     assert moves["total"] == 3 and {e["kind"] for e in moves["results"]} == {"ir"}
     assert bad == [422] * 4 and after["ir"] == [] and len(after["results"]) == size
 
@@ -671,13 +710,11 @@ def test_an_offer_that_no_longer_stands_is_saved_as_expired(client):
         post(client, game + "/advance", {"step": "play", "week": week})
         post(client, game + "/advance", {"step": "wednesday", "week": week + 1})
     offer = get(client, game + "/trades")["offers"][0]
-    post(client, game + "/drop", {"player_id": offer["get"][0]["id"]})     # the player the CPU asked for
+    post(client, game + "/drop", {"player_id": offer["get"][0]["id"]})     # the player the CPU asked for: the
+                                                                           # drop expires the offer at once
+    trades = get(client, game + "/trades")
 
-    answer = post(client, f"{game}/trades/offers/{offer['id']}/respond", {"accept": True})
-
-    assert (answer["accepted"], answer["expired"]) == (False, True) and answer["game"]["pending"]["offers"] == 0
-    assert answer["message"].startswith("That offer no longer stands. Not on Your Team's roster")
-    assert get(client, game + "/trades")["results"][0]["status"] == "expired"
+    assert trades["offers"] == [] and trades["results"][0]["status"] == "expired"
     assert refused(client, f"{game}/trades/offers/{offer['id']}/respond", {"accept": True}) == (
         422, "That offer is already expired.")
 

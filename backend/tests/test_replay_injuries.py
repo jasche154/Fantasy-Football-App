@@ -38,7 +38,7 @@ def rows(reports=(), rosters=(), last_week=LAST) -> dict[tuple[int, int], tuple]
     ("RES", "R30", "SUS"), ("RES", "R01", "IR"), ("RES", None, "IR"), ("RES", "R48", "IR"), ("RSN", None, "IR"),
     ("RES", "R02", None), ("RES", "R03", None), ("RES", "R06", None), ("RES", "R62", None), ("RES", "R59", "IR"),
     ("NWT", None, None), ("ACT", None, None), ("INA", None, None), ("CUT", None, None),
-    ("RET", None, None), (None, None, None)])
+    ("RET", None, None), (None, None, None), ("EXE", "E02", "EXE"), ("EXE", None, "EXE")])
 def test_roster_tag(status, abbr, tag):
     assert ri.roster_tag(status, abbr) == tag
 
@@ -87,6 +87,14 @@ def test_a_suspension_never_has_practice_or_injury_text():
                [roster(week=2, status="SUS", abbr=None)])
 
     assert got[(1, 2)] == ("SUS", None, None)
+
+
+def test_the_commissioners_exempt_list_is_a_hard_tag_without_injury_text_carried_over_a_bye():
+    """Josh Jacobs, 2026 weeks 1-6: on the exempt list (roster status EXE), out, and no injury."""
+    got = rows([report(week=1, status="Out", text="Knee")],
+               [roster(week=w, status="EXE", abbr="E02") for w in (1, 2, 3)])
+
+    assert [got[(1, w)] for w in (1, 2, 3, 4)] == [("EXE", None, None)] * 4      # NYJ on bye in week 4
 
 
 def test_injury_text_is_carried_one_week_onto_a_hard_tag():

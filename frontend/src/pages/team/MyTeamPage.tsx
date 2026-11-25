@@ -158,7 +158,7 @@ function LineupView({ data }: { data: MyTeamResponse }) {
       <h2 className="section-title">Bench and IR</h2>
       <RosterTable rows={bench} caption="Bench and injured reserve" news={marks} />
       <p className="hint">
-        Kickers and team defenses aren't modeled, so they're not shown. A highlighted news icon means news from the
+        Kickers and team defenses get weekly projections only (no trade value or waiver advice). A highlighted news icon means news from the
         last 48 hours you haven't opened; click it for the player's latest notes.
       </p>
       <RosterNews news={roster} seen={seen} onPlayer={open} />

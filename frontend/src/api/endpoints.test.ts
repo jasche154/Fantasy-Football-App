@@ -166,6 +166,9 @@ describe('Replay League endpoints', () => {
     await replay.proposeReplayTrade(7, trade);
     await replay.respondReplayOffer(7, 3, true, [111]);
     await replay.respondReplayOffer(7, 3, false);
+    await replay.setReplayLineup(7, null, 4);
+    await replay.replayDrop(7, 111, 4);
+    await replay.replayIrPlace(7, 111, 4);
 
     const games = '/api/replay/games';
     expect(api.calls.map((call) => [call.method, `${call.url.pathname}${call.url.search}`, call.body])).toEqual([
@@ -196,6 +199,9 @@ describe('Replay League endpoints', () => {
       ['POST', `${games}/7/trades/propose`, trade],
       ['POST', `${games}/7/trades/offers/3/respond`, { accept: true, drops: [111] }],
       ['POST', `${games}/7/trades/offers/3/respond`, { accept: false, drops: [] }],
+      ['POST', `${games}/7/lineup`, { starters: null, week: 4 }],
+      ['POST', `${games}/7/drop`, { player_id: 111, week: 4 }],
+      ['POST', `${games}/7/ir/place`, { player_id: 111, week: 4 }],
     ]);
   });
 });

@@ -1,5 +1,5 @@
 import type { ReplayPlayerRow, ReplayTeam } from '../../api/types';
-import { EMPTY_VALUE, formatNumber } from '../../lib/format';
+import { EMPTY_VALUE, formatInteger } from '../../lib/format';
 import { DefenseChip } from './gameUi';
 import { canGoOnIr, ConfirmButton, formatPoints, ReplayPlayerCell } from './shared';
 import { canSwap, slotLabel, spotState, type LineupSpot } from './teamLineup';
@@ -98,7 +98,7 @@ function PlayerCells({ row, openPlayer }: { row: ReplayPlayerRow; openPlayer: ((
       <td className="num">{formatPoints(row.points)}</td>
       <td className="num">{row.games > 0 ? formatPoints(row.ppg) : EMPTY_VALUE}</td>
       <td className="num">{formatPoints(row.ros_ppg)}</td>
-      <td className="num">{formatNumber(row.value)}</td>
+      <td className="num">{formatInteger(row.value)}</td>
     </>
   );
 }

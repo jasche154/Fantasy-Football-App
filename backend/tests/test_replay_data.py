@@ -45,8 +45,8 @@ DOWNLOADS: list[int] = []
 
 def espn_player(player_id: int, name: str, position_id: int, stats: dict | None = None, applied: float = 0.0,
                 week: int = 1) -> dict:
-    line = {"statSourceId": 1, "statSplitTypeId": 1, "scoringPeriodId": week, "appliedTotal": applied,
-            "stats": stats or {}}
+    line = {"id": f"11{SEASON}{week}", "statSourceId": 1, "statSplitTypeId": 1, "scoringPeriodId": week,
+            "appliedTotal": applied, "stats": stats or {}}
     return {"player": {"id": player_id, "fullName": name, "defaultPositionId": position_id, "proTeamId": 0,
                        "stats": [line]}}
 
@@ -201,14 +201,14 @@ def test_mfl_unexpected_response_raises_a_history_error():
 
 
 def test_espn_stat_line_is_scored_in_all_three_formats_with_the_apps_scoring():
-    projections = {p.name: p for p in espn_history.parse_week(espn_payload(1), 1)}
+    projections = {p.name: p for p in espn_history.parse_week(espn_payload(1), SEASON, 1)}
 
     back = projections["Christian McCaffrey"]
     assert (back.position, back.pts_std, back.pts_half, back.pts_ppr) == ("RB", 14.0, 16.0, 18.0)
 
 
 def test_espn_kickers_and_defenses_carry_espns_total_and_zero_projections_are_dropped():
-    projections = {p.name: p for p in espn_history.parse_week(espn_payload(1), 1)}
+    projections = {p.name: p for p in espn_history.parse_week(espn_payload(1), SEASON, 1)}
 
     kicker, defense = projections["Michael Badgley"], projections["Raiders D/ST"]
     assert (kicker.position, kicker.pts_ppr, kicker.pts_half, kicker.pts_std) == ("K", 8.41, 8.41, 8.41)
@@ -216,8 +216,37 @@ def test_espn_kickers_and_defenses_carry_espns_total_and_zero_projections_are_dr
     assert not {"Rams D/ST", "Hurt Star", "Some Linebacker"} & set(projections)
 
 
-def test_espn_lines_for_another_week_are_ignored():
-    assert espn_history.parse_week(espn_payload(2), 1) == []
+def test_espn_lines_for_another_week_are_ignored_with_a_warning(caplog):
+    payload = espn_payload(2)
+
+    assert espn_history.parse_week(payload, SEASON, 1) == []
+    assert f"ESPN {SEASON} week 1: {len(payload['players'])} players, no projected lines read" in caplog.text
+    assert "http" not in caplog.text.lower()
+
+
+def last_years_line(entry: dict, applied: float, stats: dict) -> dict:
+    """In season ESPN sends last season's line for the same week number next to this season's."""
+    line = {"id": f"11{SEASON - 1}1", "statSourceId": 1, "statSplitTypeId": 1, "scoringPeriodId": 1,
+            "seasonId": SEASON - 1, "appliedTotal": applied, "stats": stats}
+    return {"player": {**entry["player"], "stats": [line, *entry["player"]["stats"]]}}
+
+
+def test_espn_uses_this_seasons_line_not_last_seasons_for_the_same_week():
+    back = espn_player(3117251, "Christian McCaffrey", 2, {"24": 80.0, "25": 0.5, "53": 4.0, "42": 30.0}, 18.0)
+    kicker = espn_player(3123052, "Michael Badgley", 5, {"80": 1.0}, 8.41)
+    payload = {"players": [last_years_line(back, 3.0, {"24": 20.0}), last_years_line(kicker, 1.0, {"80": 0.1})]}
+
+    projections = {p.name: p for p in espn_history.parse_week(payload, SEASON, 1)}
+
+    assert projections["Christian McCaffrey"].pts_ppr == 18.0 and projections["Michael Badgley"].pts_ppr == 8.41
+
+
+def test_espn_bye_week_with_only_last_seasons_line_has_no_projection():
+    bye = {"player": {"id": 3117251, "fullName": "Christian McCaffrey", "defaultPositionId": 2, "stats": []}}
+    zero = espn_player(3123052, "Michael Badgley", 5, {}, 0.0)     # this season's bye line: projected 0
+    payload = {"players": [last_years_line(bye, 18.0, {"24": 80.0}), last_years_line(zero, 8.0, {"80": 1.0})]}
+
+    assert espn_history.parse_week(payload, SEASON, 1) == []
 
 
 def test_espn_request_asks_for_the_whole_pool_including_kickers_and_defenses():

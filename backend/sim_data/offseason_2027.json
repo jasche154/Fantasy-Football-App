@@ -2,17 +2,17 @@
  "as_of": "2026-11-23",
  "season": 2027,
  "confidence": "medium",
- "how_to_edit": "rookies: name, position (QB/RB/WR/TE/K), team (schedule code, e.g. MIA, LA, LV, WAS), pick (projected overall pick, 1-262), college. moves: name (as the app spells him), position, team (new team code, or null = retired / out of the league), note. One object per line; names must be unique across both lists.",
+ "how_to_edit": "rookies: name, position (QB/RB/WR/TE/K), team (schedule code, e.g. MIA, LA, LV, WAS), pick (projected overall pick, 1-262: his rank on the board of the seeded draft), college, optional lock (default false; true = he goes to this team at this pick in every league, otherwise team is only the mock landing spot and the league's seeded draft places him, services/sim_rookie_draft.py), optional hype (1-3, default 1: a prospect rated beyond his pick; market premium and expected role x hype). moves: name (as the app spells him), position, team (new team code, or null = retired / out of the league), note. One object per line; names must be unique across both lists.",
  "rookie_method": "Round 1-3 landing spots follow the newest mock with the player (Stick to the Model 2026-11-23, then PFN Cummings 7-round 2026-11-21, PFN Sheath 2026-11-15, FanSided/Yahoo top 10 2026-11-22); a QB a team already took moves to his next-newest mock's team. Ranked prospects no mock places are day-3 picks assigned by team need (listed in rookie_notes).",
  "rookie_notes": [
-  "Jeremiah Smith: every current mock has him No. 1 overall to Tennessee (Miami picks 3rd in them, taking a QB); he is placed on Miami at No. 1 as the user expects.",
+  "Jeremiah Smith: every current mock has him No. 1 overall to Tennessee (Miami picks 3rd in them, taking a QB); he is placed on Miami at No. 1 as the user expects. hype 1.2: his market premium and expected role x1.2, set so his ADP lands near Marvin Harrison Jr.'s rookie ADP (14.5, 2024 PPR): across 20 league seeds (the seeded draft lands him on 13 different teams) his ADP averaged 12.3 (1-30), and he finished a top-12 WR 35%, top-24 55%, outside the top 36 20%.",
   "Arch Manning: Arizona at 6 (FanSided/Yahoo, PFN Sheath); PFN Cummings has him returning to Texas for 2027.",
   "Darian Mensah: Pittsburgh at 23 (PFN Cummings has Pittsburgh taking a QB at 23, Sheath at 26); Stick to the Model had him to the Jets at 6, who take Mestemaker here.",
   "CJ Carr: Chargers at 33 per Stick to the Model (newest); other mocks have him in the top 20 (Miami 3, Jets 4, Cleveland 16).",
   "Justice Haynes, Mark Fletcher Jr., Terrance Carter Jr., Adam Mohammed: ranked prospects with no mock landing spot; day-3 picks assigned by team need."
  ],
  "rookies": [
-  {"name": "Jeremiah Smith", "position": "WR", "team": "MIA", "pick": 1, "college": "Ohio State"},
+  {"name": "Jeremiah Smith", "position": "WR", "team": "MIA", "pick": 1, "college": "Ohio State", "hype": 1.2},
   {"name": "Drew Mestemaker", "position": "QB", "team": "NYJ", "pick": 4, "college": "Oklahoma State"},
   {"name": "Arch Manning", "position": "QB", "team": "ARI", "pick": 6, "college": "Texas"},
   {"name": "Charlie Becker", "position": "WR", "team": "TB", "pick": 10, "college": "Indiana"},

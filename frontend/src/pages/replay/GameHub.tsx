@@ -17,7 +17,7 @@ import { TeamView } from './TeamView';
 import { TradesView } from './TradesView';
 import { GameNav } from './GameNav';
 import { Scorebug } from './Scorebug';
-import { groupEvents, ordinal, REPLAY_VIEWS, type ReplayView, type ReplayViewProps } from './shared';
+import { groupEvents, ordinal, REPLAY_VIEWS, viewHash, type MatchupAt, type ReplayView, type ReplayViewProps } from './shared';
 import { useGame } from './useGame';
 
 const VIEWS: Record<ReplayView, (props: ReplayViewProps) => ReactNode> = {
@@ -37,6 +37,18 @@ function announce(game: ReplaySummary, events: readonly ReplayEvent[]): string {
   return `${draftDone}${lead.text}.${more}`;
 }
 
+/** Pending CPU offers lapse when the week is played: say so before the user presses Play week. */
+function ExpiringOffers({ game }: { game: ReplaySummary }) {
+  const count = game.pending.offers;
+  if (game.next_action.step !== 'play' || count === 0) return null;
+  return (
+    <p className="replay-alert">
+      {pluralize(count, 'trade offer')} {count === 1 ? 'is' : 'are'} waiting for you and {count === 1 ? 'expires' : 'expire'} when
+      you play week {game.week}. <a href={viewHash(game.id, 'trades')}>Answer {count === 1 ? 'it' : 'them'}</a>
+    </p>
+  );
+}
+
 function ChampionBanner({ game }: { game: ReplaySummary }) {
   const { champion, record } = game;
   if (game.phase !== 'complete' || !champion) return null;
@@ -54,10 +66,11 @@ function ChampionBanner({ game }: { game: ReplaySummary }) {
 interface GameHubProps {
   gameId: number;
   view: ReplayView;
+  matchupAt?: MatchupAt;
 }
 
 /** The game: the scorebug (with the one primary button) and section tabs, what just happened, and the current screen. */
-export function GameHub({ gameId, view }: GameHubProps) {
+export function GameHub({ gameId, view, matchupAt }: GameHubProps) {
   const { loaded, game, version, act, isBusy, actError, clearError, events, dismissEvents } = useGame(gameId);
   useEffect(clearError, [view, clearError]);       // a refusal on one tab is not news on the next
   const [playerId, setPlayerId] = useState<number | null>(null);
@@ -112,11 +125,13 @@ export function GameHub({ gameId, view }: GameHubProps) {
       </header>
       <main id="main-content" className="game-body game-main" tabIndex={-1}>
         <ChampionBanner game={game} />
+        <ExpiringOffers game={game} />
         {actError && <p className="error-text replay-alert" role="alert">{actError}</p>}
         <p className="sr-only" role="status">{announce(game, events)}</p>
         {events.length > 0 && <EventsPanel key={events[0].id} events={events} onDismiss={dismissEvents} />}
-        <section ref={viewRef} key={isDraft ? 'draft' : view} className="game-view" tabIndex={-1} aria-label={viewLabel} data-game-view>
-          <View game={game} version={version} act={act} isBusy={isBusy} actError={actError} openPlayer={setPlayerId} />
+        {/* A game named in the URL is a new screen: the Matchup tab opens on it (and the plain tab link goes back). */}
+        <section ref={viewRef} key={isDraft ? 'draft' : `${view}:${matchupAt?.week}:${matchupAt?.teamId}`} className="game-view" tabIndex={-1} aria-label={viewLabel} data-game-view>
+          <View game={game} version={version} act={act} isBusy={isBusy} actError={actError} openPlayer={setPlayerId} matchupAt={matchupAt} />
         </section>
       </main>
       {playerId !== null && <PlayerDrawer key={playerId} gameId={game.id} playerId={playerId} version={version} simFrom={game.sim_from} onClose={closePlayer} />}

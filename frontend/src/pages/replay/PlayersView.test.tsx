@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ReplayClaim, ReplayClaims, ReplayPlayerRef, ReplaySummary, ReplayWireRow } from '../../api/types';
 import { json, mockFetch, type MockReply, type MockRoute } from '../../test/mockFetch';
+import { AppProviders } from '../../App';
 import { META_ROUTE, renderWithProviders } from '../../test/render';
 import {
   actionResult, COLLINS, COOK, GAME_ID, HILL, MAHOMES, MOSTERT, nextAction, OLAVE, OPPONENT_TEAM_ID, playerRow, rosterRow,
@@ -92,7 +93,7 @@ describe('PlayersView table', () => {
     renderPlayers(summary(), [{ path: PLAYERS, reply: json(wire([wireRow(MOSTERT, { games: 0, ppg: 0, line: statLine({ games: 0, points: 0 }) })])) }]);
     const cells = (await row('Raheem Mostert')).getAllByRole('cell').map((cell) => cell.textContent);
     // Opp, Pts, PPG, GP, ROS, seven box columns (no box yet), Value.
-    expect(cells.slice(2, 15)).toEqual(['DEN', '0.00', '—', '0', '13.80', '—', '—', '—', '—', '—', '—', '—', '31.5']);
+    expect(cells.slice(2, 15)).toEqual(['DEN', '0.00', '—', '0', '13.80', '—', '—', '—', '—', '—', '—', '—', '32']);
   });
 
   it('shows the box columns that fit the position, and the matchup in words as well as colour', async () => {
@@ -245,7 +246,12 @@ describe('PlayersView table', () => {
     await user.selectOptions(screen.getByLabelText('Show'), 'Rostered');
     await user.type(screen.getByLabelText('Search'), ' mos');
     await waitFor(() => expect(lastQuery().get('search')).toBe('mos'));
-    expect(Object.fromEntries(lastQuery())).toEqual({ position: 'FLEX', search: 'mos', status: 'rostered', sort: 'value', dir: 'desc', stats: 'season', limit: '25', offset: '0' });
+    // A name searches every player, whatever Show says; clearing it goes back to the chosen filter.
+    expect(Object.fromEntries(lastQuery())).toEqual({ position: 'FLEX', search: 'mos', status: 'all', sort: 'value', dir: 'desc', stats: 'season', limit: '25', offset: '0' });
+    expect(screen.getByLabelText('Show')).toHaveValue('rostered');
+    await user.clear(screen.getByLabelText('Search'));
+    await waitFor(() => expect(lastQuery().get('search')).toBeNull());
+    expect(lastQuery().get('status')).toBe('rostered');
   });
 
   it('caps the search at the backend\'s 60 characters', async () => {
@@ -310,7 +316,7 @@ describe('PlayersView adding a free agent', () => {
     finish(json(actionResult()));
     // The notice takes focus in an effect, a moment after its text is on the page.
     await waitFor(() => expect(screen.getByText('Added Raheem Mostert.')).toHaveFocus());
-    expect(api.callsTo(ADD_DROP, 'POST').map((call) => call.body)).toEqual([{ add: MOSTERT.id }]);
+    expect(api.callsTo(ADD_DROP, 'POST').map((call) => call.body)).toEqual([{ add: MOSTERT.id, week: 5 }]);
     await waitFor(() => expect(api.callsTo(PLAYERS)).toHaveLength(2));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
@@ -333,7 +339,7 @@ describe('PlayersView adding a free agent', () => {
     expect(within(dialog).getByRole('button', { name: 'Close' })).toHaveFocus();
     const choices = within(await within(dialog).findByRole('group', { name: 'Drop who?' })).getAllByRole('radio');
     expect(choices).toHaveLength(11);
-    expect(choices[0]).toHaveAccessibleName(/Chris Olave.*Value 5\.0/);
+    expect(choices[0]).toHaveAccessibleName(/Chris Olave.*Value 5(?![.\d])/);
     expect(choices[1]).toHaveAccessibleName(/James Cook/);
     expect(within(dialog).getByText(/Your roster is full \(11 players\)/)).toBeInTheDocument();
     expect(within(dialog).queryByRole('radio', { name: /Don't drop anyone/ })).not.toBeInTheDocument();
@@ -342,7 +348,7 @@ describe('PlayersView adding a free agent', () => {
     await user.click(choices[0]);
     await user.click(within(dialog).getByRole('button', { name: 'Add and drop' }));
     expect(await screen.findByText('Added Raheem Mostert, dropping Chris Olave.')).toBeInTheDocument();
-    expect(api.callsTo(ADD_DROP, 'POST')[0].body).toEqual({ add: MOSTERT.id, drop: OLAVE.id });
+    expect(api.callsTo(ADD_DROP, 'POST')[0].body).toEqual({ add: MOSTERT.id, drop: OLAVE.id, week: 5 });
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
@@ -388,8 +394,22 @@ describe('PlayersView waivers', () => {
     expect(await within(dialog).findByRole('radio', { name: 'Don\'t drop anyone' })).toBeChecked();
     await user.click(within(dialog).getByRole('button', { name: 'Submit claim' }));
     expect(await screen.findByText('Claim for Raheem Mostert is in. It is settled on “Sim to Wednesday”.')).toBeInTheDocument();
-    expect(api.callsTo(CLAIMS, 'POST')[0].body).toEqual({ add: MOSTERT.id });
+    expect(api.callsTo(CLAIMS, 'POST')[0].body).toEqual({ add: MOSTERT.id, week: WAIVERS.week });
     await waitFor(() => expect(api.callsTo(CLAIMS)).toHaveLength(2));
+  });
+
+  it('drops the claim confirmation once the waivers have run', async () => {
+    mockFetch([META_ROUTE, post(CLAIMS), { path: PLAYERS, reply: json(wire([wireRow(MOSTERT, { status: 'waivers' })])) },
+      { path: TEAM, reply: json(team()) }, { path: CLAIMS, reply: json(claims()) }]);
+    const user = userEvent.setup();
+    const { rerender } = renderWithProviders(<Hub game={WAIVERS} />);
+    await user.click(await ready('Claim Raheem Mostert'));
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Submit claim' }));
+    const notice = 'Claim for Raheem Mostert is in. It is settled on “Sim to Wednesday”.';
+    expect(await screen.findByText(notice)).toBeInTheDocument();
+
+    rerender(<AppProviders><Hub game={summary()} /></AppProviders>);
+    expect(screen.queryByText(notice)).not.toBeInTheDocument();
   });
 
   it('claims with a drop, and marks players already claimed', async () => {
@@ -400,7 +420,7 @@ describe('PlayersView waivers', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Claim Raheem Mostert' });
     await user.click(await within(dialog).findByRole('radio', { name: /Chris Olave/ }));
     await user.click(within(dialog).getByRole('button', { name: 'Submit claim' }));
-    await waitFor(() => expect(api.callsTo(CLAIMS, 'POST')[0]?.body).toEqual({ add: MOSTERT.id, drop: OLAVE.id }));
+    await waitFor(() => expect(api.callsTo(CLAIMS, 'POST')[0]?.body).toEqual({ add: MOSTERT.id, drop: OLAVE.id, week: 5 }));
   });
 
   it('reorders the pending claims', async () => {

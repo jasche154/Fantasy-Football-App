@@ -3,7 +3,7 @@ import type { ReplayPlayerWeek, ReplayPosition } from '../../api/types';
 import { EMPTY_VALUE } from '../../lib/format';
 import { DefenseChip } from './gameUi';
 import { boxColumns, boxText, type BoxColumn } from './playerColumns';
-import { formatPoints, ReplayInjuryBadge, showsOut } from './shared';
+import { formatPoints, ReplayInjuryBadge, ReplayOutBadge, showsOut } from './shared';
 
 /** "@ BUF", "BUF" or "BYE". */
 export function opponentText(opponent: string | null, away: boolean, bye: boolean): string {
@@ -33,16 +33,23 @@ interface WeekRowProps {
   position: ReplayPosition;
   box: readonly BoxColumn[];
   simFrom?: number | null;
+  onOpenGame?: (week: number, team: string, opener: HTMLElement) => void;
 }
 
-function WeekRow({ week, position, box, simFrom }: WeekRowProps) {
+function WeekRow({ week, position, box, simFrom, onOpenGame }: WeekRowProps) {
+  const opponent = opponentText(week.opponent, week.away, week.bye);
+  // A played week's game (his team's, whether he played or not) opens its box score.
+  const canOpen = onOpenGame && week.played && !week.bye && week.team && week.opponent;
   return (
     <tr>
       <th scope="row" className="num">{week.week}{isSimWeek(week.week, simFrom) && <> <SimWeekMark /></>}</th>
       <td className="replay-card__opp">
-        {opponentText(week.opponent, week.away, week.bye)}
+        {canOpen
+          ? <button type="button" className="linklike" aria-label={`Week ${week.week} box score, ${opponent}`}
+            onClick={(event) => onOpenGame(week.week, week.team!, event.currentTarget)}>{opponent}</button>
+          : opponent}
         {week.injury && <> <ReplayInjuryBadge injury={week.injury} /></>}
-        {showsOut(week.out, week.injury) && <span className="status-badge status-badge--out replay-drawer__badge">Out</span>}
+        {showsOut(week.out, week.injury) && <ReplayOutBadge className="replay-drawer__badge" />}
         {/* The week still to play shows how tough the matchup is, like the weeks after it. */}
         {!week.played && !week.bye && <DefenseChip rating={week.defense} position={position} />}
       </td>
@@ -62,10 +69,12 @@ interface PlayerGameLogProps {
   hasHeading?: boolean;
   /** The league's first simulated week (Summary.sim_from): later weeks are marked Sim. */
   simFrom?: number | null;
+  /** Opens a played week's NFL box score (week, his team that week). */
+  onOpenGame?: (week: number, team: string, opener: HTMLElement) => void;
 }
 
 /** Weeks 1..current: the pre-game projection, the real points and his box score (played weeks only). */
-export function PlayerGameLog({ name, position, weeks, hasHeading = true, simFrom = null }: PlayerGameLogProps) {
+export function PlayerGameLog({ name, position, weeks, hasHeading = true, simFrom = null, onOpenGame }: PlayerGameLogProps) {
   const headingId = useId();
   const box = boxColumns(position);
   return (
@@ -83,10 +92,10 @@ export function PlayerGameLog({ name, position, weeks, hasHeading = true, simFro
               {box.map(({ key, label, title }) => <th key={key} scope="col" className="num"><abbr title={title}>{label}</abbr></th>)}
             </tr>
           </thead>
-          <tbody>{weeks.map((week) => <WeekRow key={week.week} week={week} position={position} box={box} simFrom={simFrom} />)}</tbody>
+          <tbody>{weeks.map((week) => <WeekRow key={week.week} week={week} position={position} box={box} simFrom={simFrom} onOpenGame={onOpenGame} />)}</tbody>
         </table>
       </div>
-      <p className="hint">Proj is the pre-game projection. Pts and the box score show played weeks only; a dash means he did not play.</p>
+      <p className="hint">Proj is the pre-game projection. Pts and the box score show played weeks only; a dash means he did not play.{onOpenGame && ' Select a played opponent for that game’s box score.'}</p>
       <SimLegend weeks={weeks} simFrom={simFrom} />
     </section>
   );

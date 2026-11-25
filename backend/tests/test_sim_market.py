@@ -79,11 +79,13 @@ def test_standard_scoring_moves_a_pass_catching_back_down(belief):
 
 def test_buzz_hints_most_changes_and_is_right_about_as_often_as_promised(belief):
     true = wrong = hinted = changed = 0
+    ranks = sim_talent.public_ranks(belief)
+    rumors = sim_talent.rumors(belief, ranks)
     for seed in range(40):
         truth = sim_talent.truth(belief, seed, 1, 17)
-        rate = sim_market.expected_hints(len(belief.teams), 17, sim_talent.settings())
+        rate = sim_market.expected_hints(sim_talent.expected_changes(belief, ranks, 1, 17), 17)
         for week in range(1, 18):
-            notes = sim_market.buzz(truth.changes, belief, week, np.random.default_rng([seed, week]), rate)
+            notes = sim_market.buzz(truth.changes, belief, week, np.random.default_rng([seed, week]), rate, (), rumors)
             real = {c.player_id for c in truth.changes if c.week == week}
             changed += len(real)
             hinted += len(real & {p for p, _ in notes})
@@ -102,8 +104,21 @@ def test_buzz_is_never_about_a_player_who_is_out_that_week(belief):
         benched = [sim_world.RoleChange(week, pid, kind="bench") for week in range(1, 18) for pid in (on_ir, tagged)]
         for week in range(1, 18):
             notes = sim_market.buzz((*truth.changes, *benched), hurt, week, np.random.default_rng([seed, week]), 20.0,
-                                    out={tagged})
+                                    out={tagged}, rumors={"bench": {on_ir: 1.0, tagged: 1.0}})
             assert not {on_ir, tagged} & {pid for pid, _ in notes}
+
+
+def test_false_buzz_is_only_about_a_change_that_could_happen_to_him(belief):
+    """A false line comes from the rumour pool, in proportion to its weights; a star is never in it."""
+    rumors = {"bench": {1: 0.9, 2: 0.1}, "breakout": {3: 1.0}}
+    picked = Counter()
+    for seed in range(600):
+        notes = sim_market.buzz((), belief, 5, np.random.default_rng(seed), 0.5, (), rumors)    # mostly one line
+        picked.update((pid, line) for (pid, _), line in notes.items())
+    assert {pid for pid, _ in picked} <= {1, 2, 3}
+    assert all(line == sim_market.BUZZ["bench"] for (pid, line) in picked if pid in (1, 2))
+    assert picked[(1, sim_market.BUZZ["bench"])] > 3 * picked[(2, sim_market.BUZZ["bench"])]
+    assert not sim_market.buzz((), belief, 5, np.random.default_rng(0), 5.0)    # no pool: no false lines
 
 def test_the_market_and_the_experts_price_a_starter_on_ir_alike(belief, monkeypatch):
     """A jump-in draft: with the lead back on IR, his backup's ADP moves up with his expert rank (the experts and

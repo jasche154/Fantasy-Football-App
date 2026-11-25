@@ -23,7 +23,7 @@ from services.trade_finder import find_trades
 from services.valuation import build_valuation
 from services.waivers import faab_label, waiver_candidates
 from services.weekly_adjust import adjust
-from services.weekly_model import Matchup, weekly_rate
+from services.weekly_model import Matchup, rate_share, weekly_rate
 from services.weekly_rankings import build_weekly_rankings
 
 SEASON, WEEK = 2026, 7
@@ -142,6 +142,18 @@ def test_vacated_boosts_use_with_without_history_and_depth_chart():
     assert boosts[3][0].full_points < backup.full_points                    # his usage didn't change without him
     assert boosts[4][0].full_points == pytest.approx(18.0 * 0.07, abs=0.01)  # cross-position trickle
     assert injuries.vacated_boosts(seasons, rates, {}, {}, aaa_schedule(), 7) == {}   # nobody hurt -> nothing moves
+
+
+@pytest.mark.parametrize("half_life", [None, 1.0])
+def test_a_boosts_in_rate_share_uses_the_rates_half_life(half_life):
+    seasons = _backfield()
+    avail = {1: Availability(1, 0.5, "Questionable", "DNP", "Quad", "sleeper")}
+
+    backup = injuries.vacated_boosts(seasons, {1: 18.0, 2: 7.0, 3: 3.0, 4: 10.0}, avail, {}, aaa_schedule(), 7,
+                                     half_life=half_life)[2][0]
+
+    assert backup.in_rate == round(rate_share(seasons[1], {4, 5}, None, half_life), 3)
+    assert rate_share(seasons[1], {4, 5}, None, None) != rate_share(seasons[1], {4, 5}, None, 1.0)
 
 
 def test_next_man_up_is_the_player_behind_the_absent_one():

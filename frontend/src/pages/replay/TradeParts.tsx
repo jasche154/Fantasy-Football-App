@@ -1,7 +1,7 @@
 /** Replay League trades: the pieces the offers, the builder and the history share. */
 import { Fragment, useState } from 'react';
 import type { ReplayPlayerRef, ReplayPricedPlayer, ReplayRosterRow, ReplayVerdict } from '../../api/types';
-import { formatNumber, formatSigned, pluralize } from '../../lib/format';
+import { formatInteger, formatNumber, formatSigned, pluralize } from '../../lib/format';
 import { BalanceMeter } from '../trade/BalanceMeter';
 import { VERDICT_COPY } from '../trade/TradeResultView';
 import { ReplayHypeStar, ReplayPlayerCell, useKeyedAct, type KeyedAct, type ReplayAct } from './shared';
@@ -72,7 +72,7 @@ export function TradeSide({ title, players, onOpen }: TradeSideProps) {
         {players.map(({ player, value }) => (
           <li key={player.id}>
             <ReplayPlayerCell player={player} onOpen={onOpen} />
-            {value !== undefined && <span className="replay-trade__value">{formatNumber(value)}<span className="sr-only"> value</span></span>}
+            {value !== undefined && <span className="replay-trade__value">{formatInteger(value)}<span className="sr-only"> value</span></span>}
           </li>
         ))}
       </ul>
@@ -92,20 +92,37 @@ interface TradeVerdictViewProps {
   isOffer?: boolean;
 }
 
+/** A lineup loss (rest-of-season points) big enough to call out next to a trade-value headline. */
+export const LINEUP_LOSS_WARNING = 10;
+
+function sumValues(players: readonly { value: number }[]): number {
+  return players.reduce((total, player) => total + player.value, 0);
+}
+
 /** A verdict from the user's side: the balance, both values, the lineup gains, drops and why a CPU says no. */
 export function TradeVerdictView({ verdict, partner, isOffer = false }: TradeVerdictViewProps) {
   const copy = VERDICT_COPY[verdict.fair_label];
+  const isAdjusted = Math.abs(sumValues(verdict.give) - verdict.value_give) > 0.1
+    || Math.abs(sumValues(verdict.get) - verdict.value_get) > 0.1;
+  const noted = [...verdict.give, ...verdict.get].filter((row) => row.note);
   return (
     <div className="replay-verdict">
       <BalanceMeter percentDifference={verdict.percent} />
       <p>
         <span className={`status-badge verdict--${copy.tone}`}><span aria-hidden="true">{copy.symbol} </span>{copy.label}</span>{' '}
-        You give {formatNumber(verdict.value_give)} value, get {formatNumber(verdict.value_get)}.
+        on trade value. You give {formatInteger(verdict.value_give)} value, get {formatInteger(verdict.value_get)}.
+        {isAdjusted && ' The totals count the best player in the deal a little extra and take off anyone you would drop.'}
       </p>
+      {noted.map((row) => <p key={row.player.id} className="hint">{row.player.name}: {row.note}.</p>)}
       <p>
         Points added to each best lineup over the rest of the season: you {formatSigned(verdict.your_gain)}, {partner}{' '}
         {formatSigned(verdict.their_gain)}.
       </p>
+      {verdict.your_gain <= -LINEUP_LOSS_WARNING && (
+        <p className="error-text">
+          Careful: whatever the value says, this costs your best lineup {formatNumber(-verdict.your_gain)} points over the rest of the season.
+        </p>
+      )}
       {verdict.your_drops.length > 0 && <p>You would drop {names(verdict.your_drops)}.</p>}
       {verdict.their_drops.length > 0 && <p>{partner} would drop {names(verdict.their_drops)}.</p>}
       {verdict.accepted
@@ -137,7 +154,7 @@ export function DropPicker({ rows, count, value, onChange }: DropPickerProps) {
           <label key={row.player.id} className="checkbox">
             <input type="checkbox" checked={isChecked} disabled={!isChecked && value.length >= count}
               onChange={() => onChange(toggleId(value, row.player.id))} />
-            <span>Drop {row.player.name} <span className="muted">({row.player.position}, value {formatNumber(row.value)})</span></span>
+            <span>Drop {row.player.name} <span className="muted">({row.player.position}, value {formatInteger(row.value)})</span></span>
           </label>
         );
       })}

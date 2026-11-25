@@ -642,7 +642,10 @@ def test_the_out_streak_counts_a_hard_tagged_week():
 
 def test_the_preseason_curve_never_depends_on_tags():
     data = tag_rb1("IR", 1)
-    assert know_at(0, data).values == know_at(0).values
+    tagged, plain = know_at(0, data), know_at(0)
+    assert {v.player_id: (v.ros_ppg, v.projection) for v in tagged.values} == {
+        v.player_id: (v.ros_ppg, v.projection) for v in plain.values}
+    assert tagged.by_id[RB1].injury.tag == "IR" and tagged.by_id[RB1].out    # a preseason IR is known at the draft
     assert know_at(1, data).by_id[RB1].projection == 0.0
 
 
@@ -786,7 +789,7 @@ def test_a_star_drops_less_after_bad_games_than_a_lesser_player():
 
 def test_the_bye_bump_lands_once_his_bye_is_behind_him():
     data = fakes.fake_season()
-    pid = fakes.player_id("RB", 1)
+    pid = fakes.player_id("RB", 2)                      # under the cap: RB1's bump would pass 1000 (capped)
     bye = next(w for w in range(1, 18) if data.on_bye(pid, w))
     flat = replace(data, expert_ranks=MappingProxyType({(p, w): r for (p, w), r in data.expert_ranks.items()
                                                         if w == 0}))           # one frozen snapshot

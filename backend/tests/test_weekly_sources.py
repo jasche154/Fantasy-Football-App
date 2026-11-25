@@ -305,9 +305,13 @@ def test_yahoo_errors_keep_previous_snapshot(session, seeded):
 
 def espn_payload():
     def player(pid, name, position_id, team_id, stats):
-        lines = [{"statSourceId": 0, "scoringPeriodId": WEEK, "statSplitTypeId": 1, "stats": {"42": 999}}]
+        lines = [{"statSourceId": 0, "scoringPeriodId": WEEK, "statSplitTypeId": 1, "stats": {"42": 999}},
+                 # last season's projection for the same week number: ESPN sends it in season
+                 {"id": f"11{SEASON - 1}{WEEK}", "statSourceId": 1, "scoringPeriodId": WEEK, "statSplitTypeId": 1,
+                  "stats": {"42": 555.0}}]
         if stats is not None:
-            lines.append({"statSourceId": 1, "scoringPeriodId": WEEK, "statSplitTypeId": 1, "stats": stats})
+            lines.append({"id": f"11{SEASON}{WEEK}", "statSourceId": 1, "scoringPeriodId": WEEK,
+                          "statSplitTypeId": 1, "stats": stats})
         return {"player": {"id": pid, "fullName": name, "defaultPositionId": position_id,
                            "proTeamId": team_id, "stats": lines}}
     return {"players": [
@@ -322,6 +326,29 @@ def test_espn_rows_map_stats_and_skip_byes(session, seeded):
     (row,) = rows
     assert (row["player_id"], row["team"], row["position"]) == (seeded["chase"], "CIN", "WR")
     assert json.loads(row["stats"]) == {"rec_yds": 91.0, "rec_tds": 0.8, "rec": 8.0, "two_pt": 0.02}
+
+
+def test_espn_payload_with_players_but_no_lines_warns_with_counts_only(session, seeded, caplog):
+    payload = espn_payload()
+
+    assert espn.projection_rows(payload, SEASON, WEEK + 1, PlayerMatcher(session)) == []   # no line for that week
+    assert espn.projection_rows({"players": []}, SEASON, WEEK, PlayerMatcher(session)) == []
+    espn.projection_rows(payload, SEASON, WEEK, PlayerMatcher(session))
+
+    assert [r.getMessage() for r in caplog.records if r.levelname == "WARNING"] == [
+        f"ESPN {SEASON} week {WEEK + 1}: 3 players, no projected lines read"]
+
+
+def test_espn_lines_without_an_id_are_matched_by_their_fields():
+    def line(season, stats, **extra):
+        return {"statSourceId": 1, "scoringPeriodId": WEEK, "statSplitTypeId": 1, "stats": stats,
+                **({"seasonId": season} if season else {}), **extra}
+    old_shape = {"stats": [line(SEASON - 1, {"42": 555.0}), line(SEASON, {"42": 91.0})]}
+    assert espn.projected_stats(old_shape, SEASON, WEEK)["rec_yds"] == 91.0
+    assert espn.projected_stats({"stats": [line(None, {"42": 91.0})]}, SEASON, WEEK) is None   # which season?
+    with_id = {"stats": [line(SEASON, {"42": 555.0}, id=f"11{SEASON - 1}{WEEK}"),
+                         line(SEASON, {"42": 91.0}, id=f"11{SEASON}{WEEK}")]}
+    assert espn.projected_stats(with_id, SEASON, WEEK)["rec_yds"] == 91.0                       # the id decides
 
 
 def test_espn_refresh_sends_week_filter(session, seeded):

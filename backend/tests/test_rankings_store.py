@@ -68,3 +68,15 @@ def test_suggested_weights_favor_the_more_accurate_source():
     rows = [_row(i, 7, 10.0, {"model": 10.0 + 4, "vegas_props": 10.0 + 1}) for i in range(40)]
     weights = projection_eval.evaluate(rows, {(i, 7): 10.0 for i in range(40)})["suggested_weights"]
     assert weights["vegas_props"] > weights["model"] and sum(weights.values()) == pytest.approx(1.0, abs=0.01)
+
+
+def test_range_coverage_scores_the_current_ranges_not_stale_stored_floors():
+    from services import score_ranges
+
+    stale = _row(1, 3, 10.0, {"model": 10.0})
+    stale.floor, stale.ceiling = 9.0, 11.0                         # saved under an older range model
+    unsaved = _row(2, 3, 10.0, {"model": 10.0})                    # floor/ceiling never stored
+    report = projection_eval.evaluate([stale, unsaved], {(1, 3): 5.0, (2, 3): 30.0})
+    current = score_ranges.player_quantiles("RB", 10.0)
+    assert current[score_ranges.FLOOR_INDEX] < 5.0 < current[score_ranges.CEILING_INDEX] < 30.0
+    assert report["range"] == {"n": 2, "below_floor": 0.0, "above_ceiling": 0.5}

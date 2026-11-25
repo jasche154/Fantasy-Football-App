@@ -58,6 +58,10 @@
 .bracket-game--mine { border-color: var(--game-you, var(--color-accent)); }
 .bracket-game--tbd { border-style: dashed; background: transparent; }
 .bracket-game--bye { background: transparent; }
+/* A game with a matchup to open: the whole card is the link. */
+.bracket-game__link { display: grid; gap: 1px; color: inherit; text-decoration: none; border-radius: calc(var(--radius-md) - 3px); }
+.bracket-game--link:hover { border-color: var(--game-ink-dim, var(--color-text-muted)); }
+.bracket-game__link:focus-visible { outline: 2px solid var(--game-you, var(--color-accent)); outline-offset: 3px; }
 /* The title game: an ink rule instead of a hairline and a larger score; no shadow (the game world has none). */
 .bracket-game--final { padding-top: var(--space-2); border-color: var(--game-ink, var(--color-text)); }
 .bracket-game--final.bracket-game--mine { border-color: var(--game-you, var(--color-accent)); }

@@ -19,7 +19,8 @@ results are used only for weeks already played: the `games` / `ppg` display fiel
 - Trade chart (services/replay_chart.py): `chart` on a 0-1000 rank-based scale from expert ranks and the
   model, after injury news (services/replay_news.py). rank / pos_rank sort by it.
   A hard-tagged player with a `returns` entry gets a news report; his availability comes from it.
-- Injury tags (week >= 1): a hard tag (O, IR, PUP, SUS) means out, and that week's projection counts as 0.
+- Injury tags (week >= 1; at the draft, week 1's preseason IR, PUP, SUS and EXE): a hard tag (O, IR, PUP, SUS, EXE) means
+  out, and that week's projection counts as 0.
   Tagged IR or PUP, he is expected to miss at least IR_OUT_SHARE of his remaining games. Q and D change nothing.
 
 `Knowledge` and `ReplayValue` duck-type `valuation.Valuation` / `PlayerValue` for services/lineup_gain.py and
@@ -35,7 +36,7 @@ from types import MappingProxyType, SimpleNamespace
 from services import lineup_gain, my_team as mt, replay_chart, replay_slots, replay_state
 from services.league import LeagueSettings, replacement_levels
 from services.replay_news import Report
-from services.replay_pool import SKILL, Injury, PoolPlayer, SeasonData
+from services.replay_pool import PRESEASON_TAGS, SKILL, Injury, PoolPlayer, SeasonData
 from services.schedule_strength import NEUTRAL, DefenseStrength, Schedule
 
 RECENCY_WEIGHTS = (4, 3, 2, 1)                        # newest first: the projections (or priors) behind ros_ppg
@@ -70,7 +71,7 @@ class ReplayValue:
     healthy_value: float = 0.0     # vorp_per_game x games_left, no injury discount
     games_left: int = 0            # his team's games from this week to the league's last week
     last_projection: float = 0.0   # his most recent non-zero pre-game projection
-    injury: Injury | None = None   # this week's tag; always None at week 0
+    injury: Injury | None = None   # this week's tag; at week 0 only a preseason IR, PUP or SUS
     recent_points: tuple[float, ...] = ()   # real points of his last RECENT_GAMES games before this week, newest first
     last_game_week: int = 0        # the week of his last game before this week (0 = none)
     chart: float = 0.0             # 0-1000 trade chart value after injury (replay_chart)
@@ -161,7 +162,9 @@ def _row(data: SeasonData, player: PoolPlayer, prior: float, week: int, team: st
     """Everything about a player except his value over replacement and his rank."""
     pid = player.player_id
     streak = _out_streak(data, pid, prior, week)
-    injury = data.injuries.get((pid, week)) if week else None
+    injury = data.injuries.get((pid, max(1, week)))     # draft time: a preseason IR/PUP/SUS (replay_pool.as_of)
+    if not week and (injury is None or injury.tag not in PRESEASON_TAGS):
+        injury = None
     share = OUT_SHARE.get(streak, OUT_SHARE_LONG) if streak else 0.0
     if injury is not None and injury.tag in ("IR", "PUP"):
         share = max(share, IR_OUT_SHARE)
@@ -278,7 +281,7 @@ def league_settings(settings: "replay_state.Settings") -> LeagueSettings:
                           superflex=replay_slots.superflex(settings.starters) > 0)
 
 
-@lru_cache(maxsize=64)
+@lru_cache(maxsize=16)       # x lineup_gain.MAX_LINEUPS solves each: tens of MB at most
 def projector(know: Knowledge) -> lineup_gain.Projector:
     """Week-by-week points for lineup_gain: this week's projection now, the healthy rate afterwards.
 

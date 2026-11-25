@@ -75,6 +75,7 @@ export function swappedLineup(spots: readonly LineupSpot[], from: LineupSpot, to
 
 const TAG_WARNINGS: Record<ReplayInjuryTag, string> = {
   O: 'is out', IR: 'is on injured reserve', PUP: 'is on the PUP list', SUS: 'is suspended', Q: 'is questionable', D: 'is doubtful',
+  EXE: "is on the commissioner's exempt list",
 };
 
 /** One starter's problem, or null: bye, then out (worded by a hard tag), then a Q or D tag. */

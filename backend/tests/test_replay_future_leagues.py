@@ -67,7 +67,7 @@ def test_the_future_season_is_built_from_the_season_in_progress(app):
     _, engine = app
     with Session(engine) as session:
         assert sim_setup.source(session) == (LIVE, THROUGH)
-        base, belief = sim_setup._future_base(session, FUTURE, _settings())
+        base, belief, _ = sim_setup._future_base(session, FUTURE, _settings())
     _check_future(base, belief, 18)
     assert len(base.schedule.games) == 272                       # generated: no 2027 schedule is stored
     assert {g.week for g in base.schedule.games} == set(range(1, 19))
@@ -83,13 +83,59 @@ def test_a_stored_schedule_is_used_and_a_finished_season_still_builds(app):
         try:
             assert sim_setup.source(session) == (LIVE, None)
             assert sim_setup.future_problem(session, FUTURE) is None
-            base, belief = sim_setup._future_base(session, FUTURE, _settings())
+            base, belief, _ = sim_setup._future_base(session, FUTURE, _settings())
         finally:
             session.rollback()
             replay_pool.clear_cache()
     _check_future(base, belief, FULL.last_week)
     assert {(g.week, g.home_team, g.away_team) for g in base.schedule.games} == {
         (g.week, g.home_team, g.away_team) for g in FULL.schedule.games}
+
+
+def test_the_rookie_draft_and_the_offseason_restore_starters_from_the_same_starts(app, monkeypatch):
+    from services import sim_rookie_draft
+
+    _, engine = app
+    seen = []
+    real_run, real_next, real_starts = sim_rookie_draft.run, sim_next_year.next_year, sim_next_year.starts_by_team
+    monkeypatch.setattr(sim_next_year, "starts_by_team", lambda data: seen.append(real_starts(data)) or seen[-1])
+    monkeypatch.setattr(sim_rookie_draft, "run", lambda *args: seen.append(args[5]) or real_run(*args))
+    monkeypatch.setattr(sim_next_year, "next_year", lambda *args: seen.append(args[5]) or real_next(*args))
+    with Session(engine) as session:
+        sim_setup._future_base(session, FUTURE, _settings())
+    built, drafted, offseason = seen
+    assert drafted is built and offseason is built
+
+
+def test_the_rookie_draft_order_counts_the_real_games_played(app, monkeypatch):
+    """The pool's schedule has no scores: a team that lost every real game must still pick near the top."""
+    from sqlalchemy import or_
+
+    from services import sim_rookie_draft
+
+    _, engine = app
+    loser = FULL.schedule.games[0].home_team
+    orders = []
+    real_order = sim_rookie_draft.draft_order
+    monkeypatch.setattr(sim_rookie_draft, "draft_order",
+                        lambda wins, seed: orders.append(real_order(wins, seed)) or orders[-1])
+    with Session(engine) as session:
+        session.execute(update(NflGame).where(NflGame.season == LIVE, NflGame.week <= THROUGH,
+                                              NflGame.home_team == loser).values(home_score=0, away_score=45))
+        session.execute(update(NflGame).where(NflGame.season == LIVE, NflGame.week <= THROUGH,
+                                              NflGame.away_team == loser).values(home_score=45, away_score=0))
+        assert session.query(NflGame).where(NflGame.season == LIVE, NflGame.week <= THROUGH, or_(
+            NflGame.home_team == loser, NflGame.away_team == loser)).count() >= THROUGH - 1
+        replay_pool.clear_cache()
+        try:
+            for seed in range(5):
+                sim_setup._future_base(session, FUTURE, _settings(), seed)
+        finally:
+            session.rollback()
+            replay_pool.clear_cache()
+    # the rest of the season is still simulated, so a seed may let a bad team or two finish below him
+    assert len(orders) == 5 and sum(loser in order[:3] for order in orders) >= 4
+    assert all(loser in order[:5] for order in orders)
 
 
 def _play_out(client: TestClient, game: str) -> dict:

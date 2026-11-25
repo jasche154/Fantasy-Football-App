@@ -14,7 +14,7 @@ import json
 import types
 import typing
 import zlib
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, fields, is_dataclass, replace
 from functools import lru_cache
 from numbers import Integral, Real
@@ -394,6 +394,27 @@ def markdowns(state: State, team_id: int) -> dict[int, float]:
             if shop.team_id == team_id and shop.week == state.week and shop.player_id in owner.roster}
 
 
+def expire_offers(state: State, player_ids: Iterable[int]) -> State:
+    """Every pending offer naming one of these players marked "expired": he has left his team (traded or dropped),
+    so the deal can no longer happen as offered."""
+    moved = set(player_ids)
+    return replace(state, offers=tuple(replace(o, status="expired") if o.status == "pending" and moved & {*o.give, *o.get}
+                                       else o for o in state.offers))
+
+
+def pickups(state: State) -> frozenset[int]:
+    """Players their team added or claimed this week and still has (from the log: an "add" or "claim" event names
+    the added player first; a failed claim names a player the team doesn't hold). Just acquired."""
+    found = set()
+    for event in reversed(state.events):
+        if event.week < state.week:
+            break                                     # the log runs oldest first
+        if (event.kind in ("add", "claim") and event.week == state.week and event.player_ids and event.team_id
+                and event.player_ids[0] in held(team(state, event.team_id))):
+            found.add(event.player_ids[0])
+    return frozenset(found)
+
+
 def faab_left(state: State, team_id: int) -> int:
     return FAAB_BUDGET - state.faab_spent.get(team_id, 0)
 
@@ -419,7 +440,8 @@ def release(state: State, settings: Settings, team_id: int, player_id: int, name
         raise ValueError(f"{owner.name} can't drop a player who isn't on the roster.")
     smaller = replace(owner, roster=tuple(pid for pid in owner.roster if pid != player_id),
                       ir=tuple(pid for pid in owner.ir if pid != player_id))
-    dropped = replace(with_team(state, smaller), locked=(*(p for p in state.locked if p != player_id), player_id))
+    dropped = expire_offers(replace(with_team(state, smaller), locked=(*(p for p in state.locked if p != player_id),
+                                                                       player_id)), (player_id,))
     if not log:
         return dropped
     return add_event(dropped, "drop", team_id, f"{owner.name} dropped {name or 'a player'}", (player_id,))

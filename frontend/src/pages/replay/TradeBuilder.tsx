@@ -7,7 +7,7 @@ import { AsyncView } from '../../components/AsyncView';
 import { Skeleton, TableSkeleton } from '../../components/StatusViews';
 import { useAsync } from '../../hooks/useAsync';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
-import { formatNumber } from '../../lib/format';
+import { formatInteger } from '../../lib/format';
 import { DropPicker, overLimit, PlayerNames, playerIds, toggleId, TradeVerdictView, type TradeActions } from './TradeParts';
 import { ReplayPlayerCell, TeamSelect } from './shared';
 
@@ -69,7 +69,7 @@ function RosterPicker({ title, caption, verb, rows, selected, max, onToggle, ope
                     {row.slot === 'IR' && <span className="status-badge status-badge--missing">On IR</span>}
                     {row.news && <p className="hint">{row.news.text}</p>}
                   </td>
-                  <td className="num">{formatNumber(row.value)}</td>
+                  <td className="num">{formatInteger(row.value)}</td>
                 </tr>
               );
             })}
@@ -148,8 +148,9 @@ export function TradeBuilder({ game, version, roster, ir, maxPlayers, counterTo,
   const propose = async () => {
     if (!body) return;
     const { to_team: _partner, ...deal } = body;
-    const result = await actions.send(PROPOSE_KEY, () => (counterTo ? counterReplayOffer(game.id, counterTo.id, deal)
-      : proposeReplayTrade(game.id, body)));
+    const result = await actions.send(PROPOSE_KEY, () => (counterTo
+      ? counterReplayOffer(game.id, counterTo.id, { ...deal, week: game.week })
+      : proposeReplayTrade(game.id, { ...body, week: game.week })));
     if (!result) return;
     if (!result.executed) {
       setDeclined(result.verdict);

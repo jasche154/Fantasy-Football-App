@@ -34,7 +34,9 @@ from services.valuation import NoDataError
 log = logging.getLogger(__name__)
 
 VERSION = 1                     # the "v" of a stored season (1..VERSION); a newer one is refused, an older one read
-CACHED = 4                      # decoded seasons kept, least recent out
+# Decoded seasons kept, least recent out. One is ~9 MB decoded and takes ~1.5 s to decode (2026-11, real DB), so
+# 12 (~110 MB) lets a user switch between a dozen simulated leagues paying the decode once each per restart.
+CACHED = 12
 MAX_UNPACKED = 64 * 2**20       # JSON bytes a save may unpack to: far above any season; a tampered row can't balloon
 _HINTS = typing.get_type_hints(SeasonData)
 _SCHEDULE = {"games": tuple[Game, ...], "opponents": Mapping[tuple[str, int], str]}

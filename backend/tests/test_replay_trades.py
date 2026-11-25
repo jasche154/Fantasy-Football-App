@@ -174,7 +174,7 @@ def test_a_fair_deal_across_positions_is_accepted_and_carried_out():
 def test_the_suggested_player_is_the_one_worth_closest_to_what_is_missing():
     state, know = league()
 
-    verdict = judge(DEEP_AT_WR, [SCRUB], [P("RB", 30)])
+    verdict = judge(NEEDS_RB, [SCRUB], [P("RB", 36)])        # (CPU 5 has seven receivers: it would cut SCRUB)
 
     named = next(v for v in know.values if verdict.suggestion == f"Add {v.name} to make this fair.")
     assert -verdict.score <= named.chart <= rt.SUGGEST_WITHIN * -verdict.score
@@ -475,7 +475,9 @@ def test_declining_an_offer_only_marks_it_declined():
 
 @pytest.mark.parametrize("change, why", [
     (lambda s: s, "Value is too far apart"),                                        # the CPU's test fails now
-    (lambda s: rs.release(s, SETTINGS, RICH, P("RB", 2)), "Not on CPU 2's roster"),   # the player is gone
+    (lambda s: rs.with_team(s, replace(rs.team(s, RICH), roster=tuple(p for p in rs.team(s, RICH).roster
+                                                                       if p != P("RB", 2)))),
+     "Not on CPU 2's roster"),                                                     # the player is gone
     (lambda s: replace(s, week=2), "It was made in week 1."),                       # last week's offer
 ])
 def test_an_offer_that_no_longer_stands_expires_with_the_reason(change, why):
@@ -623,6 +625,21 @@ def test_an_ir_player_arriving_with_the_ir_slot_full_needs_a_roster_spot():
     assert rt.evaluate(state, SETTINGS, know, *deal).your_drops == ()           # TE7 goes on the free IR slot
     with pytest.raises(ValueError, match="over the roster limit"):
         rt.evaluate(full, SETTINGS, know, *deal)
+
+
+def test_the_value_hint_lands_the_users_ir_player_in_the_cpus_free_ir_slot(monkeypatch):
+    """The suggestion prices the CPU's cuts on the roster the deal really leaves it (as _side does): the user's
+    IR player takes its free IR slot instead of costing it a roster spot."""
+    state = on_ir(league()[0], USER, RB14)
+    seen = []
+    real = rt._cpu_drops
+    monkeypatch.setattr(rt, "_cpu_drops", lambda settings, know, kept, ir=(), before=(): (
+        seen.append((tuple(kept), tuple(ir))) or real(settings, know, kept, ir, before)))
+
+    verdict = rt.evaluate(state, SETTINGS, hurt(1, RB14), USER, RICH, [RB14], [P("RB", 2)])
+
+    assert not verdict.accepted and verdict.suggestion
+    assert len(seen) > 1 and all(RB14 in ir and RB14 not in kept for kept, ir in seen)
 
 
 def test_the_roster_limit_of_a_trade_ignores_the_ir_player():

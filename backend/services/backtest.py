@@ -97,13 +97,14 @@ def project_week(session: Session, data: SeasonData, week: int, settings: Weekly
     before = cache[("before", week)]
     eligible = [p for p in before if p.games_played >= MIN_GAMES_BEFORE and p.team]
     defense = cache[("defense", week)] if settings.sos_weight else None
-    rates = {p.player_id: weekly_rate(p, priors.get(p.player_id), settings.half_life) for p in eligible}
+    rates = {p.player_id: weekly_rate(p, priors.get(p.player_id), settings.half_life, settings.usage_weight)
+             for p in eligible}
     context = None
     if settings.use_injuries:
-        key = ("context", week, settings.half_life)
+        key = ("context", week, settings.half_life, settings.usage_weight)
         if key not in cache:
             cache[key] = build_context(session, before, rates, season, week, schedule, use_live=False,
-                                       exclude_rate_season=season)
+                                       exclude_rate_season=season, priors=priors, half_life=settings.half_life)
         context = cache[key]
     games_this_week = {p.player_id: next((g for g in p.games if g.week == week), None) for p in current}
     played = {pid: (g.fantasy_points if g else None) for pid, g in games_this_week.items()}
@@ -111,7 +112,8 @@ def project_week(session: Session, data: SeasonData, week: int, settings: Weekly
     for player in eligible:
         rate = rates[player.player_id]
         game = schedule.game(player.team, week)
-        if rate < MIN_RATE or game is None:
+        # Who is graded doesn't depend on the snap trend, so runs with and without it compare the same games.
+        if game is None or weekly_rate(player, priors.get(player.player_id), settings.half_life, 0.0) < MIN_RATE:
             continue                                   # bye week or not fantasy-relevant
         opponent = game.away_team if game.home_team == player.team else game.home_team
         multiplier = 1.0
@@ -125,7 +127,9 @@ def project_week(session: Session, data: SeasonData, week: int, settings: Weekly
         if_active = rate * multiplier
         projected = if_active
         if context is not None:
-            if_active += sum(b.expected_points for b in context.boosts.get(player.player_id, ())) * multiplier
+            # Only the part of each boost his rate hasn't already seen (games without the teammate).
+            if_active += sum(b.expected_points * (1 - b.in_rate)
+                             for b in context.boosts.get(player.player_id, ())) * multiplier
             projected = if_active * context.of(player.player_id).play_prob
         actual = played.get(player.player_id)
         game_line = games_this_week.get(player.player_id)
@@ -231,7 +235,7 @@ def main(argv: list[str] | None = None) -> None:
         production = WeeklyModelSettings()
         if args.ablation:
             candidates = [production, replace(production, use_factors=False), replace(production, use_injuries=False),
-                          replace(production, half_life=None),
+                          replace(production, half_life=None), replace(production, usage_weight=0.0),
                           replace(production, implied_weight=0.0), replace(production, sos_weight=0.0),
                           WeeklyModelSettings(half_life=None, sos_weight=0.0, implied_weight=0.0, use_injuries=False)]
         else:

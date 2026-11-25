@@ -71,6 +71,25 @@ describe('MatchupView', () => {
     expect(openPlayer).toHaveBeenCalledWith(MAHOMES.id);
   });
 
+  it('opens on the game a link named (week and team), and never a week not reached yet', async () => {
+    const { api } = renderMatchup([], { matchupAt: { week: 3, teamId: 2 } });
+    await screen.findAllByRole('table');
+    expect(api.callsTo(MATCHUP_PATH)[0].url.search).toBe('?week=3&team_id=2');
+    expect(api.callsTo(SCOREBOARD_PATH)[0].url.search).toBe('?week=3');
+  });
+
+  it('opens on this week\'s game for a link to the current week (its preview)', async () => {
+    const { api } = renderMatchup([], { matchupAt: { week: 5, teamId: 2 } });
+    await screen.findAllByRole('table');
+    expect(api.callsTo(MATCHUP_PATH)[0].url.search).toBe('?week=5&team_id=2');
+  });
+
+  it('shows the current week, not a later one, when a link names a week to come', async () => {
+    const { api } = renderMatchup([], { matchupAt: { week: 7, teamId: 2 } });
+    await screen.findAllByRole('table');
+    expect(api.callsTo(MATCHUP_PATH)[0].url.search).toBe('?week=5');
+  });
+
   it('shows real totals, the winner and the playoff label once the week is played', async () => {
     const played = matchup({ played: true, playoff: true, label: 'Semi-final', winner: USER_TEAM_ID,
       home: { ...matchup().home, played: true, actual_total: 98.2 },

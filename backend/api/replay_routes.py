@@ -11,13 +11,13 @@ import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Annotated, Literal
+from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from api.deps import Scoring
+from api.deps import DbId, Scoring
 from database.db import get_session
 from database.models import ReplayLeague
 from services import (
@@ -37,7 +37,7 @@ Limit = Query(views.DEFAULT_PAGE, ge=1, le=views.MAX_PAGE)
 Offset = Query(0, ge=0)
 Week = Query(None, ge=0, le=22)
 TeamId = Query(None, ge=1)
-GameId = Annotated[int, Path(ge=1, le=2 ** 63 - 1)]      # SQLite INTEGER range: a bigger id is a 422, not a 500
+GameId = DbId
 
 _GAME_LOCK = threading.Lock()
 
@@ -118,9 +118,11 @@ class Turn:
 @contextmanager
 def turn(session: Session, game_id: int, week: int | None = None, overall: int | None = None) -> Iterator[Turn]:
     """The game loaded under its lock. `week` is the week the caller believes it is, `overall` the draft
-    pick it believes is on the clock: 409 when either is given and wrong."""
+    pick it believes is on the clock: 409 when either is given and wrong. Nothing changes once the season is over."""
     with errors(), game_lock(game_id):
         row, settings, state = rs.load(session, game_id)
+        if state.phase == "complete":
+            raise ValueError("This season is over.")
         if week is not None and week != state.week:
             raise HTTPException(409, f"This league is in week {state.week}, not week {week}. Reload it.")
         if overall is not None and overall != len(state.picks) + 1:
@@ -174,6 +176,7 @@ class CreateBody(BaseModel):
     starters: dict[str, int] | None = Field(None, max_length=len(replay_slots.SLOTS))   # slot -> count; None: standard
     scoring_rules: RulesBody | None = None              # None: the `scoring` preset as is
     start: Literal["full", "now"] = "full"              # "now": the live season, drafted today, from the next week
+    bench: int = Field(6, ge=replay_slots.BENCH_RANGE[0], le=replay_slots.BENCH_RANGE[1])
 
 
 def _lineup_and_scoring(body: CreateBody) -> tuple[dict[str, int], str, replay_scoring.ScoringRules | None]:
@@ -225,7 +228,8 @@ def games(session: Session = Depends(get_session)) -> dict:
 @router.post("/games")
 def create_game(body: CreateBody, session: Session = Depends(get_session)) -> dict:
     """A new league, drafted up to the user's first pick. Season "random": a seeded choice of a ready one. A live
-    or future season is built from the seed and frozen with the league, in the same transaction."""
+    or future season is built from a server-side seed (_sim_seed) and frozen with the league, in the same
+    transaction."""
     seed = body.seed if body.seed is not None else secrets.randbelow(MAX_SEED + 1)
     with errors():
         starters, scoring, rules = _lineup_and_scoring(body)        # 422 before any season lookup
@@ -233,10 +237,11 @@ def create_game(body: CreateBody, session: Session = Depends(get_session)) -> di
         slot = body.draft_slot or int(rs.rng(seed, "slot").integers(1, body.teams + 1))
         settings = Settings(season=season, teams=body.teams, scoring=scoring, draft_slot=slot,
                             waiver_mode=body.waiver_mode, difficulty=body.difficulty, starters=starters,
+                            bench=body.bench,
                             scoring_rules=rules, adp_format=replay_adp_format.wanted(scoring, rules, starters),
                             **_window(body, kind, through))
         simulated = settings.sim_from is not None
-        blob, data = (_build(session, settings, seed) if simulated else
+        blob, data = (_build(session, settings, _sim_seed()) if simulated else
                       (None, replay_pool.load_season_data(session, season, scoring, rules, settings.adp_format)))
         state = rg.create_game(settings, data, seed)
         name = (body.name or "").strip() or f"{season} {'Sim' if simulated else 'Replay'}"
@@ -247,6 +252,12 @@ def create_game(body: CreateBody, session: Session = Depends(get_session)) -> di
             replay_blob.remember(session, row.id, data)
         game = _game(row, settings, state, data)
         return {"game": views.summary(game), "events": views.new_events(game, None)}
+
+
+def _sim_seed() -> int:
+    """The simulated future's own seed: server-side randomness, never the client's seed, so a league can't be
+    recreated to scout a future already played (the season is frozen with the league, so it isn't needed again)."""
+    return secrets.randbelow(MAX_SEED + 1)
 
 
 def _build(session: Session, settings: Settings, seed: int) -> tuple[bytes, SeasonData]:
@@ -340,8 +351,15 @@ def players(game_id: GameId, position: str | None = None, search: str | None = Q
 
 
 @router.get("/games/{game_id}/players/{player_id}")
-def player(game_id: GameId, player_id: int, session: Session = Depends(get_session)) -> dict:
+def player(game_id: GameId, player_id: DbId, session: Session = Depends(get_session)) -> dict:
     return show(session, game_id, lambda game: league_views.player(game, player_id))
+
+
+@router.get("/games/{game_id}/box")
+def box_score(game_id: GameId, week: int = Query(ge=1, le=22), team: str = Query(min_length=2, max_length=3),
+              session: Session = Depends(get_session)) -> dict:
+    """A played NFL game's box score, both teams (`team` is either side)."""
+    return show(session, game_id, lambda game: league_views.box_score(game, week, team))
 
 
 @router.get("/games/{game_id}/claims")

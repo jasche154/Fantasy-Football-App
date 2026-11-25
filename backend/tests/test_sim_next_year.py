@@ -1,6 +1,6 @@
 """sim_next_year: the offseason turns one season's belief into the next one's (hand-built worlds, no database)."""
 from dataclasses import replace
-from types import MappingProxyType
+from types import MappingProxyType, SimpleNamespace
 
 import numpy as np
 import pytest
@@ -109,9 +109,80 @@ def test_a_rookie_qb_starts_only_where_the_job_is_open_or_he_went_very_high():
 
 def test_the_healthy_incumbent_gets_his_job_back():
     hurt = _world((_player("KC", "QB1", 1.05, starts=0.4), _player("KC", "QB2", 0.9, starts=0.6)))
-    belief, _ = _next(hurt, rookies=(), starts={pid("KC", "QB1"): [1, 2, 3], pid("KC", "QB2"): [4, 5, 6, 7]})
+    belief, _ = _next(hurt, rookies=(), starts={pid("KC", "QB1"): [(1, "KC"), (2, "KC"), (3, "KC")],
+                                                pid("KC", "QB2"): [(4, "KC"), (5, "KC"), (6, "KC"), (7, "KC")]})
     assert belief.players[pid("KC", "QB1")].starts == 1.0
     assert belief.players[pid("KC", "QB2")].starts == ny.VETERAN_BACKUP_STARTS
+
+
+def test_a_fill_in_elsewhere_does_not_take_the_job_from_the_teams_own_starter():
+    """Starts for another team count only when he was that team's main starter (2024: Flacco's five fill-in
+    starts at CLE did not make him IND's starter over Richardson; a signed starter still is)."""
+    fill_in, own = pid("DAL", "QB2"), pid("PIT", "QB1")
+    starts = {fill_in: [(w, "DAL") for w in range(1, 6)], pid("DAL", "QB1"): [(w, "DAL") for w in range(6, 18)],
+              own: [(w, "PIT") for w in range(1, 5)]}
+    belief, _ = _next(rookies=(), moves={fill_in: "PIT"}, starts=starts)
+    assert belief.players[own].starts == 1.0 > belief.players[fill_in].starts
+    signed, _ = _next(rookies=(), moves={pid("DAL", "QB1"): "PIT"}, starts=starts)
+    assert signed.players[pid("DAL", "QB1")].starts == 1.0 > signed.players[own].starts
+
+
+def test_a_qb_traded_in_mid_season_brings_no_claim_from_his_old_team():
+    """2026: Brissett led ARI for 8 weeks, then started once for BAL; Lamar (4 starts, hurt late, low starts
+    weight) is still BAL's starter in August."""
+    traded, own = pid("MIA", "QB1"), pid("KC", "QB1")
+    world = _world((replace(_player("MIA", "QB1", 1.0), team="KC", starts=0.6), _player("KC", "QB1", 1.05, starts=0.38)))
+    starts = {traded: [*((w, "MIA") for w in range(1, 9)), (9, "KC")], own: [(w, "KC") for w in range(1, 5)]}
+    belief, _ = _next(world, rookies=(), starts=starts)
+    assert belief.players[own].starts == 1.0 > belief.players[traded].starts
+
+
+def test_a_starter_traded_at_the_deadline_keeps_his_claim_over_a_fill_in():
+    """He led MIA for 13 weeks, then started twice for KC, whose own week-1 starter is gone: KC's 10-start
+    fill-in is not its August starter."""
+    traded, fill_in, opener = pid("MIA", "QB1"), pid("KC", "QB1"), pid("KC", "QB2")
+    world = _world((replace(_player("MIA", "QB1", 1.0), team="KC", starts=0.3),
+                    _player("KC", "QB1", 0.9, starts=0.6), _player("KC", "QB2", 0.85, starts=0.1)))
+    starts = {traded: [*((w, "MIA") for w in range(1, 14)), (16, "KC"), (17, "KC")],
+              fill_in: [(w, "KC") for w in range(6, 16)], opener: [(w, "KC") for w in range(1, 6)]}
+    belief, _ = _next(world, rookies=(), moves={opener: "MIA"}, starts=starts)
+    assert belief.players[traded].starts == 1.0 > belief.players[fill_in].starts
+
+
+def test_each_start_counts_for_the_team_he_played_that_game_for(monkeypatch):
+    """A QB traded before week 9 started week 9 for his new team (team_at would say the old one)."""
+    from services import replay_pool, sim_metrics
+
+    data = SimpleNamespace(team_by_week={7: ((7, "ARI"), (8, "ARI"), (9, "BAL"))}, players={})
+    data.team_at = lambda player_id, week: replay_pool.SeasonData.team_at(data, player_id, week)
+    monkeypatch.setattr(sim_metrics, "qb_starts", lambda _: {7: [7, 8, 9]})
+    assert ny.starts_by_team(data) == {7: [(7, "ARI"), (8, "ARI"), (9, "BAL")]}
+
+
+def test_receivers_carry_their_august_starter_and_a_qbs_rushing_keeps_its_own_regression():
+    """A receiver's yards and TDs per catch are held at an average passer and scaled to the new starter's
+    regressed quality (his QB's part regresses once, with the QB); a QB's rushing uses the QB keep."""
+    world = _world()
+    belief, _ = _next(world, rookies=())
+    for team in TEAMS:
+        starter = belief.players[pid(team, "QB1")]
+        assert belief.teams[team].passer == pytest.approx(starter.quality)
+    left, _ = _next(world, moves={pid("MIA", "QB1"): None}, rookies=())
+    wr, before = left.players[pid("MIA", "WR1")], belief.players[pid("MIA", "WR1")]
+    assert wr.ypc / before.ypc == pytest.approx(left.teams["MIA"].passer / belief.teams["MIA"].passer)
+    assert ny.keep_of("QB", "ypr", scaled=False) == ny.stored()["efficiency_keep"]["QB ypr"]
+    assert ny.keep_of("RB", "ypr", scaled=False) == ny.stored()["efficiency_keep"]["ypr"]
+    scale = ny.stored()["efficiency_scale"]["RB"]
+    assert ny.keep_of("RB", "ypr") == pytest.approx(1 - scale * (1 - ny.keep_of("RB", "ypr", scaled=False)))
+
+
+def test_a_hyped_rookie_costs_more_and_is_trusted_with_more_work():
+    """hype multiplies the market's premium in full and his role by hype ^ HYPE_ROLE (the coaches buy part of it)."""
+    plain, hyped = Rookie("W", "WR", "MIA", 1, "X"), Rookie("W", "WR", "MIA", 1, "X", hype=1.5)
+    team = _world().teams["MIA"]
+    assert ny.rookie_premium({1: hyped})[1] == pytest.approx(1.5 * ny.rookie_premium({1: plain})[1])
+    a, b = ny.rookie_player(1, plain, team), ny.rookie_player(1, hyped, team)
+    assert b.targets == pytest.approx(a.targets * 1.5 ** ny.HYPE_ROLE) and b.ypc == a.ypc
 
 
 def test_a_team_that_loses_its_only_kicker_signs_a_spare():
@@ -150,14 +221,18 @@ def test_rookies_are_the_least_certain_and_prospects_take_over_at_the_rookie_rat
     starter, prospect, veteran = (Player(1, "QB", "MIA", starts=1.0, games=17), Player(2, "QB", "MIA", starts=0.4),
                                   Player(3, "QB", "MIA", starts=0.05, games=17))
 
-    def benched(backup: Player, whole: bool) -> float:
+    def benched(backup: Player, whole: bool, rank: int = 20, share: float = 1.0) -> float:
         dice = np.random.default_rng(5)
-        return np.mean([any(c.kind == "bench" for c in sim_talent._changes([starter, backup], dice, (2, 15), knobs, whole))
+        return np.mean([any(c.kind == "bench" for c in sim_talent._changes([starter, backup], dice, (2, 15), knobs, whole,
+                                                                          {1: rank}, share))
                         for _ in range(2000)])
 
+    usual = sim_talent.bench_chance(20)
     assert benched(prospect, True) == pytest.approx(knobs["rookie_bench_rate"], abs=0.04)
-    assert benched(veteran, True) == pytest.approx(knobs["bench_rate"], abs=0.03)
-    assert benched(prospect, False) == pytest.approx(knobs["bench_rate"], abs=0.03)   # mid-season: the usual rate
+    assert benched(veteran, True) == pytest.approx(usual, abs=0.03)
+    assert benched(prospect, False) == pytest.approx(usual, abs=0.03)       # mid-season: the usual rate
+    assert benched(veteran, True, rank=1) < benched(veteran, True, rank=32)   # a top-rated starter keeps his job
+    assert benched(veteran, False, share=0.4) == pytest.approx(0.4 * usual, abs=0.03)    # fewer weeks left
 
 
 def test_the_market_pays_a_rookie_premium_on_his_price_only():
@@ -214,6 +289,7 @@ def test_the_fit_writes_its_file_once_at_the_end_and_never_after_a_failed_step(t
     monkeypatch.setattr(database.db, "SessionLocal", lambda: nullcontext(None))
     monkeypatch.setattr(fit, "observations", lambda session, seasons: {})
     monkeypatch.setattr(fit, "summarize", lambda rows, seasons: dict(model))
+    monkeypatch.setattr(fit, "whole_season_fits", lambda session, seasons, fitted: {})
 
     def offline(session, seasons):
         seen.append(ny.stored())
