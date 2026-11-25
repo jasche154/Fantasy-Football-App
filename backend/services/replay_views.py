@@ -30,8 +30,9 @@ Shared pieces
                     out for the season", "he won the backfield" (the UI shows "role jumped after <reason>").
                     Null otherwise, for a move down, and always in a preseason draft room.
       injury        his tag in the CURRENT week, wherever the ref appears (events, offers, verdicts, claims). Only a
-                    PlayerRow built for another week (team / matchup with ?week=) carries that week's tag. Always null
-                    in a preseason draft room (a jump-in league's draft room shows its start week's tags).
+                    PlayerRow built for another week (team / matchup with ?week=) carries that week's tag. In a preseason
+                    draft room only week 1's preseason moves (IR, PUP, SUS, EXE: replay_pool.PRESEASON_TAGS),
+                    else null (a jump-in league's draft room shows its start week's tags).
                     O, IR, PUP, SUS and EXE (exempt list) mean he does not play; O, IR and PUP may go on IR.
   PlayerRow  {player: PlayerRef, opponent, bye, out, projection, points, ros_ppg, value, rank, pos_rank, adp,
               pre_rank, expert_rank, news: {back, text} | null, buzz: string | null, games, ppg, trade_locked,
