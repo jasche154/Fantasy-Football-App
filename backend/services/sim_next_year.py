@@ -35,8 +35,8 @@ seasons 2019-2025 by services/sim_next_year_fit.py and lives in sim_next_year.js
   or more), or likely (ROOKIE_QB_NAMED) and the incumbent is a below-average passer; otherwise his starts
   weight is his week-1 chance, which
   puts him next in line (sim_talent's rookie takeover). A rookie with `hype` (offseason file) gets his role x
-  hype ^ HYPE_ROLE (1: the coaches buy the hype; tuned so Jeremiah Smith, hype 1.3, finishes a top-12 WR
-  about 30% of seeds, top-24 55%, outside the top 36 25%); the market's premium is x hype as well.
+  hype ^ HYPE_ROLE (1: the coaches buy the hype; tuned so Jeremiah Smith, hype 1.2, finishes a top-12 WR
+  in about 35% of league seeds, top-24 55%, outside the top 36 20%); the market's premium is x hype as well.
 - Teams: volume and defenses regress toward the league (`team_keep`); the passer scale and the "other"
   buckets stay.
 

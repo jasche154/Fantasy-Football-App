@@ -1394,9 +1394,10 @@ read the belief, so, as in a real season, the public learns the truth only from 
   August starter's passing (so a great passer's receivers stay good, and a QB change moves them). How much of
   the measured regression the preseason belief applies is fitted on whole seasons: each real season 2021-2025
   rebuilt from the year before, against what players really scored. Applying all of it left the August
-  belief too flat (real stars outscored it by 1.5-3 points a game); the fitted share is a quarter of it for
-  quarterbacks and none for the others, which made the preseason values match real points a game (slope
-  about 1, lower error). All of it is measured from real seasons 2019-2025 (`sim_next_year.json`). On each
+  belief too flat (real stars outscored it by 1.5-3 points a game); the fitted share is none at every
+  position (the end-of-season belief is already shrunk enough), which made the preseason values match real
+  points a game (slope about 1, lower error). The measured regressions still size the hidden talent's
+  offseason spread (what last season leaves unexplained). All of it is measured from real seasons 2019-2025 (`sim_next_year.json`). On each
   team the QB who started the most games last season is the starter again in August; starts made for
   another team count only when he was that team's main starter (a five-game fill-in elsewhere does not
   take the job from the team's own starter).
@@ -1406,16 +1407,18 @@ read the belief, so, as in a real season, the public learns the truth only from 
   upside, so the market (ADP and the preseason expert ranks, not his role or talent) multiplies his value by
   a premium fitted on the real rookie ADPs of all of 2019-2025 at once, then checked on held-out seasons
   (`rookie_premium` in `sim_next_year.json`; allowed to fall with the pick but never to rise). The fitted
-  premium is flat by position, the same at every pick: x1.22 for a running back, x1.10 for a receiver,
-  x1.05 for a tight end, none for a quarterback (rookie QBs already go where real ones do).
+  premium is flat by position, the same at every pick: x1.22 for a running back, x1.16 for a receiver,
+  x1.11 for a tight end, x1.05 for a quarterback (refitted with the stars-level model).
 - **The offseason file** `backend/sim_data/offseason_2027.json` is meant to be edited by hand. `rookies`:
   one entry per player with `name`, `position` (QB/RB/WR/TE/K), `team` (schedule code, e.g. MIA, LA, LV,
   WAS), `pick` (projected overall pick, 1-262: the prospect's rank on the consensus board), `college`, and
   optionally `lock` (default `false`; `true` pins him to that `team` and `pick` in every league) and `hype`
   (1-3, default 1) for a prospect rated beyond his pick: the market's rookie premium and his expected role
   are both multiplied by it (his talent is still drawn around that role, with a rookie's wide spread, so he
-  can still bust). Jeremiah Smith carries one, set so his average ADP across leagues lands where Marvin
-  Harrison Jr.'s did as a rookie (14.5 in 2024's PPR ADP). `moves`: `name` (as the app spells him),
+  can still bust). Jeremiah Smith carries 1.2, set so his average ADP across leagues lands near where Marvin
+  Harrison Jr.'s did as a rookie (14.5 in 2024's PPR ADP): over 20 league seeds (the seeded draft put him on
+  13 different teams) his ADP averaged 12.3 (1-30), and he finished a top-12 receiver 35% of the time,
+  top-24 55% and outside the top 36 20%. `moves`: `name` (as the app spells him),
   `position`, `team` (the new team, or `null` for retired / out of the league) and a `note`. Names must be
   unique across both lists; everyone else stays on his team. A bad entry greys out the 2027 card with the
   file name and the problem; a move whose name matches nobody is skipped (logged as a warning). Saved
