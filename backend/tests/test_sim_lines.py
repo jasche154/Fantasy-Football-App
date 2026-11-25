@@ -154,7 +154,7 @@ def test_expert_opinion_persists_from_week_to_week():
     first = sim_market.opinion({}, ids, np.random.default_rng(1))
     second = sim_market.opinion(first, ids, np.random.default_rng(2))
     a, b = np.array([first[i] for i in ids]), np.array([second[i] for i in ids])
-    assert np.corrcoef(a, b)[0, 1] == pytest.approx(sim_market.OPINION_KEEP, abs=0.05)
+    assert np.corrcoef(a, b)[0, 1] == pytest.approx(sim_market.opinion_knob("opinion_keep"), abs=0.05)
     assert b.std() == pytest.approx(1.0, abs=0.06)
 
 
@@ -174,7 +174,7 @@ def test_a_simulated_season_stores_its_lines_and_scores_follow_them(data, simula
 def test_experts_revise_a_healthy_players_value_slowly_and_an_injured_ones_at_once(belief):
     healthy = next(pid for pid, p in belief.players.items() if p.out_weeks == 0)
     hurt = replace(belief, players={**belief.players, healthy: replace(belief.players[healthy], out_weeks=2)})
-    step = sim_market.WORTH_STEP
+    step = sim_market.opinion_knob("worth_step")
     assert sim_market.held({healthy: 10.0}, {healthy: 20.0}, belief)[healthy] == pytest.approx(10 + step * 10)
     assert sim_market.held({healthy: 10.0}, {healthy: 2.0}, hurt)[healthy] == 2.0
     assert sim_market.held({}, {healthy: 20.0}, belief)[healthy] == 20.0
@@ -191,3 +191,18 @@ def test_a_team_that_has_been_scoring_gets_a_scoring_edge_in_the_experts_values(
     plain, edged = sim_market.values(belief, scoring), sim_market.values(belief, scoring, edges=edges)
     qb = next(pid for pid, p in belief.players.items() if p.team == best and p.position == "QB" and p.starts > 0.5)
     assert (edged[qb] > plain[qb]) == (edges[best] > 0)
+
+
+def test_experts_take_injury_news_in_full_for_the_player_and_his_position_group(belief):
+    team = sorted(belief.teams)[0]
+    rbs = sorted((p for p in belief.players.values() if p.team == team and p.position == "RB"),
+                 key=lambda p: -p.carries)
+    starter, backup = rbs[0].player_id, rbs[1].player_id
+    other = next(pid for pid, p in belief.players.items() if p.team != team and p.out_weeks == 0)
+    hurt = replace(belief, players={**belief.players, starter: replace(belief.players[starter], out_weeks=4)})
+    before, now = {backup: 5.0, other: 5.0, starter: 15.0}, {backup: 12.0, other: 9.0, starter: 1.0}
+    held = sim_market.held(before, now, hurt, was_out=())
+    assert held[backup] == 12.0 and held[starter] == 1.0          # the starter went on IR: news for the group
+    assert held[other] == pytest.approx(5.0 + sim_market.opinion_knob("worth_step") * 4.0)
+    back = sim_market.held({starter: 1.0}, {starter: 15.0}, belief, was_out={starter})
+    assert back[starter] == 15.0                                   # a star back from injury: at once

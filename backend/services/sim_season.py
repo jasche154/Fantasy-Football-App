@@ -192,7 +192,7 @@ def _market(tables: _Tables, base: SeasonData, belief: World, truth: World, seed
             team_prior: Mapping[str, sim_lines.Rating] | None = None) -> None:
     """The week's public tables (projections, expert ranks, buzz). `opinions`: the experts' memory, carried from
     week to week and updated here: {"z": each player's opinion (sim_market.opinion), "worth": the value each is
-    ranked on (sim_market.held)}; `team_prior`: last season's team ratings (the expert values' scoring edges,
+    ranked on (sim_market.held), "out": who was believed out}; `team_prior`: last season's team ratings (the expert values' scoring edges,
     sim_lines.edges, are worked out only in a week whose expert ranks are drawn here)."""
     scoring, last = scoring_of(base), base.last_week
     known = _known(base, tables, week)
@@ -219,9 +219,10 @@ def _market(tables: _Tables, base: SeasonData, belief: World, truth: World, seed
                 edges = sim_lines.edges(known, week, belief, out, team_prior)
                 weekly = sim_market.opinion(opinions["z"], [pid for pid in ids if pid in belief.players], dice)
                 fresh_worth = sim_market.values(belief, scoring, last - rank_week + 1, edges)
-                worth = sim_market.held(opinions["worth"], fresh_worth, belief)
+                worth = sim_market.held(opinions["worth"], fresh_worth, belief, opinions["out"])
                 opinions["z"].update(weekly)
                 opinions["worth"] = worth
+                opinions["out"] = {pid: 1.0 for pid, p in belief.players.items() if p.out_weeks > 0}
             tables.expert_ranks.update(sim_market.expert_ranks(
                 belief, ids, rank_week, dice, scoring, last - max(1, rank_week) + 1, market, weekly,
                 edges if rank_week else None, worth))
@@ -257,7 +258,7 @@ def simulate(base: SeasonData, seed: int, from_week: int, prior: World | None = 
                                            buzz_weeks[1] - buzz_weeks[0] + 1)
     public = belief                                  # the latest public belief (last week's, for this week's tags)
     hidden = sim_talent.strength(belief.teams, seed)
-    opinions: dict[str, dict[int, float]] = {"z": {}, "worth": {}}     # the experts' memory, week to week
+    opinions: dict[str, dict[int, float]] = {"z": {}, "worth": {}, "out": {}}    # the experts' memory, week to week
     lines: dict[tuple[str, int], sim_lines.Line] = {}
     for week in range(from_week, last + 1):
         tags = _tags(base, public, absences, returning, week, from_week, replay_state.rng(seed, "sim", "tags", week))
