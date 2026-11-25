@@ -16,6 +16,8 @@
   with its leaderboard, weekly, rookies, how our ADP agrees with S's real ADP, all of it and the rookies':
   ours priced in the real list's format, PPR; and how the preseason experts agree with the ADP).
   mid reports the leaderboard of the simulated weeks too.
+- both modes report injuries (sim_metrics.injuries: new injuries per game played, missed share, by position)
+  against the real rate and the target, real x sim_injuries.INJURY_SCALE (simulated seasons have fewer on purpose).
 - --set overrides a sim_params.json value for this run (section.key=value, JSON value); --save-tuned writes
   the overrides into the file's `tuned` section, which is how tuned constants get there.
 
@@ -39,7 +41,7 @@ from dataclasses import replace
 from functools import partial
 from pathlib import Path
 
-from services import replay_pool, sim_fit, sim_market, sim_metrics, sim_season, sim_world
+from services import replay_pool, sim_fit, sim_injuries, sim_market, sim_metrics, sim_season, sim_world
 from services.replay_adp_format import TWO_QB
 from services.replay_pool import SeasonData
 from services.sim_world import World
@@ -170,6 +172,21 @@ def _table(title: str, real: dict, sim: dict) -> list[str]:
     return lines
 
 
+def injury_targets(real: dict[str, float]) -> dict[str, float]:
+    """The injury rates simulated seasons aim at: real x sim_injuries.INJURY_SCALE (fewer injuries on purpose)."""
+    return {key: value * sim_injuries.INJURY_SCALE for key, value in real.items()
+            if key.startswith(("new inj/game", "missed share"))}
+
+
+def _injury_table(real: dict, target: dict, sim: dict) -> list[str]:
+    lines = [f"{'injuries':28s} {'real':>9s} {'target':>9s} {'sim':>9s} {'sim/real':>8s}"]
+    for key in target:
+        if key in sim:
+            ratio = sim[key] / real[key] if real[key] else math.nan
+            lines.append(f"{key:28s} {real[key]:9.3f} {target[key]:9.3f} {sim[key]:9.3f} {ratio:8.2f}")
+    return lines
+
+
 def apply_overrides(pairs: list[str]) -> dict[str, dict]:
     """Set section.key=value overrides on the loaded params; returns them as {section: {key: value}}."""
     overrides: dict[str, dict] = defaultdict(dict)
@@ -235,7 +252,9 @@ def run(seasons: list[int], seeds: list[int], mode: str, workers: int = 1, overr
     for kind in kinds:
         pairs = [results[(kind, season)] for season in seasons]
         report[kind] = {"real": _mean([real for real, _ in pairs]), "sim": _mean([sim for _, sim in pairs])}
-        for line in _table(f"{kind} ({seasons[0]}-{seasons[-1]}, {len(seeds)} seeds)", *report[kind].values()):
+        report[kind]["target"] = injury_targets(report[kind]["real"])
+        for line in _table(f"{kind} ({seasons[0]}-{seasons[-1]}, {len(seeds)} seeds)", report[kind]["real"],
+                           report[kind]["sim"]) + _injury_table(*(report[kind][k] for k in ("real", "target", "sim"))):
             log.info(line)
     return report
 

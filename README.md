@@ -1277,6 +1277,12 @@ read the belief, so, as in a real season, the public learns the truth only from 
   is listed Q or D and plays anyway (who counts as a starter there comes from the public belief, never the
   truth). A long absence is tagged IR, like the real reports. Defenses are never hurt. A player already out
   when the simulation starts sits a fitting number of further games.
+  On purpose, simulated players get hurt **about a quarter less often** than real ones (`INJURY_SCALE = 0.75`
+  in `sim_injuries.py` multiplies the per-game and preseason injury chances, in whole simulated seasons and
+  in the live season's simulated weeks alike); how long an injury lasts stays real, and an absence already
+  running in the real weeks is carried over untouched. `sim_eval` reports, by position, new injuries per
+  game played and the share of games missed for the real seasons, the target (real x 0.75) and the
+  simulation.
 - **Hidden talent:** every player's true role and efficiency differ from his reputation by a random draw,
   widest for rookies and players with few games, smallest for veterans with a full season
   (`services/sim_talent.py`); teams' volume and defenses move the same way. During the season some
@@ -1363,7 +1369,11 @@ with what really happened (weekly point ranges, projection error, QB-receiver co
 out, K and D/ST points); **full** builds a season exactly like the future one, from the season before with
 that year's real rookies, moves and schedule, and compares the whole season (preseason rank against final
 rank, breakouts, busts, games missed, how its ADP agrees with the real ADP, overall and for the rookies, and
-how its preseason expert ranks agree with its ADP).
+how its preseason expert ranks agree with its ADP). Both modes end with an injury table: for the top-150
+ADP skill players, new injuries per game played (he played and missed his team's next game with any injury
+tag: a real player ruled out on game day often keeps his Q or D, while a simulated one is always O or IR, so
+counting only O/IR would undercount the real rate by about a third) and the share of team games missed,
+with the real value, the target and the simulated one.
 
 ## API reference
 

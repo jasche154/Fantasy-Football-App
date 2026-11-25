@@ -18,6 +18,11 @@ The model, per position (QB/RB/WR/TE/K; a defense is never hurt):
   Q/D (ruled out on game day) or PUP; those come out as O / IR, which every consumer treats the same.
 - `phantom`: a healthy player listed Q/D who plays anyway, at the real rate.
 - `open_spell` / `preseason`: an absence already running at the snapshot, and one that starts before week 1.
+
+INJURY_SCALE (a product choice, not fitted: nobody likes injuries in fantasy football) multiplies `hazard` and
+the preseason rate, so simulated seasons, full and mid alike, see about a quarter fewer new injuries than real
+ones; lengths, tags and phantoms stay as fitted, and an absence already running (`open_spell`) is untouched.
+sim_eval reports the real rates, the target (real x INJURY_SCALE) and the simulated ones.
 """
 import sys
 from pathlib import Path
@@ -41,6 +46,7 @@ NEVER_HURT = ("DST",)
 POOLED = "ALL"                      # the all-positions fit, used where a position has too little data
 WEEKS_OUT_EDGES = (1, 2, 3, 4, 5, 7, 10)   # open_spell buckets: 1, 2, 3, 4, 5-6, 7-9, 10+ games out so far
 MAX_BODY = 60
+INJURY_SCALE = 0.75                 # simulated new injuries vs real ones (see the docstring)
 
 
 @dataclass(frozen=True)
@@ -83,10 +89,10 @@ def _body(dice: np.random.Generator, fit: dict) -> str:
 
 
 def hazard(position: str) -> float:
-    """The chance a healthy player is hurt in a game he plays (0 for a defense)."""
+    """The chance a healthy player is hurt in a game he plays (0 for a defense): the fit x INJURY_SCALE."""
     if position in NEVER_HURT:
         return 0.0
-    return float(_fit(position)["hazard"])
+    return INJURY_SCALE * float(_fit(position)["hazard"])
 
 
 def draw(dice: np.random.Generator, position: str) -> Spell:
@@ -160,13 +166,13 @@ def open_spell(dice: np.random.Generator, position: str, tag: str, weeks_out: in
 
 
 def preseason(dice: np.random.Generator, position: str) -> Spell | None:
-    """A player who starts the season hurt (PUP / IR / out in week 1), at the real rate of fresh ones (not
+    """A player who starts the season hurt (PUP / IR / out in week 1), at the real rate of fresh ones x INJURY_SCALE (not
     counting last season's absences carried over: carry those with `open_spell`). games_out counts from
     week 1. Always 4 draws."""
     if position in NEVER_HURT:
         return None
     fit = _fit(position)
-    hurt = dice.random() < fit["preseason_rate"]
+    hurt = dice.random() < INJURY_SCALE * fit["preseason_rate"]
     games = _pick(dice, fit["preseason_pmf"])
     body = _body(dice, fit)
     back = dice.random() < fit["q_back"]

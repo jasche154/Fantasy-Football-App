@@ -35,6 +35,19 @@ def test_hazard_ordering_and_defense():
         si.hazard("LB")
 
 
+def test_injury_scale_lowers_only_how_often_players_get_hurt(monkeypatch):
+    assert 0 < si.INJURY_SCALE < 1
+    for position in SKILL:
+        assert si.hazard(position) == pytest.approx(si.INJURY_SCALE * si.stored()["positions"][position]["hazard"])
+    lengths = [si.draw(dice(9), "RB").games_out for _ in range(3)]
+    hurt = sum(si.preseason(r, "TE") is not None for r in [dice(1)] for _ in range(4000))
+    monkeypatch.setattr(si, "INJURY_SCALE", 1.0)
+    assert [si.draw(dice(9), "RB").games_out for _ in range(3)] == lengths          # lengths stay real
+    assert sum(si.preseason(r, "TE") is not None for r in [dice(1)] for _ in range(4000)) > hurt
+    monkeypatch.setattr(si, "INJURY_SCALE", 0.0)
+    assert si.hazard("RB") == 0.0 and si.preseason(dice(), "RB") is None
+
+
 def test_spells_and_tags_have_real_shapes():
     rolls = dice(11)
     for position in SKILL:
