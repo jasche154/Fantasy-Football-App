@@ -124,8 +124,7 @@ def test_a_search_that_finds_nothing_is_not_rerun_that_week(always, monkeypatch)
 # ---------------- which counter: each generator, the cheapest, difficulty, the market guard ----------------
 
 def test_the_add_generator_asks_for_the_users_cheapest_extra_player(always):
-    # WR51 rather than WR42 since the need bonus (replay_styles): CPU 3 is short at RB and pays 5% more for RB14
-    assert countered() == ((RB14, P("WR", 51)), (RB17,))
+    assert countered() == ((RB14, WR42), (RB17,))
 
 
 def test_the_swap_generator_offers_a_lesser_back_and_beats_a_dearer_add(always):

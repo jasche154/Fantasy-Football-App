@@ -11,12 +11,15 @@ player is worth in it (replay_trade_value.tally uses it for both sides):
 - feelings (replay_mood.feeling, on his own players): worried caps his price at the chart, and "high on"
   (`markup`) asks ATTACH_LOW over max(price, chart) at the threshold, rising to ATTACH_HIGH at ATTACH_STRONG,
   whoever buys. So a feeling and his price always point the same way, whatever the style adds.
-- needs and deep (`position_needs`): for each position with its own starting slots (QB, RB, WR, TE; n of
-  them), a team's weakest starter there is its n-th best healthy player's chart and the league bar the median
-  of every team's. It needs P when its weakest starter is below NEED_SHARE x the bar (or it has fewer than n
-  healthy), and is deep at P when n + 1 or more of its healthy players there are at or above the bar. A CPU pays
-  NEED_BONUS for a player at a position it needs, NEED_DEEP_BONUS when everything it sends is from positions
-  where it is deep; that and its lineup gain together add at most NEED_CAP of what it gives (`tally`).
+- needs and deep (`position_needs`): for each position with starting slots of its own (QB, RB, WR, TE; n of
+  them, a SUPERFLEX counting as a QB slot: superflex leagues start two QBs; a FLEX belongs to no one position,
+  so it counts for none), a team's weakest starter there is its n-th best healthy player's chart and the
+  league bar the median of every team's. It needs P when its weakest starter is below NEED_SHARE x the bar (or
+  it has fewer than n healthy), and is deep at P when n + 1 or more of its healthy players there are at or
+  above the bar. A CPU pays NEED_BONUS (NEED_DEEP_BONUS when everything it sends is from positions where it is
+  deep) on the net gain at a position it needs: what it gets there that would START for it after the deal
+  (`Mind.filling`), less what it sends at that position. So swapping one back for another earns nothing. That
+  and its lineup gain together add at most NEED_CAP of what it gives (`tally`).
 All numbers are the user's choices, inside the brief's ranges. Pure: the state and a Knowledge in, numbers out.
 """
 import statistics
@@ -24,7 +27,10 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from functools import lru_cache
 
-from services import replay_fans, replay_mood, replay_personas, replay_state as rs, replay_values as rv
+from types import MappingProxyType
+
+from services import replay_fans, replay_mood, replay_personas, replay_pool, replay_slots, replay_state as rs
+from services import replay_values as rv
 from services.replay_state import Settings, State, Team
 from services.replay_values import Knowledge
 
@@ -50,6 +56,7 @@ class Mind:
     starting: frozenset[int] = frozenset()      # who would start for him (contender only)
     needs: frozenset[str] = frozenset()
     deep: frozenset[str] = frozenset()
+    filling: frozenset[int] = frozenset()       # what it gets that would start at a position it needs
 
 
 def plain(persona: str, hype: float = 1.0) -> Mind:
@@ -70,18 +77,26 @@ def _healthy(know: Knowledge, roster: Sequence[int], position: str) -> list[floa
                    and know.by_id[pid].position == position and not know.by_id[pid].out), reverse=True)
 
 
-def position_needs(state: State, settings: Settings, know: Knowledge) -> dict[int, tuple[frozenset[str], frozenset[str]]]:
+Needs = Mapping[int, tuple[frozenset[str], frozenset[str]]]
+
+
+def slots_for(position: str, starters: Mapping[str, int]) -> int:
+    """Starting slots that are this position's own: a SUPERFLEX is a QB's (superflex leagues start two)."""
+    return starters.get(position, 0) + (replay_slots.superflex(starters) if position == "QB" else 0)
+
+
+def position_needs(state: State, settings: Settings, know: Knowledge) -> Needs:
     """{team id: (positions it needs, positions where it is deep)} for every team, from its active roster.
-    Cached: a trade search asks again for every deal it scores on the same rosters."""
+    Cached (read-only): a trade search asks again for every deal it scores on the same rosters."""
     return _needs(know, tuple((team.id, team.roster) for team in state.teams), tuple(settings.starters.items()))
 
 
 @lru_cache(maxsize=8)       # few: an entry keeps its Knowledge alive (hashed by identity, so never stale)
 def _needs(know: Knowledge, rosters: tuple[tuple[int, tuple[int, ...]], ...],
-           starters: tuple[tuple[str, int], ...]) -> dict[int, tuple[frozenset[str], frozenset[str]]]:
+           starters: tuple[tuple[str, int], ...]) -> Needs:
     found: dict[int, tuple[set[str], set[str]]] = {team_id: (set(), set()) for team_id, _ in rosters}
     for position in NEED_POSITIONS:
-        slots = dict(starters).get(position, 0)
+        slots = slots_for(position, dict(starters))
         if slots <= 0:
             continue
         charts = {team_id: _healthy(know, roster, position) for team_id, roster in rosters}
@@ -92,7 +107,14 @@ def _needs(know: Knowledge, rosters: tuple[tuple[int, tuple[int, ...]], ...],
                 found[tid][0].add(position)
             elif bar > 0 and sum(chart >= bar for chart in held) >= slots + 1:
                 found[tid][1].add(position)
-    return {tid: (frozenset(needs), frozenset(deep)) for tid, (needs, deep) in found.items()}
+    return MappingProxyType({tid: (frozenset(needs), frozenset(deep)) for tid, (needs, deep) in found.items()})
+
+
+def clear_cache() -> None:
+    _needs.cache_clear()
+
+
+replay_pool.CLEAR_HOOKS.append(clear_cache)
 
 
 def _starters(know: Knowledge, settings: Settings, roster: Sequence[int]) -> frozenset[int]:
@@ -100,14 +122,19 @@ def _starters(know: Knowledge, settings: Settings, roster: Sequence[int]) -> fro
 
 
 def mind_for(state: State, settings: Settings, know: Knowledge, team: Team, sends: Sequence[int] = (),
-             kept: Sequence[int] = (), needs: Mapping[int, tuple[frozenset[str], frozenset[str]]] | None = None) -> Mind:
+             kept: Sequence[int] = (), needs: Needs | None = None) -> Mind:
     """The CPU's Mind for sending `sends` and keeping `kept` of what it gets (`needs`: position_needs, if known)."""
     needed, deep = (needs if needs is not None else position_needs(state, settings, know))[team.id]
     mind = Mind(team.persona, replay_personas.now(state, team), team.hype, team.fan_of, needs=needed, deep=deep)
-    if team.persona != "contender" or not contending(state, settings, team.id):
+    contends = team.persona == "contender" and contending(state, settings, team.id)
+    wanted = [pid for pid in kept if know.by_id[pid].position in needed]
+    if not contends and not wanted:
         return mind
-    after = [pid for pid in team.roster if pid not in sends] + list(kept)
-    starting = (_starters(know, settings, team.roster) & set(sends)) | (_starters(know, settings, after) & set(kept))
+    after = _starters(know, settings, [pid for pid in team.roster if pid not in sends] + list(kept))
+    mind = replace(mind, filling=frozenset(pid for pid in wanted if pid in after))
+    if not contends:
+        return mind
+    starting = (_starters(know, settings, team.roster) & set(sends)) | (after & set(kept))
     return replace(mind, contending=True, starting=frozenset(starting))
 
 
@@ -139,12 +166,16 @@ def price(know: Knowledge, mind: Mind, player_id: int, own: bool = False, attach
     return worth
 
 
-def need_bonus(know: Knowledge, mind: Mind, sends: Sequence[int], kept: Sequence[int],
-               kept_worth: Mapping[int, float]) -> float:
-    """NEED_BONUS (NEED_DEEP_BONUS when it pays only from positions where it is deep) of what it gets at
-    positions it needs, before NEED_CAP."""
-    filling = [pid for pid in kept if know.by_id[pid].position in mind.needs]
-    if not filling:
+def need_bonus(know: Knowledge, mind: Mind, sends: Sequence[int], kept_worth: Mapping[int, float],
+               sent_worth: Mapping[int, float]) -> float:
+    """NEED_BONUS (NEED_DEEP_BONUS when it pays only from positions where it is deep) of its net gain at the
+    positions it needs: what it gets there that would start (`Mind.filling`) less what it sends there. Before
+    NEED_CAP."""
+    positions = {know.by_id[pid].position for pid in mind.filling if pid in kept_worth}
+    gain = sum(max(0.0, sum(kept_worth[pid] for pid in mind.filling if know.by_id[pid].position == position)
+                   - sum(sent_worth[pid] for pid in sends if know.by_id[pid].position == position))
+               for position in positions)
+    if gain <= 0:
         return 0.0
     from_depth = bool(sends) and all(know.by_id[pid].position in mind.deep for pid in sends)
-    return (NEED_DEEP_BONUS if from_depth else NEED_BONUS) * sum(kept_worth[pid] for pid in filling)
+    return (NEED_DEEP_BONUS if from_depth else NEED_BONUS) * gain

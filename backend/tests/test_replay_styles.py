@@ -4,6 +4,7 @@ replay_trade_value.py, replay_trades.py).
 
 Leagues come from test_replay_trades (fakes.drafted_state() on its plain chart; the user is team 1).
 """
+import itertools
 from collections import Counter
 from dataclasses import replace
 
@@ -340,7 +341,8 @@ def test_the_mark_up_raises_what_he_asks_from_any_buyer_and_the_feeling_and_pric
     for to_user in (True, False):
         loved = tv.tally(know, "balanced", [1], [2], [], 0.0, 1.0, to_user)
         assert loved.sent == pytest.approx(500.0 * (1 + st.markup(know, st.plain("balanced"), 1)))
-        assert loved.score < loved.bare_score == tv.tally(know, "balanced", [2], [1], [], 0.0, 1.0, to_user).bare_score
+        plain = tv.tally(know, "balanced", [1], [2], [], 0.0, 1.0, to_user, attach=False)
+        assert loved.score < plain.score and plain.sent == pytest.approx(500.0)
     # a contender's bench price is lower, but he never asks under the chart for a player he is high on
     mind = replace(st.plain("contender"), contending=True)
     assert st.price(know, mind, 1, own=True) >= 500.0 * (1 + st.ATTACH_LOW)
@@ -365,18 +367,58 @@ def test_needs_and_deep_come_from_the_lineup_against_the_leagues_starters():
                 st._healthy(know, t.roster, position)[slots - 1] for t in state.teams)
 
 
-def test_the_need_bonus_pays_five_percent_ten_from_depth_and_with_the_lineup_term_never_more_than_ten():
-    know = values(p1=star(400.0, position="RB"), p2=star(400.0, position="WR"), p3=star(400.0, position="TE"))
-    mind = replace(st.plain("balanced"), needs=frozenset({"RB"}), deep=frozenset({"WR"}))
+def test_the_need_bonus_pays_on_the_net_gain_at_a_needed_position_from_a_new_starter_only():
+    know = values(p1=star(400.0, position="RB"), p2=star(400.0, position="WR"), p3=star(400.0, position="TE"),
+                  p4=star(380.0, position="RB"))
+    mind = replace(st.plain("balanced"), needs=frozenset({"RB"}), deep=frozenset({"WR"}), filling=frozenset({1}))
 
-    def need(sends, kept, gain=0.0):
-        return tv.tally(know, mind, sends, kept, [], gain, 1.0, True)
+    def need(sends, kept, gain=0.0, who=mind):
+        return tv.tally(know, who, sends, kept, [], gain, 1.0, True)
 
     assert need([3], [1]).need == pytest.approx(0.05 * 400)
-    assert need([2], [1]).need == pytest.approx(0.10 * 400)
+    assert need([2], [1]).need == pytest.approx(0.10 * 400)                 # paid only from depth
+    assert need([4], [1]).need == pytest.approx(0.05 * 20)                  # a back for a back: the net gain only
     assert need([1], [2]).need == 0.0
+    assert need([3], [1], who=replace(mind, filling=frozenset())).need == 0.0       # he would not start
     gained = need([2], [1], gain=10.0)
     assert gained.lineup > 0 and tv.LINEUP_WEIGHT * gained.lineup + gained.need == pytest.approx(st.NEED_CAP * 400)
+
+
+def test_a_team_short_at_a_position_earns_nothing_for_swapping_a_starter_there_for_a_lesser_one():
+    """Team 3 needs RB: its starting back for another team's slightly lesser back made it weaker yet paid a bonus."""
+    state, know = league()
+    needy = next(t for t in state.teams if not t.is_user and "RB" in st.position_needs(state, SETTINGS, know)[t.id][0])
+    backs = sorted((p for p in needy.roster if know.by_id[p].position == "RB"), key=lambda p: -chart(know, p))
+    other = next(t for t in state.teams if not t.is_user and t.id != needy.id)
+    lesser = max((p for p in other.roster if know.by_id[p].position == "RB" and chart(know, p) < chart(know, backs[0])),
+                 key=lambda p: chart(know, p))
+    side = rt._side(state, SETTINGS, know, needy, other, (backs[0],), (lesser,), (), rt.free_agents(state, know))
+
+    assert side.tally.need == 0.0
+
+
+def test_a_superflex_slot_counts_as_a_qb_slot_for_needs():
+    from tests import replay_fakes as fakes
+    superflex = fakes.fake_settings(starters={"QB": 1, "RB": 2, "WR": 2, "TE": 1, "FLEX": 1, "SUPERFLEX": 1,
+                                              "K": 1, "DST": 1})
+    state, know = league(settings=superflex)
+
+    assert st.slots_for("QB", superflex.starters) == 2 and st.slots_for("RB", superflex.starters) == 2
+    one_qb = [t.id for t in state.teams if len(st._healthy(know, t.roster, "QB")) < 2]
+    needs = st.position_needs(state, superflex, know)
+    assert one_qb and all("QB" in needs[tid][0] for tid in one_qb)
+
+
+def test_the_needs_cache_is_read_only_and_cleared_with_the_season_caches():
+    from services import replay_pool
+    state, know = league()
+    needs = st.position_needs(state, SETTINGS, know)
+
+    with pytest.raises(TypeError):
+        needs[CPU] = (frozenset(), frozenset())            # type: ignore[index]
+    assert st.position_needs(state, SETTINGS, know) is needs
+    replay_pool.clear_cache()
+    assert st.position_needs(state, SETTINGS, know) is not needs
 
 
 # ---------------- why a CPU says no ----------------
@@ -392,14 +434,14 @@ def test_a_cpu_with_no_lineup_room_says_so():
 
 
 def test_a_lowball_gets_a_value_reply_naming_the_player_asked_for():
+    """His worst player for their best: it also costs them a starter, but that is not why they say no."""
     state, know = league()
     cpu, user = rs.team(state, CPU), rs.user_team(state)
     best = max(cpu.roster, key=lambda pid: chart(know, pid))
     worst = min((pid for pid in user.roster if know.by_id[pid].position in SKILL), key=lambda pid: chart(know, pid))
 
     verdict = rt.evaluate(state, SETTINGS, know, USER, CPU, [worst], [best])
-    assert not verdict.accepted and (verdict.decline, verdict.decline_player) in (
-        ("decline_value", best), ("decline_need", None))
+    assert not verdict.accepted and (verdict.decline, verdict.decline_player) == ("decline_value", best)
 
 
 def _close_deal(state, know):
@@ -424,22 +466,56 @@ def test_a_cpu_high_on_the_player_asked_for_turns_down_what_it_would_take_withou
     assert not verdict.accepted and (verdict.decline, verdict.decline_player) == ("decline_attached", theirs)
 
 
-def test_a_cpu_that_would_lose_a_starter_or_only_get_depth_says_it_does_not_need_that(monkeypatch):
+def test_decline_need_only_when_the_lineup_loss_alone_sank_the_deal():
+    """Over every 1-for-1 the user offers CPU 9 that it turns down while losing lineup value, the reply is
+    decline_need exactly when the same deal without the lineup loss would have passed."""
     state, know = league()
     cpu, user = rs.team(state, CPU), rs.user_team(state)
-    starters = st._starters(know, SETTINGS, cpu.roster)
-    starter = max((pid for pid in cpu.roster if pid in starters and know.by_id[pid].position in SKILL),
-                  key=lambda pid: chart(know, pid))
-    scrub = min((pid for pid in user.roster if know.by_id[pid].position in SKILL), key=lambda pid: chart(know, pid))
-    verdict = rt.evaluate(state, SETTINGS, know, USER, CPU, [scrub], [starter])
-    assert (verdict.decline, verdict.decline_position) == ("decline_need", know.by_id[starter].position)
+    seen = set()
+    for mine in (pid for pid in user.roster if know.by_id[pid].position in SKILL):
+        for theirs in (pid for pid in cpu.roster if know.by_id[pid].position in SKILL):
+            side = rt._side(state, SETTINGS, know, cpu, user, (theirs,), (mine,), (), rt.free_agents(state, know))
+            if side.tally.score >= 0 or side.tally.lineup >= 0 or not side.market_ok or side.drops is None \
+                    or side.cover is None or any(st.markup(know, side.mind, p) for p in side.sends):
+                continue
+            kind = rt._decline(SETTINGS, know, side)[0]
+            flips = side.rescore(gain_per_week=0.0).score >= 0
+            assert kind == ("decline_need" if flips else "decline_value"), (mine, theirs)
+            seen.add(kind)
+    assert seen == {"decline_need", "decline_value"}
 
-    position = know.by_id[scrub].position
-    real = st.position_needs
-    monkeypatch.setattr(st, "position_needs", lambda *a: {tid: (n, d | {position}) for tid, (n, d) in real(*a).items()})
-    side = rt._side(state, SETTINGS, know, cpu, user, (starter,), (scrub,), (), rt.free_agents(state, know))
-    assert rt._decline(SETTINGS, know, replace(side, tally=replace(side.tally, lineup=0.0, score=-1.0))) == (
-        "decline_need", None, position)
+
+def _stub_side(kind_flips: str, **more):
+    """A CPU Side whose rescore passes only when `kind_flips` is the term taken away."""
+    from services import replay_trade_reasons as reasons
+    state, know = league()
+    cpu, user = rs.team(state, CPU), rs.user_team(state)
+    theirs = next(p for p in cpu.roster if know.by_id[p].position == "WR")
+    mine = next(p for p in user.roster if know.by_id[p].position == "WR")
+    failing = tv.Tally(100.0, 90.0, 0.0, 0.0, more.pop("lineup", 0.0), -5.0)
+
+    def rescore(**changed):
+        flipped = {"attach": changed.get("attach") is False, "lineup": changed.get("gain_per_week") == 0.0,
+                   "deep": "persona" in changed}[kind_flips]
+        return replace(failing, score=5.0 if flipped else -5.0)
+
+    mind = replace(st.plain("balanced"), **more)
+    side = reasons.Side(cpu, (theirs,), (mine,), (), cpu.roster, (mine,), (), 0.0, failing, True, mind, rescore)
+    return know, side, theirs, mine
+
+
+def test_each_decline_reason_is_the_term_whose_removal_flips_the_answer(monkeypatch):
+    know, side, theirs, mine = _stub_side("deep", deep=frozenset({"WR"}))
+    assert rt._decline(SETTINGS, know, side) == ("decline_need", None, "WR")          # only got a deep position
+    know, side, theirs, mine = _stub_side("lineup", lineup=-20.0)
+    assert rt._decline(SETTINGS, know, side)[0] == "decline_need"                     # lost a starter
+    know, side, theirs, mine = _stub_side("deep")                                     # not deep there: no flip tried
+    assert rt._decline(SETTINGS, know, side) == ("decline_value", theirs, None)
+    monkeypatch.setattr(st, "markup", lambda know, mind, pid: 0.1 if pid == theirs else 0.0)
+    know, side, theirs, mine = _stub_side("attach")
+    assert rt._decline(SETTINGS, know, side) == ("decline_attached", theirs, None)
+    know, side, theirs, mine = _stub_side("lineup", lineup=-20.0)                     # high on him, but the
+    assert rt._decline(SETTINGS, know, side)[0] == "decline_need"                     # mark-up alone doesn't flip it
 
 
 def test_the_reply_is_stored_on_the_declined_offer_and_kept_out_of_the_feed(fan_of_rival):
@@ -467,12 +543,12 @@ def _best_single(state, know, mine: int) -> int | None:
 
 def _setup(persona: str, mine: int):
     """CPU 9 in `persona` at its most generous: a fan of the user's player's team, a contender in a playoff spot,
-    tilted after three losses, a stasher buying the user's player hurt with a return date."""
+    tilted after three losses, a stasher buying the user's player out with a return date, at half his chart."""
     changes = {}
     if persona == "stasher":
         base = league()[1].by_id[mine]
         changes = {mine: {"out": True, "availability": 0.5, "news": Report(1, 4, "Out; back in week 4."),
-                          "healthy_chart": base.healthy_chart}}
+                          "healthy_chart": base.healthy_chart, "chart": 0.5 * base.healthy_chart}}
     state, know = league(changes=changes)
     state = with_team(state, CPU, persona=persona, fan_of=fans.club(know.by_id[mine].team) if persona == "fan" else None)
     if persona in ("contender", "tilted"):
@@ -480,26 +556,81 @@ def _setup(persona: str, mine: int):
     return state, know
 
 
+# The best round trip found per style (.scratch/trip2.py: 3 user players, first deals up to 2-for-2, buying back
+# up to 2 players): every style ends at or below where the user started except the stasher (+1.2%: half the
+# injury discount, by design); the fan -3.6%, the rest -14.6%. Asserted with 2 points to spare.
+TRIP_CEILING = {persona: 0.02 for persona in rp.PERSONAS} | {"stasher": 0.032}
+
+
+def _packages(ids: list[int]) -> list[tuple[int, ...]]:
+    return [(p,) for p in ids] + list(itertools.combinations(ids[:4], 2))
+
+
+def _verdict(state, know, give, get) -> rt.Verdict | None:
+    """The CPU's verdict, or None for a deal that needs the user to name a drop (left out)."""
+    try:
+        return rt.evaluate(state, SETTINGS, know, USER, CPU, give, get)
+    except ValueError:
+        return None
+
+
 @pytest.mark.parametrize("persona", rp.PERSONAS)
-def test_no_round_trip_with_one_cpu_leaves_the_user_ahead_by_more_than_the_styles_stated_edge(persona):
-    """A for B (his best player he takes for A, or his own offer for A), then B back for the best player he takes
-    for B: the user ends up at most `stated_edge` ahead of where he started, on neutral chart."""
+def test_no_round_trip_with_one_cpu_leaves_the_user_ahead_by_more_than_the_measured_ceiling(persona):
+    """The user sends `give` (1 or 2 players) for `get` (1 or 2), then sends `get` back for the best 1 or 2 players
+    the CPU takes for it: his chart value never ends more than TRIP_CEILING above where it started."""
     user, trips = rs.user_team(league()[0]), 0
-    for mine in [pid for pid in user.roster if league()[1].by_id[pid].position in SKILL][:4]:
+    for mine in sorted((p for p in user.roster if league()[1].by_id[p].position in SKILL),
+                       key=lambda p: -chart(league()[1], p))[:2]:
         state, know = _setup(persona, mine)
-        firsts = [(b, False) for b in (_best_single(state, know, mine),) if b is not None]
-        offered = ai._best_deal(state, SETTINGS, know, rs.user_team(state), rs.team(state, CPU), want=True,
-                                wanted=mine)
-        firsts += [(offered[1][0], True) for _ in (1,) if offered is not None and offered[0] == (mine,)
-                   and len(offered[1]) == 1]
-        for got, as_offer in firsts:
-            verdict = rt.evaluate(state, SETTINGS, know, USER, CPU, (mine,), (got,), offered=as_offer)
-            swapped = rt._apply(state, SETTINGS, know, USER, CPU, (mine,), (got,), verdict)
-            back = _best_single(replace(swapped, traded={}), know, got)
-            end = chart(know, back) if back is not None else chart(know, got)
-            assert end - chart(know, mine) <= tv.stated_edge(persona) * chart(know, mine) + 0.5, (persona, mine, got, back)
-            trips += 1
+        partner = sorted((p for p in rs.user_team(state).roster if know.by_id[p].position in SKILL and p != mine),
+                         key=lambda p: -chart(know, p))[:1]
+        theirs = sorted((p for p in rs.team(state, CPU).roster if know.by_id[p].position in SKILL),
+                        key=lambda p: -chart(know, p))[:5]
+        for give in [(mine,), (mine, *partner)]:
+            for get in _packages(theirs):
+                verdict = _verdict(state, know, give, get)
+                if verdict is None or not verdict.accepted:
+                    continue
+                swapped = replace(rt._apply(state, SETTINGS, know, USER, CPU, give, get, verdict), traded={})
+                left = sorted((p for p in rs.team(swapped, CPU).roster if know.by_id[p].position in SKILL),
+                              key=lambda p: -chart(know, p))[:5]
+                backs = [b for b in _packages(left) if (found := _verdict(swapped, know, get, b)) and found.accepted]
+                end = max((sum(chart(know, p) for p in b) for b in backs), default=sum(chart(know, p) for p in get))
+                start = sum(chart(know, p) for p in give)
+                assert end - start <= TRIP_CEILING[persona] * start + 0.5, (persona, give, get, backs)
+                trips += 1
     assert trips >= 2
+
+
+def test_a_stasher_pays_most_for_a_hurt_star_inside_the_guard_and_never_sells_him_back_cheaper():
+    """Chart 300, healthy 800, back in a few weeks: the stasher gives well over what a balanced CPU gives, never
+    past the market guard, and the user can't buy him back for less than he was paid: not the same week or the
+    next (re-trade lock), nor later for anything worth less than he got."""
+    state, know = league()
+    user = rs.user_team(state)
+    star_id = max((p for p in user.roster if know.by_id[p].position in SKILL), key=lambda p: chart(know, p))
+    hurt = {star_id: {"out": True, "availability": 0.375, "chart": 300.0, "healthy_chart": 800.0,
+                      "news": Report(1, 5, "Out; back in week 5.")}}
+    state, know = league(changes=hurt)
+
+    def best_for(persona):
+        return _best_single(with_team(state, CPU, persona=persona), know, star_id)
+
+    stash, plain = best_for("stasher"), best_for("balanced")
+    paid = chart(know, stash)
+    assert plain is None or paid > chart(know, plain)
+    assert tv.MARKET_GUARD * paid <= 300.0                       # inside the guard: he gets back 80% of what he gives
+
+    stasher = with_team(state, CPU, persona="stasher")
+    sold = rt._apply(stasher, SETTINGS, know, USER, CPU, (star_id,), (stash,),
+                     rt.evaluate(stasher, SETTINGS, know, USER, CPU, (star_id,), (stash,)))
+    mine = [p for p in rs.user_team(sold).roster if know.by_id[p].position in SKILL]
+    for week in (sold.week, sold.week + 1):
+        locked = rt.evaluate(replace(sold, week=week), SETTINGS, replace(know, week=week), USER, CPU, (stash,), (star_id,))
+        assert not locked.accepted and any("Traded in the last" in r for r in locked.reasons)
+    later = replace(sold, traded={})
+    cheaper = [p for p in mine if chart(know, p) < paid]
+    assert not any(rt.evaluate(later, SETTINGS, know, USER, CPU, (p,), (star_id,)).accepted for p in cheaper)
 
 
 # ---------------- no hindsight ----------------

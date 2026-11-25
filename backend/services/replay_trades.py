@@ -29,15 +29,22 @@ roster spot (`_landing`; a team blocked by a stale IR player can't trade, so eve
 The user is always the proposer in `evaluate`: to look at a CPU's offer, mirror it (`respond` does).
 """
 import logging
-from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
-from functools import lru_cache
+from functools import lru_cache, partial
 
-from services import (lineup_gain, replay_fans, replay_ir, replay_personas, replay_state as rs, replay_styles,
+from services import (lineup_gain, replay_ir, replay_personas, replay_state as rs, replay_styles,
                       replay_trade_value as tv, replay_values as rv, trade)
 from services.replay_pool import SKILL
 from services.replay_state import Offer, Settings, State, Team
+from services.replay_trade_reasons import (  # noqa: F401 - re-exported: callers and tests use them from here
+    DECLINE_KINDS, VALUE_REASON, Side as _Side, decline as _decline, names as _names, rule_reasons as _rule_reasons,
+    side_reasons,
+)
+from services.replay_trade_rosters import (  # noqa: F401 - re-exported, as above
+    cover, cpu_drops as _cpu_drops, free_agents, landing as _landing, positions as _positions,
+    user_drops as _user_drops,
+)
 from services.replay_values import Knowledge
 
 log = logging.getLogger(__name__)
@@ -46,9 +53,7 @@ TRADE_PHASES = ("waivers", "open")
 MAX_PLAYERS_PER_SIDE = 6         # many-for-few deals pay a depth discount (replay_trade_value.DEPTH_SHARE)
 CPU_TRADE_MULTIPLE = 0.95       # between two CPUs: each needs back at least this share of what it gives
 SUGGEST_WITHIN = 1.5            # a player suggested to close a value gap is worth at most this x what is missing
-VALUE_REASON = "Value is too far apart"     # every value decline starts so (a counter-offer answers only those)
 DEPTH_HINT = "They'd rather have fewer, better players: offer one stronger player in place of several."
-DECLINE_KINDS = ("decline_rival", "decline_room", "decline_attached", "decline_need", "decline_value")  # first wins
 
 
 @dataclass(frozen=True)
@@ -84,22 +89,6 @@ class OfferExpired(ValueError):
         self.state, self.verdict = state, verdict
 
 
-@dataclass(frozen=True)
-class _Side:
-    """One team's half of a deal."""
-    team: Team
-    sends: tuple[int, ...]
-    receives: tuple[int, ...]
-    drops: tuple[int, ...] | None           # None: over the roster limit with nobody it could cut
-    roster: tuple[int, ...]                 # after the deal and the drops
-    kept: tuple[int, ...]                   # what it receives and keeps
-    cover: tuple[int, ...] | None           # free agents for its empty starting slots; None: nobody eligible
-    gain: float
-    tally: tv.Tally | None = None           # CPU sides only
-    market_ok: bool = True
-    mind: replay_styles.Mind | None = None  # CPU sides only
-
-
 def needed_multiple(settings: Settings, other: Team) -> float:
     """The share of what it gives that a CPU needs back when dealing with `other`."""
     return rs.USER_TRADE_MULTIPLE[settings.difficulty] if other.is_user else CPU_TRADE_MULTIPLE
@@ -118,14 +107,6 @@ def _multiple(state: State, settings: Settings, team: Team, other: Team, offered
 def fair_label(value_give: float, value_get: float) -> str:
     """trade.verdict_for on chart values for the team that sends `value_give`: "fair", "slight_win"..."""
     return trade.verdict_for(trade.percent_difference(value_give, value_get))
-
-
-def _names(know: Knowledge, player_ids: Sequence[int]) -> str:
-    return ", ".join(know.by_id[pid].name for pid in player_ids)
-
-
-def _positions(know: Knowledge, player_ids: Sequence[int]) -> list[str]:
-    return [know.by_id[pid].position for pid in player_ids]
 
 
 def _chart(know: Knowledge, player_ids: Sequence[int], just_added: frozenset[int] = frozenset()) -> float:
@@ -160,81 +141,6 @@ def _check(state: State, settings: Settings, know: Knowledge, from_team: int, to
     return sender, receiver
 
 
-def _landing(team: Team, other: Team, sends: tuple[int, ...], receives: tuple[int, ...]) -> tuple[tuple[int, ...], tuple[int, ...]]:
-    """(active roster, IR) after the deal, before drops: a player from `other`'s IR slot takes a free IR slot."""
-    roster = [pid for pid in team.roster if pid not in sends]
-    ir = [pid for pid in team.ir if pid not in sends]
-    for pid in receives:
-        (ir if pid in other.ir and len(ir) < replay_ir.IR_SLOTS else roster).append(pid)
-    return tuple(roster), tuple(ir)
-
-
-def _user_drops(team: Team, settings: Settings, kept: Sequence[int], drops: tuple[int, ...]) -> tuple[int, ...]:
-    """The user's own choice of who to cut, which must cover the overflow exactly."""
-    over = max(0, len(kept) - settings.roster_size)
-    if len(set(drops)) != len(drops) or any(pid not in team.roster or pid not in kept for pid in drops):
-        raise ValueError("You can only drop players who are on your roster and not part of the trade.")
-    if len(drops) != over:
-        raise ValueError(f"This trade leaves you {over} over the roster limit of {settings.roster_size}: "
-                         f"choose exactly {over} to drop." if over else "This trade doesn't need you to drop anyone.")
-    return drops
-
-
-def _over_limit(settings: Settings, know: Knowledge, roster: Sequence[int], ir: Sequence[int],
-                before: Sequence[int]) -> str | None:
-    """A skill position the roster and IR slot hold more of than its limit and than `before` the deal did."""
-    had, held = Counter(_positions(know, before)), Counter(_positions(know, [*roster, *ir]))
-    return next((pos for pos in SKILL if held[pos] > max(rv.position_cap(pos, settings), had[pos])), None)
-
-
-def _cpu_drops(settings: Settings, know: Knowledge, kept: Sequence[int], ir: Sequence[int] = (),
-               before: Sequence[int] = ()) -> tuple[int, ...] | None:
-    """Who a CPU cuts to get back to the roster limit, and within every position limit the deal takes it past
-    (`before`: what it held; Colston Loveland as a third tight end was cut the next week): its lowest
-    healthy-chart skill players (at that position) that leave the lineup legal. Never a kicker or a defense.
-    None when nobody can go."""
-    roster, drops = list(kept), []
-    while len(roster) > settings.roster_size or _over_limit(settings, know, roster, ir, before):
-        crowded = _over_limit(settings, know, roster, ir, before)
-        legal = rv.can_field_lineup(_positions(know, roster), settings)
-        skill = sorted((know.by_id[pid] for pid in roster if know.by_id[pid].position in SKILL
-                        and crowded in (None, know.by_id[pid].position)),
-                       key=lambda v: (v.healthy_chart, v.healthy_value, v.ros_ppg, v.player_id))
-        cut = next((v.player_id for v in skill if not legal or rv.can_field_lineup(
-            _positions(know, [pid for pid in roster if pid != v.player_id]), settings)), None)
-        if cut is None:
-            return None
-        roster.remove(cut)
-        drops.append(cut)
-    return tuple(drops)
-
-
-def free_agents(state: State, know: Knowledge) -> list[int]:
-    """Who could fill a slot a trade empties, best first: unrostered, not out, and free once waivers clear.
-    In the open phase that excludes players on waivers (`state.locked`). In the waivers phase everyone
-    unrostered is on waivers and the cover waits for them to clear (`replay_cover.cpu_cover`), so it is
-    anyone the user hasn't claimed (a CPU's own claim may take one; the next best then covers)."""
-    claimed = {claim.add for claim in state.claims if state.phase == "waivers"}
-    taken = rs.rostered(state) | (claimed if state.phase == "waivers" else set(state.locked))
-    pool = (v for v in know.values if v.player_id not in taken and not v.out)
-    return [v.player_id for v in sorted(pool, key=lambda v: (-v.chart, -v.ros_ppg, v.player_id))]
-
-
-def cover(know: Knowledge, settings: Settings, roster: Sequence[int], pool: Sequence[int],
-          used: frozenset[int] = frozenset()) -> tuple[int, ...] | None:
-    """One free agent from `pool` (best first) per starting slot `roster` cannot fill, none in `used`; None
-    when a slot has nobody eligible. () for a legal roster."""
-    picked: list[int] = []
-    for slot in rv.missing_slots(_positions(know, roster), settings):
-        eligible = rv.eligible(slot)
-        found = next((pid for pid in pool if pid not in used and pid not in picked
-                      and know.by_id[pid].position in eligible), None)
-        if found is None:
-            return None
-        picked.append(found)
-    return tuple(picked)
-
-
 @lru_cache(maxsize=8)
 def _seasons(know: Knowledge) -> dict[tuple[Settings, tuple[int, ...]], float]:
     """One point cache per Knowledge (immutable, hashed by identity, so entries never go stale), and only
@@ -261,7 +167,7 @@ def _side(state: State, settings: Settings, know: Knowledge, team: Team, other: 
           receives: tuple[int, ...], drops: tuple[int, ...], pool: Sequence[int],
           used: frozenset[int] = frozenset(), just_added: frozenset[int] = frozenset(),
           offered: bool = False, counter: bool = False,
-          needs: dict[int, tuple[frozenset[str], frozenset[str]]] | None = None) -> _Side:
+          needs: replay_styles.Needs | None = None) -> _Side:
     after, ir = _landing(team, other, sends, receives)
     if team.is_user:
         cut = _user_drops(team, settings, after, drops)
@@ -280,93 +186,17 @@ def _side(state: State, settings: Settings, know: Knowledge, team: Team, other: 
     own_cuts = tuple(pid for pid in (cut or ()) if pid not in receives)
     per_week = gain / max(1e-9, sum(rv.horizon(know, settings).weights.values()))
     mind = replay_styles.mind_for(state, settings, know, team, sends, kept, needs)
-    multiple = _multiple(state, settings, team, other, offered, counter)
-    counted = tv.tally(know, mind, sends, kept, own_cuts, per_week, multiple, other.is_user, team.hype,
-                       rs.markdowns(state, team.id), just_added, offered and other.is_user)
-    return replace(side, tally=counted, market_ok=tv.market_ok(know, sends, kept, own_cuts, just_added), mind=mind)
+    rescore = partial(tv.tally, know=know, persona=mind, sends=sends, kept=kept, drops=own_cuts, gain_per_week=per_week,
+                      multiple=_multiple(state, settings, team, other, offered, counter), to_user=other.is_user,
+                      hype=team.hype, markdown=rs.markdowns(state, team.id), just_added=just_added,
+                      offered=offered and other.is_user)
+    return replace(side, tally=rescore(), market_ok=tv.market_ok(know, sends, kept, own_cuts, just_added), mind=mind,
+                   rescore=rescore)
 
 
-def _rule_reasons(state: State, know: Knowledge, sender: Team, receiver: Team, moved: tuple[int, ...]) -> list[str]:
-    reasons = []
-    locked = [pid for pid in moved if rs.retrade_locked(state, pid)]
-    if locked:
-        reasons.append(f"Traded in the last {rs.RETRADE_LOCK_WEEKS} weeks, so not yet tradable again: "
-                       f"{_names(know, locked)}.")
-    reasons.extend(f"{team.name} has already made {rs.MAX_TRADES_PER_WEEK} trades this week."
-                   for team in (sender, receiver)
-                   if not team.is_user and rs.trades_this_week(state, team.id) >= rs.MAX_TRADES_PER_WEEK)
-    reasons.extend(reason for team in (sender, receiver)
-                   if not team.is_user and (reason := replay_ir.blocked_reason(state, know, team.id)))
-    return reasons
-
-
-def _value_reason(state: State, side: _Side, other: Team, settings: Settings, know: Knowledge, offered: bool = False,
-                  counter: bool = False) -> str | None:
-    counted, name = side.tally, side.team.name
-    if counted is not None and counted.score < 0:
-        bar = _multiple(state, settings, side.team, other, offered, counter) * tv.OUT_MARGIN
-        extra = f" They want {bar - 1:.0%} more than they give." if bar > 1 else ""
-        if counted.lineup < 0:
-            extra += f" It would weaken their starting lineup (worth {-counted.lineup:.0f} of value to them)."
-        cut = [pid for pid in side.receives if pid not in side.kept]
-        if cut:
-            extra += f" They would drop {_names(know, cut)} to make room, so that counts for nothing."
-        held = [pid for pid in side.sends if other.is_user and know.by_id[pid].out]
-        if held:
-            extra += (f" They won't let {_names(know, held)} go for less than {tv.OUT_SELL_SHARE:.0%} of "
-                      f"healthy value while out.")
-        return (f"{VALUE_REASON}: {name} would give {counted.sent + max(0.0, -counted.premium):.0f} of value and "
-                f"get {counted.received + max(0.0, counted.premium):.0f} back.{extra}")
-    if not side.market_ok:
-        return f"{VALUE_REASON}: {name} won't take back less than {tv.MARKET_GUARD:.0%} of what it gives."
-    return None
-
-
-def _rivals(know: Knowledge, side: _Side) -> list[int]:
-    """Players of his rival team a fan would receive (replay_fans)."""
-    return [pid for pid in side.receives if replay_fans.banned(side.team, know.by_id[pid].team)]
-
-
-def _side_reasons(state: State, side: _Side, other: Team, settings: Settings, know: Knowledge, offered: bool = False,
-                  counter: bool = False) -> list[str]:
-    name, reasons = side.team.name, []
-    hated = _rivals(know, side) if not side.team.is_user else []
-    if hated:
-        reasons.append(f"{name} won't take a {replay_fans.nickname(replay_fans.rival(side.team))} player: "
-                       f"{_names(know, hated)}.")
-    if side.drops is None:
-        reasons.append(f"{name} would be over the roster or a position limit with nobody it could drop.")
-    if side.cover is None:
-        short = ", ".join(rv.missing_slots(_positions(know, side.roster), settings))
-        reasons.append(f"It would leave {name} without a full starting lineup (short at {short}) and no free "
-                       f"agent to fill it.")
-    value = _value_reason(state, side, other, settings, know, offered, counter)
-    return [*reasons, *([value] if value else [])]
-
-
-def _decline(settings: Settings, know: Knowledge, side: _Side) -> tuple[str | None, int | None, str | None]:
-    """(chat kind, player, position) for why this CPU side said no: the first of DECLINE_KINDS that applies;
-    (None, None, None) when it had nothing against the deal."""
-    counted, mind = side.tally, side.mind
-    if counted is None or mind is None:
-        return None, None, None
-    hated = _rivals(know, side)
-    if hated:
-        return "decline_rival", hated[0], None
-    if side.drops is None or side.cover is None:
-        return "decline_room", None, None
-    if counted.score >= 0 and side.market_ok:
-        return None, None, None
-    loved = [pid for pid in side.sends if replay_styles.markup(know, mind, pid) > 0]
-    if loved and counted.bare_score >= 0 and side.market_ok:
-        return "decline_attached", max(loved, key=lambda pid: (replay_styles.markup(know, mind, pid), -pid)), None
-    if counted.lineup < 0:
-        starters = {pid for ids in rv.best_lineup(know, side.team.roster, settings).values() for pid in ids}
-        lost = [pid for pid in side.sends if pid in starters] or list(side.sends)
-        return "decline_need", None, know.by_id[max(lost, key=lambda pid: (know.by_id[pid].chart, -pid))].position
-    if side.kept and all(know.by_id[pid].position in mind.deep for pid in side.kept):
-        return "decline_need", None, know.by_id[side.kept[0]].position
-    return "decline_value", max(side.sends, key=lambda pid: (know.by_id[pid].chart, -pid)), None
+def _bar(state: State, settings: Settings, side: _Side, other: Team, offered: bool = False, counter: bool = False) -> float:
+    """The share of what it gives the team on `side` needs back (its multiple x OUT_MARGIN)."""
+    return _multiple(state, settings, side.team, other, offered, counter) * tv.OUT_MARGIN
 
 
 def _points_text(points: float) -> str:
@@ -431,8 +261,8 @@ def evaluate(state: State, settings: Settings, know: Knowledge, from_team: int, 
     theirs = _side(state, settings, know, receiver, sender, get, give, (), pool, frozenset(mine.cover or ()),
                    just_added, offered, counter, needs)
     reasons = [*_rule_reasons(state, know, sender, receiver, (*give, *get)),
-               *_side_reasons(state, theirs, sender, settings, know, offered, counter),
-               *_side_reasons(state, mine, receiver, settings, know)]
+               *side_reasons(theirs, sender, settings, know, _bar(state, settings, theirs, sender, offered, counter)),
+               *side_reasons(mine, receiver, settings, know, _bar(state, settings, mine, receiver))]
     decline = _decline(settings, know, theirs) if reasons else (None, None, None)
     bonus = tv.premium(know, "balanced", give, mine.kept, just_added)
     value_give = round(_chart(know, give, just_added) + max(0.0, -bonus), 2)

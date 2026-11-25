@@ -29,7 +29,7 @@ Pure: takes a Knowledge and the players, no state.
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
-from services import replay_personas, replay_styles
+from services import replay_styles
 from services.replay_styles import Mind
 from services.replay_values import Knowledge
 
@@ -58,7 +58,6 @@ class Tally:
     lineup: float              # before LINEUP_WEIGHT / LINEUP_LOSS_WEIGHT
     score: float               # accept at >= 0
     need: float = 0.0          # its need bonus, after the cap
-    bare_score: float = 0.0    # the score without its "high on" mark-ups (== score when it has none)
 
 
 def fresh(know: Knowledge, picked: Iterable[int]) -> frozenset[int]:
@@ -95,11 +94,12 @@ def depth_counted(worth: Sequence[float], sent: Sequence[float]) -> float:
 def tally(know: Knowledge, persona: str | Mind, sends: Sequence[int], kept: Sequence[int], drops: Sequence[int],
           gain_per_week: float, multiple: float, to_user: bool, hype: float = 1.0,
           markdown: Mapping[int, float] | None = None, just_added: Collection[int] = (),
-          offered: bool = False) -> Tally:
+          offered: bool = False, attach: bool = True) -> Tally:
     """The CPU sends `sends`, keeps `kept` of what it receives and cuts `drops` (its own players).
     `persona`: its Mind (replay_styles.mind_for), or a persona name priced with `hype` and no state.
     `markdown`: {player id: discount} it is shopping to the user (only applied when `to_user`); `just_added`:
-    players who count PICKUP_SHARE (`fresh`); `offered`: its own offer to the user (no shark margin)."""
+    players who count PICKUP_SHARE (`fresh`); `offered`: its own offer to the user (no shark margin); `attach`
+    False leaves out its "high on" mark-ups (replay_trade_reasons asks whether they alone sank a deal)."""
     mind = persona if isinstance(persona, Mind) else replay_styles.plain(persona, hype)
     cut = (markdown or {}) if to_user else {}
 
@@ -121,19 +121,15 @@ def tally(know: Knowledge, persona: str | Mind, sends: Sequence[int], kept: Sequ
     lineup = min(max(LINEUP_PER_WEEK * gain_per_week, -cap), cap)
     weight = LINEUP_WEIGHT if lineup > 0 else LINEUP_LOSS_WEIGHT
 
-    def score_for(attach: bool) -> tuple[float, float, float]:
-        sent = sum(sell(pid, cut.get(pid, 0.0), attach) for pid in sends)
-        out = sent + max(0.0, -bonus)
-        room = max(0.0, replay_styles.NEED_CAP * out - max(0.0, weight * lineup))
-        need = min(replay_styles.need_bonus(know, mind, sends, kept, kept_worth), room)
-        margin = SHARK_MARGIN * out if mind.persona == "shark" and not offered else 0.0
-        score = received + max(0.0, bonus) + spot + weight * lineup + need - out * multiple * OUT_MARGIN - margin
-        return sent, need, score
-
-    sent, need, score = score_for(True)
-    bare = score_for(False)[2] if any(replay_styles.markup(know, mind, pid) for pid in sends) else score
+    sent = sum(sell(pid, cut.get(pid, 0.0), attach) for pid in sends)
+    out = sent + max(0.0, -bonus)
+    room = max(0.0, replay_styles.NEED_CAP * out - max(0.0, weight * lineup))
+    sent_worth = {pid: private(pid, True, attach) for pid in sends}
+    need = min(replay_styles.need_bonus(know, mind, sends, kept_worth, sent_worth), room)
+    margin = SHARK_MARGIN * out if mind.persona == "shark" and not offered else 0.0
+    score = received + max(0.0, bonus) + spot + weight * lineup + need - out * multiple * OUT_MARGIN - margin
     return Tally(round(sent, 2), round(received, 2), round(bonus, 2), spot, round(lineup, 2), round(score, 2),
-                 round(need, 2), round(bare, 2))
+                 round(need, 2))
 
 
 def market_ok(know: Knowledge, sends: Sequence[int], kept: Sequence[int], drops: Sequence[int],
@@ -145,17 +141,3 @@ def market_ok(know: Knowledge, sends: Sequence[int], kept: Sequence[int], drops:
     got = depth_counted(worth(kept), worth(sends)) - sum(worth(drops))
     return got >= MARKET_GUARD * sum(worth(sends))
 
-
-LEAN = {"panicky": 0.15, "steady": 0.15, "gambler": 0.15, "tilted": 0.15,      # replay_personas.PRIVATE_CLAMP
-        "fan": replay_styles.FAN_BONUS, "contender": replay_styles.CONTEND_START, "stasher": 1.0}
-
-
-def stated_edge(persona: str) -> float:
-    """The most a style may leave the user ahead on neutral chart in deals with him, as a share of what the user
-    sends: its top offer edge (a haggler's counter), plus the need bonus cap and how far its own prices lean from
-    the chart (a panicky or tilted manager selling low, a steady one holding a star, a gambler's hot streak, a
-    fan's team, a contender's starters, a stasher's hurt stars), never more than the market guard allows
-    (1 / MARKET_GUARD - 1). A test trades round trips against every style to hold it."""
-    top = max(replay_personas.offer_edge(persona)[1], replay_personas.offer_edge(persona, counter=True)[1],
-              replay_personas.offer_edge(persona, losses=99)[1])
-    return min(1 / MARKET_GUARD - 1, top + replay_styles.NEED_CAP + LEAN.get(persona, 0.0))
