@@ -81,7 +81,7 @@ def test_cpus_trade_every_season_without_a_frenzy(seasons):
     counts = [len(trades(season)) for season in seasons.values()]
 
     # The need bonus (a team short at QB next to one with four pays up to 10% more) and the dealer's extra
-    # attempts make deals here more common: measured 7.7 a season without the bonus, 10.8 with it, 12 with dealers.
+    # attempts make deals here more common: 7.7 a season without the bonus, 11.2 with it (counts 7-13).
     assert all(3 <= count <= 15 for count in counts), counts
     assert 5 <= mean(counts) <= 13, counts
 
