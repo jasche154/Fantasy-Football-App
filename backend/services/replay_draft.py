@@ -10,6 +10,9 @@ Its pick is the lowest `(adp + noise) x need x lean` among the best available pl
 - need: below 1 pulls a position earlier (an open starting spot), above 1 pushes it back (depth, backups);
 - lean: the team's fixed taste for each position.
 
+At a preseason draft a player a week-1 IR, PUP or suspension already rules out (known then: replay_pool's
+PRESEASON_TAGS) counts OUT_PUSH x his ADP, so a CPU waits on him (2021: Gus Edwards' ACL, ADP 57).
+
 Hard rules sit on top: a roster must always be able to end legal (every starting slot filled, K and DST
 included), position caps, kickers and defenses only in the last rounds, no backup QB or TE before round
 10 of 15, never a reach of more than a round of picks in rounds 1-4, a round and a half in rounds 5-9 and
@@ -57,6 +60,7 @@ OPEN_STARTER_NEED = (0.95, 0.85, 0.75)  # RB/WR with a starting spot still open,
 STARTER_NEED_LATE = 0.7                 # QB1/TE1 still missing: 1.0 in round 1 down to this ...
 STARTER_NEED_BY_ROUND = 9               # ... by this round
 DEPTH_SLACK = 3                         # a team with this many bench RB (or WR) is deep there (tuned: 2 left
+OUT_PUSH = 2.0                          # a preseason IR/PUP/SUS player's ADP x this at a week-0 draft (Kupp 7 -> 14)
 DEEP_NEED = 1.15                        # two teams in three with the minimum four backs)
 BACKUP_NEED = 1.5                       # QB2/TE2 once the gate is open (tuned: about half the teams take each)
 
@@ -231,15 +235,22 @@ def _candidates(state: State, known: SeasonData, allowed: Sequence[str], round_:
 
 
 def _scores(team: Team, players: Sequence[PoolPlayer], counts: Counter, round_: int, settings: Settings,
-            noise: Sequence[float]) -> list[float]:
+            noise: Sequence[float], out: frozenset[int] = frozenset()) -> list[float]:
+    """`out`: players a preseason IR, PUP or suspension rules out of week 1, pushed back OUT_PUSH x."""
     chaos = 0.0 if team.is_user else team.chaos * rs.DRAFT_CHAOS_SCALE[settings.difficulty]
     scores = []
     for player, luck in zip(players, noise):
         sigma = player.adp_stdev or SIGMA_BASE + SIGMA_PER_PICK * player.adp
         draw = max(MIN_DRAW, player.adp + float(luck) * sigma * chaos)
         scores.append(draw * _need(player.position, counts, round_, settings)
-                      * team.lean.get(player.position, 1.0))
+                      * team.lean.get(player.position, 1.0) * (OUT_PUSH if player.player_id in out else 1.0))
     return scores
+
+
+def _preseason_out(known: SeasonData, player_id: int) -> bool:
+    """A week-1 tag known at a preseason draft (replay_pool.PRESEASON_TAGS: IR, PUP, SUS)."""
+    tag = known.injuries.get((player_id, 1))
+    return tag is not None and tag.hard
 
 
 def cpu_pick(state: State, settings: Settings, data: SeasonData, seed: int) -> int:
@@ -257,7 +268,8 @@ def cpu_pick(state: State, settings: Settings, data: SeasonData, seed: int) -> i
     if not ranked:
         return players[0].player_id
     noise = rs.rng(seed, "draft", overall).standard_normal(len(players))
-    scores = _scores(team, players, Counter(mine), round_, settings, noise)
+    out = frozenset(p.player_id for p in players if state.week == 0 and _preseason_out(known, p.player_id))
+    scores = _scores(team, players, Counter(mine), round_, settings, noise, out)
     return players[min(range(len(players)), key=lambda i: (scores[i], i))].player_id
 
 

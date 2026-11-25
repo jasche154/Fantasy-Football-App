@@ -367,6 +367,22 @@ def small_db():
     engine.dispose()
 
 
+def test_the_raiders_are_oak_before_2020_although_nflverse_says_lv(loaded):
+    engine = _fresh_engine()
+    with Session(engine) as session:
+        fakes.seed_db(session, fakes.fake_season(2019))
+        old = replay_pool.load_season_data(session, 2019, "half")
+    engine.dispose()
+
+    codes = {code for games in old.team_by_week.values() for _, code in games}
+    teams = {g.home_team for g in old.schedule.games} | {g.away_team for g in old.schedule.games}
+    assert "OAK" in codes and "OAK" in teams and "LV" not in codes | teams
+    assert all("LV" not in key for key in old.schedule.opponents) and "LV" not in old.schedule.opponents.values()
+    raider = next(pid for pid, games in old.team_by_week.items() if games[0][1] == "OAK")
+    assert old.schedule.opponent(old.team_at(raider, 2), 2) is not None or old.on_bye(raider, 2)
+    assert "LV" in {code for games in loaded.team_by_week.values() for _, code in games}     # 2021: Las Vegas
+
+
 def test_load_returns_the_same_pool_with_adp(loaded):
     data = fakes.fake_season()
 
