@@ -9,9 +9,12 @@ league, its hard-tagged players out; the team ratings from the games before the 
 ratings carried over), next to the Vegas closing line and the result. Read-only on the database; the per-game
 inputs are cached in backend/data/cache/sim_lines_games.json (git-ignored; --refresh rebuilds them).
 
-Leave-season-out: the rating knobs (decay, pseudo-games, carry-over) are picked on the held-out RMSE against the
-Vegas line (less noisy than results); for each knob setting and each season, the coefficients are fitted by
-least squares on the other seasons and judged on the held-out one. The report gives, on held-out seasons, the
+Leave-season-out: for each knob setting and each held-out season, the league level and home edge the ratings
+use and the coefficients are fitted on the other seasons only (least squares against the Vegas line, less noisy
+than results) and judged on the held-out one. The rating knobs themselves (decay, pseudo-games, carry-over: a
+small grid) are picked on that held-out RMSE against Vegas without a nested split, so the reported held-out
+numbers are slightly optimistic about the knob choice (the grid's settings differ by under 0.01 in held-out
+correlation with the results). The report gives, on held-out seasons, the
 correlation with the real margin and total next to Vegas's, the spread of predicted margins, the home edge,
 blowout shares in the most lopsided and closest fifth, and what each input adds (held-out correlation with the
 real margin / total when it is dropped). The coefficients written are fitted on every season.
@@ -111,6 +114,12 @@ def _levels(data: dict[int, dict]) -> dict:
     return {"level": round(float(np.concatenate([home, away]).mean()), 4), "home": round(float((home - away).mean()), 4)}
 
 
+def folds(data: dict[int, dict], combo: tuple) -> dict[int, dict[int, dict[str, np.ndarray]]]:
+    """{held-out season: features of every season with the league level and home edge of the others only}."""
+    return {held: features(data, _knobs(*combo, _levels({s: d for s, d in data.items() if s != held})))
+            for held in data}
+
+
 def features(data: dict[int, dict], knobs: dict) -> dict[int, dict[str, np.ndarray]]:
     """{season: {input: (games, 2) margin and total parts, plus vegas, score, week}}."""
     out = {}
@@ -141,14 +150,19 @@ def _fit(feats: list[dict], inputs: tuple[str, ...], col: int) -> np.ndarray:
     return np.linalg.lstsq(x, y, rcond=None)[0]
 
 
-def held_out(feats: dict[int, dict], inputs: dict[int, tuple[str, ...]]) -> dict[int, np.ndarray]:
-    """{season: (games, 2) held-out predicted margin and total}; inputs: {column: inputs used}."""
+def held_out(by_fold: dict[int, dict[int, dict]], inputs: dict[int, tuple[str, ...]]) -> dict[int, np.ndarray]:
+    """{season: (games, 2) held-out predicted margin and total}; `by_fold`: `folds`; inputs: {column: inputs used}."""
     out = {}
-    for season in feats:
+    for season, feats in by_fold.items():
         rest = [feats[s] for s in feats if s != season]
         pred = [_design(feats[season], inputs[col], col) @ _fit(rest, inputs[col], col) for col in (0, 1)]
         out[season] = np.column_stack(pred)
     return out
+
+
+def _own(by_fold: dict[int, dict[int, dict]]) -> dict[int, dict]:
+    """Each season's features as its own fold computed them (for the held-out reports)."""
+    return {season: feats[season] for season, feats in by_fold.items()}
 
 
 def _report(feats: dict[int, dict], pred: dict[int, np.ndarray], weeks: tuple[int, int] = (1, 18)) -> dict:
@@ -194,28 +208,28 @@ def yards_power(data: dict[int, dict]) -> float:
 def fit(seasons: list[int], refresh: bool = False) -> tuple[dict, dict]:
     """(sim_lines.json contents, report)."""
     data = load(seasons, refresh)
-    levels = _levels(data)
     inputs = {0: INPUTS, 1: TOTAL_INPUTS}
     best = None
     for combo in itertools.product(*GRID.values()):
-        knobs = _knobs(*combo, levels)
-        feats = features(data, knobs)
-        score = _rmse(feats, held_out(feats, inputs))
+        by_fold = folds(data, combo)
+        score = _rmse(_own(by_fold), held_out(by_fold, inputs))
         log.info("knobs %s: held-out RMSE vs Vegas (margin + total) %.3f", combo, score)
         if best is None or score < best[0]:
-            best = (score, knobs, feats)
-    _, knobs, feats = best
-    pred = held_out(feats, inputs)
-    report = {"knobs": knobs, "all weeks": _report(feats, pred), "weeks 5-18": _report(feats, pred, (5, 18)),
+            best = (score, combo, by_fold)
+    _, combo, by_fold = best
+    own, pred = _own(by_fold), held_out(by_fold, inputs)
+    report = {"knobs": combo, "all weeks": _report(own, pred), "weeks 5-18": _report(own, pred, (5, 18)),
               "dropped": {}}
     for name in INPUTS:
         fewer = {col: tuple(i for i in inputs[col] if i != name) for col in (0, 1)}
-        fewer_pred = held_out(feats, fewer)
-        dropped = _report(feats, fewer_pred)
+        fewer_pred = held_out(by_fold, fewer)
+        dropped = _report(own, fewer_pred)
         report["dropped"][name] = {"r margin": dropped["r margin"], "r total": dropped["r total"],
-                                   "RMSE vs Vegas": _rmse(feats, fewer_pred)}
-    report["RMSE vs Vegas"] = _rmse(feats, pred)
-    report["2023-2025 weeks 5-18"] = _report({s: feats[s] for s in feats if s >= 2023}, pred, (5, 18))
+                                   "RMSE vs Vegas": _rmse(own, fewer_pred)}
+    report["RMSE vs Vegas"] = _rmse(own, pred)
+    report["2023-2025 weeks 5-18"] = _report({s: own[s] for s in own if s >= 2023}, pred, (5, 18))
+    knobs = _knobs(*combo, _levels(data))                  # the model written: every season
+    feats = features(data, knobs)
     coefs = {col: _fit(list(feats.values()), inputs[col], col) for col in (0, 1)}
     model = {"seasons": seasons, "ratings": knobs, "yards_power": round(yards_power(data), 4),
              "margin": {"const": round(float(coefs[0][0]), 4), **{n: round(float(b), 4) for n, b in zip(INPUTS, coefs[0][1:])}},

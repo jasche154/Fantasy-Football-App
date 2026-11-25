@@ -23,7 +23,7 @@ proportion to his expected TDs (never one who left the game hurt), with `game.ot
 more pass attempt for a catch, so the passer's line (the receivers' sum) and the box score still add up; a field
 goal is the kicker's unless he left hurt (then a fill-in's: points, no kick on his line). OT_TIE is set so
 simulated games end tied about as often as real ones (0.29% of regular season games 2021-2025; simulated games
-are tied after regulation 3.2% of the time). `game.ot_field_goal` (0.5) and `game.ot_td_yards` (12 yards on a
+are tied after regulation 4.3% of the time). `game.ot_field_goal` (0.5) and `game.ot_td_yards` (12 yards on a
 catch, 4 on a run) are hand-set: no overtime play-by-play is loaded; the tie rate and the box score are what the
 realism check measures.
 """
@@ -43,8 +43,8 @@ from services.sim_game import (
 )
 from services.sim_world import params
 
-TD_DRIVES = 6.0                  # default of the tuned `game.td_drives`
-OT_TIE = 0.09                    # a tied game stays tied after overtime: 0.29% real ties / 3.2% simulated regulation ties
+TD_DRIVES = 5.0                  # default of the tuned `game.td_drives`
+OT_TIE = 0.07                    # a tied game stays tied after overtime: 0.29% real ties / 4.3% simulated regulation ties
 OT_DEFAULTS = {"ot_field_goal": 0.5, "ot_td_yards": {"rec": 12, "rush": 4}}   # hand-set (see above); tuned section
 
 

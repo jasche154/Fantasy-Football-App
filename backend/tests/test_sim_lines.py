@@ -206,3 +206,25 @@ def test_experts_take_injury_news_in_full_for_the_player_and_his_position_group(
     assert held[other] == pytest.approx(5.0 + sim_market.opinion_knob("worth_step") * 4.0)
     back = sim_market.held({starter: 1.0}, {starter: 15.0}, belief, was_out={starter})
     assert back[starter] == 15.0                                   # a star back from injury: at once
+
+
+def test_a_player_who_left_hurt_never_scores_the_overtime_touchdown_and_attempts_keep_up(data, belief, monkeypatch):
+    monkeypatch.setattr(sim_draw, "OT_TIE", 0.0)
+    monkeypatch.setattr(sim_draw, "ot_field_goal", lambda: 0.0)
+    game = next(g for g in data.schedule.games if g.week == WEEK)
+    home, away = game.home_team, game.away_team
+    star = max((p for p in belief.players.values() if p.team == home and p.position in ("RB", "WR", "TE")),
+               key=lambda p: p.targets + p.carries).player_id
+    sides = (sim_game._side(belief, home, away, set(), {star: 0.05}), sim_game._side(belief, away, home, set(), {}))
+    assert star in sides[0].exited
+    means = [sim_game._side_means(s) for s in sides]
+    rng = np.random.default_rng(2)
+    offense = [sim_draw._offense(s, 33, 27, 1.0, rng) for s in sides]
+    for _ in range(300):
+        after, _, points, _, _ = sim_draw._overtime(sides, offense, [(20, {}), (20, {})], [20, 20],
+                                                    np.array([33, 33]), np.array([27, 27]), rng, means)
+        if points[0] > points[1]:
+            o, before = after[0], offense[0]
+            for ids, gained in ((sides[0].receivers, o.rec_td - before.rec_td), (sides[0].rushers, o.rush_td - before.rush_td)):
+                assert all(n == 0 for pid, n in zip(ids, gained) if pid == star)
+            assert o.attempts - before.attempts == int((o.catches - before.catches).sum())

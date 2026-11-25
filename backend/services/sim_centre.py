@@ -28,7 +28,7 @@ NEWTON_STEPS = 25                # on the closed form (microseconds each); stops
 CLOSED_TOLERANCE = 1e-4          # points, on the closed form
 TARGET_TOLERANCE = 0.05          # points, on the real means (else one correction)
 MIN_TARGET = 1.0                 # a side is never centred below this many points
-REGULATION_TIES = 0.032          # share of simulated games tied after regulation (measured over 6,000 draws)
+REGULATION_TIES = 0.043          # share of simulated games tied after regulation (measured over 6,000 draws, td_drives 5)
 
 
 def ot_points() -> float:

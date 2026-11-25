@@ -1190,7 +1190,7 @@
    "share_sd_targets": 0.05,
    "share_sd_carries": 0.15,
    "share_sd_qb_carries": 0.45,
-   "td_drives": 6,
+   "td_drives": 5,
    "ot_field_goal": 0.5,
    "ot_td_yards": {
     "rec": 12,
