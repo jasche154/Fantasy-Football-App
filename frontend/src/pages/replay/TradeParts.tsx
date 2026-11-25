@@ -102,8 +102,8 @@ function sumValues(players: readonly { value: number }[]): number {
 /** A verdict from the user's side: the balance, both values, the lineup gains, drops and why a CPU says no. */
 export function TradeVerdictView({ verdict, partner, isOffer = false }: TradeVerdictViewProps) {
   const copy = VERDICT_COPY[verdict.fair_label];
-  const isAdjusted = Math.abs(sumValues(verdict.give) - verdict.value_give) > 0.05
-    || Math.abs(sumValues(verdict.get) - verdict.value_get) > 0.05;
+  const isAdjusted = Math.abs(sumValues(verdict.give) - verdict.value_give) > 0.1
+    || Math.abs(sumValues(verdict.get) - verdict.value_get) > 0.1;
   const noted = [...verdict.give, ...verdict.get].filter((row) => row.note);
   return (
     <div className="replay-verdict">

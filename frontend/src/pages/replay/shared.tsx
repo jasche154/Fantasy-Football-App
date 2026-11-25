@@ -199,7 +199,7 @@ export const OUT_REASON = 'Out: no projection for this game, so he is not expect
 
 /** The plain Out badge (see showsOut), its reason on hover. */
 export function ReplayOutBadge({ className = '' }: { className?: string }) {
-  return <span className={`status-badge status-badge--out${className ? ` ${className}` : ''}`} title={OUT_REASON}>Out</span>;
+  return <span className={`status-badge status-badge--out${className ? ` ${className}` : ''}`} title={OUT_REASON}>Out<span className="sr-only">: {OUT_REASON.replace(/^Out: /, '')}</span></span>;
 }
 
 /** The user's IR players who lost their tag block adds, claims and trades; null when nothing is blocked. */

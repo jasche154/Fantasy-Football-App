@@ -227,7 +227,7 @@ describe('PlayerDrawer box score', () => {
   it('shows the matchup without a score when the league has none', async () => {
     const { user } = renderBox(boxScore(false));
     await user.click(await screen.findByRole('button', { name: 'Week 2 box score, @ DEN' }));
-    expect(await screen.findByText(/final score not kept/)).toBeInTheDocument();
+    expect(await screen.findByText(/final score not available/)).toBeInTheDocument();
     expect(screen.getByText(/DEN @ MIA/)).toBeInTheDocument();
   });
 });

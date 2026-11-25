@@ -153,6 +153,7 @@ export function PlayersView({ game, version, act, isBusy, openPlayer }: ReplayVi
       <div className="weekly-controls replay-players__filters">
         <PositionTabs value={tab} onChange={setTab} withFlex />
         <SelectField label="Show" isInline value={status} options={STATUS_OPTIONS} onChange={(value) => setStatus(value as ReplayStatusFilter)} />
+        {query && <span className="hint replay-players__search-note" role="status">Searching all players</span>}
         <StatsPicker game={game} value={shown} onChange={setStats} />
         <ViewSwitch value={view} onChange={setView} />
         <div className="field field--inline replay-players__search">
@@ -165,7 +166,7 @@ export function PlayersView({ game, version, act, isBusy, openPlayer }: ReplayVi
         {(data) => (
           <>
             {data.results.length === 0
-              ? <EmptyState title="No players match">Try another position, status or name.</EmptyState>
+              ? <EmptyState title="No players match">{query ? 'Try another position or name.' : 'Try another position, status or name.'}</EmptyState>
               : (
                 <PlayersTable game={game} week={data.week} rows={data.results} columns={statColumns(data.shown.span, data.shown.week, data.tab, view)} sort={sort}
                   onSort={(key) => setSort(nextSort(sort, key, sortDirection))} claimedIds={claimedIds} moves={moves}

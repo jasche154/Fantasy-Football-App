@@ -104,7 +104,7 @@ export function BoxScoreView({ gameId, week, team, backLabel, onBack }: BoxScore
           <>
             <p className="replay-box__final">
               {finalText(data.teams)}
-              {data.teams[0].score === null ? <span className="hint"> · final score not kept for this league</span> : <span className="hint"> · Final</span>}
+              {data.teams.some((side) => side.score === null) ? <span className="hint"> · final score not available</span> : <span className="hint"> · Final</span>}
             </p>
             <Tabs label={`Week ${week} teams`} className="replay-adv__tabs" initial={Math.max(0, data.teams.findIndex((side) => side.team === team))}
               tabs={data.teams.map((side) => ({ id: side.team, label: side.team, panel: <TeamBox side={side} /> }))} />

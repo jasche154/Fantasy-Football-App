@@ -19,8 +19,9 @@ function StandingsTable({ standings }: { standings: ReplayStandings }) {
   const onSort = (key: StandingsSort) => setSort(nextSort(sort, key, (column) => (column === 'order' ? 'asc' : 'desc')));
   const ordered = standings.results.map((row, index) => ({ row, index }));
   const column = sort.key === 'order' ? null : sort.key;
-  if (column) ordered.sort((a, b) => a.row[column] - b.row[column] || a.index - b.index);
-  if (sort.direction === 'desc') ordered.reverse();
+  const sign = sort.direction === 'desc' ? -1 : 1;
+  if (column) ordered.sort((a, b) => sign * (a.row[column] - b.row[column]) || a.index - b.index);   // ties keep standings order
+  else if (sign < 0) ordered.reverse();
   const isDefault = sort.key === 'order' && sort.direction === 'asc';
   return (
     <>

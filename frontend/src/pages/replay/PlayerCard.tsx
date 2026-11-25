@@ -68,7 +68,7 @@ interface WeeksTabsProps {
   position: ReplayPosition;
   weeks: readonly ReplayPlayerWeek[];
   simFrom: number | null;
-  onOpenGame?: (week: number, team: string) => void;
+  onOpenGame?: (week: number, team: string, opener: HTMLElement) => void;
 }
 
 /** Game log, plus an Advanced tab (usage and efficiency) for skill players; K and DST get the game log alone. */
@@ -88,7 +88,7 @@ interface PlayerCardProps {
   /** The league's first simulated week (Summary.sim_from): its weeks from there on are marked Sim. */
   simFrom?: number | null;
   /** Opens a played week's NFL box score from the game log. */
-  onOpenGame?: (week: number, team: string) => void;
+  onOpenGame?: (week: number, team: string, opener: HTMLElement) => void;
 }
 
 /** The player card: who he is and his news, five season numbers, rumors, his game log (and advanced stats) and the weeks ahead. */

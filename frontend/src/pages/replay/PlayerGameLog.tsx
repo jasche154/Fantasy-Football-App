@@ -33,7 +33,7 @@ interface WeekRowProps {
   position: ReplayPosition;
   box: readonly BoxColumn[];
   simFrom?: number | null;
-  onOpenGame?: (week: number, team: string) => void;
+  onOpenGame?: (week: number, team: string, opener: HTMLElement) => void;
 }
 
 function WeekRow({ week, position, box, simFrom, onOpenGame }: WeekRowProps) {
@@ -46,7 +46,7 @@ function WeekRow({ week, position, box, simFrom, onOpenGame }: WeekRowProps) {
       <td className="replay-card__opp">
         {canOpen
           ? <button type="button" className="linklike" aria-label={`Week ${week.week} box score, ${opponent}`}
-            onClick={() => onOpenGame(week.week, week.team!)}>{opponent}</button>
+            onClick={(event) => onOpenGame(week.week, week.team!, event.currentTarget)}>{opponent}</button>
           : opponent}
         {week.injury && <> <ReplayInjuryBadge injury={week.injury} /></>}
         {showsOut(week.out, week.injury) && <ReplayOutBadge className="replay-drawer__badge" />}
@@ -70,7 +70,7 @@ interface PlayerGameLogProps {
   /** The league's first simulated week (Summary.sim_from): later weeks are marked Sim. */
   simFrom?: number | null;
   /** Opens a played week's NFL box score (week, his team that week). */
-  onOpenGame?: (week: number, team: string) => void;
+  onOpenGame?: (week: number, team: string, opener: HTMLElement) => void;
 }
 
 /** Weeks 1..current: the pre-game projection, the real points and his box score (played weeks only). */

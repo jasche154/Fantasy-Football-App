@@ -89,7 +89,8 @@ function FaceOff({ matchup, starters, isUserIdle, openPlayer }: FaceOffProps) {
 }
 
 /** Matchup: one game of a week face to face, and the week's scoreboard to pick another from. */
-export function MatchupView({ game, version, openPlayer, matchupAt }: ReplayViewProps) {
+export function MatchupView({ game, version, openPlayer, matchupAt: asked }: ReplayViewProps) {
+  const matchupAt = asked && asked.week >= game.start_week ? asked : undefined;   // a hand-edited week before the league began
   // A game named in the URL (the playoff bracket's links) opens first; null: follow the current week.
   const [pickedWeek, setPickedWeek] = useState<number | null>(matchupAt && matchupAt.week < game.week ? matchupAt.week : null);
   const [isAutoPinned, setIsAutoPinned] = useState(false);                  // pickedWeek is the week just played, not the user's pick

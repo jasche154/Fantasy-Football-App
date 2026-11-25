@@ -23,8 +23,8 @@ export function PlayerDrawer({ gameId, playerId, version, simFrom = null, onClos
   const [game, setGame] = useState<{ week: number; team: string } | null>(null);
   const opener = useRef<HTMLElement | null>(null);
   const name = detail.data?.player.player.name ?? 'Player';
-  const openGame = (week: number, team: string) => {
-    opener.current = document.activeElement as HTMLElement | null;
+  const openGame = (week: number, team: string, button: HTMLElement) => {
+    opener.current = button;                                   // the clicked button: Safari doesn't focus on click
     setGame({ week, team });
   };
   const back = () => {
