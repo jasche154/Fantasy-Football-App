@@ -9,11 +9,11 @@ included) out of his team's `left` remaining games takes off:
   costs (out 2 of the last 3 games: 48%) and a near-season-long one heads toward zero;
 - all of the remaining games (out for the season): the whole chart.
 At 13 games left: 1 missed 6%, 2 8%, 3 10%, 4 12%, 6 40%, 8 45%, 10 62%.
-Real results (services.replay_chart_eval, 2018-25) say a known absence costs about its share of games (out
-players realised 0.49 of a healthy player's value; the old share x 0.9 chart kept 0.49). The user's targets
-keep more (0.63 on average), so within them the deep end is used: the anchors' upper bounds and the lowest
-SHARE_POWER (1.8) that keeps every 1-4-week absence within 12% at 13 games left (held-out RMSE of out
-players 3.20 with the middle of the ranges and a square, 3.17 at the deep end, 2.94 with the old chart).
+Real results (services.replay_chart_eval, 2018-25, regular lineup) say a known absence costs about its share
+of games (out players realised 0.48 of a healthy player's value; the old share x 0.9 chart kept 0.50). The
+user's targets keep more (0.61), so within them the deep end is used: the anchors' upper bounds and the
+lowest SHARE_POWER (1.8) that keeps every 1-4-week absence within 12% at 13 games left (held-out RMSE of out
+players: 3.006 with the old chart, 3.159 at power 1.8, 3.186 at 2.5, 3.214 at 4.0).
 
 `unreported_discount`: an out player without a news report (no hard tag streak in replay_news) loses the
 expected discount over NO_REPORT_ODDS, how many games such absences really missed (counting this week, each
