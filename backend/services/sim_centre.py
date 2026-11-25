@@ -2,13 +2,13 @@
 
 Given each side's wanted mean points (a `target`, or its own mean + a `shift`), the side's TD rates per catch
 and per carry are multiplied by one factor f, its yards by f ** yards_power (the fitted slope of log yards on log
-points in real team games, sim_lines.json) and, when f < 1, its field-goal tries by f too: a weak offense
+points in real team games, sim_lines.json) and, when f < 1, its field-goal tries by f ** `game.fg_power` too: a weak offense
 reaches field-goal range less often, so low totals are reachable (only return TDs and safeties, about 0.7 points
 a game, stay as they are); above 1 the tries stay as fga_mean gives them (a strong offense's extra drives end in
 TDs; scaling them up too gave a 38-point side 4.3 tries, far above real ones).
 
 The factor is solved on the closed form of sim_game._mean_points (`_points_at`): TDs = f T0, yards = f^p Y0,
-field-goal tries = min(1, f) x fga_mean(yards, TDs) (capped where the draw caps them). Newton steps on that scalar
+field-goal tries = min(1, f) ** fg_power x fga_mean(yards, TDs) (capped where the draw caps them). Newton steps on that scalar
 function need no side rebuilt; one check on the scaled side's real means then corrects for the only thing the
 closed form leaves out (a TD rate reaching sim_game.MAX_TD_RATE).
 
@@ -28,6 +28,7 @@ NEWTON_STEPS = 25                # on the closed form (microseconds each); stops
 CLOSED_TOLERANCE = 1e-3          # points, on the closed form
 TARGET_TOLERANCE = 0.05          # points, on the real means (else one correction)
 MIN_TARGET = 1.0                 # a side is never centred below this many points
+FG_POWER = 1.0                   # default of the tuned `game.fg_power`
 REGULATION_TIES = 0.043          # share of simulated games tied after regulation (measured over 6,000 draws, td_drives 5)
 
 
@@ -38,11 +39,16 @@ def ot_points() -> float:
     return REGULATION_TIES * (1 - sim_draw.OT_TIE) * (3 * field_goal + 6 * (1 - field_goal)) / 2
 
 
+def fg_power() -> float:
+    """How field-goal tries follow a factor below 1 (`game.fg_power`)."""
+    return float(params()["game"].get("fg_power", FG_POWER))
+
+
 def scaled(side, factor: float, power: float):
-    """`side` with TD rates x factor, field-goal tries x min(1, factor) and yards x factor ** power."""
+    """`side` with TD rates x factor, field-goal tries x min(1, factor) ** fg_power and yards x factor ** power."""
     yards = factor ** power
     return replace(side, ypc=side.ypc * yards, rec_td=side.rec_td * factor, ypr=side.ypr * yards,
-                   rush_td=side.rush_td * factor, fg_scale=side.fg_scale * min(1.0, factor))
+                   rush_td=side.rush_td * factor, fg_scale=side.fg_scale * min(1.0, factor) ** fg_power())
 
 
 def _points_at(f: float, tds: float, yards: float, rest: float, fg_scale: float, power: float) -> tuple[float, float]:
@@ -53,8 +59,8 @@ def _points_at(f: float, tds: float, yards: float, rest: float, fg_scale: float,
     per_td = 6 + (1 - kick["two_point"]) * kick["xp"] + kick["two_point"] * 2 * TWO_POINT_SUCCESS
     make = float(np.dot(kick["bands"], kick["make"]))
     cap = float(round(kick["fga_chances"]))
-    below = f < 1.0
-    fga = min(1.0, f) * fg_scale * fga_mean(yards * f ** power, tds * f)
+    below = fg_power() if f < 1.0 else 0.0
+    fga = min(1.0, f) ** fg_power() * fg_scale * fga_mean(yards * f ** power, tds * f)
     slope_fga = 0.0 if fga >= cap else fga * (below + kick["fga_yards"] * power + kick["fga_tds"] * tds * f) / f
     return per_td * tds * f + 3 * make * min(fga, cap) + rest, per_td * tds + 3 * make * slope_fga
 

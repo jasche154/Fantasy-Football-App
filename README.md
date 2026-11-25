@@ -1344,21 +1344,26 @@ read the belief, so, as in a real season, the public learns the truth only from 
   margin (Vegas 0.51; the old belief alone 0.38) and its total 0.23 with the real total (Vegas 0.31; old
   0.21); its margins spread like Vegas's (sd 6.0 against 6.1) with the same home edge (1.6 points). Tried
   and dropped because they added nothing on held-out seasons: yards per play, team EPA (simulated games
-  have none anyway), a dome flag, capping blowouts. In the live season the real lines already posted for
-  games still to be played (2026: weeks 12 and 13) are used as they are (`sim_setup.posted_lines`). Each
-  simulated game's line is stored as that game's spread and total, as a real season's closing line is.
+  have none anyway), a dome flag, capping blowouts. In the live season the real line already posted for
+  a game of the first simulated week (2026: week 12) is used instead (`sim_setup.posted_lines`), the spread
+  and the total each where there is one (an out-of-range value is logged and ignored); a later week's posted
+  line (week 13's) is not, since it knows nothing of what happened in the simulated week before it. Each
+  simulated game's line is stored as that game's spread and total, as a real season's closing line is, and
+  what a week shows (`as_of`) never includes a later week's line, real or simulated.
 - **The result is drawn around the line:** the truth's expected points for each side are the line's plus
   what the public doesn't know (the truth's own expected points minus the belief's: hidden talent, a starter
   hurt during the game, a benching), plus each team's hidden strength (offense and defense, a few points each,
   drawn once a season; the public learns it from the scores), with the line's edge widened a little (real
-  margins run about 1.1 x the Vegas spread). Each side's yards and touchdown rates are then scaled by one
-  factor so its expected points hit that number, and the game is drawn as below; the week's projections are
-  centred on the same line, so they stay unbiased. A team's touchdowns are drive-limited (their total is a
+  margins run about 1.1 x the Vegas spread). Each side's touchdown rates are then scaled by one factor
+  (its yards by a power of it, and, for a side below its own expectation, its field-goal tries too, so even a
+  6-point target is reachable) so its expected points hit that number, overtime included
+  (`services/sim_centre.py`), and the game is drawn as below; the draw averages that number (within about 0.3
+  points over 4,000 draws) and the week's projections are centred on the same line, so they stay unbiased. A team's touchdowns are drive-limited (their total is a
   binomial over a handful of "drives" around its expected touchdowns, then shared out play by play), because
   independent plays made scores too spread out once team strength was right. A game tied after regulation
   goes to **overtime**: one side wins it with a field goal or a touchdown (credited to a receiver or a
-  rusher, so the box score still adds up), and about 9% of overtimes end tied, so ties stay as rare as real
-  ones (0.29% of games). The hidden strength, the widened edge and the drive count are tuned so simulated
+  rusher, never one who left the game hurt, so the box score still adds up), and about 7% of overtimes end
+  tied (4.3% of simulated games are tied after regulation), so ties stay as rare as real ones (0.29%). The hidden strength, the widened edge and the drive count are tuned so simulated
   results against the sim's own line look like real results against Vegas (2022-2025 weeks 6-18: line vs
   result correlation 0.49 in both, results around the line spread 12.5 against 12.0, margins of 21+ 15.6%
   against 16.0%, 35+ 1.3% in both, team scores sd 9.9 against 9.8). Known gaps: shutouts are about a third as
@@ -1438,7 +1443,8 @@ read the belief, so, as in a real season, the public learns the truth only from 
   correlation 0.98 over the real top 150 in 2022-2025; the simulated ones now 0.99, from about 0.86 when the
   experts ignored last season). The weekly experts **revise slowly**: each player's noise carries from week to
   week (90% of last week's), and the value a healthy player is ranked on moves 40% of the way to this week's
-  (a player ruled out is re-ranked at once), so a healthy star no longer jumps from QB1 to QB9 and back: a
+  (on injury news, a player ruled out or back, or a teammate at his position ruled out or back, is re-ranked
+  at once: the backup whose starter just went on IR moves up that week), so a healthy star no longer jumps from QB1 to QB9 and back: a
   healthy top-16 quarterback's expert rank moves about 1.3-1.5 places a week (real: about 1.1; it moved about
   five). Quarterback expert ranks still agree less with the week's projections than real ones (rank correlation
   about 0.6-0.66 against 0.72-0.75): QB values are bunched, and the projections follow each week's matchup line.
