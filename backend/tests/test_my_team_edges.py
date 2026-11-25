@@ -10,8 +10,8 @@ from tests.test_my_team import MINE, THEIRS, _seed_league, league  # noqa: F401 
 
 
 @pytest.mark.parametrize("path, status", [
-    ("/api/my-team/abc", 422), ("/api/my-team/0", 404), ("/api/my-team/-1", 404),
-    ("/api/my-team/999999999999999999999", 404),
+    ("/api/my-team/abc", 422), ("/api/my-team/0", 422), ("/api/my-team/-1", 422),     # ids are 1..2**63-1 (api.deps.DbId)
+    ("/api/my-team/999999999999999999999", 422), ("/api/my-team/12345", 404),
 ])
 def test_bad_league_ids_are_rejected_cleanly(client, league, path, status):
     assert client.get(path).status_code == status

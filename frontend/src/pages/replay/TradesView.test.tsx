@@ -203,7 +203,7 @@ describe('TradesView builder', () => {
     finish?.();
 
     expect(await screen.findByText('Trade executed with Gridiron Ghosts.')).toHaveAttribute('role', 'status');
-    expect(api.callsTo(PROPOSE_PATH, 'POST').map((call) => call.body)).toEqual([{ to_team: 1, give: [ETIENNE.id], get: [MOSTERT.id], drops: [] }]);
+    expect(api.callsTo(PROPOSE_PATH, 'POST').map((call) => call.body)).toEqual([{ to_team: 1, give: [ETIENNE.id], get: [MOSTERT.id], drops: [], week: 5 }]);
     expect(screen.getByRole('checkbox', { name: 'Give Travis Etienne' })).not.toBeChecked();
     expect(screen.getByRole('checkbox', { name: 'Get Raheem Mostert' })).not.toBeChecked();
   });
@@ -411,7 +411,7 @@ describe('TradesView counters', () => {
     await user.click(screen.getByRole('button', { name: 'Send counter' }));
 
     await waitFor(() => expect(api.callsTo(COUNTER_PATH, 'POST').map((call) => call.body))
-      .toEqual([{ give: [ETIENNE.id], get: [MOSTERT.id], drops: [] }]));
+      .toEqual([{ give: [ETIENNE.id], get: [MOSTERT.id], drops: [], week: 5 }]));
     expect(await screen.findByText('Trade executed with Blitz Brigade.')).toBeInTheDocument();
   });
 

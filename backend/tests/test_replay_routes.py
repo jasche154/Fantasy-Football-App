@@ -132,7 +132,11 @@ def _week_two_waivers(client: TestClient, game: str, seen: dict) -> None:
     drop = min((r for r in rows if not r["starting"] and r["player"]["position"] in SKILL),
                key=lambda r: r["value"])["player"]["id"]
     for add in wire:
-        post(client, game + "/claims", {"add": add, "drop": drop})
+        post(client, game + "/claims", {"add": add, "drop": drop, "week": 2})
+    seen["stale_actions"] = [refused(client, game + path, {**body, "week": 1}) for path, body in (
+        ("/lineup", {"starters": None}), ("/claims", {"add": wire[0], "drop": drop}), ("/drop", {"player_id": drop}),
+        ("/add-drop", {"add": wire[0], "drop": drop}), ("/ir/place", {"player_id": drop}),
+        ("/ir/activate", {"player_id": drop}), ("/trades/propose", seen["deal"]))]
     first = get(client, game + "/claims")
     order = [row["id"] for row in first["results"]][::-1]
     seen["wire"], seen["claim_twice"] = wire, refused(client, game + "/claims", {"add": wire[0], "drop": drop})
@@ -181,8 +185,11 @@ def story(client) -> dict:
             seen["snapshot"] = _snapshot(client, game)
         seen["played"].append(post(client, game + "/advance", {"step": "play", "week": week}))
     seen["after_end"] = refused(client, game + "/advance", {"step": "play", "week": summary["week"]})
+    seen["over"] = [refused(client, game + path, body) for path, body in (
+        ("/lineup", {"starters": None}), ("/add-drop", {"add": 1}), ("/claims", {"add": 1}))]
     seen["final"] = {name: get(client, f"{game}/{name}") for name in (
-        "team", "matchup", "scoreboard", "standings", "schedule", "activity", "chat", "players", "claims", "trades", "draft")}
+        "team", "matchup", "scoreboard", "standings", "schedule", "activity", "chat", "players", "claims", "trades", "draft",
+        "playoffs")}
     seen["final"]["summary"] = summary
     return seen
 
@@ -316,6 +323,22 @@ def test_time_only_moves_forward_one_step_at_a_time(story):
     assert story["stale"] == (409, "This league is in week 1, not week 2. Reload it.")
     assert story["wrong_step"][0] == 422 and "play week 1 instead" in story["wrong_step"][1]
     assert story["after_end"] == (422, "This season is over.")
+
+
+def test_an_action_from_a_page_showing_an_old_week_is_refused(story):
+    assert story["stale_actions"] == [(409, "This league is in week 2, not week 1. Reload it.")] * 7
+
+
+def test_a_finished_season_refuses_every_move_and_shows_no_moods(story):
+    assert story["over"] == [(422, "This season is over.")] * 3
+    assert not _moods(story["final"]["playoffs"])
+
+
+def _moods(value) -> list:
+    """Every non-null "mood" anywhere in a response."""
+    if isinstance(value, dict):
+        return [m for key, item in value.items() for m in ([item] if key == "mood" and item else _moods(item))]
+    return [m for item in value for m in _moods(item)] if isinstance(value, list) else []
 
 
 def test_every_week_is_played_to_a_champion(story):

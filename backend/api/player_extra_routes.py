@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from api.deps import league_params
+from api.deps import MAX_ID, DbId, league_params
 from database.db import get_session
 from database.models import Player
 from integrations.sleeper import SleeperError
@@ -21,13 +21,15 @@ def _ints(text: str, name: str, limit: int) -> list[int]:
         values = list(dict.fromkeys(int(part) for part in text.split(",") if part.strip()))
     except ValueError as exc:
         raise HTTPException(422, f"{name} must be comma-separated numbers.") from exc
+    if any(not 0 < value <= MAX_ID for value in values):
+        raise HTTPException(422, f"{name} must be numbers from 1 to {MAX_ID}.")
     if not values or len(values) > limit:
         raise HTTPException(422, f"Give 1 to {limit} {name}.")
     return values
 
 
 @router.get("/players/{player_id}/news")
-def player_news(player_id: int, session: Session = Depends(get_session)) -> dict:
+def player_news(player_id: DbId, session: Session = Depends(get_session)) -> dict:
     """Latest news for one player from Sleeper's partners (headline, summary, source link)."""
     player = session.get(Player, player_id)
     if player is None:
@@ -41,7 +43,7 @@ def player_news(player_id: int, session: Session = Depends(get_session)) -> dict
 
 
 @router.get("/players/{player_id}/usage")
-def player_usage(player_id: int, season: int | None = Query(None, ge=1999, le=2100),
+def player_usage(player_id: DbId, season: int | None = Query(None, ge=1999, le=2100),
                  league: LeagueSettings = Depends(league_params), session: Session = Depends(get_session)) -> dict:
     """Position percentiles for key season stats and the last 3 games against the games before them."""
     player = session.get(Player, player_id)

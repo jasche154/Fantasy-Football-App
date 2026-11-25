@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { event, MOSTERT, NINERS, OPPONENT_TEAM_ID, playerRow, RESULT_EVENTS, summary, tagged, TUCKER, USER_TEAM_ID } from './fixtures';
 import {
-  canGoOnIr, ConfirmButton, EventList, formatPoints, formatRecord, groupEvents, injuryLabel, isHardTag, ordinal, PositionTabs, positionParam,
+  canGoOnIr, ConfirmButton, EventList, formatPoints, formatRecord, groupEvents, injuryLabel, isHardTag, ordinal, OUT_REASON, PositionTabs, positionParam,
   ReplayDrawer, ReplayInjuryBadge, ReplayIrBlockedNotice, ReplayPlayerCell, TeamSelect, viewHash,
 } from './shared';
 
@@ -62,7 +62,8 @@ describe('injury tags', () => {
     unmount();
     render(<ReplayPlayerCell player={tagged(MOSTERT, 'Q')} info={{ out: true }} />);
     expect(screen.getByText('Q')).toBeInTheDocument();
-    expect(screen.getByText('Out', { selector: '.status-badge' })).toBeInTheDocument();
+    // Q (the injury report) next to Out (no pre-game projection) says why on hover, so they don't read as a contradiction.
+    expect(screen.getByText('Out', { selector: '.status-badge' })).toHaveAttribute('title', OUT_REASON);
   });
 
   it('shows the IR banner only while blocked and roster moves are open', () => {

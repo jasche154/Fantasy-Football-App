@@ -1,7 +1,7 @@
 """Shared request dependencies and request bodies."""
-from typing import Literal
+from typing import Annotated, Literal
 
-from fastapi import HTTPException, Query
+from fastapi import HTTPException, Path, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -10,6 +10,8 @@ from services.valuation import NoDataError, Valuation, build_valuation
 
 Scoring = Literal["ppr", "half", "std"]
 Position = Literal["QB", "RB", "WR", "TE"]
+MAX_ID = 2 ** 63 - 1
+DbId = Annotated[int, Path(ge=1, le=MAX_ID)]     # SQLite INTEGER range: a bigger id is a 422, not a 500
 
 
 class LeagueBody(BaseModel):

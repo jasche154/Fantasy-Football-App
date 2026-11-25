@@ -13,10 +13,14 @@ export interface PlayerMoves extends Pick<KeyedAct, 'isBusy' | 'pendingKey' | 'e
   noticeRef: RefObject<HTMLParagraphElement | null>;
 }
 
-/** The Players screen's moves: the shared keyed `act`, plus a confirmation that can take the keyboard focus. */
-export function usePlayerMoves(act: ReplayAct, isHubBusy: boolean): PlayerMoves {
+/**
+ * The Players screen's moves: the shared keyed `act`, plus a confirmation that can take the keyboard focus.
+ * `stage` (week and phase) names where the league stands: a confirmation is only shown in the stage it was made in
+ * ("It is settled on Sim to Wednesday" is wrong once the waivers have run).
+ */
+export function usePlayerMoves(act: ReplayAct, isHubBusy: boolean, stage: string): PlayerMoves {
   const { send, isBusy, pendingKey, errorFor } = useKeyedAct(act, isHubBusy);
-  const [notice, setNotice] = useState<{ text: string; keepFocus: boolean } | null>(null);
+  const [notice, setNotice] = useState<{ text: string; keepFocus: boolean; stage: string } | null>(null);
   const noticeRef = useRef<HTMLParagraphElement>(null);
 
   // An added player's row, a cancelled claim and the dialog all disappear: keep keyboard focus somewhere.
@@ -27,9 +31,9 @@ export function usePlayerMoves(act: ReplayAct, isHubBusy: boolean): PlayerMoves 
   const run: PlayerMoves['run'] = async (key, request, done, keepFocus = false) => {
     setNotice(null);
     const result = await send(key, request);
-    if (result) setNotice({ text: done, keepFocus });
+    if (result) setNotice({ text: done, keepFocus, stage });
     return result !== undefined;
   };
 
-  return { run, isBusy, pendingKey, errorFor, noticeRef, notice: notice?.text ?? '' };
+  return { run, isBusy, pendingKey, errorFor, noticeRef, notice: notice?.stage === stage ? notice.text : '' };
 }

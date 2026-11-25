@@ -148,8 +148,9 @@ export function TradeBuilder({ game, version, roster, ir, maxPlayers, counterTo,
   const propose = async () => {
     if (!body) return;
     const { to_team: _partner, ...deal } = body;
-    const result = await actions.send(PROPOSE_KEY, () => (counterTo ? counterReplayOffer(game.id, counterTo.id, deal)
-      : proposeReplayTrade(game.id, body)));
+    const result = await actions.send(PROPOSE_KEY, () => (counterTo
+      ? counterReplayOffer(game.id, counterTo.id, { ...deal, week: game.week })
+      : proposeReplayTrade(game.id, { ...body, week: game.week })));
     if (!result) return;
     if (!result.executed) {
       setDeclined(result.verdict);

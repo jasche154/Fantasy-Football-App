@@ -123,3 +123,21 @@ def test_signals_survive_a_missing_expected_points_week(session, seeded):
     # Weeks 1-5 only: 12 actual vs (3 x 19 + 2 x 21) / 5 = 19.8 expected.
     assert buys[0].fpoe_per_game == -7.8
 
+
+def test_insight_ppg_covers_the_same_games_as_expected_ppg(session, seeded):
+    """The card's "PPG vs xPPG" and its reason's "(actual vs expected)" show one actual number: both leave out
+    a game without expected points (week 6, his best game here)."""
+    from sqlalchemy import delete, update
+
+    from database.models import PlayerExpectedPointsWeekly, PlayerStatsWeekly
+
+    session.execute(delete(PlayerExpectedPointsWeekly).where(PlayerExpectedPointsWeekly.week == 6))
+    session.execute(update(PlayerStatsWeekly).where(PlayerStatsWeekly.player_id == seeded["buy"],
+                                                    PlayerStatsWeekly.week == 6)
+                    .values(receiving_yards=PlayerStatsWeekly.receiving_yards + 60))
+    session.commit()
+    buy = next(i for i in find_insights(build_valuation(session, LeagueSettings()), "buy_low")
+               if i.player_id == seeded["buy"])
+    assert (buy.ppg, buy.expected_ppg) == (12.0, 19.8)
+    assert "(12.0 actual vs 19.8 expected)" in buy.reasons[0]
+

@@ -52,31 +52,31 @@ function Roster({ team, isStale, game, act, isBusy, openPlayer }: RosterProps) {
 
   const drop = async (playerId: number) => {
     const name = nameOf(playerId);
-    if (await send(`drop:${playerId}`, () => replayDrop(game.id, playerId)) && name) setDone({ text: `Dropped ${name}.` });
+    if (await send(`drop:${playerId}`, () => replayDrop(game.id, playerId, game.week)) && name) setDone({ text: `Dropped ${name}.` });
   };
 
   const toIr = async (playerId: number) => {
     const name = nameOf(playerId);
     const sent = await send(`ir:${playerId}`, () => (onIr
-      ? replayIrActivate(game.id, onIr.id, { swap: playerId })
-      : replayIrPlace(game.id, playerId)));
+      ? replayIrActivate(game.id, onIr.id, { swap: playerId, week: game.week })
+      : replayIrPlace(game.id, playerId, game.week)));
     if (sent && name) setDone({ text: onIr ? `Moved ${name} to IR and activated ${onIr.name}.` : `Moved ${name} to IR.` });
   };
 
   const move = (spot: LineupSpot) => {
     setDone(null);
     setMovingKey(source || !spot.row ? null : spot.key);
-    if (source && spot.key !== source.key) void send(`move:${spot.key}`, () => setReplayLineup(game.id, swappedLineup(spots, source, spot)));
+    if (source && spot.key !== source.key) void send(`move:${spot.key}`, () => setReplayLineup(game.id, swappedLineup(spots, source, spot), game.week));
   };
 
   const activate = async (player: ReplayPlayerRef) => {
     if (team.results.length >= game.settings.roster_size) return setActivating(player);
-    if (await send(`activate:${player.id}`, () => replayIrActivate(game.id, player.id))) setDone({ text: `Activated ${player.name}.` });
+    if (await send(`activate:${player.id}`, () => replayIrActivate(game.id, player.id, { week: game.week }))) setDone({ text: `Activated ${player.name}.` });
   };
 
   const activateAndDrop = async (drop: ReplayPlayerRef | null) => {
     if (!activating || !drop) return;
-    if (!await send(DIALOG_KEY, () => replayIrActivate(game.id, activating.id, { drop: drop.id }))) return;
+    if (!await send(DIALOG_KEY, () => replayIrActivate(game.id, activating.id, { drop: drop.id, week: game.week }))) return;
     // Same commit: the drawer's cleanup refocuses its opener first, then the status effect moves focus here.
     setActivating(null);
     setDone({ text: `Activated ${activating.name}, dropping ${drop.name}.` });
@@ -104,7 +104,7 @@ function Roster({ team, isStale, game, act, isBusy, openPlayer }: RosterProps) {
           <strong>{team.manual_lineup ? 'Lineup set by you' : 'Best lineup (auto)'}</strong>
           {team.manual_lineup && (
             <button type="button" className="btn btn--ghost btn--sm" disabled={isBusy || isStale}
-              onClick={() => void send('reset', () => setReplayLineup(game.id, null))}>
+              onClick={() => void send('reset', () => setReplayLineup(game.id, null, game.week))}>
               {pending === 'reset' ? 'Resetting…' : 'Reset to best lineup'}
             </button>
           )}

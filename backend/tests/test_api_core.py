@@ -93,3 +93,13 @@ def test_legacy_rushing_endpoint(client):
     assert pct["results"][0]["rush_pct_over_expected"] == 0.5     # legacy 0-1 scale
     assert client.get("/api/rankings/rushing", params={"metric": "bogus"}).status_code == 422
     assert client.get("/api/rankings/rushing", params={"limit": -1}).status_code == 422
+
+
+def test_ids_beyond_sqlite_integers_are_a_422_not_a_500(client):
+    huge = 2 ** 63
+    for url in (f"/api/players/{huge}", f"/api/players/{huge}/news", f"/api/players/{huge}/usage",
+                f"/api/rankings/weekly/{huge}/explain", f"/api/my-team/{huge}", f"/api/my-team/{huge}/waivers",
+                f"/api/compare?ids={huge},1", "/api/players/0"):
+        assert client.get(url).status_code == 422, url
+    assert client.post(f"/api/my-team/{huge}/sync").status_code == 422
+    assert client.get(f"/api/players/{huge - 1}").status_code == 404

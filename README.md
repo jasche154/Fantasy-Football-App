@@ -827,7 +827,8 @@ consensus. Offers rank by expected edge, your edge × a rough chance they accept
 
 ### Buy low / sell high
 Per player (3+ games):
-- **FPOE** = actual − expected fantasy points per game
+- **FPOE** = actual − expected fantasy points per game, both over the games that have expected points (the
+  card's "PPG vs xPPG" uses the same games, so it can differ slightly from his season PPG)
 - **TD luck** = actual TDs − expected TDs
 - **Usage trend** = expected points over the last 3 games vs the season
 - **Recent form** = last-3 PPG vs season PPG (other managers react to this)
@@ -1433,6 +1434,7 @@ League parameters accepted by every valuation endpoint: `scoring=ppr|half|std`,
 | POST | `/api/replay/games/{id}/ir/place` | Body `{"player_id": id}`; move a player tagged O, IR or PUP this week to your IR slot |
 | POST | `/api/replay/games/{id}/ir/activate` | Body `{"player_id": id, "drop": id, "swap": id}` (`drop` and `swap` optional, not both); bring him back, dropping `drop` when the roster is full or moving the injured `swap` to IR in his place |
 | POST | `/api/replay/games/{id}/advance` | Body `{"step": "wednesday", "week": 3}` runs the waivers, `"play"` plays the week (409 if `week` is not the league's current week) |
+| | | The lineup, claim, add-drop, drop, IR, propose and counter bodies take the same optional `"week"` (the page sends it): 409 when the league has moved on, so a move made on an old page never lands in the next week. Once the season is over every move is a 422 "This season is over." |
 | GET | `/api/replay/games/{id}/trades` | CPU offers waiting for you (with a preview verdict), every past offer and trade (`counter_to` marks a counter), and whether trades are open |
 | POST | `/api/replay/games/{id}/trades/evaluate` | Body `{"to_team": 3, "give": [ids], "get": [ids], "drops": [ids]}`; that CPU's verdict with reasons (nothing changes) |
 | POST | `/api/replay/games/{id}/trades/propose` | Same body; the trade is carried out when the CPU accepts; a decline may come back with the CPU's `counter` offer |

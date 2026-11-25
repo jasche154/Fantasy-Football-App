@@ -266,6 +266,8 @@ export interface ReplayClaimBody {
   drop?: number | null;
   /** Claims in FAAB leagues only (whole dollars, 0..left); never sent otherwise or on add-drop. */
   bid?: number | null;
+  /** The week the page shows: 409 when the league has moved on. */
+  week?: number;
 }
 
 // ---------------- trades ----------------
@@ -332,6 +334,8 @@ export interface ReplayTradeBody {
   get: number[];
   /** The user's own drops when the deal overfills the roster. */
   drops?: number[];
+  /** The week the page shows (propose and counter): 409 when the league has moved on. */
+  week?: number;
 }
 
 /** POST trades/offers/{id}/counter body: the user's own deal (give = what the user sends) with the CPU that made the offer. */

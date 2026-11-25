@@ -113,7 +113,8 @@ export function PlayersView({ game, version, act, isBusy, openPlayer }: ReplayVi
   const claimedIds = new Set(claims.data?.results.map((claim) => claim.add.player.id));
   // No moves while anything reloads: the roster decides whether an add needs a drop, and a button on a
   // stale table or claim list would act on rows or a claim order that no longer exist.
-  const moves = usePlayerMoves(act, isBusy || [players, claims, team].some((state) => state.status === 'loading'));
+  const moves = usePlayerMoves(act, isBusy || [players, claims, team].some((state) => state.status === 'loading'),
+    `${game.week}:${game.phase}`);
   const earlierNoDrop = claims.data?.results.filter((claim) => claim.drop === null).length ?? 0;
 
   // An add or a drop can empty the last page: step back to the new last page.
@@ -127,13 +128,13 @@ export function PlayersView({ game, version, act, isBusy, openPlayer }: ReplayVi
     const { id, name } = row.player;
     // Without a known open spot the dialog asks who to drop (and shows the roster's error when it failed to load).
     if (!team.data || team.data.results.length >= game.settings.roster_size) return setTarget({ row, kind: 'add' });
-    void moves.run(addKey(id), () => replayAddDrop(game.id, { add: id }), `Added ${name}.`);
+    void moves.run(addKey(id), () => replayAddDrop(game.id, { add: id, week: game.week }), `Added ${name}.`);
   };
 
   const confirm = async (drop: ReplayPlayerRef | null, bid?: number) => {
     if (!target) return;
     const { id, name } = target.row.player;
-    const body = drop ? { add: id, drop: drop.id } : { add: id };
+    const body = drop ? { add: id, drop: drop.id, week: game.week } : { add: id, week: game.week };
     const dropping = drop ? `, dropping ${drop.name}` : '';
     const forBid = bid === undefined ? '' : ` for $${bid}`;
     const sent = target.kind === 'claim'

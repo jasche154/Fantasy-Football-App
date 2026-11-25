@@ -11,13 +11,13 @@ import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Annotated, Literal
+from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from api.deps import Scoring
+from api.deps import DbId, Scoring
 from database.db import get_session
 from database.models import ReplayLeague
 from services import (
@@ -37,7 +37,7 @@ Limit = Query(views.DEFAULT_PAGE, ge=1, le=views.MAX_PAGE)
 Offset = Query(0, ge=0)
 Week = Query(None, ge=0, le=22)
 TeamId = Query(None, ge=1)
-GameId = Annotated[int, Path(ge=1, le=2 ** 63 - 1)]      # SQLite INTEGER range: a bigger id is a 422, not a 500
+GameId = DbId
 
 _GAME_LOCK = threading.Lock()
 
@@ -118,9 +118,11 @@ class Turn:
 @contextmanager
 def turn(session: Session, game_id: int, week: int | None = None, overall: int | None = None) -> Iterator[Turn]:
     """The game loaded under its lock. `week` is the week the caller believes it is, `overall` the draft
-    pick it believes is on the clock: 409 when either is given and wrong."""
+    pick it believes is on the clock: 409 when either is given and wrong. Nothing changes once the season is over."""
     with errors(), game_lock(game_id):
         row, settings, state = rs.load(session, game_id)
+        if state.phase == "complete":
+            raise ValueError("This season is over.")
         if week is not None and week != state.week:
             raise HTTPException(409, f"This league is in week {state.week}, not week {week}. Reload it.")
         if overall is not None and overall != len(state.picks) + 1:
@@ -342,7 +344,7 @@ def players(game_id: GameId, position: str | None = None, search: str | None = Q
 
 
 @router.get("/games/{game_id}/players/{player_id}")
-def player(game_id: GameId, player_id: int, session: Session = Depends(get_session)) -> dict:
+def player(game_id: GameId, player_id: DbId, session: Session = Depends(get_session)) -> dict:
     return show(session, game_id, lambda game: league_views.player(game, player_id))
 
 
