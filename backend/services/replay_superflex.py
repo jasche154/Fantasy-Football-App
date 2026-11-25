@@ -100,10 +100,11 @@ def one_qb(data: SeasonData) -> SeasonData:
     """The season on the league-scoring 1-QB list (see the module docstring); cached per season object."""
     if data.adp_format != TWO_QB:
         return data
-    if data.scoring_adp:
-        return _with_adp(data, {pid: data.scoring_adp.get(pid) for pid in data.players})
+    converted = _converted(data)                    # non-QBs; a QB keeps his: view() moves him
+    if data.scoring_adp:                            # a non-QB the 1-QB list lacks: his converted pick
+        return _with_adp(data, {pid: data.scoring_adp.get(pid, converted.get(pid)) for pid in data.players})
     qbs = {pid: p.adp for pid, p in data.players.items() if p.position == "QB"}
-    return _with_adp(data, {**qbs, **_converted(data)})        # QBs keep theirs: view() moves them
+    return _with_adp(data, {**qbs, **converted})
 
 
 def pick_of_slot(picks: Sequence[float], slot: float) -> float:
@@ -128,17 +129,27 @@ def view(data: SeasonData) -> SeasonData:
     return _with_adp(regular, {**{pid: p.adp for pid, p in regular.players.items()}, **moved})
 
 
-def borrowed_qb_adp(adp: float) -> float:
-    """A QB's ADP on a 1-QB (PPR) list moved to where the average 2-QB list takes the same QB (replay_data:
-    the 2-QB list borrowing a QB it leaves out). QB n goes at about pick slot + n on either list."""
-    one = [slot + n for n, slot in enumerate(fitted()["ppr"], start=1)]
-    two = [slot + n for n, slot in enumerate(fitted()[TWO_QB], start=1)]
-    if adp <= one[0]:
-        return adp * two[0] / one[0]
+def borrowed_qb_adp(adp: float, listed: str = "ppr") -> float:
+    """A QB's ADP on a 1-QB list (`listed`: ppr, half or std) moved to where the average 2-QB list takes the same
+    QB (replay_data: the 2-QB list borrowing a QB it leaves out); never before pick 1. QB n goes at about pick
+    slot + n on either list."""
+    one = [1.0, *(slot + n for n, slot in enumerate(fitted()[listed], start=1))]
+    two = [1.0, *(slot + n for n, slot in enumerate(fitted()[TWO_QB], start=1))]
     if adp >= one[-1]:
         return two[-1] + adp - one[-1]
-    k = bisect_left(one, adp)
-    return two[k - 1] + (adp - one[k - 1]) / (one[k] - one[k - 1]) * (two[k] - two[k - 1])
+    k = max(1, bisect_left(one, adp))
+    return max(1.0, two[k - 1] + (adp - one[k - 1]) / (one[k] - one[k - 1]) * (two[k] - two[k - 1]))
+
+
+def as_two_qb(listed: str, pairs: Sequence[tuple]) -> list[tuple]:
+    """A 1-QB list's (AdpEntry, player id) pairs lent to the 2-QB list: each QB at `borrowed_qb_adp`, his spread
+    moved in proportion; everyone else as is."""
+    def moved(entry):
+        if entry.position != "QB" or entry.adp <= 0:
+            return entry
+        adp = borrowed_qb_adp(entry.adp, listed)
+        return replace(entry, adp=adp, stdev=entry.stdev * adp / entry.adp if entry.stdev is not None else None)
+    return [(moved(entry), player_id) for entry, player_id in pairs]
 
 
 def clear_cache() -> None:
@@ -150,13 +161,15 @@ def clear_cache() -> None:
 
 def fit(session, seasons: Sequence[int] | None = None) -> dict:
     """The average QB slots per list over the stored seasons that have the 2-QB list and that 1-QB list
-    (every QB n that all of them list)."""
+    (every QB n that all of them list), read from FFC's own rows only: a borrowed row was placed by this fit
+    (`as_two_qb`) and MFL's tail is not on FFC's scale. ValueError when a list is stored for no season:
+    `fitted()` needs all four."""
     from sqlalchemy import select
 
     from database.models import Player, ReplayAdp
 
     rows = session.execute(select(ReplayAdp.season, ReplayAdp.format, ReplayAdp.adp, Player.position)
-                           .join(Player, Player.id == ReplayAdp.player_id))
+                           .join(Player, Player.id == ReplayAdp.player_id).where(ReplayAdp.source == "ffc"))
     boards: dict[tuple[int, str], list[tuple[str, float]]] = {}
     for season, fmt, adp, position in rows:
         if seasons is None or season in seasons:
@@ -165,9 +178,10 @@ def fit(session, seasons: Sequence[int] | None = None) -> dict:
     out: dict = {"seasons": both}
     for fmt in (TWO_QB, *PRESETS):
         curves = [qb_slots(boards[(s, fmt)]) for s in both if (s, fmt) in boards]
-        if curves:                                      # a list no season stores is left out
-            length = min(len(c) for c in curves)
-            out[fmt] = [round(sum(c[n] for c in curves) / len(curves), 2) for n in range(length)]
+        if not curves:
+            raise ValueError(f"No season stores both the 2-QB list and the {fmt} list: nothing written.")
+        length = min(len(c) for c in curves)
+        out[fmt] = [round(sum(c[n] for c in curves) / len(curves), 2) for n in range(length)]
     return out
 
 
@@ -181,7 +195,11 @@ def main(argv: list[str] | None = None) -> None:
         return
     from database.db import SessionLocal
     with SessionLocal() as session:
-        found = fit(session)
+        try:
+            found = fit(session)
+        except ValueError as exc:
+            log.error("%s", exc)
+            raise SystemExit(1) from exc
     FIT_PATH.write_text(json.dumps(found, indent=1) + "\n", encoding="utf-8")
     fitted.cache_clear()
     log.info("Wrote %s from seasons %s", FIT_PATH.name, found["seasons"])

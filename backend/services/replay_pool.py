@@ -34,6 +34,7 @@ from services.kdst_rankings import DST_PREFIX
 from services.projections import load_game_lines
 from services.replay_box import BoxLine
 from services.replay_live import SUPPORTED_SEASONS  # noqa: F401 (re-exported; replay_live.replay_seasons grows it)
+from services.replay_returns import hard_tag_returns  # noqa: F401 (re-exported)
 from services.replay_readiness import (  # noqa: F401 (re-exported)
     MIN_ADP_PLAYERS, MIN_DEFENSES, MIN_KICKERS, data_version, readiness, ready_last_weeks, ready_seasons,
 )
@@ -110,8 +111,7 @@ class SeasonData:
     defense_prior: Mapping[tuple[str, str], float] = field(default_factory=lambda: MappingProxyType({}))  # last season
     rules: ScoringRules | None = None                         # custom key settings on `scoring` (replay_scoring)
     adp_format: str = "ppr"                                   # the replay_adp list `players` carry (replay_adp_format)
-    # with adp_format "2qb": {player: ADP on the league-scoring 1-QB list} (replay_superflex); preseason data
-    scoring_adp: Mapping[int, float] = field(default_factory=lambda: MappingProxyType({}))
+    scoring_adp: Mapping[int, float] = field(default_factory=lambda: MappingProxyType({}))  # "2qb": the 1-QB list's
     notes: Mapping[PlayerWeek, str] = field(default_factory=lambda: MappingProxyType({}))  # news before the week
     # (team, week) -> points the team scored in that week's game: a result, like `actual` (as_of keeps played weeks)
     scores: Mapping[tuple[str, int], int] = field(default_factory=lambda: MappingProxyType({}))
@@ -347,25 +347,6 @@ def _pool(session: Session, season: int, ids: set[int], two_way: Mapping[int, tu
             for pid, name, position in people if pid in ids or pid in adp}
 
 
-def _scoring_adp(session: Session, season: int, scoring: str, rules: ScoringRules | None,
-                 players: Mapping[int, PoolPlayer]) -> dict[int, float]:
-    """{player: ADP} on the stored 1-QB list nearest the league's scoring, for the pool's players."""
-    listed = replay_adp_format.stored(session, season, scoring, rules)
-    if listed == replay_adp_format.TWO_QB:
-        return {}
-    return {pid: adp for pid, adp in session.execute(select(ReplayAdp.player_id, ReplayAdp.adp).where(
-        ReplayAdp.season == season, ReplayAdp.format == listed)) if pid in players}
-
-
-def with_scoring_adp(session: Session, data: SeasonData) -> SeasonData:
-    """A real season on the 2-QB list saved before `scoring_adp` existed, with its scoring's stored 1-QB list
-    (an old live league drafted on the real August lists; replay_routes); anything else as is."""
-    if data.adp_format != replay_adp_format.TWO_QB or data.scoring_adp:
-        return data
-    found = _scoring_adp(session, data.season, data.scoring, data.rules, data.players)
-    return replace(data, scoring_adp=MappingProxyType(found)) if found else data
-
-
 def _defense_ids(session: Session) -> dict[str, int]:
     rows = session.execute(select(Player.gsis_id, Player.id).where(Player.position == "DST"))
     return {gsis.removeprefix(DST_PREFIX): pid for gsis, pid in rows if gsis and gsis.startswith(DST_PREFIX)}
@@ -376,25 +357,6 @@ def _by_player(teams: Mapping[PlayerWeek, str]) -> dict[int, tuple[tuple[int, st
     for (player_id, week), team in teams.items():
         grouped[player_id].append((week, team))
     return {player_id: tuple(sorted(games)) for player_id, games in grouped.items()}
-
-
-def hard_tag_returns(injuries: Mapping[PlayerWeek, Injury], actual: Mapping[PlayerWeek, float],
-                     last_week: int) -> dict[PlayerWeek, int]:
-    """{(player, first week of a hard-tag streak): first later week he really played, 0 = never}. A streak
-    runs from a hard tag until his next game (byes and untagged weeks in between stay in it). Only the tag
-    starts one: whether he played that week anyway is not known before it is played."""
-    tagged: dict[int, list[int]] = defaultdict(list)
-    for (player_id, week), injury in injuries.items():
-        if injury.hard:
-            tagged[player_id].append(week)
-    out: dict[PlayerWeek, int] = {}
-    for player_id, weeks in tagged.items():
-        back = None                                     # the week the open streak ends; 0 = it never does
-        for week in sorted(weeks):
-            if back is None or 0 < back <= week:
-                back = next((w for w in range(week + 1, last_week + 1) if (player_id, w) in actual), 0)
-                out[(player_id, week)] = back
-    return out
 
 
 def _expert_ranks(session: Session, season: int, schedule: Schedule, players: Mapping[int, PoolPlayer],
@@ -437,7 +399,6 @@ def _build(session: Session, season: int, scoring: str, rules: ScoringRules | No
     adp_format = replay_adp_format.stored(session, season, scoring, rules, want)
     players = _pool(session, season, {pid for pid, _ in (*actual, *projected)}, two_way,
                     {team for team, _ in schedule.opponents}, adp_format)
-    scoring_adp = _scoring_adp(session, season, scoring, rules, players) if adp_format == replay_adp_format.TWO_QB else {}
     if rules is not None:
         projected = replay_scoring.convert(projected, {pid: p.position for pid, p in players.items()}, box, rules)
     actual, projected, teams, usage, box = ({key: value for key, value in table.items() if key[0] in players}
@@ -458,7 +419,8 @@ def _build(session: Session, season: int, scoring: str, rules: ScoringRules | No
                       expert_ranks=MappingProxyType(expert_ranks), expert_age=MappingProxyType(expert_age),
                       returns=MappingProxyType(hard_tag_returns(injuries, actual, weeks)),
                       box=MappingProxyType(box), rules=rules, adp_format=adp_format, scores=MappingProxyType(scores),
-                      scoring_adp=MappingProxyType(scoring_adp),
+                      scoring_adp=MappingProxyType(replay_adp_format.scoring_list(
+                          session, season, scoring, rules, players, adp_format)),
                       defense_prior=MappingProxyType(replay_defense.load_prior(session, season, rescored))))
 
 

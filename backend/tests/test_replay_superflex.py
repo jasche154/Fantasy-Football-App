@@ -132,3 +132,12 @@ def test_replacement_and_values_over_it_read_the_league_scoring_priors():
 
     assert know.by_id[back].ros_ppg == regular.by_id[back].ros_ppg          # priors from the league's list
     assert know.replacement["QB"] < regular.replacement["QB"] and rv.league_settings(SUPERFLEX).superflex
+
+
+def test_a_non_qb_the_scoring_list_lacks_takes_his_converted_pick():
+    missing = fakes.player_id("WR", 3)
+    partial = replace(TWO_QB, scoring_adp=MappingProxyType(
+        {pid: adp for pid, adp in TWO_QB.scoring_adp.items() if pid != missing}))
+
+    assert sf.one_qb(partial).players[missing].adp == sf._converted(partial)[missing]
+    assert sf.one_qb(TWO_QB).players[missing].adp == TWO_QB.scoring_adp[missing]

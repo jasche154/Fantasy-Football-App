@@ -2,7 +2,6 @@
 league reads (no network)."""
 import json
 from dataclasses import replace
-from types import MappingProxyType
 
 import pytest
 from sqlalchemy import create_engine, insert, select
@@ -171,13 +170,24 @@ def test_the_2qb_list_borrows_a_qb_from_a_1qb_list_at_superflex_prices():
     two_qb = [(adp_history.AdpEntry("ffc", "A", "QB", 1.5, 0.5), 1)]
     ppr = [(adp_history.AdpEntry("ffc", "Q", "QB", 60.0, 5.0), 2), (adp_history.AdpEntry("ffc", "W", "WR", 30.0, 2.0), 3)]
 
-    rows = replay_data.adp_rows(SEASON, two_qb, [], [ppr], replay_superflex.borrowed_qb_adp)
-    moved = replay_superflex.borrowed_qb_adp(60.0)
+    rows = replay_data.adp_rows(SEASON, two_qb, [], [replay_superflex.as_two_qb("ppr", ppr)])
+    moved = replay_superflex.borrowed_qb_adp(60.0, "ppr")
 
     assert [(r["player_id"], r["adp"], r["stdev"], r["source"]) for r in rows] == [
         (1, 1.5, 0.5, "ffc"), (2, pytest.approx(moved), pytest.approx(5.0 * moved / 60.0), "ffc_borrowed"),
         (3, 30.0, 2.0, "ffc_borrowed")]
     assert 10 < moved < 30                     # QB5 or so of a 1-QB list goes in the 2-QB list's second round
+
+
+def test_a_borrowed_qb_never_goes_before_pick_one_and_reads_the_list_he_came_from():
+    for listed in ("ppr", "half", "std"):
+        moved = [replay_superflex.borrowed_qb_adp(adp, listed) for adp in (0.5, 1.0, 5.0, 25.0, 60.0, 120.0, 300.0)]
+        assert moved[0] == moved[1] == 1.0 and moved == sorted(moved)
+        assert all(m < adp for m, adp in zip(moved[2:], (5.0, 25.0, 60.0, 120.0, 300.0)))
+    curves = replay_superflex.fitted()
+    one = {listed: curves[listed][4] + 5 for listed in ("ppr", "std")}           # where each list takes QB5
+    assert replay_superflex.borrowed_qb_adp(one["std"], "std") == pytest.approx(curves["2qb"][4] + 5)
+    assert replay_superflex.borrowed_qb_adp(one["ppr"], "ppr") == pytest.approx(curves["2qb"][4] + 5)
 
 
 def test_a_list_missing_a_player_borrows_the_ppr_lists_adp_first(db):
@@ -368,20 +378,33 @@ def test_stored_donor_lists_carry_the_players_position(db):
     assert positions and "" not in positions and "RB" in positions
 
 
-def test_an_old_live_save_on_the_2qb_list_gets_its_scoring_list_and_the_fit_reads_both_lists(seeded):
+def test_a_superflex_league_reads_its_scoring_list_beside_the_2qb_list(seeded):
     session, data = seeded
     add_format(session, data, "2qb", {"QB": 0.3})
-    loaded = replay_pool.load_season_data(session, data.season, "ppr", None, af.wanted("ppr", None, SUPERFLEX))
-    old = replace(loaded, scoring_adp=MappingProxyType({}))          # saved before scoring_adp existed
 
-    assert replay_pool.with_scoring_adp(session, old).scoring_adp == loaded.scoring_adp == adps(data)
-    assert replay_pool.with_scoring_adp(session, loaded) is loaded
+    superflex = replay_pool.load_season_data(session, data.season, "ppr", None, af.wanted("ppr", None, SUPERFLEX))
     regular = replay_pool.load_season_data(session, data.season, "ppr")
-    assert replay_pool.with_scoring_adp(session, regular) is regular                # a 1-QB list: as is
 
+    assert superflex.scoring_adp == adps(data) and regular.scoring_adp == {}
+
+
+def test_the_fit_reads_ffcs_own_rows_and_refuses_a_missing_list(seeded):
+    session, data = seeded
+    add_format(session, data, "2qb", {"QB": 0.3})
+    with pytest.raises(ValueError, match="half"):                           # no half or std list stored
+        replay_superflex.fit(session)
+
+    add_format(session, data, "half", {})
+    add_format(session, data, "std", {})
+    top = min((p.adp, pid) for pid, p in data.players.items() if p.position == "QB" and p.adp is not None)[1]
+    session.execute(ReplayAdp.__table__.update().where(ReplayAdp.player_id == top, ReplayAdp.format == "2qb")
+                    .values(source="ffc_borrowed", adp=0.5))            # a borrowed row: never read back
+    session.commit()
     fit = replay_superflex.fit(session)
+
     board = [(p.position, p.adp) for p in data.players.values() if p.adp is not None]
+    two_qb = [(p.position, p.adp * (0.3 if p.position == "QB" else 1.0)) for pid, p in data.players.items()
+              if p.adp is not None and pid != top]
     assert fit["seasons"] == [data.season]
-    assert fit["ppr"] == [round(s, 2) for s in replay_superflex.qb_slots(board)]
-    assert fit["2qb"] == [round(s, 2) for s in replay_superflex.qb_slots(
-        (position, adp * 0.3 if position == "QB" else adp) for position, adp in board)]
+    assert fit["ppr"] == fit["half"] == fit["std"] == [round(s, 2) for s in replay_superflex.qb_slots(board)]
+    assert fit["2qb"] == [round(s, 2) for s in replay_superflex.qb_slots(two_qb)]

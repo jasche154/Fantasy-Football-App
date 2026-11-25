@@ -188,20 +188,6 @@ def test_a_new_league_on_a_reused_id_never_sees_the_old_leagues_season(db):
     assert new == old and replay_blob.load(db, new).season == DATA.season + 1
 
 
-def test_an_old_save_is_upgraded_once_when_it_is_decoded(db):
-    league = _league(db, DATA)
-    replay_pool.clear_cache()                                      # as after a restart: decoded from the store
-    calls: list[SeasonData] = []
-
-    def fill(data: SeasonData) -> SeasonData:
-        calls.append(data)
-        return replace(data, scoring_adp=MappingProxyType({1: 2.0}))
-
-    first, again = replay_blob.load(db, league, fill), replay_blob.load(db, league, fill)
-
-    assert len(calls) == 1 and first is again and first.scoring_adp == {1: 2.0}
-
-
 def test_a_league_gets_one_season_object_until_the_cache_is_cleared(db):
     league = _league(db, DATA)
 

@@ -46,6 +46,17 @@ def choose(want: str, scoring: str, available: Collection[str]) -> str | None:
     return next((f for f in order if f in available), None)
 
 
+def scoring_list(session: Session, season: int, scoring: str, rules: ScoringRules | None, players: Collection[int],
+                 listed: str) -> dict[int, float]:
+    """{player: ADP} on the stored 1-QB list nearest the league's scoring, for `players`, when the season is read
+    from the 2-QB list (`listed`); else empty (SeasonData.scoring_adp, replay_superflex)."""
+    found = stored(session, season, scoring, rules) if listed == TWO_QB else TWO_QB
+    if found == TWO_QB:
+        return {}
+    return {pid: adp for pid, adp in session.execute(select(ReplayAdp.player_id, ReplayAdp.adp).where(
+        ReplayAdp.season == season, ReplayAdp.format == found)) if pid in players}
+
+
 def stored(session: Session, season: int, scoring: str, rules: ScoringRules | None = None,
            want: str | None = None) -> str:
     """The stored list `choose` picks for this league (`want` defaults to the scoring's); "ppr" when none is."""

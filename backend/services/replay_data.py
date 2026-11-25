@@ -208,26 +208,20 @@ def adp_player(matcher: SeasonMatcher, entry: AdpEntry, crosswalk: dict[str, str
 
 
 def adp_rows(season: int, ffc: Sequence[tuple[AdpEntry, int | None]], mfl: Sequence[tuple[AdpEntry, int | None]],
-             others: Sequence[Sequence[tuple[AdpEntry, int | None]]] = (),
-             borrowed_qb: Callable[[float], float] | None = None) -> list[dict]:
+             others: Sequence[Sequence[tuple[AdpEntry, int | None]]] = ()) -> list[dict]:
     """FFC's ADP as published; a player it leaves out but another FFC list of the season has (`others`, the one to
     trust most first) at his ADP and spread there, the same site's 12-team scale (a thin list, like 2026's half-PPR,
     drops top players); then the players in no FFC list, one pick apart after the last pick, in MFL's order (MFL's
     picks are not on FFC's scale: its real drafts include dynasty and keeper leagues).
-    Borrowed rows are stored as FFC_BORROWED (never read back as a donor); a borrowed QB's ADP becomes
-    `borrowed_qb(adp)` and his spread moves in proportion (the 2-QB list borrowing from 1-QB lists:
-    replay_superflex.borrowed_qb_adp, where the average 2-QB list takes a QB the 1-QB lists take there)."""
+    Borrowed rows are stored as FFC_BORROWED (never read back as a donor); the 2-QB list's donors come with
+    their QBs moved to 2-QB prices (replay_superflex.as_two_qb)."""
     rows: list[dict] = []
     seen: set[int] = set()
-    own = [(pair, adp_history.FFC, 1.0) for pair in ffc]
-    lent = [(pair, FFC_BORROWED, borrowed_qb(pair[0].adp) / pair[0].adp
-             if borrowed_qb is not None and pair[0].position == "QB" and pair[0].adp > 0 else 1.0)
-            for other in others for pair in other]
-    for (entry, player_id), source, scale in (*own, *lent):
+    lent = [(pair, FFC_BORROWED) for other in others for pair in other]
+    for (entry, player_id), source in (*[(pair, adp_history.FFC) for pair in ffc], *lent):
         if player_id is not None and player_id not in seen:
             seen.add(player_id)
-            stdev = entry.stdev * scale if entry.stdev is not None else None
-            rows.append({"season": season, "player_id": player_id, "adp": entry.adp * scale, "stdev": stdev,
+            rows.append({"season": season, "player_id": player_id, "adp": entry.adp, "stdev": entry.stdev,
                          "source": source, "team": entry.team})
     pick = max((row["adp"] for row in rows), default=0.0)
     for entry, player_id in sorted(mfl, key=lambda pair: pair[0].adp):
@@ -331,9 +325,9 @@ def load_adp(session: Session, season: int, client: HistoryClient, force: bool =
     via_mfl = {(name_key(e.name), e.position): pid for e, pid in mfl_pairs if pid is not None}
     pairs = {fmt: [(e, adp_player(matcher, e, crosswalk, via_mfl)) for e in entries] for fmt, entries in lists.items()}
     donors = {**_stored_ffc(session, season, set(pairs)), **pairs}
-    by_format = {fmt: adp_rows(season, fmt_pairs, mfl_pairs, [donors[d] for d in _donor_formats(fmt) if d in donors],
-                               replay_superflex.borrowed_qb_adp if fmt == replay_adp_format.TWO_QB else None)
-                 for fmt, fmt_pairs in pairs.items()}
+    lent = {fmt: [replay_superflex.as_two_qb(d, donors[d]) if fmt == replay_adp_format.TWO_QB else donors[d]
+                  for d in _donor_formats(fmt) if d in donors] for fmt in pairs}
+    by_format = {fmt: adp_rows(season, fmt_pairs, mfl_pairs, lent[fmt]) for fmt, fmt_pairs in pairs.items()}
     session.execute(delete(ReplayAdp).where(ReplayAdp.season == season, ReplayAdp.format.in_(list(by_format))))
     rows = [{**row, "format": fmt} for fmt, fmt_rows in by_format.items() for row in fmt_rows]
     if rows:

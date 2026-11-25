@@ -17,7 +17,7 @@ import types
 import typing
 import zlib
 from collections import OrderedDict
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import fields, is_dataclass
 from threading import Lock
 from types import MappingProxyType
@@ -208,10 +208,8 @@ def remember(session: Session, league_id: int, data: SeasonData) -> None:
     _keep(_key(session, league_id), data, replace=True)
 
 
-def load(session: Session, league_id: int,
-         fill: Callable[[SeasonData], SeasonData] | None = None) -> SeasonData:
-    """A league's frozen season, the same object on every call. NoDataError when it has none. `fill` upgrades a
-    save made before a field existed, once, when it is decoded (never stored back)."""
+def load(session: Session, league_id: int) -> SeasonData:
+    """A league's frozen season, the same object on every call. NoDataError when it has none."""
     key = _key(session, league_id)
     with _cache_lock:
         found = _cache.get(key)
@@ -221,8 +219,7 @@ def load(session: Session, league_id: int,
     row = session.get(ReplaySeasonData, league_id)
     if row is None:
         raise NoDataError(f"Replay league {league_id} has no stored season.")
-    data = loads(row.blob)
-    return _keep(key, fill(data) if fill is not None else data)
+    return _keep(key, loads(row.blob))
 
 
 def forget(session: Session, league_id: int) -> None:
