@@ -33,7 +33,9 @@ from dataclasses import dataclass
 from functools import lru_cache
 from types import MappingProxyType, SimpleNamespace
 
-from services import lineup_gain, my_team as mt, replay_chart, replay_slots, replay_state, replay_superflex
+from services import (
+    lineup_gain, my_team as mt, replay_chart, replay_chart_injury, replay_slots, replay_state, replay_superflex,
+)
 from services.league import LeagueSettings, replacement_levels
 from services.replay_news import Report
 from services.replay_pool import PRESEASON_TAGS, SKILL, Injury, PoolPlayer, SeasonData
@@ -42,7 +44,7 @@ from services.schedule_strength import NEUTRAL, DefenseStrength, Schedule
 RECENCY_WEIGHTS = (4, 3, 2, 1)                        # newest first: the projections (or priors) behind ros_ppg
 OUT_SHARE = {1: 0.45, 2: 0.55, 3: 0.60, 4: 0.65, 5: 0.75}    # share of remaining games missed, by weeks out so far
 OUT_SHARE_LONG = 0.90                                 # six or more weeks out (measured, RB/WR/TE 2021-25)
-IR_OUT_SHARE = 0.80                                   # least share missed when tagged IR or PUP (measured 2018-25)
+IR_OUT_SHARE = replay_chart_injury.IR_OUT_SHARE      # least share missed when tagged IR or PUP (measured 2018-25)
 FLEX_POSITIONS = replay_slots.FLEX_POSITIONS
 eligible = replay_slots.eligible                      # slot -> the positions that can play there
 BACKUPS = {"QB": 1, "RB": 3, "WR": 4, "TE": 1}        # most a CPU carries behind its starters (no spare K or DST)

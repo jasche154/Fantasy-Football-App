@@ -54,7 +54,8 @@ def test_knowledge_covers_the_pool_known_that_week_ranked_best_first():
 
 def test_trade_value_is_points_over_replacement_for_the_games_left():
     data, know = fakes.fake_season(), know_at(5)
-    back = roster_of(know, "RB8")[0]
+    # a healthy back around RB8 (an out back now keeps more of his chart, so RB8 itself may be the injured one)
+    back = next(v for v in know.values if v.position == "RB" and not v.out and int(v.pos_rank[2:]) >= 8)
 
     games_left = len(data.schedule.remaining_opponents(back.team, 4, END))
     over = back.ros_ppg - know.replacement["RB"]
@@ -506,7 +507,8 @@ def test_a_trade_package_counts_the_chart_value():
 
     assert star.chart > 700 and scrub.trade_value == 0.0 and 0 < scrub.chart < 30
     assert 0 < out.chart < out.healthy_chart                                         # discounted, not zero
-    discount = out.availability * rv.replay_chart.AVAILABILITY_SHARE                # his first week out
+    missed = out.games_left * (1 - out.availability)                                # his first week out
+    discount = 1 - rv.replay_chart_injury.discount(missed, out.games_left)
     assert out.chart == pytest.approx(out.healthy_chart * discount, abs=0.2) and out.chart > 0
     assert all(0 <= v.chart <= rv.replay_chart.CHART_MAX * rv.replay_chart.BYE_BUMP for v in know.values)
 

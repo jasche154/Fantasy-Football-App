@@ -26,9 +26,11 @@ bye is behind him.
   stand in (ageing a week per week played). A season with no expert ranks at all (2018-19) has the ranks of
   ros_ppg (the sites' slow consensus) stand in at EXPERT_WEIGHT from week 1 (STAND_IN_EXPERTS): the model
   alone swung QBs 124 -> 495 -> 633 in three weeks; this halves the weekly moves and ranks no worse.
-- chart: with a news report (replay_news), healthy_chart x share of games he plays x AVAILABILITY_SHARE (0 if
-  out for the season; from his second week out only the model half is discounted, the experts already price
-  it). Out without a report: healthy_chart x the OUT_SHARE availability replay_values gives him.
+- chart: healthy_chart x (1 - replay_chart_injury.discount(games he misses, games left)): with a news report
+  (replay_news) the games before the reported return (0 if out for the season; from his second week out only
+  the model half is discounted, the experts already price it); out without one, unreported_missed. The
+  discount follows the user's targets (out 1-4 weeks 5-12% off, 6+ weeks 35-45%), not the share of games
+  missed: availability and expected_missed (lineups, waivers) stay the real expected games.
 
 Pure: no database, no Knowledge.
 """
@@ -39,7 +41,7 @@ from collections.abc import Mapping, Sequence
 from functools import lru_cache
 from types import MappingProxyType
 
-from services import replay_news, replay_pool, replay_role, replay_shocks, replay_superflex
+from services import replay_chart_injury, replay_news, replay_pool, replay_role, replay_shocks, replay_superflex
 from services.replay_pool import SeasonData
 
 TAU = 40.0                     # pick_value decay: 1 -> 1000, 12 -> 760, 24 -> 563, 50 -> 294, 100 -> 84
@@ -57,7 +59,6 @@ EXPERT_WEIGHT = 0.65           # blend weight on the expert rank for a snapshot 
 EXPERT_FRESH_DAYS = 10
 UNLISTED_GAP = 10              # missing from an existing snapshot: last listed + this
 BYE_BUMP = 1.03                # once his bye is behind him
-AVAILABILITY_SHARE = 0.9       # chart x share_played x this, when a news report exists
 DAYS_PER_WEEK = 7
 STAND_IN_EXPERTS = True        # a season with no expert ranks at all: ros_ppg ranks stand in at EXPERT_WEIGHT
 
@@ -209,15 +210,20 @@ def _injured(data: SeasonData, row: dict, news: "replay_news.Report | None", wee
              expert: float, model: float) -> tuple[float, dict]:
     """(chart, availability fields from the news) from his weighted expert and model parts."""
     if news is None:
-        return (expert + model) * row["availability"], {}
-    share = replay_news.share_played(news, _game_weeks(data, row["team"], week, end_week))
+        if not row["out"]:
+            return expert + model, {}
+        injury = row["injury"]
+        missed = replay_chart_injury.unreported_missed(row["games_left"], injury is not None and injury.tag in ("IR", "PUP"))
+        return (expert + model) * (1 - replay_chart_injury.discount(missed, row["games_left"])), {}
+    games = _game_weeks(data, row["team"], week, end_week)
+    share = replay_news.share_played(news, games)
     extra = {"availability": round(share, 3), "expected_missed": round(row["games_left"] * (1 - share), 2)}
-    discount = share * AVAILABILITY_SHARE
     if news.back is None:
         return 0.0, extra
+    keep = 1 - replay_chart_injury.discount(len(games) * (1 - share), len(games))
     if week > news.since:                               # second week out on: the experts already price it
-        return expert + model * discount, extra
-    return (expert + model) * discount, extra
+        return expert + model * keep, extra
+    return (expert + model) * keep, extra
 
 
 Parts = Mapping[int, tuple[float, float, tuple[int, int, str]]]    # {id: (expert part, model part, open streak)}
