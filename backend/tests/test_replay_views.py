@@ -353,7 +353,7 @@ def test_out_and_bye_players_are_flagged_with_no_projection():
     assert (healthy["out"], healthy["bye"]) == (False, False) and healthy["projection"] > 10
     assert (out["out"], out["bye"], out["projection"]) == (True, False, 0.0) and out["opponent"] != "BYE"
     now = game(at(7)).know.by_id[fakes.INJURED_STAR_ID]                 # his value is discounted while out
-    assert out["ros_ppg"] > 10 and 0 < out["value"] == round(now.chart) and now.chart < now.healthy_chart
+    assert out["ros_ppg"] > 10 and 0 < out["value"] == views.whole(now.chart) and now.chart < now.healthy_chart
     assert len(resting) > 20 and all(row["opponent"] == "BYE" and row["projection"] == 0 for row in resting)
     assert sum(row["out"] for row in resting) < 5                # out before the bye: both flags
 

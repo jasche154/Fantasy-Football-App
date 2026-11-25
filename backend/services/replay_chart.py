@@ -218,12 +218,9 @@ def _injured(data: SeasonData, row: dict, news: "replay_news.Report | None", wee
     games = _game_weeks(data, row["team"], week, end_week)
     share = replay_news.share_played(news, games)
     extra = {"availability": round(share, 3), "expected_missed": round(row["games_left"] * (1 - share), 2)}
-    if news.back is None:
-        return 0.0, extra
-    keep = 1 - replay_chart_injury.discount(len(games) * (1 - share), len(games))
-    if week > news.since:                               # second week out on: the experts already price it
-        return expert + model * keep, extra
-    return (expert + model) * keep, extra
+    if news.back is None:                               # may be wrong: replay_chart_injury.SEASON_REPORT_KEEP
+        return (expert + model) * (1 - replay_chart_injury.season_report_discount(len(games))), extra
+    return (expert + model) * (1 - replay_chart_injury.discount(len(games) * (1 - share), len(games))), extra
 
 
 Parts = Mapping[int, tuple[float, float, tuple[int, int, str]]]    # {id: (expert part, model part, open streak)}
@@ -241,11 +238,14 @@ def charts(data: SeasonData, rows: Sequence[dict], priors: Mapping[int, float], 
 
 
 def base_charts(data: SeasonData, rows: Sequence[dict], priors: Mapping[int, float], week: int,
-                end_week: int, drafted: int = 0, regular: SeasonData | None = None) -> tuple[dict[int, dict], Parts, str]:
+                end_week: int, drafted: int = 0, regular: SeasonData | None = None,
+                frozen: Mapping[int, float] | None = None) -> tuple[dict[int, dict], Parts, str]:
     """`charts` without the seeded news: (fields with news None, the parts `with_news` needs for players
     with an open hard-tag streak, rank_source). `drafted`: the league's draft week (see `pre_picks`).
     `regular`: a superflex league's season on the 1-QB list (replay_superflex.one_qb), whose overall ranks
-    set a non-QB's `star`, so the SUPERFLEX slot changes only the QBs."""
+    set a non-QB's `star`, so the SUPERFLEX slot changes only the QBs. `frozen`: {id: healthy chart} for the
+    players in an injury absence (replay_values), standing in for the expert and model parts."""
+    frozen = frozen or {}
     curve, picks = slot_curve(data), pre_picks(data, drafted)
     overall = pre_ranks(picks)
     star_ranks = overall if regular is None else {
@@ -280,6 +280,8 @@ def base_charts(data: SeasonData, rows: Sequence[dict], priors: Mapping[int, flo
             model_part = (1 - w) * model_value * bump
             if expert + model_part > CHART_MAX:         # the bye bump never lifts anyone past the top of the scale
                 expert, model_part = (part * CHART_MAX / (expert + model_part) for part in (expert, model_part))
+            if pid in frozen:                           # out: his value before the absence (replay_values._frozen)
+                expert, model_part = frozen[pid], 0.0
             streak = replay_news.open_streak(data, pid, week)
             if streak is not None:
                 parts[pid] = (expert, model_part, streak)

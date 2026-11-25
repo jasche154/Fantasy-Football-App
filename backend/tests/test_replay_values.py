@@ -679,9 +679,10 @@ def test_the_ir_kicker_who_never_returns_is_reported_out_for_the_season():
     for week in range(fakes.IR_KICKER_WEEK, data.last_week + 1):
         tagged, plain = know_at(week).by_id[kicker], know_at(week, untagged).by_id[kicker]
         assert tagged.news.since == fakes.IR_KICKER_WEEK and plain.news is None
-        assert tagged.availability == 0.0 and tagged.healthy_chart == plain.healthy_chart   # no game left for him
+        frozen = know_at(fakes.IR_KICKER_WEEK - 1, untagged).by_id[kicker].healthy_chart
+        assert tagged.availability == 0.0 and tagged.healthy_chart == frozen   # his value before the absence
         ignored = {"availability": 0, "expected_missed": 0, "chart": 0, "rank": 0, "pos_rank": "",
-                   "news": None, "trade_value": 0}
+                   "news": None, "trade_value": 0, "healthy_chart": 0}
         assert replace(tagged, injury=None, **ignored) == replace(plain, **ignored)
     assert know_at(fakes.IR_KICKER_WEEK + 3).by_id[kicker].news.back is None
 
@@ -747,9 +748,11 @@ def test_changing_returns_moves_only_players_hard_tagged_now(week):
 def test_the_seed_moves_only_the_news():
     data, league = fakes.fake_season(), rv.league_settings(fakes.fake_settings())
     rv.clear_cache()
-    reports = {seed: rv.knowledge(data, league, 7, END, seed) for seed in range(6)}
+    reports = {0: rv.knowledge(data, league, 7, END, 0)}
+    built = rv._base.cache_info().misses                              # week 7, and the frozen weeks before absences
+    reports.update({seed: rv.knowledge(data, league, 7, END, seed) for seed in range(1, 6)})
 
-    assert rv._base.cache_info().misses == 1                          # one chart pass serves every game's seed
+    assert rv._base.cache_info().misses == built                      # one chart pass serves every game's seed
     assert len({know.by_id[fakes.INJURED_STAR_ID].news for know in reports.values()}) > 1
     for know in reports.values():
         for v in know.values:

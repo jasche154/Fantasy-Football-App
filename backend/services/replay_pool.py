@@ -22,6 +22,7 @@ from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from threading import Lock
 from types import MappingProxyType
+from weakref import WeakKeyDictionary
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
@@ -131,7 +132,7 @@ class SeasonData:
             raise ValueError(f"Week {week} is not a valid week.")
         if self.known_before is not None and self.known_before <= week:
             return self                                       # already holds no more than that
-        return _as_of(self, week)
+        return _as_of(_SOURCE.get(self, self), week)          # a copy's copy is the season's own copy
 
     def team_at(self, player_id: int, week: int) -> str | None:
         """His team as known before `week`: the team of his last game before it, else of his first game of
@@ -167,6 +168,9 @@ def _preseason(key: PlayerWeek, tag: Injury, week: int) -> bool:
     return week == 0 and key[1] == 1 and tag.tag in PRESEASON_TAGS
 
 
+_SOURCE: WeakKeyDictionary = WeakKeyDictionary()       # as_of copy -> the season it was cut from
+
+
 @lru_cache(maxsize=256)
 def _as_of(data: SeasonData, week: int) -> SeasonData:
     actual = {key: points for key, points in data.actual.items() if key[1] < week}
@@ -175,7 +179,7 @@ def _as_of(data: SeasonData, week: int) -> SeasonData:
     players = {pid: p for pid, p in data.players.items() if p.adp is not None or pid in seen}
     games = {pid: tuple(g for g in played if g[0] < week) or played[:1]
              for pid, played in data.team_by_week.items() if pid in players}
-    return replace(
+    copy = replace(
         data, known_before=week, players=MappingProxyType(players), team_by_week=MappingProxyType(games),
         actual=MappingProxyType({key: v for key, v in actual.items() if key[0] in players}),
         projected=MappingProxyType({key: v for key, v in projected.items() if key[0] in players}),
@@ -188,6 +192,8 @@ def _as_of(data: SeasonData, week: int) -> SeasonData:
         expert_ranks=MappingProxyType({key: v for key, v in data.expert_ranks.items() if key[1] <= week}),
         expert_age=MappingProxyType({w: v for w, v in data.expert_age.items() if w <= week}),
         returns=MappingProxyType({key: v for key, v in data.returns.items() if key[1] <= week}))
+    _SOURCE[copy] = data
+    return copy
 
 
 # ---------------- loading ----------------
