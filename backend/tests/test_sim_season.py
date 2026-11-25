@@ -201,9 +201,10 @@ def test_a_backup_seen_only_in_the_snapshot_stays_in_view_mid_season(data):
         assert set(backups) <= set(season.as_of(week).players), week
 
 
-def _out_since(data, from_week: int, on_bye: bool, extra_game: bool = False):
-    """(base, player): a WR hard-tagged O since from_week - 2 with no game since (his team on bye at from_week or
-    not), the snapshot taken before from_week; `extra_game`: base (wrongly) holds his from_week game too."""
+def _out_since(data, from_week: int, on_bye: bool, extra_game: bool = False, tag: str = "O", through: int = 0):
+    """(base, player): a WR hard-tagged `tag` since from_week - 2 with no game since (his team on bye at from_week
+    or not), the snapshot taken before from_week; `extra_game`: base (wrongly) holds his from_week game too;
+    `through`: tags only through that week (a live base carries none for from_week)."""
     teams = {t for t, _ in data.schedule.opponents}
     team = next(t for t in sorted(teams) if (data.schedule.opponent(t, from_week) is None) == on_bye
                 and all(data.schedule.opponent(t, w) for w in (from_week - 2, from_week - 1)))
@@ -213,10 +214,30 @@ def _out_since(data, from_week: int, on_bye: bool, extra_game: bool = False):
     gone = {(pid, w) for w in range(from_week - 2, data.last_week + 1)}
     keep = lambda table: {k: v for k, v in table.items() if k not in gone}   # noqa: E731
     actual = {**keep(base.actual), **({(pid, from_week): 9.0} if extra_game else {})}
-    injuries = {**keep(base.injuries), **{(pid, w): replay_pool.Injury("O", "DNP", "Ankle")
-                                          for w in range(from_week - 2, from_week + 1)}}
+    hurt = replay_pool.Injury("O", "DNP", "Ankle") if tag == "O" else replay_pool.Injury(tag)
+    injuries = {**keep(base.injuries), **{(pid, w): hurt for w in range(from_week - 2, (through or from_week) + 1)}}
     return replace(base, actual=MappingProxyType(actual), box=MappingProxyType(keep(base.box)),
                    usage=MappingProxyType(keep(base.usage)), injuries=MappingProxyType(injuries)), pid
+
+
+@pytest.mark.parametrize(("tag", "table"), [("SUS", "O"), ("EXE", "IR")])
+def test_a_suspension_or_the_exempt_list_carries_into_the_simulated_weeks_with_its_own_tag(data, monkeypatch, tag,
+                                                                                            table):
+    """Josh Jacobs on the exempt list at the last real week must not play the first simulated one: the absence
+    goes on (its length from the CARRIED table), keeps its tag, carries no injury and no Q on his return."""
+    tables = []
+    monkeypatch.setattr(sim_season.sim_injuries, "open_spell",
+                        lambda dice, position, drawn, weeks_out: tables.append(drawn) or 1)
+    base, pid = _out_since(data, FROM, False, tag=tag, through=FROM - 1)
+    absence = sim_season._absences(base, sim_world.estimate(base, FROM), SEED, FROM)[pid]
+    assert (absence.tag, absence.left, absence.spell.questionable_back) == (tag, 2, False) and table in tables
+
+    season = sim_season.simulate(base, SEED, FROM)
+    team_weeks = [w for w in range(FROM, season.last_week + 1) if season.schedule.opponent(season.team_at(pid, w), w)]
+    for week in team_weeks[:2]:
+        assert (pid, week) not in season.actual and season.injuries[(pid, week)] == replay_pool.Injury(tag), week
+    back = team_weeks[2]
+    assert (pid, back) not in season.injuries or not season.injuries[(pid, back)].hard
 
 
 @pytest.mark.parametrize("on_bye", [False, True])
