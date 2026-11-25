@@ -1355,7 +1355,8 @@ read the belief, so, as in a real season, the public learns the truth only from 
   2026 week 10) starts the simulation out, for a length the injury model draws; Questionable is left to the
   model. Out / Doubtful statuses older than 18 hours (their count is logged) and players already hard-tagged
   in the last real week are left alone; IR, PUP and suspended last for weeks, so they count however old the
-  sync is, except a stale one for a player who played in the last real week (he has been activated since). Real weeks never change.
+  sync is, except a stale one fetched before the kickoff of a game he then played in the last real week (he has
+  been activated since; a tag fetched after that game, hurt Sunday and placed on IR Tuesday, still counts). Real weeks never change.
   On purpose, simulated players get hurt **about a quarter less often** than real ones (`INJURY_SCALE = 0.75`
   in `sim_injuries.py` multiplies the per-game and preseason injury chances, in whole simulated seasons and
   in the live season's simulated weeks alike); how long an injury lasts stays real, and an absence already
@@ -1415,10 +1416,11 @@ read the belief, so, as in a real season, the public learns the truth only from 
   points a game (slope about 1, lower error). The measured regressions still size the hidden talent's
   offseason spread (what last season leaves unexplained). All of it is measured from real seasons 2019-2025 (`sim_next_year.json`). On each
   team the QB who started the most games last season is the starter again in August; starts made for
-  another team count only when he was that team's main starter and has no starts for his new team (a
-  five-game fill-in elsewhere does not take the job from the team's own starter, a signed starter does, and a
-  quarterback traded in mid-season brings no claim from his old team: Jacoby Brissett's Arizona starts do not
-  beat Lamar Jackson in Baltimore).
+  another team count only when he was that team's main starter (a five-game fill-in elsewhere does not take
+  the job from the team's own starter, a signed starter does). A quarterback traded in mid-season keeps his
+  old team's starts too, unless his new team's main starter opened its season and is still there: Jacoby
+  Brissett's Arizona starts do not beat Lamar Jackson in Baltimore, while a starter traded at the deadline to
+  a team led by a fill-in keeps the job.
 - **Rookies** get the role a player taken at that pick and position really had as a rookie, and the widest
   talent draw. A rookie QB starts week 1 when his team has no starter, or when his pick makes it likely and
   the incumbent is a below-average passer; otherwise he is next in line. Real drafters pay for a rookie's

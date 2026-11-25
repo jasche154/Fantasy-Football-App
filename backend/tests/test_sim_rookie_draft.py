@@ -90,3 +90,22 @@ def test_a_starter_hurt_late_is_restored_before_the_needs():
     world = World(MappingProxyType({**world.players, lamar: replace(world.players[lamar], starts=0.38)}), world.teams)
     assert "QB" in rd.needs(world)["BAL"]
     assert "QB" not in rd.needs(world, {}, {lamar: [(w, "BAL") for w in range(1, 5)]})["BAL"]
+
+
+def test_a_team_whose_starter_moved_away_needs_a_qb():
+    bal = TEAMS.index("BAL") * 10 + 1
+    world = _world({"BAL"})
+    assert "QB" not in rd.needs(world)["BAL"]
+    moved = rd.needs(world, {bal: "MIA"}, {bal: [(w, "BAL") for w in range(1, 18)]})
+    assert "QB" in moved["BAL"] and "QB" not in moved["MIA"]
+
+
+def test_a_team_that_signs_another_teams_starter_needs_no_qb():
+    """LAC's starter, hurt late (low starts weight), signs with BAL, whose own QB is weak: BAL is set, LAC is not."""
+    signed, own = TEAMS.index("LAC") * 10 + 1, TEAMS.index("BAL") * 10 + 1
+    world = _world({"LAC"})
+    world = World(MappingProxyType({**world.players, signed: replace(world.players[signed], starts=0.38)}), world.teams)
+    starts = {signed: [(w, "LAC") for w in range(1, 11)], own: [(w, "BAL") for w in range(1, 6)]}
+    assert "QB" in rd.needs(world, {signed: "BAL"})["BAL"]                # his decayed weight alone: a backup
+    need = rd.needs(world, {signed: "BAL"}, starts)
+    assert "QB" not in need["BAL"] and "QB" in need["LAC"]

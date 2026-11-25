@@ -92,6 +92,21 @@ def test_a_stored_schedule_is_used_and_a_finished_season_still_builds(app):
         (g.week, g.home_team, g.away_team) for g in FULL.schedule.games}
 
 
+def test_the_rookie_draft_and_the_offseason_restore_starters_from_the_same_starts(app, monkeypatch):
+    from services import sim_rookie_draft
+
+    _, engine = app
+    seen = []
+    real_run, real_next, real_starts = sim_rookie_draft.run, sim_next_year.next_year, sim_next_year.starts_by_team
+    monkeypatch.setattr(sim_next_year, "starts_by_team", lambda data: seen.append(real_starts(data)) or seen[-1])
+    monkeypatch.setattr(sim_rookie_draft, "run", lambda *args: seen.append(args[5]) or real_run(*args))
+    monkeypatch.setattr(sim_next_year, "next_year", lambda *args: seen.append(args[5]) or real_next(*args))
+    with Session(engine) as session:
+        sim_setup._future_base(session, FUTURE, _settings())
+    built, drafted, offseason = seen
+    assert drafted is built and offseason is built
+
+
 def test_the_rookie_draft_order_counts_the_real_games_played(app, monkeypatch):
     """The pool's schedule has no scores: a team that lost every real game must still pick near the top."""
     from sqlalchemy import or_

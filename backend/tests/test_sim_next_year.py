@@ -137,6 +137,18 @@ def test_a_qb_traded_in_mid_season_brings_no_claim_from_his_old_team():
     assert belief.players[own].starts == 1.0 > belief.players[traded].starts
 
 
+def test_a_starter_traded_at_the_deadline_keeps_his_claim_over_a_fill_in():
+    """He led MIA for 13 weeks, then started twice for KC, whose own week-1 starter is gone: KC's 10-start
+    fill-in is not its August starter."""
+    traded, fill_in, opener = pid("MIA", "QB1"), pid("KC", "QB1"), pid("KC", "QB2")
+    world = _world((replace(_player("MIA", "QB1", 1.0), team="KC", starts=0.3),
+                    _player("KC", "QB1", 0.9, starts=0.6), _player("KC", "QB2", 0.85, starts=0.1)))
+    starts = {traded: [*((w, "MIA") for w in range(1, 14)), (16, "KC"), (17, "KC")],
+              fill_in: [(w, "KC") for w in range(6, 16)], opener: [(w, "KC") for w in range(1, 6)]}
+    belief, _ = _next(world, rookies=(), moves={opener: "MIA"}, starts=starts)
+    assert belief.players[traded].starts == 1.0 > belief.players[fill_in].starts
+
+
 def test_each_start_counts_for_the_team_he_played_that_game_for(monkeypatch):
     """A QB traded before week 9 started week 9 for his new team (team_at would say the old one)."""
     from services import replay_pool, sim_metrics

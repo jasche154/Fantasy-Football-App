@@ -22,10 +22,10 @@ seasons 2019-2025 by services/sim_next_year_fit.py and lives in sim_next_year.js
 - Starters. A QB's `starts` weight is a decayed share of recent starts, so a starter hurt late in the season
   (or one who changed teams after it) looks like a backup; in August the healthy incumbent is the starter
   again: on each team (after the moves) the QB with the most starts over the whole season (`season_starts`,
-  starts_by_team, each start labelled with that game's team: starts for his new team, or, only when he has
-  none for it (an offseason signing), for a team he was the main starter of, so a fill-in elsewhere does not
-  take the job from the team's own starter while a signed starter does, and a QB traded in mid-season brings
-  no claim from his old team; starting week 1 counts one
+  starts_by_team, each start labelled with that game's team: starts for his team plus those for a team he was
+  the main starter of, so a fill-in elsewhere does not take the job from the team's own starter while a signed
+  starter does; a QB traded in mid-season keeps his old team's starts too, unless his new team's main starter
+  started its week 1 and is still there (Brissett behind Lamar); starting week 1 counts one
   more, which settles a split with an early fill-in; then the better passer) gets
   starts 1.0 and the others at most VETERAN_BACKUP_STARTS. A team left with no QB or kicker (a retirement)
   signs the best spare one: the backup with the highest starts weight on a team that has two or more.
@@ -240,10 +240,17 @@ def restore_starters(players: dict[int, Player], season_starts: Mapping[int, Seq
             started[team][pid] += 1
     led = {team: max(counts, key=lambda pid: (counts[pid], -pid)) for team, counts in started.items()}
     for qbs in by_team.values():
+        roster = {p.player_id for p in qbs}
+
         def claim(p: Player) -> int:
-            own = [week for week, team in season_starts.get(p.player_id, ()) if team == p.team]
-            # a team he led counts only for a signing: a QB traded in mid-season keeps no claim from his old team
-            weeks = own or [week for week, team in season_starts.get(p.player_id, ()) if led.get(team) == p.player_id]
+            mine = season_starts.get(p.player_id, ())
+            own = [week for week, team in mine if team == p.team]
+            # a team he led counts, except for a QB traded in mid-season to a team whose own opening-day starter
+            # led it and is still there (Brissett behind Lamar at BAL); one traded to a team led by fill-ins keeps it
+            leader = led.get(p.team, p.player_id)
+            if own and leader != p.player_id and leader in roster and (1, p.team) in season_starts.get(leader, ()):
+                return len(own) + (1 in own)
+            weeks = own + [week for week, team in mine if team != p.team and led.get(team) == p.player_id]
             return len(weeks) + (1 in weeks)
 
         order = sorted(qbs, key=lambda p: (-claim(p), -p.quality, -p.starts, p.player_id))
