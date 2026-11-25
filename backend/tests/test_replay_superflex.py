@@ -102,7 +102,7 @@ def test_the_fitted_slots_put_qbs_far_earlier_in_2qb_drafts():
     fitted = sf.fitted()
 
     for name in ("2qb", "ppr", "half", "std"):
-        assert len(fitted[name]) >= 24 and list(fitted[name]) == sorted(fitted[name])
+        assert len(fitted[name]) >= 15 and list(fitted[name]) == sorted(fitted[name])   # FFC rows: QBs every season lists
     assert all(two < one for two, one in zip(fitted["2qb"], fitted["ppr"]))
     assert fitted["2qb"][9] < fitted["ppr"][0]                               # QB10 of 2-QB lists before QB1 of PPR
 

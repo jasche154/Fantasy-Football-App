@@ -133,8 +133,9 @@ def borrowed_qb_adp(adp: float, listed: str = "ppr") -> float:
     """A QB's ADP on a 1-QB list (`listed`: ppr, half or std) moved to where the average 2-QB list takes the same
     QB (replay_data: the 2-QB list borrowing a QB it leaves out); never before pick 1. QB n goes at about pick
     slot + n on either list."""
-    one = [1.0, *(slot + n for n, slot in enumerate(fitted()[listed], start=1))]
-    two = [1.0, *(slot + n for n, slot in enumerate(fitted()[TWO_QB], start=1))]
+    pairs = list(zip(fitted()[listed], fitted()[TWO_QB]))          # the QBs both curves list
+    one = [1.0, *(a + n for n, (a, _) in enumerate(pairs, start=1))]
+    two = [1.0, *(b + n for n, (_, b) in enumerate(pairs, start=1))]
     if adp >= one[-1]:
         return two[-1] + adp - one[-1]
     k = max(1, bisect_left(one, adp))
