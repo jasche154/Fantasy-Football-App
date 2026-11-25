@@ -75,17 +75,36 @@ def build(session: Session, settings: Settings, seed: int) -> tuple[bytes, Seaso
     if settings.sim_from is None:
         raise ValueError(f"{settings.season} is not a simulated season.")
     if settings.sim_from == 1:
-        base, world, carried = _future_base(session, settings.season, settings, seed)
+        base, world, carried, teams = _future_base(session, settings.season, settings, seed)
         rookies = [pid for pid in world.players if pid >= sim_next_year.ROOKIE_ID_BASE]     # this draft class
-        data = sim_season.simulate(base, seed, 1, prior=world, carried=carried, rookies=rookies)
+        data = sim_season.simulate(base, seed, 1, prior=world, carried=carried, rookies=rookies, team_prior=teams)
     else:
         base = replay_pool.load_season_data(session, settings.season, settings.scoring, settings.scoring_rules,
                                             settings.adp_format, through=settings.sim_from - 1)
         rookies = [pid for pid, first in first_seasons(session).items() if first == settings.season]
         data = sim_season.simulate(with_status_now(session, base, settings.sim_from), seed, settings.sim_from,
-                                   rookies=rookies)
+                                   rookies=rookies, team_prior=team_prior(session, settings.season),
+                                   posted=posted_lines(base, settings.sim_from))
         data = _market_adp(data, settings) if settings.start_week > 1 else data
     return replay_blob.freeze(data)
+
+
+def team_prior(session: Session, season: int) -> dict:
+    """{team: sim_lines.Rating}: the points ratings `season`'s games start from, last season's final ones
+    regressed (sim_lines.carry_over), from its real scores in the database (none: {})."""
+    from services import sim_lines
+    from services.schedule_strength import load_schedule
+
+    scores = [(g.week, g.home_team, g.away_team, g.home_score, g.away_score)
+              for g in load_schedule(session, season - 1).games if g.is_final]
+    return sim_lines.carry_over(scores) if scores else {}
+
+
+def posted_lines(base: SeasonData, from_week: int) -> dict[tuple[str, int], tuple[float, float]]:
+    """{(home team, week): (spread, total)} of the real lines already posted for games from `from_week` on: the
+    simulated games use them as their prediction (sim_lines)."""
+    return {(g.home_team, g.week): (g.spread_line, g.total_line) for g in base.schedule.games
+            if g.week >= from_week and g.spread_line is not None and g.total_line is not None}
 
 
 def _market_adp(data: SeasonData, settings: Settings) -> SeasonData:
@@ -250,6 +269,7 @@ class Future(NamedTuple):
     base: SeasonData             # every player of the new belief, the schedule, preseason ADP, week-1 projections
     belief: object               # the prior World (sim_world.World)
     carried: dict                # {player: sim_injuries.Spell}: the truth's absences running into week 1
+    teams: dict = {}             # {team: sim_lines.Rating}: the newest season's team ratings, carried over
 
 
 def injury_detail(session: Session) -> dict[int, tuple[str | None, str | None]]:
@@ -267,7 +287,7 @@ def _future_base(session: Session, season: int, settings: Settings, seed: int = 
     """The season after the newest one, from what is known today plus the league's `seed` (its draft:
     sim_rookie_draft; its carried injuries: sim_carryover), through sim_next_year. Raises NoDataError when it
     can't be built (future_problem says why)."""
-    from services import (sim_carryover, sim_market, sim_next_year, sim_offseason, sim_rookie_draft,
+    from services import (sim_carryover, sim_lines, sim_market, sim_next_year, sim_offseason, sim_rookie_draft,
                           sim_world)
 
     problem = future_problem(session, season)
@@ -302,7 +322,8 @@ def _future_base(session: Session, season: int, settings: Settings, seed: int = 
                                      settings.scoring_rules, _defense_prior(data), settings.adp_format,
                                      sim_market.track_record(data), sim_next_year.rookie_premium(drafted))
     base = replace(base, notes=MappingProxyType({(pid, 0): sim_carryover.note(c) for pid, c in carries.items()}))
-    return Future(base, belief, sim_carryover.draw(carries, seed))
+    scores = [(g.week, g.home_team, g.away_team, g.home_score, g.away_score) for g in played if g.is_final]
+    return Future(base, belief, sim_carryover.draw(carries, seed), sim_lines.carry_over(scores) if scores else {})
 
 
 # ---------------- the seasons list ----------------

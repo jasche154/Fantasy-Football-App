@@ -16,6 +16,9 @@
   with its leaderboard, weekly, rookies, how our ADP agrees with S's real ADP, all of it and the rookies':
   ours priced in the real list's format, PPR; and how the preseason experts agree with the ADP).
   mid reports the leaderboard of the simulated weeks too.
+- both modes report whole games (sim_metrics_games.games: the pregame line, a real season's Vegas line and a
+  simulated one's own, against the result; blowouts, home wins, ties, odd team scores) and the expert ranks
+  (sim_metrics_games.experts: week-to-week churn and agreement with the projections), by position.
 - both modes report injuries (sim_metrics.injuries: new injuries per game played, missed share, by position)
   against the real rate and the target, real x sim_injuries.INJURY_SCALE (simulated seasons have fewer on purpose).
 - --set overrides a sim_params.json value for this run (section.key=value, JSON value); --save-tuned writes
@@ -41,8 +44,8 @@ from dataclasses import replace
 from functools import partial
 from pathlib import Path
 
-from services import (replay_pool, sim_carryover, sim_depth, sim_fit, sim_injuries, sim_market, sim_metrics, sim_season,
-                      sim_setup, sim_world)
+from services import (replay_pool, sim_carryover, sim_depth, sim_fit, sim_injuries, sim_market, sim_metrics,
+                      sim_metrics_games, sim_season, sim_setup, sim_world)
 from services.replay_adp_format import TWO_QB
 from services.replay_pool import SeasonData
 from services.sim_world import World
@@ -154,26 +157,30 @@ def _mid(session, season: int, seeds: list[int]) -> tuple[dict, dict]:
     weeks = range(MID_WEEK, real.last_week + 1)
     base = cut(real, MID_WEEK)
     rookies = [pid for pid, first in sim_setup.first_seasons(session).items() if first == season]
-    sims = [_rest(sim_season.simulate(base, seed, MID_WEEK, rookies=rookies), weeks) for seed in seeds]
+    teams = sim_setup.team_prior(session, season)
+    sims = [_rest(sim_season.simulate(base, seed, MID_WEEK, rookies=rookies, team_prior=teams), weeks) for seed in seeds]
     return _rest(real, weeks), _mean(sims)
 
 
 def _rest(data: SeasonData, weeks: range) -> dict[str, float]:
-    return {**sim_metrics.weekly(data, weeks), **sim_metrics.leaderboard(data, weeks)}
+    return {**sim_metrics.weekly(data, weeks), **sim_metrics.leaderboard(data, weeks),
+            **sim_metrics_games.games(data, weeks), **sim_metrics_games.experts(data, weeks)}
 
 
 def _whole(data: SeasonData, rookies: set[int], real: SeasonData) -> dict[str, float]:
     weeks = range(1, data.last_week + 1)
     return {**sim_metrics.season(data), **sim_metrics.rookies(data, rookies),
             **sim_metrics.adp_agreement(data, real, rookies), **sim_metrics.expert_agreement(data),
-            **sim_metrics.weekly(data, weeks), **sim_depth.metrics(data)}
+            **sim_metrics.weekly(data, weeks), **sim_depth.metrics(data), **sim_metrics_games.games(data, weeks),
+            **sim_metrics_games.experts(data, weeks)}
 
 
 def _full(session, season: int, seeds: list[int], offseason: dict) -> tuple[dict, dict]:
     real = replay_pool.load_season_data(session, season, SCORING)
     base, prior, rookies, carries = next_season(session, real, offseason)
-    sims = [_whole(sim_season.simulate(base, seed, 1, prior, sim_carryover.draw(carries, seed), rookies=rookies), rookies,
-                   real) for seed in seeds]
+    teams = sim_setup.team_prior(session, season)
+    sims = [_whole(sim_season.simulate(base, seed, 1, prior, sim_carryover.draw(carries, seed), rookies=rookies,
+                                       team_prior=teams), rookies, real) for seed in seeds]
     return _whole(real, rookies, real), _mean(sims)
 
 

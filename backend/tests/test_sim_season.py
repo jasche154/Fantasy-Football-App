@@ -33,7 +33,10 @@ def test_real_weeks_are_copied_through_untouched(data, simulated):
         return {pid: before for pid, games in season.team_by_week.items()
                 if (before := tuple(g for g in games if g[0] < FROM))}
     assert real(simulated) == real(data)
-    assert simulated.players == data.players and simulated.schedule == data.schedule
+    assert simulated.players == data.players and simulated.schedule.opponents == data.schedule.opponents
+    # the schedule is the same but for the simulated games' pregame lines (sim_lines), stored as a real season's are
+    unlined = [replace(g, spread_line=None, total_line=None) if g.week >= FROM else g for g in simulated.schedule.games]
+    assert unlined == [replace(g, spread_line=None, total_line=None) if g.week >= FROM else g for g in data.schedule.games]
 
 
 def test_every_simulated_week_is_filled(data, simulated):

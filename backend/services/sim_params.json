@@ -1189,7 +1189,8 @@
    "carries_sd": 0.1,
    "share_sd_targets": 0.05,
    "share_sd_carries": 0.15,
-   "share_sd_qb_carries": 0.45
+   "share_sd_qb_carries": 0.45,
+   "td_drives": 6
   },
   "rates": {
    "rec_cv": 0.68
@@ -1198,7 +1199,9 @@
    "role_sd": 0.2,
    "evidence": 2,
    "floor": 0.2,
-   "season_spread": 1.0
+   "season_spread": 1.0,
+   "strength_sd": 2,
+   "edge_scale": 1.05
   },
   "market": {
    "two_qb_replacement": 30,

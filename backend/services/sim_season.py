@@ -25,6 +25,12 @@ week's, from what is known through from_week - 1 (a half-published mid-week inju
    - the public belief estimate(data so far, W) gives W's projections (hard-tagged players out), expert ranks
      (when the week has none; the preseason ones, week 0, follow base's ADP: sim_market.expert_ranks) and buzz
      notes (sim_market; false ones only in the weeks a true one can land, sim_talent.change_weeks);
+   - the pregame line of every game (sim_lines.week_lines, from the same public belief and the games so far;
+     a `posted` real line instead where the caller passes one) centres both the projections and the game: the
+     game's target is each side's line points + what the truth knows that the belief doesn't (the truth's mean
+     points minus the belief's, sim_game.mean_points: talent, in-game injuries, role changes) + the hidden team
+     strength (sim_talent.strength). The lines are stored on the schedule's games of the simulated weeks, as a
+     real season's closing lines are;
    - the truth at W plays every game (sim_game.play). Players on the field are hurt with
      sim_injuries.hazard (scaled down below FULL_EXPOSURE_SNAP); a hurt player plays exit_share of the game,
      then misses games_out team games (tagged from W + 1, as real tags are known before the week).
@@ -37,9 +43,9 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass, replace
 from types import MappingProxyType
 
-from services import replay_pool, replay_state, sim_depth, sim_injuries, sim_market, sim_talent
+from services import replay_pool, replay_state, sim_depth, sim_injuries, sim_lines, sim_market, sim_talent
 from services.replay_pool import Injury, SeasonData, hard_tag_returns
-from services.sim_game import on_field, play
+from services.sim_game import mean_points, on_field, play
 from services.sim_world import World, estimate, scoring_of
 
 FULL_EXPOSURE_SNAP = 20.0        # a player who really plays (a recorded game) carries the full injury hazard
@@ -47,6 +53,7 @@ PHANTOM_MIN_SNAP = 50.0          # healthy regulars this involved may be listed 
 INJURY_POSITIONS = ("QB", "RB", "WR", "TE", "K")
 CARRIED = {"SUS": "O", "EXE": "IR"}   # non-injury hard tags an open absence keeps: the open_spell table each draws from
 UNKNOWN_BODY = "Undisclosed"
+MIN_TARGET = 3.0                 # a side's expected points are kept at or above this
 
 
 @dataclass
@@ -181,13 +188,17 @@ def _hurt(world: World, team: str, out: set[int], dice) -> dict[int, sim_injurie
 
 
 def _market(tables: _Tables, base: SeasonData, belief: World, truth: World, seed: int, week: int, out: set[int],
-            false_rate: float, ranks: Mapping[int, int]) -> None:
+            false_rate: float, ranks: Mapping[int, int], lines: Mapping[str, sim_lines.Line] | None = None,
+            opinions: dict[str, dict[int, float]] | None = None, edges: Mapping[str, float] | None = None) -> None:
+    """The week's public tables (projections, expert ranks, buzz). `opinions`: the experts' memory, carried from
+    week to week and updated here: {"z": each player's opinion (sim_market.opinion), "worth": the value each is
+    ranked on (sim_market.held)}; `edges`: each team's scoring edge (sim_lines.edges)."""
     scoring, last = scoring_of(base), base.last_week
     known = _known(base, tables, week)
     snapshot = sorted(pid for pid, w in tables.projected if w == week)      # the snapshot's own (from_week only)
     for pid in snapshot:
         del tables.projected[(pid, week)]
-    fresh = sim_market.projections(belief, base.schedule, week, out, scoring)
+    fresh = sim_market.projections(belief, base.schedule, week, out, scoring, lines)
     tables.projected.update({(pid, week): p for pid, p in fresh.items()})
     if snapshot:
         # a player the snapshot alone admits (a backup QB, a WR6: no ADP, no game, no earlier projection) keeps a
@@ -201,9 +212,17 @@ def _market(tables: _Tables, base: SeasonData, belief: World, truth: World, seed
             ids = known.players if rank_week else base.as_of(0).players
             # preseason experts and the preseason market price players alike: the experts follow base's ADP
             market = {} if rank_week else {pid: p.adp for pid, p in base.players.items() if p.adp is not None}
+            dice = replay_state.rng(seed, "sim", "experts", rank_week)
+            weekly = worth = None
+            if rank_week and opinions is not None:
+                weekly = sim_market.opinion(opinions["z"], [pid for pid in ids if pid in belief.players], dice)
+                fresh_worth = sim_market.values(belief, scoring, last - rank_week + 1, edges)
+                worth = sim_market.held(opinions["worth"], fresh_worth, belief)
+                opinions["z"].update(weekly)
+                opinions["worth"] = worth
             tables.expert_ranks.update(sim_market.expert_ranks(
-                belief, ids, rank_week, replay_state.rng(seed, "sim", "experts", rank_week), scoring,
-                last - max(1, rank_week) + 1, market))
+                belief, ids, rank_week, dice, scoring, last - max(1, rank_week) + 1, market, weekly,
+                edges if rank_week else None, worth))
             tables.expert_age[rank_week] = sim_market.EXPERT_AGE["ros" if rank_week else "pre"]
     tables.notes.update(sim_market.buzz(truth.changes, belief, week, replay_state.rng(seed, "sim", "buzz", week),
                                         false_rate, out, sim_talent.rumors(belief, ranks) if false_rate else None))
@@ -212,10 +231,13 @@ def _market(tables: _Tables, base: SeasonData, belief: World, truth: World, seed
 
 
 def simulate(base: SeasonData, seed: int, from_week: int, prior: World | None = None,
-             carried: Mapping[int, sim_injuries.Spell] | None = None, rookies: Collection[int] = ()) -> SeasonData:
+             carried: Mapping[int, sim_injuries.Spell] | None = None, rookies: Collection[int] = (),
+             team_prior: Mapping[str, sim_lines.Rating] | None = None,
+             posted: Mapping[tuple[str, int], tuple[float, float]] | None = None) -> SeasonData:
     """A new SeasonData with weeks from_week..base.last_week simulated (see the module docstring). `carried`:
     the truth's absences running into week 1 of a whole season (sim_carryover.draw); `rookies`: the players in
-    their first season (sim_talent.growth)."""
+    their first season (sim_talent.growth); `team_prior`: last season's team ratings (sim_lines.carry_over);
+    `posted`: {(home team, week): (spread, total)}, real lines already posted for simulated games."""
     if not 1 <= from_week <= base.last_week:
         raise ValueError(f"Week {from_week} is outside the season (1-{base.last_week}).")
     scoring, last = scoring_of(base), base.last_week
@@ -232,14 +254,21 @@ def simulate(base: SeasonData, seed: int, from_week: int, prior: World | None = 
     false_rate = sim_market.expected_hints(sim_talent.expected_changes(belief, ranks, from_week, last),
                                            buzz_weeks[1] - buzz_weeks[0] + 1)
     public = belief                                  # the latest public belief (last week's, for this week's tags)
+    hidden = sim_talent.strength(belief.teams, seed)
+    opinions: dict[str, dict[int, float]] = {"z": {}, "worth": {}}     # the experts' memory, week to week
+    lines: dict[tuple[str, int], sim_lines.Line] = {}
     for week in range(from_week, last + 1):
         tags = _tags(base, public, absences, returning, week, from_week, replay_state.rng(seed, "sim", "tags", week))
         tables.injuries.update({(pid, week): injury for pid, injury in tags.items()})
         public_out = {pid for pid, injury in tags.items() if injury.hard}
         sitting = public_out | {pid for pid, a in absences.items() if a.left > 0}
-        public = estimate(_known(base, tables, week), week, prior)
+        known = _known(base, tables, week)
+        public = estimate(known, week, prior)
+        pregame = sim_lines.week_lines(known, week, public, public_out, team_prior, posted)
+        lines.update({(home, week): line for home, line in pregame.items()})
         _market(tables, base, public, truth, seed, week, public_out,
-                false_rate if buzz_weeks[0] <= week <= buzz_weeks[1] else 0.0, ranks)
+                false_rate if buzz_weeks[0] <= week <= buzz_weeks[1] else 0.0, ranks, pregame, opinions,
+                sim_lines.edges(known, week, public, public_out, team_prior))
         world = truth.at(week)
         played_teams, fresh = set(), set()
         for game in sorted((g for g in base.schedule.games if g.week == week), key=lambda g: g.home_team):
@@ -247,9 +276,11 @@ def simulate(base: SeasonData, seed: int, from_week: int, prior: World | None = 
                 continue
             dice = replay_state.rng(seed, "sim", "hurt", week, game.home_team)
             hurt = {**_hurt(world, game.home_team, sitting, dice), **_hurt(world, game.away_team, sitting, dice)}
+            exits = {pid: spell.exit_share for pid, spell in hurt.items()}
+            target = _target(pregame.get(game.home_team), game.home_team, game.away_team, world, public, sitting,
+                             public_out, exits, hidden)
             result = play(world, game.home_team, game.away_team, sitting,
-                          replay_state.rng(seed, "sim", "game", week, game.home_team), scoring,
-                          {pid: spell.exit_share for pid, spell in hurt.items()})
+                          replay_state.rng(seed, "sim", "game", week, game.home_team), scoring, exits, target)
             _record(tables, world, result, week)
             played_teams |= {game.home_team, game.away_team}
             fresh |= set(hurt)
@@ -264,7 +295,30 @@ def simulate(base: SeasonData, seed: int, from_week: int, prior: World | None = 
     tables.games = {pid: [g for g in games if g[0] < from_week or (pid, g[0]) in tables.actual]
                     for pid, games in tables.games.items()}
     final = tables.season(base)
-    return replace(final, returns=MappingProxyType(hard_tag_returns(final.injuries, final.actual, last)))
+    return replace(final, returns=MappingProxyType(hard_tag_returns(final.injuries, final.actual, last)),
+                   schedule=_with_lines(base.schedule, lines))
+
+
+def _target(line: sim_lines.Line | None, home: str, away: str, truth: World, public: World, sitting: Collection[int],
+            public_out: Collection[int], exits: Mapping[int, float],
+            hidden: Mapping[str, tuple[float, float]]) -> dict[str, float] | None:
+    """{team: the points its side is centred on} (see the module docstring); None without a line."""
+    if line is None:
+        return None
+    th, ta = mean_points(truth, home, away, sitting, exits)
+    bh, ba = mean_points(public, home, away, public_out)
+    (ho, hd), (ao, ad) = hidden.get(home, (0.0, 0.0)), hidden.get(away, (0.0, 0.0))
+    edge = sim_talent.edge_scale() * line.margin / 2          # the truth's edges are wider than the shrunk line's
+    return {home: max(MIN_TARGET, line.total / 2 + edge + th - bh + ho + ad),
+            away: max(MIN_TARGET, line.total / 2 - edge + ta - ba + ao + hd)}
+
+
+def _with_lines(schedule, lines: Mapping[tuple[str, int], sim_lines.Line]):
+    """The schedule with each simulated game's pregame line as its spread and total."""
+    games = tuple(replace(g, spread_line=lines[(g.home_team, g.week)].margin,
+                          total_line=lines[(g.home_team, g.week)].total)
+                  if (g.home_team, g.week) in lines else g for g in schedule.games)
+    return replace(schedule, games=games)
 
 
 def _record(tables: _Tables, world: World, result, week: int) -> None:
