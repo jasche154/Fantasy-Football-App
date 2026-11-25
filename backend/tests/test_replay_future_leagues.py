@@ -92,6 +92,37 @@ def test_a_stored_schedule_is_used_and_a_finished_season_still_builds(app):
         (g.week, g.home_team, g.away_team) for g in FULL.schedule.games}
 
 
+def test_the_rookie_draft_order_counts_the_real_games_played(app, monkeypatch):
+    """The pool's schedule has no scores: a team that lost every real game must still pick near the top."""
+    from sqlalchemy import or_
+
+    from services import sim_rookie_draft
+
+    _, engine = app
+    loser = FULL.schedule.games[0].home_team
+    orders = []
+    real_order = sim_rookie_draft.draft_order
+    monkeypatch.setattr(sim_rookie_draft, "draft_order",
+                        lambda wins, seed: orders.append(real_order(wins, seed)) or orders[-1])
+    with Session(engine) as session:
+        session.execute(update(NflGame).where(NflGame.season == LIVE, NflGame.week <= THROUGH,
+                                              NflGame.home_team == loser).values(home_score=0, away_score=45))
+        session.execute(update(NflGame).where(NflGame.season == LIVE, NflGame.week <= THROUGH,
+                                              NflGame.away_team == loser).values(home_score=45, away_score=0))
+        assert session.query(NflGame).where(NflGame.season == LIVE, NflGame.week <= THROUGH, or_(
+            NflGame.home_team == loser, NflGame.away_team == loser)).count() >= THROUGH - 1
+        replay_pool.clear_cache()
+        try:
+            for seed in range(5):
+                sim_setup._future_base(session, FUTURE, _settings(), seed)
+        finally:
+            session.rollback()
+            replay_pool.clear_cache()
+    # the rest of the season is still simulated, so a seed may let a bad team or two finish below him
+    assert len(orders) == 5 and sum(loser in order[:3] for order in orders) >= 4
+    assert all(loser in order[:5] for order in orders)
+
+
 def _play_out(client: TestClient, game: str) -> dict:
     post(client, game + "/draft/auto", whole_draft="true")
     while (summary := get(client, game))["phase"] != "complete":

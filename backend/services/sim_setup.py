@@ -260,7 +260,10 @@ def _future_base(session: Session, season: int, settings: Settings, seed: int = 
     # before 2018 looks younger than he is until the cap bucket; store birth dates or draft years to fix it.
     experience = {pid: newest - first + 1 for pid, first in first_seasons(session).items() if first <= newest}
     moved = {matched[m.name]: m.team for m in moves if m.name in matched}
-    by_name = {r.name: r for r in sim_rookie_draft.run(rookies, data.schedule.games, world, moved, seed)}
+    # the pool's schedule carries no scores (results live in data.scores): the draft order needs them back
+    played = tuple(replace(g, home_score=data.scores.get((g.home_team, g.week)),
+                           away_score=data.scores.get((g.away_team, g.week))) for g in data.schedule.games)
+    by_name = {r.name: r for r in sim_rookie_draft.run(rookies, played, world, moved, seed)}
     drafted = {pid: by_name[r.name] for pid, r in sim_next_year.rookie_ids(season, rookies).items()}  # ids: file picks
     belief, pool = sim_next_year.next_year(world, data.players, experience, drafted, moved,
                                            sim_metrics.qb_starts(data))
