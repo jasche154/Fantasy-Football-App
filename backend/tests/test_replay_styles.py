@@ -500,3 +500,26 @@ def test_no_round_trip_with_one_cpu_leaves_the_user_ahead_by_more_than_the_style
             assert end - chart(know, mine) <= tv.stated_edge(persona) * chart(know, mine) + 0.5, (persona, mine, got, back)
             trips += 1
     assert trips >= 2
+
+
+# ---------------- no hindsight ----------------
+
+@pytest.mark.parametrize("week", [3, 8])
+def test_needs_prices_and_decline_reasons_never_see_the_future(week):
+    from tests import replay_fakes as fakes
+    from tests.test_replay_trades import chart_knowledge
+    data = fakes.fake_season()
+    state = with_team(replace(league()[0], week=week), CPU, persona="contender")
+    state = results(state, CPU, [True] * (week - 1))
+    know, shaken = chart_knowledge(week, data=data), chart_knowledge(week, data=fakes.future_changed(data, week))
+    user, cpu = rs.user_team(state), rs.team(state, CPU)
+    mine = [pid for pid in user.roster if know.by_id[pid].position in SKILL][:3]
+    theirs = [pid for pid in cpu.roster if know.by_id[pid].position in SKILL][:3]
+
+    assert st.position_needs(state, SETTINGS, know) == st.position_needs(state, SETTINGS, shaken)
+    assert st.mind_for(state, SETTINGS, know, cpu, theirs[:1], mine[:1]) == st.mind_for(
+        state, SETTINGS, shaken, cpu, theirs[:1], mine[:1])
+    for give in mine:
+        for get in theirs:
+            assert rt.evaluate(state, SETTINGS, know, USER, CPU, [give], [get]) == rt.evaluate(
+                state, SETTINGS, shaken, USER, CPU, [give], [get])
