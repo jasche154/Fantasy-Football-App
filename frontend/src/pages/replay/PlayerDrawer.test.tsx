@@ -1,12 +1,12 @@
-import { screen, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { describe, expect, it } from 'vitest';
 import { json, mockFetch } from '../../test/mockFetch';
 import { META_ROUTE, renderWithProviders } from '../../test/render';
-import type { ReplayPlayerDetail } from '../../api/types';
+import type { ReplayBoxScore, ReplayPlayerDetail } from '../../api/types';
 import { GAME_ID, MOSTERT, OPPONENT_TEAM_ID, playerDetail, tagged, teamRef, TUCKER, usage } from './fixtures';
-import { advancedDetail, cardDetail } from './fixturesPlayers';
+import { advancedDetail, boxLine, cardDetail } from './fixturesPlayers';
 import { PlayerDrawer } from './PlayerDrawer';
 
 const PLAYER = `/api/replay/games/${GAME_ID}/players/${MOSTERT.id}`;
@@ -172,5 +172,62 @@ describe('PlayerDrawer in a simulated league', () => {
     renderSim(cardDetail(), 4);
     await screen.findByRole('table', { name: 'Raheem Mostert game log' });
     expect(screen.queryByRole('region', { name: 'News' })).not.toBeInTheDocument();
+  });
+});
+
+describe('PlayerDrawer box score', () => {
+  const BOX = `/api/replay/games/${GAME_ID}/box`;
+  const boxScore = (hasScore = true): ReplayBoxScore => ({
+    week: 1,
+    teams: [
+      { team: 'DEN', home: false, score: hasScore ? 17 : null, players: [
+        { id: 301, name: 'Russell Wilson', position: 'QB', points: 18.4,
+          box: boxLine({ pass_yds: 250, pass_td: 2, pass_int: 1, carries: 3, rush_yds: 12, rush_td: 0, targets: 0, rec: 0, rec_yds: 0 }) },
+        { id: 302, name: 'Broncos Kicker', position: 'K', points: 8, box: null }] },
+      { team: 'MIA', home: true, score: hasScore ? 20 : null, players: [
+        { id: MOSTERT.id, name: 'Raheem Mostert', position: 'RB', points: 11, box: boxLine() },
+        { id: 303, name: 'Miami D/ST', position: 'DST', points: 6, box: null }] },
+    ],
+  });
+
+  function renderBox(reply: ReplayBoxScore) {
+    const api = mockFetch([META_ROUTE, { path: PLAYER, reply: json(cardDetail()) }, { path: BOX, reply: json(reply) }]);
+    renderWithProviders(<PlayerDrawer gameId={GAME_ID} playerId={MOSTERT.id} version={0} onClose={() => undefined} />);
+    return { api, user: userEvent.setup() };
+  }
+
+  it('opens a played game from the log: the final, his team\'s tab first, every line; Back returns to the card', async () => {
+    const { api, user } = renderBox(boxScore());
+    await screen.findByRole('table', { name: 'Raheem Mostert game log' });
+    expect(screen.queryByRole('button', { name: /Week 3 box score/ })).not.toBeInTheDocument();     // a bye
+    expect(screen.queryByRole('button', { name: /Week 5 box score/ })).not.toBeInTheDocument();     // not played yet
+    await user.click(screen.getByRole('button', { name: 'Week 1 box score, DEN' }));
+
+    expect(await screen.findByText(/DEN 17 @ MIA 20/)).toHaveTextContent('DEN 17 @ MIA 20 · Final');
+    expect(Object.fromEntries(api.callsTo(BOX)[0].url.searchParams)).toEqual({ week: '1', team: 'MIA' });
+    expect(screen.getByRole('heading', { name: 'Week 1 box score' })).toHaveFocus();
+    const tabs = screen.getAllByRole('tab');
+    expect(tabs.map((tab) => [tab.textContent, tab.getAttribute('aria-selected')])).toEqual([['DEN', 'false'], ['MIA', 'true']]);
+    expect(screen.getByRole('table', { name: 'Rushing, MIA' })).toHaveTextContent('Raheem Mostert15721');
+    expect(within(screen.getByRole('table', { name: 'Fantasy points, MIA' })).getAllByRole('rowheader').map((cell) => cell.textContent))
+      .toEqual(['Raheem Mostert', 'Miami D/ST']);
+    expect(screen.queryByRole('table', { name: 'Passing, MIA' })).not.toBeInTheDocument();
+
+    tabs[1].focus();
+    await user.keyboard('{ArrowLeft}');
+    expect(screen.getByRole('tab', { name: 'DEN' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('table', { name: 'Passing, DEN' })).toHaveTextContent('Russell Wilson25021');
+    expect(screen.getByRole('table', { name: 'Fantasy points, DEN' })).toHaveTextContent('Broncos Kicker');
+
+    await user.click(screen.getByRole('button', { name: '← Back to Raheem Mostert' }));
+    expect(screen.queryByRole('heading', { name: 'Week 1 box score' })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Week 1 box score, DEN' })).toHaveFocus());
+  });
+
+  it('shows the matchup without a score when the league has none', async () => {
+    const { user } = renderBox(boxScore(false));
+    await user.click(await screen.findByRole('button', { name: 'Week 2 box score, @ DEN' }));
+    expect(await screen.findByText(/final score not kept/)).toBeInTheDocument();
+    expect(screen.getByText(/DEN @ MIA/)).toBeInTheDocument();
   });
 });

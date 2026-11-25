@@ -36,7 +36,7 @@ def _client(data, url: str = "sqlite://") -> Iterator[TestClient]:
                            **({"poolclass": StaticPool} if url == "sqlite://" else {}))
     Base.metadata.create_all(engine)
     with Session(engine) as session:
-        fakes.seed_db(session, data)
+        fakes.seed_db(session, data, scores=True)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
 
     def override() -> Iterator[Session]:
@@ -158,7 +158,9 @@ def _snapshot(client: TestClient, game: str) -> dict[str, dict]:
     lines = {f"players {stats} {sort}": get(client, game + "/players", status="all", stats=stats, sort=sort, dir="asc",
                                             limit=200, **({"stat_week": LEAK_WEEK - 1} if stats == "week" else {}))
              for stats in ("season", "last4", "week") for sort in ("line_points", "rush_yds", "line_projection")}
-    return {**teams, **lines, "players": {"results": pool}, "matchup": get(client, game + "/matchup"),
+    boxes = {f"box {g.home_team}": get(client, game + "/box", week=LEAK_WEEK - 1, team=g.home_team)
+             for g in DATA.schedule.games if g.week == LEAK_WEEK - 1}
+    return {**teams, **lines, **boxes, "players": {"results": pool}, "matchup": get(client, game + "/matchup"),
             **{f"player {pid}": get(client, f"{game}/players/{pid}") for pid in sorted(ids)}}
 
 
@@ -503,6 +505,20 @@ def test_unknown_games_players_and_teams_are_reported(client, story):
         assert refused(client, game + "/players", method="GET", **query)[0] == 422, query
     assert refused(client, game + "/activity", method="GET", kind="gossip")[0] == 422
     assert refused(client, game + "/drop", {"player_id": 0})[0] == 422
+
+
+def test_a_played_games_box_score_has_the_real_final_score(client, story):
+    game, played = story["path"], next(g for g in DATA.schedule.games if g.week == 2)
+
+    shown = get(client, game + "/box", week=2, team=played.away_team)
+
+    assert [(side["team"], side["score"]) for side in shown["teams"]] == [
+        (played.away_team, DATA.scores[(played.away_team, 2)]), (played.home_team, DATA.scores[(played.home_team, 2)])]
+    assert all(side["players"] for side in shown["teams"])
+    for query in ({"week": 2, "team": "XYZ"}, {"week": 21, "team": played.home_team}, {"week": 0, "team": "KC"},
+                  {"week": 2}, {"team": played.home_team}):
+        assert refused(client, game + "/box", method="GET", **query)[0] == 422, query
+    assert refused(client, "/games/999999/box", method="GET", week=2, team="KC")[0] == 404
 
 
 def test_the_wire_sorts_any_column_either_way_and_shows_the_chosen_stats(client, story):

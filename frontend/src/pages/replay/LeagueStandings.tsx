@@ -1,14 +1,27 @@
+import { useState } from 'react';
 import { getReplayStandings } from '../../api/replay';
 import type { ReplayStandings } from '../../api/types';
 import { AsyncView } from '../../components/AsyncView';
+import { nextSort, SortableHeader, type SortState } from '../../components/SortableHeader';
 import { TableSkeleton } from '../../components/StatusViews';
 import { useAsync } from '../../hooks/useAsync';
 import { TeamBadge } from './gameUi';
 import { formatPoints, formatRecord, type ReplayViewProps } from './shared';
 
+type StandingsSort = 'order' | 'points_for' | 'points_against';
+const DEFAULT_SORT: SortState<StandingsSort> = { key: 'order', direction: 'asc' };
+
 function StandingsTable({ standings }: { standings: ReplayStandings }) {
-  const { results, playoff_teams: playoffTeams, playoff_weeks: playoffWeeks, byes, seeds_final: seedsFinal } = standings;
-  const isOver = results.some((row) => row.place !== null);         // rows are then in final order
+  const { playoff_teams: playoffTeams, playoff_weeks: playoffWeeks, byes, seeds_final: seedsFinal } = standings;
+  const isOver = standings.results.some((row) => row.place !== null);         // rows are then in final order
+  // The server's order (record, then tiebreaks) is the default; Seed/Finish brings it back.
+  const [sort, setSort] = useState(DEFAULT_SORT);
+  const onSort = (key: StandingsSort) => setSort(nextSort(sort, key, (column) => (column === 'order' ? 'asc' : 'desc')));
+  const ordered = standings.results.map((row, index) => ({ row, index }));
+  const column = sort.key === 'order' ? null : sort.key;
+  if (column) ordered.sort((a, b) => a.row[column] - b.row[column] || a.index - b.index);
+  if (sort.direction === 'desc') ordered.reverse();
+  const isDefault = sort.key === 'order' && sort.direction === 'asc';
   return (
     <>
       <div className="table-wrap">
@@ -16,16 +29,17 @@ function StandingsTable({ standings }: { standings: ReplayStandings }) {
           <caption className="sr-only">League standings</caption>
           <thead>
             <tr>
-              <th scope="col" className="num">{isOver ? 'Finish' : 'Seed'}</th>
+              <SortableHeader columnKey="order" sort={sort} onSort={onSort} title="Standings order (record, then tiebreaks)">{isOver ? 'Finish' : 'Seed'}</SortableHeader>
               <th scope="col">Team</th>
               <th scope="col">W-L-T</th>
-              <th scope="col" className="num" title="Points for">PF</th>
-              <th scope="col" className="num" title="Points against">PA</th>
+              <SortableHeader columnKey="points_for" sort={sort} onSort={onSort} title="Points for">PF</SortableHeader>
+              <SortableHeader columnKey="points_against" sort={sort} onSort={onSort} title="Points against">PA</SortableHeader>
             </tr>
           </thead>
           <tbody>
-            {results.map((row, index) => {
-              const classes = [row.is_user ? 'row--mine' : '', index === playoffTeams - 1 ? 'replay-standings__cut' : ''].filter(Boolean).join(' ');
+            {ordered.map(({ row, index }) => {
+              // The playoff cut only means something in standings order.
+              const classes = [row.is_user ? 'row--mine' : '', isDefault && index === playoffTeams - 1 ? 'replay-standings__cut' : ''].filter(Boolean).join(' ');
               return (
                 <tr key={row.team_id} className={classes || undefined}>
                   <td className="num">{row.place ?? row.seed}</td>
@@ -43,6 +57,7 @@ function StandingsTable({ standings }: { standings: ReplayStandings }) {
           </tbody>
         </table>
       </div>
+      {!isDefault && <p className="hint">Sorted by {sort.key === 'order' ? 'standings order, reversed' : sort.key === 'points_for' ? 'points for' : 'points against'}. Select {isOver ? 'Finish' : 'Seed'} to go back to the standings order.</p>}
       <p className="hint">
         The line is the playoff cut: the top {playoffTeams} seeds play for the title in weeks {playoffWeeks[0]}-{playoffWeeks.at(-1)}
         {byes > 0 && `, and the top ${byes} skip${byes === 1 ? 's' : ''} the first round`}.{' '}

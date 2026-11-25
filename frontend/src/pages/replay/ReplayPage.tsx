@@ -20,11 +20,15 @@ export function ReplayPage({ query }: { query: Query }) {
   return hasGame ? null : <ReplayHome />;
 }
 
-/** #/play?game=ID&view=team|matchup|players|trades|league: the game screen. A bad id goes back to the lobby. */
+/** #/play?game=ID&view=team|matchup|players|trades|league[&week=W&team=T]: the game screen (week and team open that
+ *  game on the Matchup tab). A bad id goes back to the lobby. */
 export function PlayPage({ query }: { query: Query }) {
   const gameId = parsePositiveInt(query.game);
   useEffect(() => {
     if (gameId === null) navigate(paths.replay, {}, { replace: true });
   }, [gameId]);
-  return gameId === null ? null : <GameHub key={gameId} gameId={gameId} view={toView(query.view)} />;
+  const week = parsePositiveInt(query.week);
+  const teamId = parsePositiveInt(query.team);
+  const matchupAt = week !== null && teamId !== null ? { week, teamId } : undefined;
+  return gameId === null ? null : <GameHub key={gameId} gameId={gameId} view={toView(query.view)} matchupAt={matchupAt} />;
 }

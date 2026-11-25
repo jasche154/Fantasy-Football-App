@@ -51,6 +51,14 @@ export interface ReplayViewProps {
   isBusy: boolean;
   actError: string | null;
   openPlayer: (playerId: number) => void;
+  /** A game named in the URL (#/play?...&view=matchup&week=W&team=T): the Matchup tab opens on it. */
+  matchupAt?: MatchupAt;
+}
+
+/** One league game: a week and either of its teams. */
+export interface MatchupAt {
+  week: number;
+  teamId: number;
 }
 
 // ---------------- tabs and the URL ----------------
@@ -66,8 +74,8 @@ export const REPLAY_VIEWS: readonly { value: ReplayView; label: string }[] = [
 ];
 
 /** The game screen's URL for a tab (#/play?game=ID&view=...). */
-export function viewHash(gameId: number, view: ReplayView): string {
-  return buildHash(paths.play, { game: gameId, view });
+export function viewHash(gameId: number, view: ReplayView, at?: MatchupAt): string {
+  return buildHash(paths.play, at ? { game: gameId, view, week: at.week, team: at.teamId } : { game: gameId, view });
 }
 
 // ---------------- formatting ----------------

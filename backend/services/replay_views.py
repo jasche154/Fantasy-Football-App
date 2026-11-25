@@ -68,6 +68,8 @@ Shared pieces
   Verdict    {accepted, reasons: string[], fair_label, value_give, value_get, percent, your_gain, their_gain,
               give: [{player: PlayerRef, value}], get: [same], your_drops: PlayerRef[], their_drops: PlayerRef[],
               suggestion: string | null}
+      value_give / value_get and each player's value are chart numbers (1 decimal); the UI shows them as whole
+      numbers, rounded half up like PlayerRow.value (`whole`), so a player reads the same on every screen.
       "give" is always what the USER sends. percent: (get - give) / the larger, a fraction; above 0 the
       user gets more. fair_label: fair | slight_win | big_win | slight_loss | big_loss (for the user).
       your_gain / their_gain: season-weighted lineup points each side gains.
@@ -184,6 +186,7 @@ GET  .../trades                   {open, deadline_week, max_players, offers: [Of
       offers: CPU offers the user can answer, each with a preview Verdict from the user's side (or null
       and a note saying why it cannot be accepted as is). results: every other offer and trade, newest first.
 """
+import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from functools import cached_property
@@ -320,6 +323,11 @@ def result_of(state: State, week: int) -> WeekResult | None:
     return next((result for result in state.results if result.week == week), None)
 
 
+def whole(chart: float) -> int:
+    """A chart value as shown: half up, as the browser rounds a verdict's values (round() would send 512.5 as 512)."""
+    return math.floor(chart + 0.5)
+
+
 def player_row(game: Game, know: Knowledge, player_id: int) -> dict:
     """A PlayerRow as of `know.week`."""
     value, week = know.by_id[player_id], know.week
@@ -328,7 +336,7 @@ def player_row(game: Game, know: Knowledge, player_id: int) -> dict:
     bye = bool(week) and value.team is not None and opponent is None
     return {"player": player_ref(value), "opponent": "BYE" if bye else opponent, "bye": bye, "out": value.out,
             "projection": round(value.projection, 2), "points": points, "ros_ppg": value.ros_ppg,
-            "value": round(value.chart), "rank": value.rank, "pos_rank": value.pos_rank, "adp": value.adp,
+            "value": whole(value.chart), "rank": value.rank, "pos_rank": value.pos_rank, "adp": value.adp,
             "pre_rank": value.pre_rank, "expert_rank": value.expert_rank, "news": news(value),
             "buzz": buzz(game, player_id, week), "games": value.games, "ppg": value.ppg,
             "defense": replay_defense.ratings(game.full_season.as_of(week)).rating(opponent, value.position),

@@ -24,7 +24,7 @@ def simulated(data):
 
 def _rows(season, week_test):
     return {name: {k: v for k, v in getattr(season, name).items() if week_test(k[1])}
-            for name in ("actual", "projected", "box", "usage", "injuries", "expert_ranks", "notes")}
+            for name in ("actual", "projected", "box", "usage", "injuries", "expert_ranks", "notes", "scores")}
 
 
 def test_real_weeks_are_copied_through_untouched(data, simulated):
@@ -41,6 +41,8 @@ def test_every_simulated_week_is_filled(data, simulated):
         playing = {t for g in data.schedule.games if g.week == week for t in (g.home_team, g.away_team)}
         dst = {pid for (pid, w) in simulated.actual if w == week and simulated.players[pid].position == "DST"}
         assert len(dst) == len(playing)
+        assert {t for t, w in simulated.scores if w == week} == playing      # each game's final score is kept
+        assert all(type(v) is int and v >= 0 for k, v in simulated.scores.items() if k[1] == week)
         assert any(w == week for _, w in simulated.projected)
         assert any(w == week for _, w in simulated.expert_ranks) and week in simulated.expert_age
         skill = [k for k in simulated.actual if k[1] == week and simulated.players[k[0]].position in replay_pool.SKILL]
@@ -94,12 +96,12 @@ def test_what_the_public_sees_before_a_week_does_not_depend_on_that_week_or_late
     changed = sim_season.simulate(data, SEED, FROM)
     known = lambda s, w: replay_pool._as_of.__wrapped__(s, w)   # noqa: E731
     before, after = known(simulated, week), known(changed, week)
-    for name in ("actual", "projected", "box", "usage", "injuries", "expert_ranks", "notes", "expert_age"):
+    for name in ("actual", "projected", "box", "usage", "injuries", "expert_ranks", "notes", "expert_age", "scores"):
         assert getattr(before, name) == getattr(after, name), name
     assert _rows(changed, lambda w: w >= week)["actual"] != _rows(simulated, lambda w: w >= week)["actual"]
 
 
-PUBLIC = ("actual", "projected", "box", "usage", "injuries", "expert_ranks", "notes", "expert_age")
+PUBLIC = ("actual", "projected", "box", "usage", "injuries", "expert_ranks", "notes", "expert_age", "scores")
 
 
 def _rerolled(monkeypatch, streams) -> None:

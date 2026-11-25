@@ -55,13 +55,14 @@ def test_every_field_round_trips_exactly():
 
     assert_same(data, back)
     assert all(len(getattr(back, name)) for name in ("players", "actual", "projected", "team_by_week", "injuries",
-                                                     "usage", "box", "expert_ranks", "expert_age", "returns", "notes"))
+                                                     "usage", "box", "expert_ranks", "expert_age", "returns", "notes",
+                                                     "scores"))
     assert_same(DATA.as_of(5), replay_blob.loads(replay_blob.dumps(DATA.as_of(5))))      # known_before kept
 
 
 def test_an_old_save_reads_with_defaults_and_a_newer_one_is_refused():
     payload = json.loads(zlib.decompress(replay_blob.dumps(_rich(DATA))))
-    for name in ("notes", "rules"):
+    for name in ("notes", "rules", "scores"):
         del payload[name]                              # saved before these fields existed
     del payload["box"]["v"]["rec_td"]                  # ... and before this column did
     payload["players"]["v"]["retired_field"] = [0] * len(payload["players"]["k"])     # since removed
@@ -69,7 +70,7 @@ def test_an_old_save_reads_with_defaults_and_a_newer_one_is_refused():
 
     old = replay_blob.loads(zlib.compress(json.dumps(payload).encode()))
 
-    assert old.notes == {} and old.rules is None and old.actual == DATA.actual and old.usage == DATA.usage
+    assert old.notes == {} and old.rules is None and old.scores == {} and old.actual == DATA.actual and old.usage == DATA.usage
     assert {key: replace(box, rec_td=0) for key, box in DATA.box.items()} == old.box
     with pytest.raises(TypeError):                     # Usage.target_share has no default: an unreadable save...
         replay_blob._records({"snap_pct": [1.0]}, fakes.Usage, 1)

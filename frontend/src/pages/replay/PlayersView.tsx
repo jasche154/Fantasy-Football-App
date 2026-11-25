@@ -85,12 +85,13 @@ export function PlayersView({ game, version, act, isBusy, openPlayer }: ReplayVi
   const [view, setView] = useState<StatsView>('box');
   const [search, setSearch] = useState('');
   const query = useDebouncedValue(search.trim(), SEARCH_DELAY_MS);
+  const sentStatus = query ? 'all' : status;           // a name searches every player; clearing it restores Show
   // A week past the current one can't be asked for (a new game after a reload): fall back to the season.
   const shown = stats.span === 'week' && (stats.week ?? 0) > game.week ? SEASON_STATS : stats;
   const columns = statColumns(shown.span, shown.week, tab, view);
   const sort = visibleSort(chosenSort, columns);       // a hidden column never sorts the table
   if (sort !== chosenSort) setSort(sort);              // ...nor comes back when its column does
-  const filterKey = [tab, status, sort.key, sort.direction, shown.span, shown.week, query].join('|');
+  const filterKey = [tab, sentStatus, sort.key, sort.direction, shown.span, shown.week, query].join('|');
   const [page, setPage] = useState({ filterKey, offset: 0 });
   const offset = page.filterKey === filterKey ? page.offset : 0;      // a new filter starts on its first page
   const [target, setTarget] = useState<DropTarget | null>(null);
@@ -103,7 +104,7 @@ export function PlayersView({ game, version, act, isBusy, openPlayer }: ReplayVi
   const showClaims = game.phase === 'waivers' || game.pending.claims > 0 || (isFaab && game.phase !== 'draft');
   const players = useAsync(
     (signal) => getReplayPlayers(game.id, {
-      position: positionParam(tab), search: query, status, sort: sort.key, dir: sort.direction, stats: shown.span,
+      position: positionParam(tab), search: query, status: sentStatus, sort: sort.key, dir: sort.direction, stats: shown.span,
       stat_week: shown.week ?? undefined, limit: PAGE_SIZE, offset,
     }, signal).then((data) => ({ ...data, shown, tab })),  // headers come from their rows' span, never over a stale page
     [game.id, version, filterKey, offset],

@@ -266,6 +266,9 @@ def _season(season: int, scoring: str, seed: int, weeks: int) -> SeasonData:
     injuries = {key: tag for key, tag in _story_tags(weeks).items() if key[1] <= weeks and key[0] in players}
     ranks = _expert_ranks([spec for spec in specs if spec.player_id in players], players, projected, weeks,
                           np.random.default_rng([season, seed, 99]))     # own stream: the rest stays as it was
+    points = np.random.default_rng([season, seed, 98]).integers(3, 42, (len(schedule.games), 2))   # own stream too
+    scores = {(team, g.week): int(score) for g, pair in zip(schedule.games, points, strict=True)
+              for team, score in ((g.home_team, pair[0]), (g.away_team, pair[1]))}
     return SeasonData(season=season, scoring=scoring, players=MappingProxyType(players), schedule=schedule,
                       actual=MappingProxyType(actual), projected=MappingProxyType(projected),
                       team_by_week=MappingProxyType(team_by_week), last_week=weeks,
@@ -273,7 +276,8 @@ def _season(season: int, scoring: str, seed: int, weeks: int) -> SeasonData:
                       box=MappingProxyType(box), expert_ranks=MappingProxyType(ranks),
                       expert_age=MappingProxyType({0: EXPERT_AGE["pre"],
                                                    **dict.fromkeys(range(1, weeks + 1), EXPERT_AGE["ros"])}),
-                      returns=MappingProxyType(hard_tag_returns(injuries, actual, weeks)))
+                      returns=MappingProxyType(hard_tag_returns(injuries, actual, weeks)),
+                      scores=MappingProxyType(scores))
 
 
 def _expert_ranks(specs: list[_Spec], players: Mapping[int, PoolPlayer], projected: Mapping[tuple[int, int], float],
@@ -388,9 +392,10 @@ def future_changed(data: SeasonData, after_week: int, seed: int = 1) -> SeasonDa
     changed = patched(data, projected=shaken(data.projected, 0.1), actual=shaken(data.actual, 0.0))
     ranks = {(pid, week): rank if week <= after_week else rank + 1 + int(rng.integers(0, 60))   # always worse than before
              for (pid, week), rank in data.expert_ranks.items()}
+    scores = {key: points + 7 if key[1] > after_week else points for key, points in data.scores.items()}
     # returns stay the original's on purpose: they are the one sanctioned leak (see returns_changed)
     return tagged(replace(changed, usage=MappingProxyType(usage), box=MappingProxyType(box),
-                          expert_ranks=MappingProxyType(ranks)), tags)
+                          expert_ranks=MappingProxyType(ranks), scores=MappingProxyType(scores)), tags)
 
 
 def returns_changed(data: SeasonData) -> SeasonData:
@@ -413,10 +418,11 @@ def _player_rows(data: SeasonData) -> list[dict]:
     return rows
 
 
-def _game_rows(data: SeasonData) -> list[dict]:
+def _game_rows(data: SeasonData, scores: bool = False) -> list[dict]:
     return [{"game_id": f"{data.season}_{g.week:02d}_{g.away_team}_{g.home_team}", "season": data.season,
              "week": g.week, "game_type": "REG", "home_team": g.home_team, "away_team": g.away_team,
-             "gameday": g.gameday} for g in data.schedule.games]
+             "gameday": g.gameday, "home_score": data.scores.get((g.home_team, g.week)) if scores else None,
+             "away_score": data.scores.get((g.away_team, g.week)) if scores else None} for g in data.schedule.games]
 
 
 def _expert_rows(data: SeasonData) -> list[dict]:
@@ -495,13 +501,14 @@ def _projection_rows(data: SeasonData) -> list[dict]:
     return rows
 
 
-def seed_db(session: Session, data: SeasonData) -> None:
+def seed_db(session: Session, data: SeasonData, scores: bool = False) -> None:
     """Write the season into the real tables (players keep their fake ids) and commit.
 
     Afterwards `replay_pool.load_season_data(session, data.season, data.scoring)` returns the same pool,
-    points, usage, projections, injury tags, expert ranks, returns, teams and schedule. K and DST points must be whole numbers (DST -4
+    points, usage, projections, injury tags, expert ranks, returns, teams and schedule, and with `scores` the
+    final scores (off by default: the live-season tests decide which weeks are final by writing scores). K and DST points must be whole numbers (DST -4
     or more)."""
-    tables = {Player: _player_rows(data), NflGame: _game_rows(data), **_result_rows(data),
+    tables = {Player: _player_rows(data), NflGame: _game_rows(data, scores), **_result_rows(data),
               ReplayAdp: [{"season": data.season, "player_id": pid, "adp": p.adp, "stdev": p.adp_stdev,
                            "source": "ffc", "team": p.adp_team}
                           for pid, p in data.players.items() if p.adp is not None],

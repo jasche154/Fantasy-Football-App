@@ -102,6 +102,35 @@ describe('LeagueView standings', () => {
     renderLeague([{ path: `${PATH}/standings`, reply: json({ detail: 'Season data is not prepared.' }, 503) }]);
     expect(await screen.findByRole('alert')).toHaveTextContent('Season data is not prepared.');
   });
+
+  it('sorts by points for and against, and Seed goes back to the standings order', async () => {
+    const base = standings();
+    const pf = [500, 300, 700, 400, 600, 200, 100, 650, 350, 450, 550, 250];
+    const results = base.results.map((row, index) => ({ ...row, points_for: pf[index], points_against: 1000 - pf[index] }));
+    const { user } = renderLeague([{ path: `${PATH}/standings`, reply: json({ ...base, results }) }]);
+    const table = await screen.findByRole('table', { name: 'League standings' });
+    const seeds = () => within(table).getAllByRole('row').slice(1).map((row) => within(row).getAllByRole('cell')[0].textContent);
+    const header = (name: string) => within(table).getByRole('columnheader', { name });
+
+    expect(header('Seed')).toHaveAttribute('aria-sort', 'ascending');
+    await user.click(within(header('PF')).getByRole('button'));
+    expect(seeds()).toEqual(['3', '8', '5', '11', '1', '10', '4', '9', '2', '12', '6', '7']);
+    expect(header('PF')).toHaveAttribute('aria-sort', 'descending');
+    expect(header('Seed')).toHaveAttribute('aria-sort', 'none');
+    expect(table.querySelector('.replay-standings__cut')).toBeNull();          // the cut means nothing out of order
+    expect(screen.getByText(/Sorted by points for\. Select Seed to go back/)).toBeInTheDocument();
+
+    await user.click(within(header('PF')).getByRole('button'));
+    expect(seeds()[0]).toBe('7');
+    expect(header('PF')).toHaveAttribute('aria-sort', 'ascending');
+    await user.click(within(header('PA')).getByRole('button'));
+    expect(seeds()[0]).toBe('7');                                              // most points against
+
+    await user.click(within(header('Seed')).getByRole('button'));
+    expect(seeds()).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']);
+    expect(within(table).getByRole('row', { name: /Your Team/ })).toHaveClass('replay-standings__cut');
+    expect(screen.queryByText(/Sorted by/)).not.toBeInTheDocument();
+  });
 });
 
 describe('LeagueView schedule', () => {
