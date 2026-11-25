@@ -1,0 +1,119 @@
+{
+ "seasons": [
+  2019,
+  2020,
+  2021,
+  2022,
+  2023,
+  2024,
+  2025
+ ],
+ "hazard": {
+  "intercept": -12.5464,
+  "market": 2.6043,
+  "form": -0.2839,
+  "record": -0.8326,
+  "n": 2503,
+  "lost": 31
+ },
+ "return": {
+  "intercept": -7.0705,
+  "market": 1.7473,
+  "n": 93,
+  "lost": 14
+ },
+ "established": -6.4715,
+ "established_rank": 12,
+ "elevated": 0.0194,
+ "prior": {
+  "intercept": -4.1005,
+  "points": 0.4951,
+  "n": 532
+ },
+ "validation": {
+  "none": {
+   "log_loss": 0.06707,
+   "auc": 0.3901
+  },
+  "market": {
+   "log_loss": 0.05664,
+   "auc": 0.8477
+  },
+  "model": {
+   "log_loss": 0.05549,
+   "auc": 0.8529
+  },
+  "model + starts": {
+   "log_loss": 0.05501,
+   "auc": 0.8622,
+   "coefficient": 0.2502
+  },
+  "model + points": {
+   "log_loss": 0.05609,
+   "auc": 0.8473,
+   "coefficient": 0.0035
+  },
+  "model + pick": {
+   "log_loss": 0.05631,
+   "auc": 0.8449,
+   "coefficient": 0.121
+  },
+  "model + years": {
+   "log_loss": 0.05557,
+   "auc": 0.8545,
+   "coefficient": 0.0321
+  },
+  "model + expert": {
+   "log_loss": 0.05608,
+   "auc": 0.8447,
+   "coefficient": 0.7648
+  }
+ },
+ "losers": [
+  "2020 wk14 PHI Carson Wentz (rank 12, week)",
+  "2022 wk16 IND Matt Ryan (rank 17, week)",
+  "2025 wk7 NYJ Justin Fields (rank 17, week)",
+  "2024 wk16 ATL Kirk Cousins (rank 19, week)",
+  "2020 wk13 JAX Gardner Minshew (rank 20, return)",
+  "2020 wk5 SF Jimmy Garoppolo (rank 21, return)",
+  "2022 wk7 NO Jameis Winston (rank 21, return)",
+  "2024 wk10 PIT Justin Fields (rank 21, return)",
+  "2025 wk16 MIA Tua Tagovailoa (rank 21, week)",
+  "2023 wk8 PIT Kenny Pickett (rank 24, week)",
+  "2022 wk15 WAS Carson Wentz (rank 27, return)",
+  "2019 wk7 TEN Marcus Mariota (rank 28, week)",
+  "2021 wk5 NYG Daniel Jones (rank 29, week)",
+  "2022 wk12 NYJ Zach Wilson (rank 29, week)",
+  "2020 wk12 LAC Tyrod Taylor (rank 30, return)",
+  "2020 wk5 WAS Dwayne Haskins (rank 31, week)",
+  "2023 wk9 LV Jimmy Garoppolo (rank 31, week)",
+  "2025 wk4 NYG Russell Wilson (rank 31, week)",
+  "2019 wk3 NYG Eli Manning (rank 32, week)",
+  "2023 wk13 NE Mac Jones (rank 32, week)",
+  "2020 wk8 MIA Ryan Fitzpatrick (rank 33, week)",
+  "2022 wk5 PIT Mitchell Trubisky (rank 33, week)",
+  "2023 wk11 TEN Ryan Tannehill (rank 33, return)",
+  "2024 wk12 NYG Daniel Jones (rank 33, week)",
+  "2020 wk3 CHI Mitchell Trubisky (rank 34, week)",
+  "2025 wk8 NO Spencer Rattler (rank 34, week)",
+  "2019 wk11 WAS Case Keenum (rank 35, return)",
+  "2020 wk14 CHI Nick Foles (rank 35, return)",
+  "2021 wk13 HOU Tyrod Taylor (rank 35, week)",
+  "2022 wk13 CLE Jacoby Brissett (rank 35, week)",
+  "2023 wk16 ATL Desmond Ridder (rank 35, week)",
+  "2024 wk5 LV Gardner Minshew (rank 35, week)",
+  "2021 wk5 CHI Andy Dalton (rank 37, return)",
+  "2024 wk6 NE Jacoby Brissett (rank 37, week)",
+  "2025 wk13 CLE Dillon Gabriel (rank 39, return)",
+  "2020 wk6 SF C.J. Beathard (rank 40, week)",
+  "2021 wk6 NYG Mike Glennon (rank 40, week)",
+  "2022 wk14 CAR PJ Walker (rank 40, return)",
+  "2022 wk4 NYJ Joe Flacco (rank 40, week)",
+  "2023 wk10 ARI Clayton Tune (rank 40, week)",
+  "2023 wk12 NYJ Zach Wilson (rank 40, week)",
+  "2023 wk14 NYJ Tim Boyle (rank 40, week)",
+  "2023 wk9 PIT Mitchell Trubisky (rank 40, week)",
+  "2024 wk14 NYG Tommy DeVito (rank 40, return)",
+  "2025 wk10 NYJ Tyrod Taylor (rank 40, return)"
+ ]
+}

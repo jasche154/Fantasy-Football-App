@@ -16,6 +16,9 @@
   with its leaderboard, weekly, rookies, how our ADP agrees with S's real ADP, all of it and the rookies':
   ours priced in the real list's format, PPR; and how the preseason experts agree with the ADP).
   mid reports the leaderboard of the simulated weeks too.
+- both modes report who holds the QB jobs (sim_qb.job_metrics: healthy job losses, those of a top-12 QB, the
+  share of injured starters who start again when healthy; mid: from MID_WEEK on) and mid how often week
+  MID_WEEK's simulated starter is the QB who really started it (sim_qb.same_starters).
 - both modes report injuries (sim_metrics.injuries: new injuries per game played, missed share, by position)
   against the real rate and the target, real x sim_injuries.INJURY_SCALE (simulated seasons have fewer on purpose).
 - --set overrides a sim_params.json value for this run (section.key=value, JSON value); --save-tuned writes
@@ -41,8 +44,8 @@ from dataclasses import replace
 from functools import partial
 from pathlib import Path
 
-from services import (replay_pool, sim_carryover, sim_depth, sim_fit, sim_injuries, sim_market, sim_metrics, sim_season,
-                      sim_setup, sim_world)
+from services import (replay_pool, sim_carryover, sim_depth, sim_fit, sim_injuries, sim_market, sim_metrics, sim_qb,
+                      sim_season, sim_setup, sim_world)
 from services.replay_adp_format import TWO_QB
 from services.replay_pool import SeasonData
 from services.sim_world import World
@@ -154,8 +157,13 @@ def _mid(session, season: int, seeds: list[int]) -> tuple[dict, dict]:
     weeks = range(MID_WEEK, real.last_week + 1)
     base = cut(real, MID_WEEK)
     rookies = [pid for pid, first in sim_setup.first_seasons(session).items() if first == season]
-    sims = [_rest(sim_season.simulate(base, seed, MID_WEEK, rookies=rookies), weeks) for seed in seeds]
-    return _rest(real, weeks), _mean(sims)
+    sims = [_mid_sim(sim_season.simulate(base, seed, MID_WEEK, rookies=rookies), real, weeks) for seed in seeds]
+    return _mid_sim(real, real, weeks), _mean(sims)
+
+
+def _mid_sim(data: SeasonData, real: SeasonData, weeks: range) -> dict[str, float]:
+    """_rest plus who holds the QB jobs (sim_qb.job_metrics) and how often week MID_WEEK's starter is the real one."""
+    return {**_rest(data, weeks), **sim_qb.job_metrics(data, MID_WEEK), **sim_qb.same_starters(data, real, MID_WEEK)}
 
 
 def _rest(data: SeasonData, weeks: range) -> dict[str, float]:
@@ -166,7 +174,7 @@ def _whole(data: SeasonData, rookies: set[int], real: SeasonData) -> dict[str, f
     weeks = range(1, data.last_week + 1)
     return {**sim_metrics.season(data), **sim_metrics.rookies(data, rookies),
             **sim_metrics.adp_agreement(data, real, rookies), **sim_metrics.expert_agreement(data),
-            **sim_metrics.weekly(data, weeks), **sim_depth.metrics(data)}
+            **sim_metrics.weekly(data, weeks), **sim_depth.metrics(data), **sim_qb.job_metrics(data)}
 
 
 def _full(session, season: int, seeds: list[int], offseason: dict) -> tuple[dict, dict]:
