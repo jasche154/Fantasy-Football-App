@@ -17,7 +17,7 @@ import { TeamView } from './TeamView';
 import { TradesView } from './TradesView';
 import { GameNav } from './GameNav';
 import { Scorebug } from './Scorebug';
-import { groupEvents, ordinal, REPLAY_VIEWS, type ReplayView, type ReplayViewProps } from './shared';
+import { groupEvents, ordinal, REPLAY_VIEWS, viewHash, type ReplayView, type ReplayViewProps } from './shared';
 import { useGame } from './useGame';
 
 const VIEWS: Record<ReplayView, (props: ReplayViewProps) => ReactNode> = {
@@ -35,6 +35,18 @@ function announce(game: ReplaySummary, events: readonly ReplayEvent[]): string {
   const draftDone = game.phase !== 'draft' && events.some((item) => item.kind === 'draft') ? 'The draft is complete. ' : '';
   const more = events.length > 1 ? ` ${pluralize(events.length - 1, 'more update')} under “What just happened”.` : '';
   return `${draftDone}${lead.text}.${more}`;
+}
+
+/** Pending CPU offers lapse when the week is played: say so before the user presses Play week. */
+function ExpiringOffers({ game }: { game: ReplaySummary }) {
+  const count = game.pending.offers;
+  if (game.next_action.step !== 'play' || count === 0) return null;
+  return (
+    <p className="replay-alert">
+      {pluralize(count, 'trade offer')} {count === 1 ? 'is' : 'are'} waiting for you and {count === 1 ? 'expires' : 'expire'} when
+      you play week {game.week}. <a href={viewHash(game.id, 'trades')}>Answer {count === 1 ? 'it' : 'them'}</a>
+    </p>
+  );
 }
 
 function ChampionBanner({ game }: { game: ReplaySummary }) {
@@ -112,6 +124,7 @@ export function GameHub({ gameId, view }: GameHubProps) {
       </header>
       <main id="main-content" className="game-body game-main" tabIndex={-1}>
         <ChampionBanner game={game} />
+        <ExpiringOffers game={game} />
         {actError && <p className="error-text replay-alert" role="alert">{actError}</p>}
         <p className="sr-only" role="status">{announce(game, events)}</p>
         {events.length > 0 && <EventsPanel key={events[0].id} events={events} onDismiss={dismissEvents} />}

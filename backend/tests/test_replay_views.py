@@ -616,15 +616,17 @@ def _on_ir(state: rs.State, player_id: int) -> rs.State:
                                        ir=(player_id,)))
 
 
-def test_the_draft_room_never_shows_a_tag_even_one_known_in_week_one():
+def test_the_draft_room_shows_only_preseason_tags_never_a_game_week_one():
     drafted = [pick.player_id for pick in at(1).picks[:30]]
-    hurt = fakes.tagged(DATA, {(pid, 1): fakes.Injury("IR", None, "Knee") for pid in drafted})
+    hurt = fakes.tagged(DATA, {(pid, 1): fakes.Injury("O", None, "Knee") for pid in drafted[1:]}
+                        | {(drafted[0], 1): fakes.Injury("IR", None, "Knee")})
 
     during, after = views.draft(game(drafting(), hurt), limit=views.MAX_PAGE), views.draft(game(at(1), hurt))
 
     assert len(_refs(during)) > 100 and len(_refs(after)) >= 180
-    assert all(ref["injury"] is None for ref in _refs(during) + _refs(after))
-    assert any(ref["injury"] == {"tag": "IR", "practice": None, "injury": "Knee"}
+    assert all(ref["injury"] is None for ref in _refs(during) + _refs(after) if ref["id"] != drafted[0])
+    assert {ref["injury"]["tag"] for ref in _refs(during) + _refs(after) if ref["id"] == drafted[0]} == {"IR"}
+    assert any(ref["injury"] == {"tag": "O", "practice": None, "injury": "Knee"}
                for team in at(1).teams for ref in _refs(views.team(game(at(1), hurt), team.id)))   # week 1: shown
 
 

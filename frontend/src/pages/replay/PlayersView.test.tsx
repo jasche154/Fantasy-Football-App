@@ -93,7 +93,7 @@ describe('PlayersView table', () => {
     renderPlayers(summary(), [{ path: PLAYERS, reply: json(wire([wireRow(MOSTERT, { games: 0, ppg: 0, line: statLine({ games: 0, points: 0 }) })])) }]);
     const cells = (await row('Raheem Mostert')).getAllByRole('cell').map((cell) => cell.textContent);
     // Opp, Pts, PPG, GP, ROS, seven box columns (no box yet), Value.
-    expect(cells.slice(2, 15)).toEqual(['DEN', '0.00', '—', '0', '13.80', '—', '—', '—', '—', '—', '—', '—', '31.5']);
+    expect(cells.slice(2, 15)).toEqual(['DEN', '0.00', '—', '0', '13.80', '—', '—', '—', '—', '—', '—', '—', '32']);
   });
 
   it('shows the box columns that fit the position, and the matchup in words as well as colour', async () => {
@@ -334,7 +334,7 @@ describe('PlayersView adding a free agent', () => {
     expect(within(dialog).getByRole('button', { name: 'Close' })).toHaveFocus();
     const choices = within(await within(dialog).findByRole('group', { name: 'Drop who?' })).getAllByRole('radio');
     expect(choices).toHaveLength(11);
-    expect(choices[0]).toHaveAccessibleName(/Chris Olave.*Value 5\.0/);
+    expect(choices[0]).toHaveAccessibleName(/Chris Olave.*Value 5(?![.\d])/);
     expect(choices[1]).toHaveAccessibleName(/James Cook/);
     expect(within(dialog).getByText(/Your roster is full \(11 players\)/)).toBeInTheDocument();
     expect(within(dialog).queryByRole('radio', { name: /Don't drop anyone/ })).not.toBeInTheDocument();

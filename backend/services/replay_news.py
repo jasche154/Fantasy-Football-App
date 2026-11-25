@@ -11,6 +11,9 @@ Pure: no database, no Knowledge.
 - A real absence of FALSE_SEASON_GAP or more weeks: FALSE_SEASON_ODDS of first reading "out for the season",
   corrected CORRECTION_LEAD weeks before he really returns.
 - Truly season-ending: FAKE_RETURN_ODDS of first naming a return 4-8 weeks out, revised after 1-3 weeks.
+- Only a SEASON_TAGS tag (IR, PUP) ever reads "out for the season". A plain O tag is week-to-week news: a
+  truly season-ending absence names a return 4-8 weeks out, then always the next week, until he is moved to
+  IR (as Cam Newton in 2019: O from week 3, IR in week 10), so "out for the season" on an O tag is no tell.
 """
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
@@ -29,6 +32,7 @@ CORRECTION_LEAD = 2
 FAKE_RETURN_ODDS = 0.35
 FAKE_RETURN_WEEKS = (4, 8)                 # inclusive: how far out a wrong first report puts the return
 FAKE_REVISED_AFTER = (1, 3)                # inclusive: weeks until that is revised to out for the season
+SEASON_TAGS = ("IR", "PUP")                # the only tags a report calls season-ending
 
 
 @dataclass(frozen=True)
@@ -58,11 +62,14 @@ def report(seed: int, player_id: int, since: int, true_return: int, week: int, t
     fake_weeks = int(rng.integers(FAKE_RETURN_WEEKS[0], FAKE_RETURN_WEEKS[1] + 1))
     revised_after = int(rng.integers(FAKE_REVISED_AFTER[0], FAKE_REVISED_AFTER[1] + 1))
 
+    long_tag = tag in SEASON_TAGS
     if tag == "SUS":
         back = true_return or None
     elif not true_return:
-        back = since + fake_weeks if fake_return and week < since + revised_after else None
-    elif false_season and true_return - since >= FALSE_SEASON_GAP and week < true_return - CORRECTION_LEAD:
+        hopeful = not long_tag or (fake_return and week < since + revised_after)
+        back = since + fake_weeks if hopeful else None
+    elif (false_season and long_tag and true_return - since >= FALSE_SEASON_GAP
+          and week < true_return - CORRECTION_LEAD):
         back = None
     else:
         left = max(0, true_return - week) / max(1, true_return - since)

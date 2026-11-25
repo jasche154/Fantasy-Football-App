@@ -38,7 +38,7 @@ describe('TeamView roster', () => {
     expect(rows.slice(1).map((row) => row.firstElementChild?.textContent))
       .toEqual(['QB', 'RB', 'RB', 'WR', 'WR', 'TE', 'FLEX', 'K', 'DST', 'Starters total', 'BN', 'BN', 'IR']);
     const mahomes = within(rowOf('Patrick Mahomes')).getAllByRole('cell').map((cell) => cell.textContent);
-    expect(mahomes.slice(2, 8)).toEqual(['MIN', '21.30', '—', '15.10', '13.80', '31.5']);
+    expect(mahomes.slice(2, 8)).toEqual(['MIN', '21.30', '—', '15.10', '13.80', '32']);
     expect(rowOf('Starters total')).toHaveTextContent('Starters total118.40—');
     expect(rowOf('James Cook')).toHaveTextContent('BYE');
     expect(within(rowOf('Chris Olave')).getByText('Out')).toBeInTheDocument();

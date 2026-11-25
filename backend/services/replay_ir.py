@@ -27,9 +27,10 @@ def _names(know: Knowledge, player_ids) -> str:
 
 
 def eligible(know: Knowledge, player_id: int) -> bool:
-    """His tag this week is O, IR or PUP (no projection alone never qualifies)."""
+    """His tag this week is O, IR or PUP (no projection alone never qualifies). Never at the draft (week 0),
+    whose preseason tags are shown but IR slots open with week 1."""
     value = know.by_id.get(player_id)
-    return value is not None and value.injury is not None and value.injury.tag in IR_TAGS
+    return know.week >= 1 and value is not None and value.injury is not None and value.injury.tag in IR_TAGS
 
 
 def ineligible(state: State, know: Knowledge, team_id: int) -> tuple[int, ...]:
@@ -103,7 +104,7 @@ def activate(state: State, settings: Settings, know: Knowledge, team_id: int, pl
     if len(team.roster) - (drop is not None) >= settings.roster_size:
         raise ValueError(f"The roster is full ({settings.roster_size} players): pick a player to drop to activate {name}.")
     if drop is not None:
-        state = rs.release(state, settings, team_id, drop, _name(know, drop))
+        state = rs.release(state, settings, team_id, drop, log=False)     # one event for the move, below
         team = rs.team(state, team_id)
     moved = replace(team, roster=(*team.roster, player_id), ir=tuple(pid for pid in team.ir if pid != player_id))
     text = f"{team.name} activated {name} from IR" + (f", dropping {_name(know, drop)}" if drop is not None else "")

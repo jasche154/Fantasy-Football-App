@@ -99,7 +99,8 @@ export function StartChoice({ live, value, onChange }: StartChoiceProps) {
       text: `Weeks 1-${live.through} replay the real results, then the season turns simulated.` },
     { value: 'now', title: `Jump in now (draft today, play week ${next} on)`, disabled: !live.can_start_now,
       text: live.can_start_now
-        ? `Draft on today’s market, knowing everything through week ${live.through}.`
+        ? `Draft on today’s market, knowing everything through week ${live.through}. Week ${next}’s injury tags and expert `
+          + 'ranks are already simulated, so they can differ from the real ones on the dashboard.'
         : `Not available: ${live.reason ?? `too few regular-season weeks are left after week ${live.through}.`}` },
   ];
   return <RadioCards legend="Start" options={options} value={live.can_start_now ? value : 'full'} onChange={onChange} />;

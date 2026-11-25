@@ -228,7 +228,8 @@ def games(session: Session = Depends(get_session)) -> dict:
 @router.post("/games")
 def create_game(body: CreateBody, session: Session = Depends(get_session)) -> dict:
     """A new league, drafted up to the user's first pick. Season "random": a seeded choice of a ready one. A live
-    or future season is built from the seed and frozen with the league, in the same transaction."""
+    or future season is built from a server-side seed (_sim_seed) and frozen with the league, in the same
+    transaction."""
     seed = body.seed if body.seed is not None else secrets.randbelow(MAX_SEED + 1)
     with errors():
         starters, scoring, rules = _lineup_and_scoring(body)        # 422 before any season lookup
@@ -240,7 +241,7 @@ def create_game(body: CreateBody, session: Session = Depends(get_session)) -> di
                             scoring_rules=rules, adp_format=replay_adp_format.wanted(scoring, rules, starters),
                             **_window(body, kind, through))
         simulated = settings.sim_from is not None
-        blob, data = (_build(session, settings, seed) if simulated else
+        blob, data = (_build(session, settings, _sim_seed()) if simulated else
                       (None, replay_pool.load_season_data(session, season, scoring, rules, settings.adp_format)))
         state = rg.create_game(settings, data, seed)
         name = (body.name or "").strip() or f"{season} {'Sim' if simulated else 'Replay'}"
@@ -251,6 +252,12 @@ def create_game(body: CreateBody, session: Session = Depends(get_session)) -> di
             replay_blob.remember(session, row.id, data)
         game = _game(row, settings, state, data)
         return {"game": views.summary(game), "events": views.new_events(game, None)}
+
+
+def _sim_seed() -> int:
+    """The simulated future's own seed: server-side randomness, never the client's seed, so a league can't be
+    recreated to scout a future already played (the season is frozen with the league, so it isn't needed again)."""
+    return secrets.randbelow(MAX_SEED + 1)
 
 
 def _build(session: Session, settings: Settings, seed: int) -> tuple[bytes, SeasonData]:

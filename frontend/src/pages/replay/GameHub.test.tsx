@@ -131,6 +131,19 @@ describe('GameHub primary button', () => {
     expect(live).toBeEmptyDOMElement();
   });
 
+  it('warns that offers still waiting expire when the week is played', async () => {
+    renderHub(summary({ pending: { claims: 0, offers: 2 } }));
+    await screen.findByRole('button', { name: 'Play week 5' });
+    expect(screen.getByText(/2 trade offers are waiting for you and expire when you play week 5/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Answer them' })).toHaveAttribute('href', expect.stringContaining('view=trades'));
+  });
+
+  it('has no expiry warning without offers or outside the play step', async () => {
+    renderHub(summary({ phase: 'waivers', next_action: nextAction('wednesday'), pending: { claims: 0, offers: 1 } }));
+    await screen.findByRole('button', { name: 'Sim to Wednesday' });
+    expect(screen.queryByText(/expires when you play/)).not.toBeInTheDocument();
+  });
+
   it('has an empty live region from the start', async () => {
     renderHub(summary());
     await screen.findByRole('button', { name: 'Play week 5' });

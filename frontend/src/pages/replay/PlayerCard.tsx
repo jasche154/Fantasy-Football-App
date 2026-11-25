@@ -1,7 +1,7 @@
 import { useId } from 'react';
 import type { ReplayPlayerDetail, ReplayPlayerWeek, ReplayPosition, ReplayWireRow } from '../../api/types';
 import { Tabs } from '../../components/Tabs';
-import { formatNumber } from '../../lib/format';
+import { formatInteger } from '../../lib/format';
 import { ADVANCED_POSITIONS, PlayerAdvanced } from './PlayerAdvanced';
 import { PlayerGameLog } from './PlayerGameLog';
 import { PlayerUpcoming } from './PlayerUpcoming';
@@ -37,7 +37,7 @@ function Tiles({ row }: { row: ReplayWireRow }) {
     { label: 'Points', value: formatPoints(row.season_points) },
     { label: 'Per game', value: formatPoints(row.ppg) },
     { label: 'Rest of season', value: formatPoints(row.ros_ppg) },
-    { label: 'Trade value', value: formatNumber(row.value) },
+    { label: 'Trade value', value: formatInteger(row.value) },
   ];
   return (
     <dl className="replay-card__tiles">

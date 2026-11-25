@@ -435,6 +435,9 @@ def test_the_draft_is_identical_when_everything_after_the_preseason_is_different
 def test_players_with_adp_are_drafted_on_adp_alone_and_from_the_week_zero_copy():
     settings, data = fakes.fake_settings(draft_slot=3), fakes.fake_season()
     no_week_one = fakes.future_changed(data, after_week=0)      # even week-1 projections changed
+    week_one = {key for key in (*data.injuries, *no_week_one.injuries) if key[1] == 1}
+    no_week_one = fakes.tagged(no_week_one, {key: data.injuries.get(key) for key in week_one})   # but not its
+    # preseason tags (replay_pool.PRESEASON_TAGS), which the draft knows
     start = rd.new_game(settings, 8)
 
     assert play_out(start, settings, no_week_one, 8).picks == drafted(12, 8).picks

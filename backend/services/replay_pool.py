@@ -52,6 +52,7 @@ PlayerWeek = tuple[int, int]                # (player_id, week)
 
 TAGS = ("Q", "D", "O", "IR", "PUP", "SUS")
 HARD_TAGS = ("O", "IR", "PUP", "SUS")       # cannot play this week: forces `out`
+PRESEASON_TAGS = ("IR", "PUP", "SUS")       # a week-1 tag of these is a preseason move: known at the draft
 IR_TAGS = ("O", "IR", "PUP")                # may go on IR (a suspension is not an injury)
 PRACTICE = ("DNP", "LP", "FP")
 
@@ -115,7 +116,8 @@ class SeasonData:
         """A copy holding only what was known before `week` was played (0 = draft time); cached.
 
         Real points and usage for weeks < week, pre-game projections for weeks <= week (week 1's at draft
-        time: the preseason curve is built from them), injury tags for weeks 1..week (none at draft time), and each
+        time: the preseason curve is built from them), injury tags for weeks 1..week (at draft time only week 1's
+        IR, PUP and SUS tags, preseason moves: PRESEASON_TAGS), and each
         player's games before `week`, or else his first game of the season (the `team_at` fallback; an
         accepted limit: wrong only for a drafted player who changed teams before his first game). `players`
         holds only those who existed by then: an ADP, a projection or a real game in those weeks; it only
@@ -156,6 +158,11 @@ class SeasonData:
         return self.actual.get((player_id, week)) or 0.0
 
 
+def _preseason(key: PlayerWeek, tag: Injury, week: int) -> bool:
+    """At draft time (week 0): a week-1 IR, PUP or suspension, placed before the season (Gus Edwards' 2021 ACL)."""
+    return week == 0 and key[1] == 1 and tag.tag in PRESEASON_TAGS
+
+
 @lru_cache(maxsize=256)
 def _as_of(data: SeasonData, week: int) -> SeasonData:
     actual = {key: points for key, points in data.actual.items() if key[1] < week}
@@ -169,7 +176,7 @@ def _as_of(data: SeasonData, week: int) -> SeasonData:
         actual=MappingProxyType({key: v for key, v in actual.items() if key[0] in players}),
         projected=MappingProxyType({key: v for key, v in projected.items() if key[0] in players}),
         injuries=MappingProxyType({key: v for key, v in data.injuries.items()
-                                   if key[1] <= week and key[0] in players}),
+                                   if (key[1] <= week or _preseason(key, v, week)) and key[0] in players}),
         notes=MappingProxyType({key: v for key, v in data.notes.items() if key[1] <= week and key[0] in players}),
         usage=MappingProxyType({key: v for key, v in data.usage.items() if key[1] < week and key[0] in players}),
         box=MappingProxyType({key: v for key, v in data.box.items() if key[1] < week and key[0] in players}),
@@ -417,11 +424,33 @@ def _build(session: Session, season: int, scoring: str, rules: ScoringRules | No
     if unplaced > len(actual) * 0.05:
         log.warning("Replay %s: %d of %d games have no team (schedule and stats team codes may differ)",
                     season, unplaced, len(actual))
-    return SeasonData(season=season, scoring=scoring, players=MappingProxyType(players), schedule=schedule,
+    return _relabel(SeasonData(season=season, scoring=scoring, players=MappingProxyType(players), schedule=schedule,
                       actual=MappingProxyType(actual), projected=MappingProxyType(projected),
                       team_by_week=MappingProxyType(_by_player(teams)), last_week=last_week,
                       injuries=MappingProxyType(injuries), usage=MappingProxyType(usage),
                       expert_ranks=MappingProxyType(expert_ranks), expert_age=MappingProxyType(expert_age),
                       returns=MappingProxyType(hard_tag_returns(injuries, actual, weeks)),
                       box=MappingProxyType(box), rules=rules, adp_format=adp_format,
-                      defense_prior=MappingProxyType(replay_defense.load_prior(session, season, rescored)))
+                      defense_prior=MappingProxyType(replay_defense.load_prior(session, season, rescored))))
+
+
+RELOCATED = (("LV", "OAK", 2020),)      # (nflverse's code for every season, the team's code before, from season)
+
+
+def _relabel(data: SeasonData) -> SeasonData:
+    """Team codes as they were that season: nflverse writes LV for the Raiders in 2018-19 too (OAK then)."""
+    swap = {code: old for code, old, since in RELOCATED if data.season < since}
+    if not swap:
+        return data
+
+    def team(code: str | None) -> str | None:
+        return swap.get(code, code)
+    schedule = Schedule(tuple(replace(g, home_team=team(g.home_team), away_team=team(g.away_team))
+                              for g in data.schedule.games),
+                        {(team(code), week): team(other) for (code, week), other in data.schedule.opponents.items()})
+    return replace(
+        data, schedule=schedule,
+        players=MappingProxyType({pid: replace(p, adp_team=team(p.adp_team)) for pid, p in data.players.items()}),
+        team_by_week=MappingProxyType({pid: tuple((week, team(code)) for week, code in games)
+                                       for pid, games in data.team_by_week.items()}),
+        defense_prior=MappingProxyType({(team(code), position): v for (code, position), v in data.defense_prior.items()}))
