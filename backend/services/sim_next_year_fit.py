@@ -8,9 +8,8 @@ belief at the end of S-2 as its prior when stored, as sim_setup builds a future 
 - rookies (nflverse draft picks of year S, through nflreadpy, joined to the players table by gsis id): their
   role in S as a line in log(pick) per position (targets, carries, a kicker's starts, a QB's chance to start
   week 1), fitted by least squares on every rookie (a never-seen late pick counts as no role), so the mean
-  is right; a position with fewer than MIN_ROOKIES gets its mean. Also rookie QBs' passer quality and how
-  often a top-64 rookie QB who did not start week 1 started a game later (`qb_takeover`, the target for
-  sim_talent's rookie takeover);
+  is right; a position with fewer than MIN_ROOKIES gets its mean. Also rookie QBs' passer quality (a rookie
+  QB's takeover from a weak starter is fitted by sim_qb_fit);
 - veterans with GAMES_MIN games and a relevant role (VOLUME_MIN) this season and NEXT_GAMES_MIN games the next
   (selected on this season only: requiring a relevant role next season too would drop the players who fell
   off and flatten the slope): log volume next season (floored at VOLUME_FLOOR) on log volume this season
@@ -68,7 +67,6 @@ GAMES_MIN = 6
 NEXT_GAMES_MIN = 3
 VOLUME_FLOOR = 0.5                              # opportunities per game: a vanished role counts as this
 MIN_ROOKIES = 30
-TAKEOVER_PICKS = 64
 DRAFT_HISTORY_FROM = 1995
 RAW = {"catch": ("rec", "targets", 20), "ypc": ("rec_yds", "rec", 15), "rec_td": ("rec_td", "rec", 15),
        "ypr": ("rush_yds", "carries", 30), "rush_td": ("rush_td", "carries", 30)}    # numerator, volume, minimum
@@ -169,10 +167,7 @@ def _rookie_fit(rows: list[dict]) -> dict:
         mine = [r for r in rows if r["position"] == position]
         fields = {"QB": ("carries", "week1"), "K": ("starts",)}.get(position, ("targets", "carries"))
         out[position] = {field: _line(mine, field) for field in fields} | {"n": len(mine)}
-    benched = [r for r in rows if r["position"] == "QB" and r["pick"] <= TAKEOVER_PICKS and not r["week1"]]
     played = [r["quality"] for r in rows if r["position"] == "QB" and r["started"] >= 3 and r["quality"]]
-    out["qb_takeover"] = round(sum(1 for r in benched if r["started"]) / max(1, len(benched)), 4)
-    out["qb_takeover_n"] = len(benched)
     out["qb_quality"] = round(float(np.mean(played)), 4) if played else 0.9
     return out
 
