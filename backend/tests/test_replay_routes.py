@@ -282,7 +282,7 @@ def test_a_lopsided_trade_is_declined_with_reasons_and_changes_nothing(story):
     assert any("Value is too far apart" in reason for reason in verdict["reasons"]) and verdict["suggestion"]
     assert verdict["fair_label"] == "big_win" and verdict["value_get"] > 5 * verdict["value_give"]
     assert [row["player"]["id"] for row in verdict["give"]] == story["deal"]["give"]
-    assert set(proposed) == {"game", "events", "verdict", "executed", "counter"} and proposed["verdict"] == verdict
+    assert set(proposed) == {"game", "events", "verdict", "executed", "counter", "reply"} and proposed["verdict"] == verdict
     countered = proposed["counter"]
     assert countered is None or (countered["counter_to"], countered["status"]) == (declined_id(story), "pending")
     assert (proposed["executed"], proposed["events"]) == (False, [])
@@ -296,7 +296,7 @@ def test_cpu_offers_are_previewed_and_answered(story):
 
     assert len(answers) >= 2                                     # this seed's CPUs make offers
     for accept, offer, answer in answers:
-        assert set(answer) == {"game", "events", "accepted", "expired", "message", "verdict"}
+        assert set(answer) == {"game", "events", "accepted", "expired", "message", "verdict", "counter"}
         assert offer["status"] == "pending" and offer["to_team"]["is_user"] and (offer["verdict"] or offer["note"])
         if not accept:
             assert (answer["accepted"], answer["expired"], answer["events"]) == (False, False, [])
@@ -316,7 +316,7 @@ def test_a_cpu_offer_can_be_countered(story):
     offer, answer = story["counter"]
     history = {row["id"]: row for row in story["final"]["trades"]["results"]}
 
-    assert set(answer) == {"game", "events", "verdict", "executed", "counter"}
+    assert set(answer) == {"game", "events", "verdict", "executed", "counter", "reply"}
     assert history[offer["id"]]["status"] == "countered"
     assert any(row["counter_to"] == offer["id"] for row in history.values())    # the user's own deal, kept
 

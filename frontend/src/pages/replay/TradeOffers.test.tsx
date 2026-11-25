@@ -27,7 +27,7 @@ function verdict(overrides: Partial<ReplayVerdict> = {}): ReplayVerdict {
 
 function offer(overrides: Partial<ReplayPendingOffer> = {}): ReplayPendingOffer {
   return { id: 61, week: 5, status: 'pending', from_team: BRIGADE, to_team: teamRef(USER_TEAM_ID), give: [MOSTERT], get: [ETIENNE],
-    verdict: verdict(), note: null, counter_to: null, message: null, ...overrides };
+    verdict: verdict(), note: null, counter_to: null, message: null, reply: null, ...overrides };
 }
 
 function trades(overrides: Partial<ReplayTrades> = {}): ReplayTrades {

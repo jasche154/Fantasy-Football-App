@@ -167,12 +167,13 @@ def _clear_caches() -> None:
     from services import llm_client
 
     llm_client.clear_cooldowns()
-    from services import replay_draft, replay_experts, replay_pool, replay_trades, replay_values
+    from services import replay_draft, replay_experts, replay_pool, replay_styles, replay_trades, replay_values
 
     replay_experts.clear_cache()
     replay_pool.clear_cache()
     replay_values.clear_cache()
     replay_trades.clear_cache()
+    replay_styles.clear_cache()               # replay_pool.clear_cache runs it too (CLEAR_HOOKS); named here to be plain
     replay_draft._board.cache_clear()
 
 

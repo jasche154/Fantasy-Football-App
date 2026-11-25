@@ -33,7 +33,9 @@ from dataclasses import dataclass
 from functools import lru_cache
 from types import MappingProxyType, SimpleNamespace
 
-from services import lineup_gain, my_team as mt, replay_chart, replay_slots, replay_state
+from services import (
+    lineup_gain, my_team as mt, replay_chart, replay_chart_injury, replay_slots, replay_state, replay_superflex,
+)
 from services.league import LeagueSettings, replacement_levels
 from services.replay_news import Report
 from services.replay_pool import PRESEASON_TAGS, SKILL, Injury, PoolPlayer, SeasonData
@@ -42,7 +44,7 @@ from services.schedule_strength import NEUTRAL, DefenseStrength, Schedule
 RECENCY_WEIGHTS = (4, 3, 2, 1)                        # newest first: the projections (or priors) behind ros_ppg
 OUT_SHARE = {1: 0.45, 2: 0.55, 3: 0.60, 4: 0.65, 5: 0.75}    # share of remaining games missed, by weeks out so far
 OUT_SHARE_LONG = 0.90                                 # six or more weeks out (measured, RB/WR/TE 2021-25)
-IR_OUT_SHARE = 0.80                                   # least share missed when tagged IR or PUP (measured 2018-25)
+IR_OUT_SHARE = replay_chart_injury.IR_OUT_SHARE      # least share missed when tagged IR or PUP (measured 2018-25)
 FLEX_POSITIONS = replay_slots.FLEX_POSITIONS
 eligible = replay_slots.eligible                      # slot -> the positions that can play there
 BACKUPS = {"QB": 1, "RB": 3, "WR": 4, "TE": 1}        # most a CPU carries behind its starters (no spare K or DST)
@@ -207,6 +209,7 @@ def _ranked(rows: Iterable[dict]) -> tuple[ReplayValue, ...]:
 class _Base:
     """One week's values before the seeded injury news: shared by every game (seed) on that season."""
     rows: Mapping[int, dict]                        # valued rows by id (never mutated)
+    chart_data: SeasonData                          # the season the chart reads (superflex: replay_superflex.view)
     parts: replay_chart.Parts                       # what replay_chart.with_news needs, hard-tagged players only
     replacement: Mapping[str, float]
     source: str
@@ -214,7 +217,8 @@ class _Base:
 
 @lru_cache(maxsize=64)
 def _base(data: SeasonData, league: LeagueSettings, week: int, end_week: int, drafted: int = 0) -> _Base:
-    priors = _priors(data)
+    regular = replay_superflex.one_qb(data)                     # superflex: non-QBs as in a 1-QB league
+    priors = _priors(regular)
     weeks_left = max(0, end_week - max(1, week) + 1)
     by_team: dict[str | None, int] = {None: weeks_left}          # unknown team: every week left
 
@@ -226,11 +230,13 @@ def _base(data: SeasonData, league: LeagueSettings, week: int, end_week: int, dr
     teams = {pid: data.team_at(pid, week) for pid in data.players}
     rows = [_row(data, player, priors[pid], week, teams[pid], games_left(teams[pid]))
             for pid, player in data.players.items()]
-    chart_data = replay_chart.superflex_view(data) if replay_slots.two_qb(league.starters) else data  # QBs go earlier
-    charts, parts, source = replay_chart.base_charts(chart_data, rows, priors, week, end_week, drafted)
+    two_qb = replay_slots.two_qb(league.starters)
+    chart_data = replay_chart.superflex_view(data) if two_qb else regular        # QBs go where 2-QB drafts take them
+    charts, parts, source = replay_chart.base_charts(chart_data, rows, priors, week, end_week, drafted,
+                                                     regular if two_qb else None)
     rows = [{**row, **charts[row["player_id"]]} for row in rows]
     replacement = replacement_levels(((r["position"], r["ros_ppg"]) for r in rows if r["position"] in SKILL), league)
-    return _Base(MappingProxyType({r["player_id"]: _valued(r, replacement) for r in rows}), parts,
+    return _Base(MappingProxyType({r["player_id"]: _valued(r, replacement) for r in rows}), chart_data, parts,
                  MappingProxyType(replacement), source)
 
 
@@ -239,7 +245,7 @@ def _knowledge(data: SeasonData, league: LeagueSettings, week: int, end_week: in
                drafted: int) -> Knowledge:
     """`_base` plus this seed's news (which may set availability) on the hard-tagged players only."""
     base = _base(data, league, week, end_week, drafted)
-    news = replay_chart.with_news(data, base.rows, base.rows, base.parts, week, end_week, seed)
+    news = replay_chart.with_news(base.chart_data, base.rows, base.rows, base.parts, week, end_week, seed)
     values = _ranked(_valued(news[pid], base.replacement) if pid in news else row for pid, row in base.rows.items())
     through = max(0, week - 1)
     return Knowledge(season=data.season, week=week, league=league, values=values,

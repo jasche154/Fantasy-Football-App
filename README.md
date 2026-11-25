@@ -923,16 +923,19 @@ that week's games on; only scoring a week reads its real points.
   2018-2025; a player one list leaves out but another FFC list of the season has takes his ADP and spread
   from that list, PPR first, then the nearest format, because FFC's thinner lists drop top players (2026's
   half-PPR list had no Drake London; he went 13th in PPR; such a row is stored as source `ffc_borrowed` and never
-  lent on again, and a QB the 2-QB list borrows from a 1-QB list has his ADP and spread x `SUPERFLEX_QB_ADP`);
+  lent on again, and a QB the 2-QB list borrows from a 1-QB list moves to the pick where the average 2-QB
+  list takes a QB the average list he came from takes at his pick, never before pick 1,
+  `replay_superflex.borrowed_qb_adp`);
   MyFantasyLeague's PPR real drafts fill each list's
   tail past the last pick with the players no FFC list has). A league drafts
   from its own list (`services/replay_adp_format.py`): a superflex league (a SFLX slot or 2+ QB slots) the
-  2-QB list, otherwise its scoring's list, and custom scoring the preset nearest its points per reception
+  2-QB list (it also loads its scoring's list as `SeasonData.scoring_adp`: see superflex values below),
+  otherwise its scoring's list, and custom scoring the preset nearest its points per reception
   (0.75 -> PPR, 0.25 -> half). The list is chosen once, at creation, and saved with the league
   (`Settings.adp_format`; leagues saved before there were several lists keep PPR), so a league never
   switches lists mid-season. A season missing that list uses the nearest one stored (2-QB -> the
-  scoring's list; PPR <-> half <-> standard), and a superflex league without a 2-QB list falls back to
-  scaling QB ADP (`replay_chart.SUPERFLEX_QB_ADP`). A re-run of Prepare fetches only the formats a season
+  scoring's list; PPR <-> half <-> standard), and a superflex league without a 2-QB list places its QBs
+  by the fitted average 2-QB list (`replay_superflex.json`). A re-run of Prepare fetches only the formats a season
   lacks. A format FFC cannot give is reported and leaves what is stored; when FFC answered without a list
   (rather than failing to answer) the format is remembered as having none and not asked for again until
   a forced Prepare. While MyFantasyLeague is down, a format with nothing stored is saved from FFC alone
@@ -998,8 +1001,7 @@ that week's games on; only scoring a week reads its real points.
   Rank, and `star`) is the overall order of these preseason picks: the slot of his preseason expert rank,
   else of his ADP at his position. The rank blends this
   week's expert rank (weight 0.65 for a fresh snapshot, less as it ages) with the app's model rank
-  (`ros_ppg` nudged by his last three real games), and an injured player is priced by the share of his
-  team's remaining games he is expected to play. Two extras keep the model rank from trailing the news
+  (`ros_ppg` nudged by his last three real games). Two extras keep the model rank from trailing the news
   (`services/replay_role.py`): from week 2 his newest projection counts half its gap to `ros_ppg` (a back
   the site re-rates after he wins the job moves now, not a quarter at a time), and when a teammate at his
   position is expected to miss games, a player with no projection since then (out or on a bye himself,
@@ -1016,6 +1018,72 @@ that week's games on; only scoring a week reads its real points.
   card, roster, trade builder, offers), rounded half up, so a player reads the same everywhere.
   Before this, a trade verdict showed one decimal (e.g. 836.8) while lists showed whole numbers, and the
   lists rounded half to even (512.5 -> 512 next to 513 in a deal); every season, 2027 included, worked the same.
+- **Superflex values** (`services/replay_superflex.py`): RBs, WRs, TEs, kickers and defenses are valued
+  exactly as in a regular league of the same scoring (their curves, ranks and `star` come from the
+  league-scoring 1-QB list; a non-QB's chart is identical with and without the SUPERFLEX slot). Each QB takes
+  the value of the non-QBs drafted next to him in the real 2-QB list: count the non-QBs ahead of QB n there
+  (fractionally, by how far his ADP went toward the next one) and give him the pick where that non-QB slot
+  went on the league-scoring list (2026: QB12 goes at pick 23 with 11 non-QBs ahead, so he is worth what the
+  11th-12th non-QB is). The CPU draft and the board's Rank place QBs the same way. A season without a 2-QB
+  list uses the average slot of QB n over the 2018-2026 seasons that have both lists, from FFC's own rows
+  only (`python -m services.replay_superflex --fit` -> `replay_superflex.json`; it refuses to write when a
+  list is stored for no season); a league saved before `scoring_adp` existed keeps its 2-QB list's order for
+  non-QBs, behind an average 1-QB list's QBs (frozen: today's database is never read for it), and so does a
+  non-QB the scoring list lacks. Before this, a superflex league valued
+  everyone on the 2-QB list's picks: with 13 QBs in the first 24 picks (2026) every non-QB slid down the
+  curve (league "Super", week 8: Ja'Marr Chase 869 -> 709, Amon-Ra St. Brown 855 -> 567, Brock Bowers
+  432 -> 175), and that list orders non-QBs like standard scoring, which sank tight ends in PPR. A new
+  superflex league values them as its regular twin does; "Super" itself was saved before, so its non-QBs keep
+  the 2-QB list's order on the 1-QB scale.
+- **Injured players' charts** (`services/replay_chart_injury.py`): an absence takes a share of his healthy
+  chart that follows the user's targets: out 1-4 weeks about 5-12%, 6+ weeks 35-45% when first reported and
+  less each week as the return nears, out for the season the whole chart. At 13 games left: 1 game missed 6%,
+  3 10%, 4 12%, 6 40%, 8 45%, 10 62% (never less than (share of the remaining games missed)^1.8, so out 2 of
+  the last 3 games still costs 48%). The games missed come from the news report. An out player without one
+  (no hard tag) loses the expected discount over how long such absences really lasted (2018-25, 3,253
+  player-weeks: 16% played that week after all, 23% missed one game, 13% two, 19% never came back that
+  season; `python -m services.replay_chart_eval --absences`), each outcome cut at the games left: about 30%
+  at 13 games left, 51% at 4, 84% at 1, never all of it (only a season-ending report is zero). A plain O
+  tag's first week: median 2 games, mean 3.0, 7% season-ending. From his second week out
+  only the model half is discounted (the experts already price the injury). Availability and expected games
+  missed (lineups, waivers) stay the real expected games. Before this the chart was healthy x share of games
+  played x 0.9 (a star missing 3 of 13 lost 31%). Measured honestly: real results say a known absence costs
+  about its share of games (out players produced 0.48 of a healthy player's value per game over
+  replacement; the old chart kept 0.50, the new one 0.61), so the user's targets price injured players above
+  what they realised (held-out error of out players 3.006 -> 3.159, see below). Within the targets the
+  deepest end is used: the power 1.8 is the lowest that keeps 4 games missed within 12% at 13 left, and a
+  shallower curve fits worse (power 2.5: 3.186, 4.0: 3.214).
+- **Chart check against real results** (`python -m services.replay_chart_eval [--seasons 2018-2025]
+  [--weeks 1,4,7,10,13] [--lineups regular,superflex] [--teams 12] [--bench 6] [--out report.json]`;
+  `--compare before.json after.json` scores two saved runs on their common player-weeks; `--absences`
+  measures unreported absences): for each real season and week it builds the point-in-time values and scores
+  each skill player's chart against his points over replacement per game from then on. A team game he missed
+  counts 0 (a benching, a lost role, a healthy scratch: busts are what the chart must price) unless an
+  injury or suspension that started after that week was open (a hard tag since his last game): those games
+  are left out, because trade value cannot know an injury that has not happened yet. A bye is no game. For
+  an absence known that week: his rate from his return on x the share of the remaining games that absence
+  left him (back with fewer than 3 games: his games from before the absence count too; never back: 0).
+  Replacement is the lineup's (teams, starters, FLEX, SUPERFLEX, bench). It reports Spearman correlation
+  overall and by position, mean value per chart band and position, a leave-season-out calibration error (a
+  position-blind band curve fitted on the other seasons) with each position's and position-rank tier's
+  bias, the same for players out that week, and how many player-weeks each rule scored (12-team PPR,
+  2018-2025, regular lineup, before this round's changes: 2,402 healthy; 1,385 healthy with a later injury
+  left out; 643 healthy with missed games counted as 0; 369 out and back, 50 of them back late; 184 out for
+  the rest of the season; 113 dropped for fewer than 3 games). Results (weeks 1/4/7/10/13, common
+  player-weeks, before -> after): regular lineup Spearman 0.561 -> 0.555, held-out error 4.008 -> 4.023, out
+  players 3.006 -> 3.159 (the injury targets); superflex lineup (QB mapping and injury targets) Spearman
+  0.561 -> 0.553, held-out error 5.040 -> 5.046; over the last starter (`--bench 0`) 0.533 -> 0.532 and
+  4.118 -> 4.114. On the full population, which now keeps the non-QBs that used to slide below 50, superflex
+  Spearman 0.561 -> 0.579 and held-out error 5.043 -> 4.998.
+  What it found and left alone: superflex QBs at every tier produce more per game over a bench-deep
+  replacement than equal-chart non-QBs (QB1-6 +4.8, 7-12 +5.3, 13-24 +5.7, 25-36 +3.3 points a game), and
+  over the last starter QB1-6 +0.85, 7-12 +1.05, 13-24 +0.98, 25-36 -0.30, where running backs below the top
+  six sit at -0.9 to -1.6: mid and lower QBs are not worth less than their non-QB neighbours, so no
+  taper. Tight ends are near par in a regular lineup (bias -0.23) and the sign flips with the replacement
+  definition in superflex (-1.3 with bench replacement, +1.3 over the last starter), so no fitted fix. CPUs
+  in superflex leagues claim QBs only when they start that week (fill-ins projected 8-20), never a sitting
+  backup, though the near-zero QB replacement level (0.6 points a game in a 14-team superflex league) ranks
+  such fill-ins above most bench backs and receivers.
 - **Market reaction (hype):** trade values model what managers would pay, not only the forecast, and CPUs
   price deals with the same values, so you can buy before or sell into a move. `services/replay_shocks.py`
   detects events the market reacts to on little or no game sample, from point-in-time data only: a teammate
@@ -1100,20 +1168,61 @@ that week's games on; only scoring a week reads its real points.
   that takes it past one cuts its cheapest player there as part of the deal, counted in its value test like
   any cut of its own. A done deal or a drop expires every other pending offer naming a player who moved.
   When a CPU sends you an offer because it wants one of your players, it gives you 5-10% more trade value
-  than it gets, by persona (`replay_personas.OFFER_EDGE`: steady 5-6%, shark 5-7%, balanced 6-8%, panicky and
-  gambler 8-10%), judged as its own offer (`replay_trades.offer_multiple`) both when made and when you accept
+  than it gets, by persona (`replay_personas.OFFER_EDGE`: steady 5-6%, shark and dealer 5-7%, balanced, fan, stasher,
+  contender and a calm tilted manager 6-8%, panicky and gambler 8-10%; the haggler's opening offer is the
+  exception, see below), judged as its own offer (`replay_trades.offer_multiple`) both when made and when you accept
   it; a shop's offer is priced as before, at the shop discount. After a deal each starting slot
   the CPU can no longer fill needs a player it can add (unrostered, not out, not on waivers; in the waiver
   phase, when everyone unrostered is on waivers, anyone you haven't claimed), and it adds him
-  (`replay_cover.cpu_cover`): right away, or in the waiver phase once waivers clear. Each CPU has a hidden **persona** (balanced, panicky, shark, steady,
-  gambler: `services/replay_personas.py`, assigned from the league's seed at creation) that nudges what it
-  thinks a player is worth by up to 15% and how often it offers and counters; after 3 weeks a one-line
-  tendency hint is shown, never the persona. Panicky and gambler CPUs are also **emotional**: they price a
+  (`replay_cover.cpu_cover`): right away, or in the waiver phase once waivers clear. Each CPU has a hidden **persona**
+  (`services/replay_personas.py`, assigned from the league's seed at creation: at least one shark and one
+  panicky, no style on more than two CPUs; old saves keep theirs) that nudges what it thinks a player is worth
+  and how often it offers and counters; after 3 weeks a one-line tendency hint is shown, never the persona:
+  - balanced: the chart. panicky: marks a slumping player down (sells low). steady: won't sell a slumping star
+    cheap. gambler: chases hot streaks and pays most for the best player in a deal. shark: wants a 5% edge and
+    hunts buy-low stars (these nudges stay within 15% of the chart).
+  - **fan**: a seeded favourite NFL team (`Team.fan_of`, `services/replay_fans.py`); its players count 10% more
+    to him, his own and the ones he buys. He never takes a player of its rival (a fixed table: CHI-GB, DAL-PHI,
+    KC-LV, ...; OAK counts as LV): he turns such a trade down, never offers one, never drafts, claims or adds
+    one, unless nobody else can fill a starting slot. His tendency names both: "Bears fan. Wants no Packers."
+  - **stasher**: takes off only half the market's injury discount for an out player with a return date, so he
+    pays the most for hurt stars and looks at yours first.
+  - **haggler**: his opening offer to you gives 10-15% *less* than you send and says it is an opening offer;
+    decline it and he always comes back with a counter at 5-7% more for you (for the player he wanted most).
+  - **contender**: while he holds a playoff spot (from league week 4), anyone who would start for him this week
+    counts 9% more and his bench and out players 10% less; otherwise balanced.
+  - **dealer**: offers you a deal about every other week (50%), counters 90% of the time, looks at 2-for-2
+    swaps first and makes an extra CPU-CPU attempt half the weeks.
+  - **tilted**: balanced until he loses two league games in a row; then he prices like panicky, offers more
+    often (25%) and his offers give you more with each loss (2: 8-10%, 3: 10-13%, 4+: 12-15%).
+  **High on a player** (his mood line says "High on X"): he asks 8% more for him at the threshold, up to 15% for
+  a strong feeling, from anyone, CPUs included; worried caps his price at the chart, so a mood and a price never
+  point opposite ways. **Needs:** a CPU needs a position when its weakest starter there is under half the
+  league's median weakest starter (or it has too few), and is deep at one when it has a starter-quality player
+  (at least that median) more than its starting slots there (a superflex slot counts as a QB slot; a flex slot
+  belongs to no one position) (`replay_styles.position_needs`); the trade builder shows "Needs RB · Deep at
+  WR" under the mood. It pays 5% more on its net gain at a position it needs: what it gets there that would
+  start for it after the deal, less what it sends at that position (so swapping one back for a lesser one
+  earns nothing); 10% when it pays only from positions where it is deep (a team short at RB with many good WRs
+  gives a 5% better WR for a starting back); that and its lineup gain together add at most 10% of what it
+  gives. Chaining such deals barely pays: in the test league a greedy user gains 1.5% of his roster's chart value
+  in a week and 3.8% over four (1.3% without the bonus), because the re-trade lock keeps a player he just got for
+  two weeks. Every style stays inside the market guard (it never takes back under 80% of what it gives on the
+  plain chart), and a test trades round trips (one or two players each way) against every style: none leaves
+  the user more than 2 points ahead of the best measured (all at or below even except the stasher, +1.2%).
+  Leagues saved before these styles keep their old personas, but the need bonus and the "high on" mark-up apply
+  to their CPUs too. A haggler's "opening offer" line and a fan's refusal of a rival's player can give the style
+  away before the week-3 tendency hint does (intended). Panicky and gambler CPUs are also **emotional**: they price a
   hype move at 1.25x its calibrated size (`replay_personas.HYPE`, at most 8 chart points more), both when
   buying and when holding; the rest stay calm. Small on purpose: Javonte Williams' week-2 jump of 15 points
   becomes about 19 to an emotional CPU. **Counters:** a CPU that turns down a deal on value alone may
   answer with a counter offer it would take (`services/replay_counter.py`; one roll and at most one counter
-  per CPU per week), shown under Offers for you (an offer lapses when the week is played: the hub warns
+  per CPU per week). A CPU that says no tells you why in one line in its voice, under its name in the trade
+  window and in the trade history (`Offer.reply`): your player is a rival's (a fan), no roster or lineup room,
+  it is high on the player you asked for and would have taken the deal without that mark-up, it would take the
+  deal without the starter it loses (or if what it gets filled a need rather than a position where it is deep),
+  or not enough value: the first that is true, each tested by taking that one term away
+  (`services/replay_trade_reasons.py`); shown under Offers for you (an offer lapses when the week is played: the hub warns
   while one is waiting);
   you can counter a CPU's offer from the trade builder (the offer is marked "countered"). The **deadline**:
   trades are open through week 11 and its waiver phase, and close when you press Sim to Wednesday after
@@ -1163,11 +1272,11 @@ that week's games on; only scoring a week reads its real points.
   and a line that would run past 140 characters with long names gives way to one that fits. A third manager may react to a
   trade (at most 2 a week) and a shopping CPU messages you (at most 2 shops are open at once); these come on
   top of the 5, so a week can show up to 9 lines. Every CPU offer carries a one-line reason in
-  his voice (worried about a player, never one who might be hurt; high on yours, short at a position, a
-  counter, or a value pitch).
+  his voice (worried about a player, never one who might be hurt; a counter; a haggler's opening offer; high
+  on yours; buying low on a slumping or hurt player of yours; short at a position he needs; or a value pitch).
   In a league that started mid-season (or a simulated one) the chat counts the league's own weeks (moods and
   shops only need 3 NFL weeks of results, see above), and each line is dated with the real NFL week.
-  Lines come from a bank of 1,400+ clean lines in five voices, one per persona, so a manager sounds the same
+  Lines come from a bank of 2,300+ clean lines in eleven voices, one per persona, so a manager sounds the same
   all season; a game never repeats a line until that bucket is used up (except when every unused line runs
   past 140 characters once the names are in: then the next one that fits is reused), and the text is copied
   into the save.
@@ -1709,8 +1818,8 @@ League parameters accepted by every valuation endpoint: `scoring=ppr|half|std`,
 | | | The lineup, claim, add-drop, drop, IR, propose and counter bodies take the same optional `"week"` (the page sends it): 409 when the league has moved on, so a move made on an old page never lands in the next week. Once the season is over every move is a 422 "This season is over." |
 | GET | `/api/replay/games/{id}/trades` | CPU offers waiting for you (with a preview verdict), every past offer and trade (`counter_to` marks a counter), and whether trades are open |
 | POST | `/api/replay/games/{id}/trades/evaluate` | Body `{"to_team": 3, "give": [ids], "get": [ids], "drops": [ids]}`; that CPU's verdict with reasons (nothing changes) |
-| POST | `/api/replay/games/{id}/trades/propose` | Same body; the trade is carried out when the CPU accepts; a decline may come back with the CPU's `counter` offer |
-| POST | `/api/replay/games/{id}/trades/offers/{offer_id}/respond` | Body `{"accept": true, "drops": [ids]}`; answer a CPU's offer |
+| POST | `/api/replay/games/{id}/trades/propose` | Same body; the trade is carried out when the CPU accepts; a decline carries the CPU's one-line `reply` and may come back with its `counter` offer |
+| POST | `/api/replay/games/{id}/trades/offers/{offer_id}/respond` | Body `{"accept": true, "drops": [ids]}`; answer a CPU's offer (declining a haggler's opening offer returns his `counter`) |
 | POST | `/api/replay/games/{id}/trades/offers/{offer_id}/counter` | Body `{"give": [ids], "get": [ids], "drops": [ids]}`; counter a CPU's offer with your own deal (answers like propose) |
 
 Every replay `POST` under `/games` answers `{"game": <summary>, "events": [...]}` plus the action's own

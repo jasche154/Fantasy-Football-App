@@ -320,7 +320,7 @@ def test_an_offer_never_says_he_is_worried_about_a_player_who_may_be_hurt():
     state = replace(state, offers=(offer,))
 
     def kind(data) -> str:
-        return replay_chat.label_offers(state, know, 4, data.as_of(WEEK)).chat[-1].kind
+        return replay_chat.label_offers(state, know, 4, data.as_of(WEEK), SETTINGS).chat[-1].kind
 
     assert kind(fakes.fake_season()) == "offer_worried"
     assert kind(left_early(star.player_id)) != "offer_worried"

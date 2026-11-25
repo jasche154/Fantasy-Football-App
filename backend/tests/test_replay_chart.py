@@ -4,7 +4,7 @@ from types import MappingProxyType
 
 import pytest
 
-from services import replay_chart as chart, replay_news, replay_values
+from services import replay_chart as chart, replay_chart_injury, replay_news, replay_values
 from services.replay_pool import PoolPlayer
 from tests import replay_fakes as fakes
 
@@ -133,9 +133,10 @@ def test_the_first_week_out_discounts_the_whole_chart_and_later_weeks_only_the_m
     expert, model, _ = base.parts[star]
     value = know.by_id[star]
     games = [w for w in range(week, settings.end_week + 1) if data.schedule.opponent(value.team, w)]
-    discount = replay_news.share_played(value.news, games) * chart.AVAILABILITY_SHARE
+    missed = len(games) * (1 - replay_news.share_played(value.news, games))
+    discount = 1 - replay_chart_injury.discount(missed, len(games))          # the share of his chart he keeps
 
-    assert expert > 0 and model > 0 and discount < 1 and value.news.since == fakes.INJURED_WEEKS[0]
+    assert expert > 0 and model > 0 and 0 < discount < 1 and value.news.since == fakes.INJURED_WEEKS[0]
     whole = round((expert + model) * discount, 1)
     assert value.chart == (whole if week == value.news.since else round(expert + model * discount, 1))
     assert week == value.news.since or value.chart > whole

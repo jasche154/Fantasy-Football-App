@@ -149,13 +149,13 @@ def test_every_new_offer_to_the_user_gets_a_message_in_its_senders_voice():
     cpu = next(t for t in state.teams if not t.is_user)
     offer = rs.Offer(50, state.week, cpu.id, user.id, (cpu.roster[1],), (user.roster[1],), "pending")
     countered = replace(offer, id=51, counter_to=40)
-    after = chat.label_offers(replace(state, offers=(offer, countered)), knowledge(state), seed=1, played=DATA.as_of(state.week))
+    after = chat.label_offers(replace(state, offers=(offer, countered)), knowledge(state), seed=1, played=DATA.as_of(state.week), settings=SETTINGS)
     first, second = after.offers
 
     assert first.message and second.message and first.message != second.message
     assert second.message in chat.bank()["offer_counter"][cpu.persona] or second.message.startswith(
         tuple(line.split("{")[0] for line in chat.bank()["offer_counter"][cpu.persona]))
-    assert chat.label_offers(after, knowledge(state), seed=1, played=DATA.as_of(state.week)) == after              # labelled once
+    assert chat.label_offers(after, knowledge(state), seed=1, played=DATA.as_of(state.week), settings=SETTINGS) == after              # labelled once
     assert all(c.kind.startswith("offer_") for c in after.chat) and not chat.chat_for(after)
 
 
@@ -166,7 +166,7 @@ def test_a_shopped_player_in_an_offer_reads_as_worry():
     pid = cpu.roster[0]
     state = replace(state, shops=(rs.Shop(cpu.id, pid, state.week, 0.1),))
     offer = rs.Offer(60, state.week, cpu.id, user.id, (pid,), (user.roster[1],), "pending")
-    after = chat.label_offers(replace(state, offers=(offer,)), knowledge(state), seed=2, played=DATA.as_of(state.week))
+    after = chat.label_offers(replace(state, offers=(offer,)), knowledge(state), seed=2, played=DATA.as_of(state.week), settings=SETTINGS)
 
     assert after.chat[-1].kind == "offer_worried"
     assert knowledge(state).by_id[pid].name in after.offers[0].message
@@ -188,7 +188,7 @@ def test_a_shop_offer_that_also_sends_another_worrying_player_names_the_shopped_
     assert not replay_mood.might_be_hurt(know, played, other, state.week - 1)      # he could be named too
     state = replace(state, shops=(rs.Shop(cpu.id, shopped, state.week, 0.1),))
     offer = rs.Offer(61, state.week, cpu.id, user.id, (other, shopped), (user.roster[1],), "pending")
-    after = chat.label_offers(replace(state, offers=(offer,)), know, seed=2, played=played)
+    after = chat.label_offers(replace(state, offers=(offer,)), know, seed=2, played=played, settings=SETTINGS)
 
     assert after.chat[-1].kind == "offer_worried" and after.chat[-1].player_ids == (shopped,)
     assert know.by_id[shopped].name in after.offers[0].message

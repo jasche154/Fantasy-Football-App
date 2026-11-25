@@ -53,7 +53,8 @@ def test_emotional_managers_overreact_to_a_shock_and_calm_ones_keep_the_chart():
 
 
 def test_rates_and_tendencies():
-    assert rp.offer_rate("shark") == max(rp.offer_rate(p) for p in rp.PERSONAS) == 0.30
+    assert rp.offer_rate("shark") == max(rp.offer_rate(p) for p in rp.PERSONAS if p != "dealer") == 0.30
+    assert rp.offer_rate("dealer") == 0.5
     assert rp.offer_rate("steady") == 0.05 and rp.offer_rate("unknown") == rp.offer_rate("balanced")
     assert all(0 < rp.counter_rate(p) <= 1 for p in rp.PERSONAS)
     assert rp.tendency("panicky", rp.TENDENCY_WEEKS - 1) is None

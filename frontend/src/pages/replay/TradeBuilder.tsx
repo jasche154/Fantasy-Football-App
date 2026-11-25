@@ -8,7 +8,7 @@ import { Skeleton, TableSkeleton } from '../../components/StatusViews';
 import { useAsync } from '../../hooks/useAsync';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { formatInteger } from '../../lib/format';
-import { DropPicker, overLimit, PlayerNames, playerIds, toggleId, TradeVerdictView, type TradeActions } from './TradeParts';
+import { DropPicker, ManagerQuote, overLimit, PlayerNames, playerIds, TeamNeeds, toggleId, TradeVerdictView, type TradeActions } from './TradeParts';
 import { ReplayPlayerCell, TeamSelect } from './shared';
 
 const EVALUATE_DELAY_MS = 300;
@@ -112,6 +112,7 @@ export function TradeBuilder({ game, version, roster, ir, maxPlayers, counterTo,
   const [linkedWant, setLinkedWant] = useState(initialWant);
   const [declined, setDeclined] = useState<ReplayVerdict | null>(null);
   const [counter, setCounter] = useState<ReplayOffer | null>(null);
+  const [reply, setReply] = useState<string | null>(null);
   const theirs = useAsync((signal) => getReplayTeam(game.id, { team_id: partnerId }, signal), [game.id, partnerId, version]);
   const partner = partners.find((team) => team.team_id === partnerId)?.name ?? 'That team';
   // While another partner's roster loads, the previous one must not be offered.
@@ -143,6 +144,7 @@ export function TradeBuilder({ game, version, roster, ir, maxPlayers, counterTo,
   const change = (update: () => void) => {
     setDeclined(null);
     setCounter(null);
+    setReply(null);
     update();
   };
   const propose = async () => {
@@ -155,6 +157,7 @@ export function TradeBuilder({ game, version, roster, ir, maxPlayers, counterTo,
     if (!result.executed) {
       setDeclined(result.verdict);
       setCounter(result.counter);
+      setReply(result.reply);
       if (counterTo) actions.announce({ text: `${partner} turned down your counter.${result.counter ? ' It countered back: see Offers for you.' : ''}`, isGood: false });
       return;
     }
@@ -183,6 +186,7 @@ export function TradeBuilder({ game, version, roster, ir, maxPlayers, counterTo,
       </div>
       {tendency && <p className="hint">{tendency}</p>}
       {chosen?.mood && <p className="game-mood"><span className="game-mood__label">Mood</span> {chosen.mood}</p>}
+      <TeamNeeds team={chosen} />
       <div role="status">
         {isWantGone && <p className="notice">That player is no longer on {partner}'s roster: pick from who they have now.</p>}
       </div>
@@ -226,6 +230,7 @@ export function TradeBuilder({ game, version, roster, ir, maxPlayers, counterTo,
         {declined && (
           <div className="replay-verdict">
             <p className="error-text"><strong>{partner} turned it down.</strong></p>
+            <ManagerQuote teamId={partnerId} text={reply} />
             <ul>{declined.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
             {declined.suggestion && <p className="hint">{declined.suggestion}</p>}
             {counter && (

@@ -159,6 +159,7 @@ class Team(_Record):
     ir: tuple[int, ...] = ()                  # players in the IR slot (not in `roster`); see replay_ir
     persona: str = "balanced"                # a CPU's trading style (replay_personas.PERSONAS)
     hype: float = 1.0                         # a CPU's multiple on opportunity shocks (replay_personas.hype_for); old saves: calm
+    fan_of: str | None = None                 # a "fan" CPU's favourite NFL team (replay_fans); None otherwise and in old saves
 
 
 @dataclass(frozen=True)
@@ -200,6 +201,8 @@ class Offer(_Record):                         # every executed trade (CPU-CPU to
     status: str                               # "pending" | "accepted" | "declined" | "expired" | "countered"
     counter_to: int | None = None             # the Offer id this one answers with a counter
     message: str = ""                         # a CPU's one line to the user about it (replay_chat); "" = none
+    reply: str | None = None                  # the CPU's one line when it turned the user's proposal down
+                                              # (replay_chat_offers.decline_reply); None = none, and in old saves
 
 
 @dataclass(frozen=True)
@@ -465,6 +468,26 @@ def round_robin(team_ids: Sequence[int], weeks: int, seed: int) -> tuple[Matchup
     order = [ids[i] for i in shuffle.permutation(len(ids))]
     turns = [int(turn) for turn in shuffle.permutation(len(ids) - 1)]       # the order the rounds are played in
     return tuple(_round(order, turns[week % len(turns)], week // len(turns)) for week in range(weeks))
+
+
+def streak(state: State, team_id: int) -> int:
+    """+n for n straight wins, -n for n straight losses, ending with the latest result (a tie ends it)."""
+    run = 0
+    for result in reversed(state.results):
+        pair = next((p for p in result.matchups if team_id in p), None)
+        if pair is None:
+            continue
+        other = pair[0] if pair[1] == team_id else pair[1]
+        mine, theirs = result.scores[team_id], result.scores[other]
+        step = 1 if mine > theirs else -1 if mine < theirs else 0
+        if step == 0 or (run and (run > 0) != (step > 0)):
+            break
+        run += step
+    return run
+
+
+def losses_in_a_row(state: State, team_id: int) -> int:
+    return max(0, -streak(state, team_id))
 
 
 def standings(state: State) -> list[dict]:

@@ -377,9 +377,13 @@ def with_market_adp(data: SeasonData, belief: World, games_left: int = sim_marke
     """`data` with every player's ADP the market's under `belief` with `games_left` games to play (none for a
     player it does not list), priced for data's scoring and its ADP list (data.adp_format "2qb": superflex),
     leaning on each player's `record` (sim_market.track_record) and paying the rookies' `premium`
-    (rookie_premium) when given."""
-    market = sim_market.adp(belief, scoring_of(data), data.adp_format == TWO_QB, games_left, record, premium)
+    (rookie_premium) when given. A 2-QB list also records the 1-QB board of the same scoring as
+    `scoring_adp` (replay_superflex values non-QBs on it)."""
+    two_qb = data.adp_format == TWO_QB
+    market = sim_market.adp(belief, scoring_of(data), two_qb, games_left, record, premium)
     players = {pid: replace(player, adp=market[pid][0] if pid in market else None,
                             adp_stdev=market[pid][1] if pid in market else None)
                for pid, player in data.players.items()}
-    return replace(data, players=MappingProxyType(players))
+    one_qb = sim_market.adp(belief, scoring_of(data), False, games_left, record, premium) if two_qb else {}
+    return replace(data, players=MappingProxyType(players),
+                   scoring_adp=MappingProxyType({pid: one_qb[pid][0] for pid in players if pid in one_qb}))

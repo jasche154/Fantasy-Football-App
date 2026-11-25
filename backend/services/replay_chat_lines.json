@@ -109,6 +109,48 @@
    "My lineup took a big swing and hit it out of the stadium.",
    "Fireworks all day! {you} brought a water pistol to a fireworks show.",
    "Momentum is real and I have ALL of it."
+  ],
+  "fan": [
+   "Won by {margin}. Wearing the jersey to work tomorrow, no question.",
+   "{my_score} points. My team would be proud. Both of my teams, really.",
+   "That's how we do it on Sundays, {you}. Loud and proud.",
+   "Week {week} goes to the home side. Somebody cue the fight song.",
+   "Big win! Same feeling as a home opener. Pure joy."
+  ],
+  "stasher": [
+   "Patience pays. Won by {margin} with a roster everyone laughed at in September.",
+   "{my_score} points. Told you the guys I waited on would come through.",
+   "A {margin} point win. The long game is starting to look short, {you}.",
+   "Week {week}: the stash is paying out. Funny how that works.",
+   "I play for December, but I'll take a big November win too."
+  ],
+  "haggler": [
+   "Won by {margin}. I'd call that a bargain win. Cheap roster, big score.",
+   "{my_score} points for the price I paid? Best deal I ever made.",
+   "Week {week} to me. Tell you what, {you}, I'll sell you some of these points. Cheap.",
+   "That margin of {margin}? Worth every penny I didn't spend.",
+   "Good game, {you}. Want to talk trades now that I've got leverage?"
+  ],
+  "contender": [
+   "{my_score} points. This is what a title team looks like, {you}.",
+   "Won by {margin}. We are not here to make friends. We're here for the trophy.",
+   "Week {week}: another step toward the ring. Nobody slows down.",
+   "Statement win. Everybody in the league just took notice.",
+   "All in, all season. That's how you put up {my_score}."
+  ],
+  "dealer": [
+   "Won by {margin} with three guys I traded for. The phone lines work, {you}.",
+   "{my_score} points. Every deal I made this year just paid off at once.",
+   "Week {week} recap: I won, and I've already got two offers drafted.",
+   "Big win! Now who's buying? I'm always open for business.",
+   "That one was built on trades. Nothing beats a good deal."
+  ],
+  "tilted": [
+   "FINALLY. Won by {margin}. I'm not even happy, I'm just relieved.",
+   "{my_score}! See? I'm not cursed. Mostly not cursed.",
+   "A real win in week {week}. Somebody screenshot it before it goes away.",
+   "Okay. Okay. Deep breaths. That one actually went my way.",
+   "{you}, sorry, but I needed that more than you'll ever know."
   ]
  },
  "close_win": {
@@ -221,6 +263,48 @@
    "{my_score} to {their_score}! Absolute cinema.",
    "The thrill of the close win. Nothing like it. Let's do it again.",
    "That was a coin flip and I called it. Lucky streak engaged."
+  ],
+  "fan": [
+   "By {margin}! Close games are a home team specialty.",
+   "{my_score} to {their_score}. Nail-biter. Just like a real Sunday.",
+   "Squeaked it out, {you}. Loyalty gets rewarded sometimes.",
+   "Week {week} came down to the wire and the home side held on.",
+   "I was pacing the living room in my jersey the whole time. Worth it."
+  ],
+  "stasher": [
+   "Won by {margin}. Patience again. Never panic in the fourth quarter.",
+   "{my_score} to {their_score}. Close, but slow and steady got there.",
+   "A {margin} point win. I'll take a narrow one while my guys get right.",
+   "Week {week}: tight, but I never doubted the long view.",
+   "{you}, good game. The team I'm building is only getting better."
+  ],
+  "haggler": [
+   "Won by {margin}. Barely paid anything for that one. Love a discount win.",
+   "{my_score} to {their_score}. Close deal, but I closed it.",
+   "That's the thing about a {margin} point margin: still counts in full.",
+   "Week {week}: I'll call that a fair price for a win.",
+   "{you}, you made me work for it. I respect a tough negotiator."
+  ],
+  "contender": [
+   "Won by {margin}. Champions win the close ones too.",
+   "{my_score} to {their_score}. Not pretty. Don't care. It's a W.",
+   "Title teams find a way. Week {week} proved it.",
+   "{you}, good fight. But we have bigger plans this year.",
+   "Close win, same goal. Banner or bust."
+  ],
+  "dealer": [
+   "By {margin}! The guy I picked up in a trade last week made the difference.",
+   "{my_score} to {their_score}. Every deal counts, even the small ones.",
+   "Week {week}: won by a hair. Might trade the hair.",
+   "{you}, close one. Want to make a deal to even it out next time?",
+   "That margin of {margin}? Brought to you by my last three trades."
+  ],
+  "tilted": [
+   "By {margin}. I aged ten years watching that. But a win is a win.",
+   "{my_score} to {their_score}. I couldn't breathe until the last play.",
+   "Week {week}: survived. Barely. My nerves are gone.",
+   "{you}, I was sure the universe would take that one from me too.",
+   "Won by {margin}. Not celebrating. Just recovering."
   ]
  },
  "close_loss": {
@@ -333,6 +417,48 @@
    "That loss just made the redemption arc way better.",
    "{you} survived. Barely. I'll take the moral victory and the next real one.",
    "So close I can taste it. Tastes like next week's win."
+  ],
+  "fan": [
+   "Lost by {margin}. Still proud of the colors. Always.",
+   "{their_score} to {my_score}. Heartbreaker. Just like being a lifelong fan.",
+   "Week {week} slipped away. We'll get them at home next time.",
+   "{you}, good game. My team never quits, and neither do I.",
+   "Lost by a hair. I've been through worse. I'm a fan, after all."
+  ],
+  "stasher": [
+   "Down by {margin}. Fine. My best guys aren't even back yet.",
+   "{their_score} to {my_score}. Close loss, long season. I can wait.",
+   "Week {week} goes to you. Check back with me in December.",
+   "A {margin} point loss with half my stars on the shelf. I like my odds later.",
+   "{you}, enjoy it. My roster is a slow cooker."
+  ],
+  "haggler": [
+   "Lost by {margin}. Can I buy those points back? Name your price.",
+   "{their_score} to {my_score}. A loss that close should come with a refund.",
+   "Week {week}: you win this round of the negotiation, {you}.",
+   "Short by {margin}. Tell you what, I'll offer you a deal to make up for it.",
+   "Close loss. I'll be shopping for a {margin} point upgrade."
+  ],
+  "contender": [
+   "Lost by {margin}. That stings. Title teams don't drop those.",
+   "{their_score} to {my_score}. Unacceptable. Changes are coming.",
+   "Week {week}: a setback, not a story. The ring is still the plan.",
+   "{you}, you got me this week. Enjoy it, because it won't happen twice.",
+   "Lost a close one. Already looking for the upgrade that fixes it."
+  ],
+  "dealer": [
+   "Down {margin}. Clearly I need one more trade. Maybe two.",
+   "{their_score} to {my_score}. Phone's already ringing. Help is on the way.",
+   "Week {week} loss. Good thing I've got offers out to half the league.",
+   "{you}, nice game. Want to trade me the player who beat me?",
+   "Lost by {margin}. That's a deal-sized gap. I can fix that."
+  ],
+  "tilted": [
+   "By {margin}. Of course. OF COURSE. Every single week.",
+   "{their_score} to {my_score}. I'm fine. I'm totally fine. I am not fine.",
+   "Week {week}: lost by {margin} on the last play. Again.",
+   "{you}, you know what, congratulations. The universe likes you.",
+   "Another close loss. I'm starting to take this personally."
   ]
  },
  "blowout_loss": {
@@ -445,6 +571,48 @@
    "That's fine. My best weeks always come right after my worst.",
    "Bust week. The boom is loading. I can feel it.",
    "Got smoked. Still believe. Always believe."
+  ],
+  "fan": [
+   "Lost by {margin}. Rough day. The jersey stays on regardless.",
+   "{their_score} to {my_score}. Loyalty means sticking around for weeks like this.",
+   "Week {week} was ugly. Real fans don't leave early though.",
+   "{you}, you crushed me. I'll be back. We always come back.",
+   "Down {margin}. Rebuilding years build character. Or so they say."
+  ],
+  "stasher": [
+   "Lost by {margin}. Not worried. The guys I'm waiting on change everything.",
+   "{their_score} to {my_score}. My roster is built for later, {you}.",
+   "Week {week} goes your way. My stash doesn't care about week {week}.",
+   "Big loss. Small concern. Patience is the whole plan.",
+   "Down {margin}. Remember this game when my guys come back."
+  ],
+  "haggler": [
+   "Lost by {margin}. Ouch. Somebody's going to sell me some points this week.",
+   "{their_score} to {my_score}. That was a bad deal for me. I don't make many.",
+   "Week {week}: I overpaid for that lineup. Lesson learned.",
+   "{you}, impressive. Want to tell me what you'd take for your best guy?",
+   "Down {margin}. Time to shop for bargains."
+  ],
+  "contender": [
+   "Lost by {margin}. Embarrassing. Moves are happening tonight.",
+   "{their_score} to {my_score}. That is not a title team performance.",
+   "Week {week}: wake-up call received. Going all in.",
+   "{you}, take your victory lap. We're coming back angry.",
+   "Down {margin}. Nobody on this roster is safe if it costs me the ring."
+  ],
+  "dealer": [
+   "Lost by {margin}. Clearly it's time to make about five trades.",
+   "{their_score} to {my_score}. My inbox is about to get very busy.",
+   "Week {week}: bad loss, great excuse to deal.",
+   "{you}, congrats. I'll probably trade with you anyway.",
+   "Down {margin}. Every player I own is available. Every one."
+  ],
+  "tilted": [
+   "Lost by {margin}. I don't want to talk about it. Okay, I do. This is a disaster.",
+   "{their_score} to {my_score}. Something is wrong with this league. Or me.",
+   "Week {week}: everything that could go wrong did. Everything.",
+   "{you}, enjoy it. I'm going to make some very bad decisions now.",
+   "Down {margin}. Time to blow it all up. Nobody stop me."
   ]
  },
  "boom": {
@@ -557,6 +725,48 @@
    "I'd rather have {player} than any three of your guys. {points} says I'm right.",
    "Week {week}: the {player} show. {points} points. Encore please.",
    "If {player} keeps this up I'm naming my dog after him. {points}!"
+  ],
+  "fan": [
+   "{player} with {points}! That's the kind of game you frame and hang on the wall.",
+   "{points} from {player}. Hometown hero energy.",
+   "Week {week}: {player} put on a show. {points} points. I stood up and cheered.",
+   "{player}, {points}. Loyalty to that guy pays off.",
+   "{points} points for {player}! Best Sunday of the year."
+  ],
+  "stasher": [
+   "{player} with {points}. Everybody wanted to drop him in September. Not me.",
+   "{points} from {player}. That's what patience looks like on a box score.",
+   "Week {week}: {player} gave me {points}. Worth every week I held him.",
+   "{player}, {points}. Told you to wait.",
+   "{points} points for {player}. The stash pays out."
+  ],
+  "haggler": [
+   "{player} with {points}! Got him for a song, too.",
+   "{points} from {player}. Best bargain in the league, and it isn't close.",
+   "Week {week}: {player} scored {points}. His price just went up. A lot.",
+   "{player}, {points}. You want him now? It'll cost you.",
+   "{points} points for {player}. Paid pennies. Love it."
+  ],
+  "contender": [
+   "{player} with {points}. That's a championship player.",
+   "{points} from {player}. Exactly why we went all in.",
+   "Week {week}: {player} put up {points}. Title teams have guys like that.",
+   "{player}, {points}. Trophy-level stuff.",
+   "{points} points for {player}. The ring is getting closer."
+  ],
+  "dealer": [
+   "{player} with {points}! Got him in a trade. Deals work, people.",
+   "{points} from {player}. My best trade of the year, maybe ever.",
+   "Week {week}: {player} gave me {points}. Already getting offers for him.",
+   "{player}, {points}. Still listening to offers. Kidding. Mostly.",
+   "{points} points for {player}. The phone is going to ring tonight."
+  ],
+  "tilted": [
+   "{player} with {points}! FINALLY something goes my way!",
+   "{points} from {player}. I almost cried. Happy tears for once.",
+   "Week {week}: {player} scored {points}. Is the curse lifting? Please?",
+   "{player}, {points}. You beautiful player. Thank you.",
+   "{points} points for {player}. I needed that. I really needed that."
   ]
  },
  "bust": {
@@ -669,6 +879,48 @@
    "{player} zigged when I needed a zag. Still starting him next week.",
    "Some days the dice come up snake eyes. {player} rolled snake eyes.",
    "{player} gave me {points}. I'm giving him another chance. And another."
+  ],
+  "fan": [
+   "{player} with {points}. Rough day. Still on my team, still my guy.",
+   "{points} from {player}. We all have off days. Even the hometown favorites.",
+   "Week {week}: {player} gave me {points}. I believe in a bounce back.",
+   "{player}, {points}. Loyal fans don't boo. Much.",
+   "{points} points from {player}. Next week, buddy. Next week."
+  ],
+  "stasher": [
+   "{player} with {points}. One game. I play for December.",
+   "{points} from {player}. Not worried. The long view says hold.",
+   "Week {week}: {player} put up {points}. Patience covers bad weeks.",
+   "{player}, {points}. He'll be worth it by the playoffs.",
+   "{points} points from {player}. Doesn't change the plan."
+  ],
+  "haggler": [
+   "{player} with {points}. His price is falling. Maybe I sell, maybe I buy more.",
+   "{points} from {player}. That's a discount waiting to happen.",
+   "Week {week}: {player} scored {points}. Anyone want a deal? Cheap.",
+   "{player}, {points}. Market value just dropped. Interesting.",
+   "{points} points from {player}. Somebody make me an offer. A real one."
+  ],
+  "contender": [
+   "{player} with {points}. Not acceptable on a title team.",
+   "{points} from {player}. If that keeps up, I'm finding someone better.",
+   "Week {week}: {player} gave me {points}. Championship teams need more.",
+   "{player}, {points}. I need you for the playoff run. Wake up.",
+   "{points} points from {player}. Upgrades are being discussed."
+  ],
+  "dealer": [
+   "{player} with {points}. Guess who's on the trade block.",
+   "{points} from {player}. Taking offers. Effective immediately.",
+   "Week {week}: {player} scored {points}. Time to flip him.",
+   "{player}, {points}. Somebody out there still believes in him. Call me.",
+   "{points} points from {player}. Deal of the week, anyone?"
+  ],
+  "tilted": [
+   "{player} with {points}. Of course. Why would he show up for me.",
+   "{points} from {player}. I'm going to trade him for a bag of chips.",
+   "Week {week}: {player} gave me {points}. This team is going to be the end of me.",
+   "{player}, {points}. I can't even look at the box score.",
+   "{points} points from {player}. Everything is falling apart. Again."
   ]
  },
  "streak_win": {
@@ -741,6 +993,48 @@
    "On FIRE. {streak} straight. Do not touch the team, extremely hot.",
    "{streak} wins running! Let it ride!",
    "This {streak} game streak is going straight into the highlight reel."
+  ],
+  "fan": [
+   "{streak} straight wins! Hometown magic.",
+   "That's {streak} in a row. The crowd is getting loud.",
+   "{streak} wins running. Just like a playoff push on Sundays.",
+   "Win number {streak} in a row. Wearing the lucky jersey every week now.",
+   "Streak hits {streak}. Real fans saw this coming."
+  ],
+  "stasher": [
+   "{streak} straight. And my best stash is about to come back.",
+   "That's {streak} in a row. Patience compounding.",
+   "{streak} wins running. The long plan, right on schedule.",
+   "Won {streak} straight. Waiting is a skill.",
+   "{streak} in a row. Just getting started."
+  ],
+  "haggler": [
+   "{streak} straight wins on a bargain roster. Unreal value.",
+   "That's {streak} in a row. Best return on investment in the league.",
+   "{streak} wins running. I'd sell you a piece of this streak. For a price.",
+   "Won {streak} straight. Paid wholesale, winning retail.",
+   "{streak} in a row. A great deal keeps on giving."
+  ],
+  "contender": [
+   "{streak} straight wins. Title teams stack them.",
+   "That's {streak} in a row. Momentum heading for the ring.",
+   "{streak} wins running. Nobody is catching this team.",
+   "Won {streak} straight. Exactly how a champion plays.",
+   "{streak} in a row. The playoffs can't come soon enough."
+  ],
+  "dealer": [
+   "{streak} straight! Every trade is clicking.",
+   "That's {streak} in a row. Deals on deals on wins.",
+   "{streak} wins running. Still taking calls though.",
+   "Won {streak} straight. Imagine what one more trade does.",
+   "{streak} in a row. The trade machine is undefeated lately."
+  ],
+  "tilted": [
+   "{streak} straight wins?! I don't recognize myself.",
+   "That's {streak} in a row. Who am I right now.",
+   "{streak} wins running. I'm not saying the curse is gone. But.",
+   "Won {streak} straight. Feels illegal after the start I had.",
+   "{streak} in a row. Please nobody jinx this."
   ]
  },
  "streak_loss": {
@@ -813,6 +1107,48 @@
    "{streak} losses running and I've never been more confident. Is that weird?",
    "{streak} in a row. All-in on upside. Nothing left to lose!",
    "{streak} straight. Rock bottom is a great place to launch from!"
+  ],
+  "fan": [
+   "{streak} straight losses. Tough stretch. The jersey stays on.",
+   "That's {streak} in a row. Loyal through the rough part.",
+   "{streak} losses running. Fans have seen worse, trust me.",
+   "Lost {streak} straight. We'll turn it around at home.",
+   "{streak} in a row. Still cheering. Always cheering."
+  ],
+  "stasher": [
+   "{streak} straight losses. Fine. My roster is built for later.",
+   "That's {streak} in a row. The stash comes back soon.",
+   "{streak} losses running. Not panicking. Never panicking.",
+   "Lost {streak} straight. Patience costs a few weeks. That's the deal.",
+   "{streak} in a row. Remember this when my guys return."
+  ],
+  "haggler": [
+   "{streak} straight losses. Time to shop for bargains.",
+   "That's {streak} in a row. My prices just dropped. Make me an offer.",
+   "{streak} losses running. Clearance sale starts now.",
+   "Lost {streak} straight. Somebody sell me a win, cheap.",
+   "{streak} in a row. Every player I own is negotiable."
+  ],
+  "contender": [
+   "{streak} straight losses. Unacceptable for a title team.",
+   "That's {streak} in a row. Emergency moves incoming.",
+   "{streak} losses running. The ring isn't won in November. Still mad.",
+   "Lost {streak} straight. Somebody is getting traded.",
+   "{streak} in a row. Not the plan. Fixing it now."
+  ],
+  "dealer": [
+   "{streak} straight losses. Perfect excuse to make five trades.",
+   "That's {streak} in a row. My phone is about to be very busy.",
+   "{streak} losses running. Everybody is available. Everybody.",
+   "Lost {streak} straight. A deal will fix this. Probably several.",
+   "{streak} in a row. Open for business, extended hours."
+  ],
+  "tilted": [
+   "{streak} straight losses. I'm going to start making wild trades.",
+   "That's {streak} in a row. Nothing matters anymore.",
+   "{streak} losses running. Somebody take my players. Please.",
+   "Lost {streak} straight. I'm calm. I'm extremely calm. I'm not calm.",
+   "{streak} in a row. Making offers I'll regret. You've been warned."
   ]
  },
  "upset": {
@@ -885,6 +1221,48 @@
    "Beat {you}!! The hype is REAL and it's spreading!",
    "Massive upset! I'm putting this team on a poster!",
    "Nobody saw it coming except me and my gut!"
+  ],
+  "fan": [
+   "Nobody believed in us. Beat {you} by {margin}. That's for the home crowd.",
+   "Underdogs win! {my_score} to {their_score}. Cue the fight song.",
+   "Week {week} upset. This is why you never stop cheering.",
+   "{you}, you were the favorite. We were the believers.",
+   "Big upset. My team loves an underdog story. So do I."
+  ],
+  "stasher": [
+   "Beat {you}, and my best guys aren't even back yet. Think about that.",
+   "{my_score} to {their_score}. The upset nobody saw. Except me.",
+   "Week {week}: patience beat the favorite.",
+   "{you}, you were up high in the table. I was waiting low. Worked out.",
+   "Upset by {margin}. Imagine when my roster is whole."
+  ],
+  "haggler": [
+   "Beat {you} with a bargain roster. Best value in the league.",
+   "{my_score} to {their_score}. Bought low, won high.",
+   "Week {week} upset. I paid half price for this lineup.",
+   "{you}, the favorite just lost to the discount bin.",
+   "Upset by {margin}. My kind of deal."
+  ],
+  "contender": [
+   "Beat {you} by {margin}. The climb to the top starts here.",
+   "{my_score} to {their_score}. Upset? Not to me. We're contenders.",
+   "Week {week}: knocked off a favorite. The ring is in sight.",
+   "{you}, you were ahead of me. Not for long.",
+   "Upset win. That's how title runs start."
+  ],
+  "dealer": [
+   "Beat {you}! Built that lineup in about four trades. Worth it.",
+   "{my_score} to {their_score}. The phone calls paid off.",
+   "Week {week} upset. Deals win games, people.",
+   "{you}, you're higher in the table, but I've got better connections.",
+   "Upset by {margin}. Every trade I made just smiled at me."
+  ],
+  "tilted": [
+   "Wait. I beat {you}? By {margin}? Is this real?",
+   "{my_score} to {their_score}! The curse is lifting! Maybe!",
+   "Week {week}: something finally went right. I don't trust it.",
+   "{you}, sorry. I needed this one in the worst way.",
+   "Upset win. Somebody pinch me. Gently."
   ]
  },
  "clinch": {
@@ -957,6 +1335,48 @@
    "In! The championship run starts NOW!",
    "Playoff spot secured! Now I'm REALLY dangerous.",
    "We're in!!! Every risky move was worth it!"
+  ],
+  "fan": [
+   "Playoffs clinched! Just like a real home playoff game.",
+   "We're in! Loyal fans get rewarded.",
+   "Clinched in week {week}. Wearing the jersey all the way.",
+   "Playoff spot locked. The home crowd is going wild.",
+   "In the playoffs. Hometown pride."
+  ],
+  "stasher": [
+   "Clinched. And my stash is ready for the playoffs. Perfect timing.",
+   "Playoffs locked in week {week}. Waiting was worth it.",
+   "We're in. The guys I held all year arrive right on time.",
+   "Clinched. Patience built a playoff team.",
+   "Playoff spot secured. Now the long game gets interesting."
+  ],
+  "haggler": [
+   "Clinched! Got a playoff spot at a discount.",
+   "Playoffs locked in week {week}. Best value in the league.",
+   "We're in. Bargain roster, real playoff team.",
+   "Clinched. Still taking reasonable offers.",
+   "Playoff spot secured. Cheap tickets, front row."
+  ],
+  "contender": [
+   "Clinched. Step one done. The ring is step two.",
+   "Playoffs locked in week {week}. As planned.",
+   "We're in. Now the real season starts.",
+   "Clinched. Title teams don't sweat the regular season.",
+   "Playoff spot secured. Eyes on the trophy."
+  ],
+  "dealer": [
+   "Clinched! Every trade I made got us here.",
+   "Playoffs locked in week {week}. Deals pay off.",
+   "We're in. Still taking calls for playoff upgrades.",
+   "Clinched. My trade history is a playoff resume.",
+   "Playoff spot secured. Let's make a deal for the stretch run."
+  ],
+  "tilted": [
+   "Clinched?! After that start? I'm shocked. Happy, but shocked.",
+   "Playoffs locked in week {week}. I take back all my complaints.",
+   "We're in. The losing streaks didn't win. I did.",
+   "Clinched. I don't know how. I'm not asking questions.",
+   "Playoff spot secured. Deep breaths. Happy breaths."
   ]
  },
  "eliminated": {
@@ -1029,6 +1449,48 @@
    "No playoffs. Still had more fun than any of you.",
    "We're out! Somebody has to be the cautionary tale. Proudly me.",
    "Eliminated. Already planning the redemption season!"
+  ],
+  "fan": [
+   "Eliminated. Like a true fan, I'll say it: wait till next year.",
+   "Out of the playoffs. Loyal anyway.",
+   "Week {week} ends the dream. The jersey stays on.",
+   "Eliminated. Rebuilding years make the good ones sweeter.",
+   "No playoffs this year. Still proud of the colors."
+  ],
+  "stasher": [
+   "Eliminated. My stash came back too late this time.",
+   "Out of the playoffs. Next year the timing will work.",
+   "Week {week} ends it. The long game needs a longer season.",
+   "Eliminated. Still holding my guys for next year.",
+   "No playoffs. Patience will pay next time."
+  ],
+  "haggler": [
+   "Eliminated. Everything must go. Make me an offer.",
+   "Out of the playoffs. Clearance sale, all players.",
+   "Week {week} ends it. My prices just got very reasonable.",
+   "Eliminated. Somebody buy my stars before the deadline.",
+   "No playoffs. Bargains for everyone."
+  ],
+  "contender": [
+   "Eliminated. That was not supposed to happen. At all.",
+   "Out of the playoffs. A failed season. I hate it.",
+   "Week {week} ends a season built to win. Painful.",
+   "Eliminated. All in and still out. Rough.",
+   "No playoffs. Next year I go twice as hard."
+  ],
+  "dealer": [
+   "Eliminated. Time to make deals for next year.",
+   "Out of the playoffs. Everybody on my roster is available.",
+   "Week {week} ends it. The trade market never closes for me.",
+   "Eliminated. Who wants my good players for the stretch run?",
+   "No playoffs. Plenty of deals to make though."
+  ],
+  "tilted": [
+   "Eliminated. Of course. Why would anything go right.",
+   "Out of the playoffs. I'm going to go stare at a wall.",
+   "Week {week} ends it. I saw this coming in week 2.",
+   "Eliminated. Fine. FINE.",
+   "No playoffs. I need a break from this league. And myself."
   ]
  },
  "champion": {
@@ -1101,6 +1563,48 @@
    "WE DID IT! The heater lasted all the way to the end!",
    "Title secured! The highlight reel needs a whole extra hour!",
    "CHAMPIONS! Let it ride! Forever!"
+  ],
+  "fan": [
+   "CHAMPIONS! {my_score} to {their_score}. This one's for everybody back home.",
+   "Title won by {margin}. Wearing the jersey for a week straight.",
+   "We did it! Loyal all season and loyal forever.",
+   "{you}, great final. But this trophy belongs to the true fans.",
+   "League champs! Best day since the last home win."
+  ],
+  "stasher": [
+   "Champion. The guys I waited on all year won it. Patience is a title strategy.",
+   "Title by {margin}. Everybody laughed at my IR slot in October.",
+   "We won it all. Slow and steady, then very fast.",
+   "{you}, good final. I've been building for this game since week 1.",
+   "Champion. The long game is the only game."
+  ],
+  "haggler": [
+   "Champion! Built on bargains, won by {margin}.",
+   "Title won. Cheapest roster ever to lift the trophy, probably.",
+   "{my_score} to {their_score}. Best deal I ever made was this season.",
+   "{you}, great final. You paid full price. I didn't.",
+   "We won it all. Every bargain paid off."
+  ],
+  "contender": [
+   "CHAMPION. This was the plan from day one, {you}.",
+   "Title by {margin}. All in, all year, all worth it.",
+   "We won the ring. Never doubted it.",
+   "{my_score} to {their_score}. Banner season. Literally.",
+   "Champions. Every win-now move paid off."
+  ],
+  "dealer": [
+   "Champion! Half this roster came from trades. Deals win titles.",
+   "Title by {margin}. Thank you to everyone who traded with me.",
+   "We won it all! Already thinking about next year's deals.",
+   "{you}, great final. Want to trade trophies? Kidding.",
+   "Champion. The phone was ringing all season for a reason."
+  ],
+  "tilted": [
+   "CHAMPION. After everything. After ALL of it. I can't believe it.",
+   "Title by {margin}! I take back every complaint I made. Most of them.",
+   "We won it all. The curse is broken. I'm emotional.",
+   "{you}, great final. I'm too relieved to gloat.",
+   "Champion! The losing streaks were worth it. I think."
   ]
  },
  "runner_up": {
@@ -1173,6 +1677,48 @@
    "Runner-up! The sequel is going to be epic.",
    "Fell one swing short! Swinging harder next year!",
    "Lost the title but WHAT a season! No regrets!"
+  ],
+  "fan": [
+   "Second place. Proud of the season, proud of the colors.",
+   "Lost the final by {margin}. Fans know heartbreak better than anyone.",
+   "{you}, congrats. We'll be back next year. We always are.",
+   "Runner-up. Still the best season I've had in years.",
+   "Lost the title game. Loyalty doesn't stop at second place."
+  ],
+  "stasher": [
+   "Runner-up. My stash came back a week too late.",
+   "Lost the final by {margin}. Next year the timing will be right.",
+   "{you}, congrats. Patience got me close. Next time it gets me there.",
+   "Second place. Still a good return on a lot of waiting.",
+   "Lost the title. I'm already planning next year's long game."
+  ],
+  "haggler": [
+   "Second place. Not a bad return for what I paid.",
+   "Lost the final by {margin}. I'll take it as a fair deal.",
+   "{you}, congrats. You outbid me in the end.",
+   "Runner-up. A bargain season, just one deal short.",
+   "Lost the title. Next year I'm negotiating harder."
+  ],
+  "contender": [
+   "Runner-up. Second place is the first loser. I'm not happy.",
+   "Lost the final by {margin}. That will motivate me for a year.",
+   "{you}, congrats. Enjoy it. I'm coming back for it.",
+   "So close to the ring. Next year I go even harder.",
+   "Lost the title game. Everything was built for this. Not enough."
+  ],
+  "dealer": [
+   "Second place! One trade short, probably.",
+   "Lost the final by {margin}. Should have made that last deal.",
+   "{you}, congrats. Want to talk trades for next year already?",
+   "Runner-up. A season full of deals and one more to go.",
+   "Lost the title. The offseason trade market opens now."
+  ],
+  "tilted": [
+   "Lost the final by {margin}. Of course I did. Of course.",
+   "Runner-up. So close. Again. I need a long walk.",
+   "{you}, congrats. I'm happy for you. I am mostly happy for you.",
+   "Second place. The universe giveth, then taketh in the final.",
+   "Lost the title game. I'm going to be thinking about this all winter."
   ]
  },
  "trade_reaction": {
@@ -1245,6 +1791,48 @@
    "Did everyone see this?! {player} is headed to {you}!",
    "That trade just changed the whole league! Probably! Definitely maybe!",
    "{player} on {you} is must-watch TV. Popcorn ready."
+  ],
+  "fan": [
+   "{you} gets {player} from {them}. Wish he played for my team. The real one.",
+   "{player} to {you}. Big move. Not as big as my team's last home win, but big.",
+   "Interesting trade. {them} gave up {player}. Bold.",
+   "{you} adds {player}. I'd only trade for a guy in the right colors.",
+   "{player} changes teams. {them} is going to regret that one."
+  ],
+  "stasher": [
+   "{you} gets {player}. Fine move. I'd have waited for a cheaper version.",
+   "{player} to {you}. {them} sold too early, if you ask me.",
+   "Interesting. {them} moves {player}. Patience is a lost art.",
+   "{you} adds {player}. Let's see how that looks in December.",
+   "{player} changes teams. The long game will tell."
+  ],
+  "haggler": [
+   "{you} gets {player} from {them}. Who negotiated that? Not great.",
+   "{player} to {you}. I'd have gotten a better price.",
+   "Interesting price, {them}. I'd have held out for more.",
+   "{you} adds {player}. Somebody overpaid. Not saying who.",
+   "{player} changes teams. Could've been a better deal for both of you."
+  ],
+  "contender": [
+   "{you} gets {player}. Fine. Doesn't change who wins this league.",
+   "{player} to {you}. You're going for it, huh? Me too.",
+   "Interesting move, {them}. Selling {player} means you're out of it.",
+   "{you} adds {player}. Good luck catching me.",
+   "{player} changes teams. Title race just got interesting."
+  ],
+  "dealer": [
+   "{you} gets {player} from {them}! Love a trade. Who's next?",
+   "{player} to {you}. Great deal. I want in on the action.",
+   "Interesting trade! {them}, call me. I've got a deal for you too.",
+   "{you} adds {player}. The trade market is alive. Beautiful.",
+   "{player} changes teams. Somebody trade with me now."
+  ],
+  "tilted": [
+   "{you} gets {player}? Of course you do. Everybody gets good players but me.",
+   "{player} to {you}. Great. Just great. Another team gets better.",
+   "Interesting, {them}. Wish someone would give ME {player}.",
+   "{you} adds {player}. I'm sure that'll go well. For you. Not for me.",
+   "{player} changes teams. Somebody please trade with me."
   ]
  },
  "shop": {
@@ -1289,6 +1877,48 @@
    "Gut says it's time to move {player}. Your gain! I'll take a bit less to get it done.",
    "{player} is yours if you want him. I'm chasing a new streak this week.",
    "Fire sale! Well, a small fire. {player}, slightly under value, this week only."
+  ],
+  "fan": [
+   "{you}, I'll be honest: {player} isn't doing it for me. Want him?",
+   "Shopping {player}. He's not one of my guys, if you know what I mean.",
+   "{player} is available. Make me a fair offer, {you}.",
+   "I'd rather have players I can cheer for. {player} could be yours.",
+   "{you}, {player} needs a new home. Interested?"
+  ],
+  "stasher": [
+   "{you}, I'm moving {player}. Not a long-term piece for me.",
+   "{player} is available. I need room to wait on bigger things.",
+   "Shopping {player}. Patience has limits, even mine.",
+   "{you}, want {player}? I'm making a little room.",
+   "{player} could be yours. Fair price, quick deal."
+  ],
+  "haggler": [
+   "{you}, special price on {player}. This week only.",
+   "Shopping {player}. Make me an offer. I'll make you a counter.",
+   "{player} is on sale. Let's talk numbers, {you}.",
+   "{you}, I've got {player} at a price you'll like. Probably.",
+   "{player} is available. Opening bids welcome."
+  ],
+  "contender": [
+   "{you}, {player} isn't a title piece for me. Want him?",
+   "Shopping {player}. I need someone who wins now.",
+   "{player} is available. Ring chasers can't wait around.",
+   "{you}, {player} could help you. I need a different fit.",
+   "Moving {player} for a win-now upgrade. Interested?"
+  ],
+  "dealer": [
+   "{you}, I'm moving {player}. Let's make a deal!",
+   "Shopping {player}. You know I always have something.",
+   "{player} is available. Call me, {you}.",
+   "{you}, got a great one for you: {player}. Fair price.",
+   "{player} is on the block. Deals happen fast here."
+  ],
+  "tilted": [
+   "{you}, take {player}. Please. I can't watch him anymore.",
+   "Shopping {player}. I need him off my team before I lose my mind.",
+   "{player} is available. Cheap. I'm in a mood.",
+   "{you}, want {player}? I'm done waiting on him.",
+   "Everyone on my roster is for sale. Starting with {player}."
   ]
  },
  "offer_worried": {
@@ -1361,6 +1991,48 @@
    "Your team, {player}, a bounce-back story. Sounds great, right?",
    "New hot hand needed. {player} is the trade chip.",
    "Let's shake things up! {player} for some fresh energy."
+  ],
+  "fan": [
+   "{you}, I'm not sold on {player}. Here's a deal for you.",
+   "Not feeling {player} lately. Would you take him?",
+   "{player} isn't playing like my kind of guy. Offer attached.",
+   "I'd rather move {player} now. Fair deal, {you}.",
+   "Trying to move on from {player}. Take a look."
+  ],
+  "stasher": [
+   "{you}, {player} isn't part of my long plan. Offer attached.",
+   "Moving {player} while he still has value. Interested?",
+   "I don't love where {player} is headed. Take a look.",
+   "{player} is the one piece I won't wait on. Here's my offer.",
+   "Here's a deal for {player}, {you}. My patience has a limit."
+  ],
+  "haggler": [
+   "{you}, special offer: {player}, priced to move.",
+   "I'm worried about {player}. Lucky for you, that means a deal.",
+   "{player} for what I'm asking here. You won't see this price again.",
+   "Selling {player} before his price drops further. Interested?",
+   "{you}, take {player} off my hands. Reasonable price."
+  ],
+  "contender": [
+   "{you}, {player} isn't helping me win now. Offer attached.",
+   "I can't carry {player} into the playoffs. Here's a deal.",
+   "{player} hasn't been title-ready. Want him?",
+   "Moving {player} for a piece that wins today. Take a look.",
+   "{you}, {player} for something I can use now?"
+  ],
+  "dealer": [
+   "{you}, I've got a deal for you with {player} in it!",
+   "Not loving {player} lately. Let's trade.",
+   "{player} could use a change of scenery. Your team, maybe?",
+   "Here's an offer with {player}. Quick deal, everybody wins.",
+   "{you}, how about {player}? I'm always dealing."
+  ],
+  "tilted": [
+   "{you}, take {player}. I can't watch another week of him.",
+   "{player} has been a nightmare for me. Maybe he's lucky for you.",
+   "I'm done with {player}. Done. Offer attached.",
+   "Get {player} out of my sight. Fair deal, I promise.",
+   "{you}, please take {player}. I'm begging a little."
   ]
  },
  "offer_high": {
@@ -1433,6 +2105,48 @@
    "{player} on my team means fireworks. Make it happen!",
    "Chasing the {player} heater! Jump on board!",
    "This is the {player} trade that wins me the league. Say yes!"
+  ],
+  "fan": [
+   "{you}, I love {player}. Just a fan of the guy. Here's my offer.",
+   "{player} is my kind of player. Let's make a deal.",
+   "I've been cheering for {player} all year. Can I have him?",
+   "{player} would look great on my team. Offer attached.",
+   "Big fan of {player}. Fair deal, {you}."
+  ],
+  "stasher": [
+   "{you}, I think {player} is only getting better. Here's an offer.",
+   "{player} is a long-term piece. I'd like him.",
+   "I've been watching {player} for weeks. Let's deal.",
+   "{player} fits what I'm building. Take a look.",
+   "Patient buyer here: I want {player}."
+  ],
+  "haggler": [
+   "{you}, I like {player}. Not too much, mind you. Here's my number.",
+   "{player} for a fair price. Well, my idea of fair.",
+   "Interested in {player}. Let's talk price.",
+   "{player} looks good to me. Opening offer attached.",
+   "I'd pay for {player}. Within reason."
+  ],
+  "contender": [
+   "{you}, {player} is the piece that wins me a title. Let's deal.",
+   "I want {player} for the stretch run. Fair offer.",
+   "{player} would start for a champion. That's me.",
+   "Going all in. {player} is the move.",
+   "{player} gets me the ring. Here's what I'll pay."
+  ],
+  "dealer": [
+   "{you}, I want {player}! Let's work something out.",
+   "{player} is on my list. Here's a deal.",
+   "Big fan of {player}. Trade?",
+   "{player} for this package. Quick and easy.",
+   "I've got a deal for {player}. Take a look!"
+  ],
+  "tilted": [
+   "{you}, {player} might be the one who saves my season. Please?",
+   "I need {player}. Something has to change around here.",
+   "{player} is exactly what my cursed team needs. Offer attached.",
+   "Give me {player} and I'll stop complaining. For a week.",
+   "{player}, please, {you}. I'm desperate and I know it."
   ]
  },
  "offer_need": {
@@ -1505,6 +2219,48 @@
    "Time to fix my {position} problem the fun way. With a trade!",
    "A {position} who can boom? That's all I want!",
    "Need a {position}! Your guy might be my next superstar!"
+  ],
+  "fan": [
+   "{you}, I need a {position}. Help a fan out?",
+   "My {position} spot is a mess. Here's a fair offer.",
+   "Looking for a {position} I can cheer for. This one works.",
+   "Short at {position}. Let's make a deal.",
+   "I need a {position} for Sunday. Offer attached."
+  ],
+  "stasher": [
+   "{you}, I'm short at {position} until my guys are back. Offer attached.",
+   "Need a {position} to bridge the gap. Take a look.",
+   "My {position} help is still on the shelf. Want to deal?",
+   "A {position} would hold me over. Fair offer.",
+   "Filling a {position} hole for a few weeks. Interested?"
+  ],
+  "haggler": [
+   "{you}, I need a {position}. Let's talk price.",
+   "Shopping for a {position}. Here's my opening number.",
+   "My {position} spot needs help. Make it worth both our while.",
+   "Looking for a {position} at a fair price. Here's my offer.",
+   "A {position}, a good price. That's all I want."
+  ],
+  "contender": [
+   "{you}, my {position} spot is the one thing between me and a title.",
+   "Need a {position} to win now. Offer attached.",
+   "Title teams don't have holes at {position}. Help me fix mine.",
+   "Win-now trade: I need a {position}.",
+   "Short at {position}. I'll pay to fix it."
+  ],
+  "dealer": [
+   "{you}, I need a {position}! Let's deal.",
+   "Looking for a {position}. Got a package ready.",
+   "My {position} spot needs a trade. Here it is.",
+   "Short at {position}. Let's make it happen.",
+   "{position} upgrade trade! Take a look."
+  ],
+  "tilted": [
+   "{you}, my {position} spot is ruining my life. Please help.",
+   "I need a {position}. Desperately. Offer attached.",
+   "Every week my {position} lets me down. Let me try yours.",
+   "No {position}, no wins. Please trade with me.",
+   "Short at {position} and short on patience. Deal?"
   ]
  },
  "offer_value": {
@@ -1577,6 +2333,48 @@
    "Let's give the group chat something to talk about!",
    "This offer is pure vibes and I love it.",
    "{player} on my team? Fireworks. Let's do it!"
+  ],
+  "fan": [
+   "{you}, I'd like {player}. Fair deal from a fair fan.",
+   "Here's an offer for {player}. Good for both of us.",
+   "{player} for this package. I think it's square.",
+   "Fair trade for {player}. Take a look.",
+   "{you}, {player} would fit my team nicely. Offer attached."
+  ],
+  "stasher": [
+   "{you}, here's a fair offer for {player}.",
+   "{player} for this package. A good long-term deal for both of us.",
+   "I like {player} for later. Here's my offer.",
+   "Value trade for {player}. No rush to answer.",
+   "{player} would fit my plans. Fair price."
+  ],
+  "haggler": [
+   "{you}, here's my offer for {player}. We can talk.",
+   "{player} for this. Reasonable. Very reasonable.",
+   "Let's make a deal for {player}. Price is on the table.",
+   "An offer for {player}. I'd call it fair. You might not.",
+   "{player}? Here's my number."
+  ],
+  "contender": [
+   "{you}, {player} helps me win now. Fair offer.",
+   "Here's an offer for {player}. Title teams pay for talent.",
+   "{player} for this package. Good for both of us.",
+   "Win-now offer for {player}. Take a look.",
+   "{player} makes my lineup better today. Here's my offer."
+  ],
+  "dealer": [
+   "{you}, let's make a deal for {player}!",
+   "Here's an offer for {player}. Quick and fair.",
+   "{player} for this. Everybody wins.",
+   "Deal time! {player} for this package.",
+   "I've got a trade for {player}. Take a look."
+  ],
+  "tilted": [
+   "{you}, I'd like {player}. My team needs anything good right now.",
+   "Here's an offer for {player}. Please say yes.",
+   "{player} for this package. I need a change.",
+   "Trying something new: {player} for this.",
+   "{player}? I'll take any good news I can get."
   ]
  },
  "offer_counter": {
@@ -1649,6 +2447,470 @@
    "Not quite, but we're SO close to a blockbuster!",
    "Let's run it back with this one!",
    "Here's my version! It has more boom!"
+  ],
+  "fan": [
+   "Close, {you}. Here's a version I can live with.",
+   "I like the idea. This works better for me.",
+   "Counter: a little different, still fair.",
+   "Not quite. How about this one?",
+   "Here's my version. Fair for both of us."
+  ],
+  "stasher": [
+   "Close. Here's a version that fits my long plan.",
+   "Counter, {you}. A little adjustment.",
+   "Not that one. This one, though.",
+   "Here's what I'd do instead. Take your time.",
+   "I can deal. Just not that deal. Try this."
+  ],
+  "haggler": [
+   "Counter! You knew this was coming, {you}.",
+   "Here's my number. Let's keep talking.",
+   "Not quite. Meet me here.",
+   "Good start. Here's a better finish.",
+   "Counteroffer. Haggling is half the fun."
+  ],
+  "contender": [
+   "Counter, {you}. This one helps me win now.",
+   "Close. Here's a version that fits a title run.",
+   "Not that one. This one gets done today.",
+   "Here's my version. Quick answer, please.",
+   "I need a deal that wins now. Here it is."
+  ],
+  "dealer": [
+   "Counter! I love a back and forth, {you}.",
+   "Here's a deal I can do. Let's keep it moving.",
+   "Not quite. Try this one!",
+   "Counteroffer. We're close!",
+   "Here's my version. Let's make it happen."
+  ],
+  "tilted": [
+   "Counter, {you}. Please just take it.",
+   "Not that. This. I'm tired.",
+   "Here's what I can do. I need a win somewhere.",
+   "Close. Take this version and let me have one good day.",
+   "Counteroffer. My nerves can't take much more."
+  ]
+ },
+ "offer_buy_low": {
+  "balanced": [
+   "{you}, {player} has had a rough patch. I'll take the chance. Fair offer.",
+   "Offer for {player}. I think he turns it around. Do you?",
+   "{player} is a little cold right now. Here's what I'd pay.",
+   "Buying {player} while things are quiet for him. Take a look.",
+   "{player} for this package. A bet on a comeback."
+  ],
+  "panicky": [
+   "{you}, I know {player} looks bad right now. I'll take him anyway. Please.",
+   "Is {player} going to be okay? I'll find out. Offer attached.",
+   "Buying {player} before everyone else remembers he's good. Hurry.",
+   "{player} might bounce back any second. Can I have him now?",
+   "Offer for {player}. I'm nervous but I'm doing it."
+  ],
+  "shark": [
+   "{you}, {player} is down. Prices are down. I'm buying.",
+   "Buy low on {player}. Here's my offer. It won't get better.",
+   "{player}'s value has never been lower. Sell to me now.",
+   "I like {player} at this price. You'd be smart to take it.",
+   "Here's what {player} is worth today. Tomorrow I offer less."
+  ],
+  "steady": [
+   "{you}, {player} is still a good player. I'll take him off your hands.",
+   "Offer for {player}. A slow stretch doesn't scare me.",
+   "{player} for this. He'll be fine. I'll wait.",
+   "I'll buy {player} on a down week. Fair offer.",
+   "{player} is the same player he was in August. Here's my offer."
+  ],
+  "gambler": [
+   "{you}, {player} is about to explode. I can feel it. Deal?",
+   "Buying {player} at the bottom! Fortune favors the bold!",
+   "{player} is due! Here's my offer before he goes off!",
+   "I'm betting on {player}. Big swing. Take it?",
+   "{player} for this package. I love a comeback story!"
+  ],
+  "fan": [
+   "{you}, I believe in {player}. Fans always believe. Offer attached.",
+   "{player} will bounce back. I'll cheer for him from my roster.",
+   "Buying {player} while he's down. Loyalty starts somewhere.",
+   "{player} for this. He just needs someone in his corner.",
+   "Offer for {player}. Every comeback needs a fan."
+  ],
+  "stasher": [
+   "{you}, {player} will be back. I'm happy to wait. Here's my offer.",
+   "Offer for {player}. The return date is all I need to know.",
+   "{player} is my kind of player: sidelined now, a difference maker later.",
+   "I'll hold {player} while he's out. You get help today.",
+   "{player} for this. You get points now, I get patience."
+  ],
+  "haggler": [
+   "{you}, {player} isn't worth what he was. Here's what he's worth now.",
+   "Buying {player} at today's price. It's a fair number. Mostly.",
+   "{player} for this. Discount for a down stretch.",
+   "Offer for {player}. Let's call it a bargain for both of us.",
+   "{player}'s market price dropped. I'm here to help."
+  ],
+  "contender": [
+   "{you}, I'll take {player} and get him going for my title run.",
+   "Offer for {player}. He'll be ready for the playoffs. I will be too.",
+   "{player} for this package. Contenders take smart chances.",
+   "Buying {player} now so he peaks in my playoff weeks.",
+   "{player} is a playoff piece in disguise. Here's my offer."
+  ],
+  "dealer": [
+   "{you}, I'll take {player} off your hands! Quick deal.",
+   "Offer for {player}. A change of scenery helps everyone.",
+   "{player} for this. You move on, I take the bet.",
+   "Let's deal! {player} for a package that helps you now.",
+   "{player} on a down week? That's a deal I like."
+  ],
+  "tilted": [
+   "{you}, {player} is struggling. So am I. Let's struggle together.",
+   "Offer for {player}. My luck can't be worse than his. Can it?",
+   "{player} for this. Two cold streaks might make a hot one.",
+   "Buying {player}. Things have to turn around for one of us.",
+   "{player}? Sure. Why not. Nothing else is working."
+  ]
+ },
+ "offer_haggle": {
+  "haggler": [
+   "{you}, opening offer for {player}. Just a starting point. Let's talk.",
+   "Here's my first number for {player}. I expect you'll want more.",
+   "Opening bid on {player}. Don't say yes too fast.",
+   "{player} for this, to start. We can haggle from here.",
+   "First offer for {player}. Every good deal starts low."
+  ]
+ },
+ "offer_haggle_counter": {
+  "haggler": [
+   "Okay, {you}, you drove a hard bargain. Here's my real offer for {player}.",
+   "Fine. Better number for {player}. This is close to my best.",
+   "You said no, so I came up. {player} for this.",
+   "Round two for {player}. I sweetened it. Happy?",
+   "My improved offer for {player}. Now we're talking."
+  ]
+ },
+ "decline_rival": {
+  "fan": [
+   "{player}? He plays for the {team}. Not on my roster. Never.",
+   "No {team} players. Not {player}, not for any price, {you}.",
+   "I'd rather start an empty slot than {player}. He's a {team} guy.",
+   "{you}, you know I can't take {player}. The {team}? Come on.",
+   "Not a chance. {player} wears the wrong colors."
+  ]
+ },
+ "decline_room": {
+  "balanced": [
+   "{you}, I just don't have the roster room for that one.",
+   "Can't make it fit. My lineup wouldn't work after that.",
+   "No room for that deal. Sorry, {you}.",
+   "I'd love to, but I'd have nobody to start at a spot.",
+   "That breaks my roster. Try a smaller deal?"
+  ],
+  "panicky": [
+   "{you}, that would leave a hole in my lineup. I can't. I just can't.",
+   "Where would they all go?! No room. Sorry.",
+   "That breaks my lineup. I'm stressed just thinking about it.",
+   "No no no. I'd have an empty spot. Please no.",
+   "My roster can't fit that. I already worry enough."
+  ],
+  "shark": [
+   "{you}, that leaves me without a starter. Not happening.",
+   "No room. Bring me something that fits.",
+   "My roster math doesn't work. Pass.",
+   "I don't take deals that break my lineup. Try again.",
+   "No space for that. Rethink it."
+  ],
+  "steady": [
+   "{you}, I don't have room for that.",
+   "My lineup wouldn't hold together. No, thanks.",
+   "Can't fit it. Maybe something smaller.",
+   "That leaves me short somewhere. Pass for now.",
+   "No room on my roster. Thanks anyway."
+  ],
+  "gambler": [
+   "{you}, love the energy, but I can't fit all that!",
+   "No room! My roster's already packed with upside.",
+   "That leaves me a starter short. Even I won't roll those dice.",
+   "Too many moving parts for my roster. Try a smaller swing!",
+   "Can't fit it! Bring me one big piece instead."
+  ],
+  "fan": [
+   "{you}, I don't have the roster room for that.",
+   "That would leave me short at a spot. Can't do it.",
+   "No room for it. Sorry, friend.",
+   "My lineup wouldn't work after that one.",
+   "Can't make that fit on my team."
+  ],
+  "stasher": [
+   "{you}, I need my roster spots for the guys I'm holding.",
+   "No room. My bench is full of players coming back.",
+   "That leaves me short somewhere. Pass.",
+   "Can't fit it. My stash takes up space.",
+   "My roster can't take that right now."
+  ],
+  "haggler": [
+   "{you}, no room for that. Smaller deal, better price?",
+   "Can't fit it. Let's talk about a different package.",
+   "That breaks my lineup. Not at any price.",
+   "My roster's full. Make me a tighter offer.",
+   "No space. Bring me one player, not a crowd."
+  ],
+  "contender": [
+   "{you}, that leaves me without a starter. Title teams can't do that.",
+   "No room. My lineup is set for a run.",
+   "That breaks my starting lineup. Pass.",
+   "Can't fit it. I need every spot to win now.",
+   "My roster can't take that. Not with the playoffs coming."
+  ],
+  "dealer": [
+   "{you}, love it, but I can't fit it! Try a 2-for-2?",
+   "No room on my roster. Let's rework it.",
+   "That breaks my lineup. Different package?",
+   "Too many players coming in. Make it even and we'll talk.",
+   "Can't fit it. But I'm still dealing!"
+  ],
+  "tilted": [
+   "{you}, I can't fit that. Nothing ever fits for me.",
+   "No room. Of course there's no room.",
+   "That would wreck my lineup even more than it already is.",
+   "Can't do it. I'd be short a starter. Again.",
+   "My roster is a mess already. No room for that."
+  ]
+ },
+ "decline_attached": {
+  "balanced": [
+   "{you}, I'm keeping {player}. I like him too much right now.",
+   "Not {player}. Not at that price. He's playing great for me.",
+   "{player} stays. I'd need a little more for him.",
+   "I'm high on {player}. You'll have to pay up for him.",
+   "Almost, but I really like {player}. Add a bit more."
+  ],
+  "panicky": [
+   "{you}, {player} is the only thing going right for me. I can't let him go cheap.",
+   "Not {player}! He's my security blanket.",
+   "I'd panic without {player}. Need more to give him up.",
+   "{player} is keeping me sane. Pay a bit more.",
+   "Please don't ask for {player} unless you mean it. A little more."
+  ],
+  "shark": [
+   "{you}, {player} is worth more than that. You know it.",
+   "Not at that price. {player} is my guy right now.",
+   "{player} costs extra. That's the market.",
+   "I don't sell {player} at a discount. Up it.",
+   "You want {player}? Pay the premium."
+  ],
+  "steady": [
+   "{you}, I'm sticking with {player}. He's earned it.",
+   "Not {player}. I believe in him.",
+   "{player} stays unless you add a bit more.",
+   "I like what {player} is doing. A little more and we'll talk.",
+   "No, thanks. I'm keeping {player} for now."
+  ],
+  "gambler": [
+   "{you}, {player} is on fire! You have to pay for fire!",
+   "Not {player}! He's my lucky charm right now.",
+   "{player} costs more than that. Way more fun, too.",
+   "You want {player}, my hottest player? Sweeten it!",
+   "{player} stays unless you make it worth my while."
+  ],
+  "fan": [
+   "{you}, {player} is my guy. I'd need more to let him go.",
+   "Not {player}. I've been cheering for him all year.",
+   "{player} stays on my team. Add a little and we'll see.",
+   "I'm a big {player} fan. Big fans don't sell cheap.",
+   "Can't part with {player} at that price."
+  ],
+  "stasher": [
+   "{you}, I've waited on {player} too long to let him go cheap.",
+   "Not {player}. He's finally paying off for me.",
+   "{player} stays unless you add more.",
+   "I like {player} a lot right now. Pay a bit more.",
+   "Patience made {player} mine. It'll cost you to take him."
+  ],
+  "haggler": [
+   "{you}, {player}? Ha. Not at that price. Higher.",
+   "I like {player} too much for that number. Add some.",
+   "{player} is premium stock. Premium price.",
+   "Close, but {player} costs more. Counter me.",
+   "You want {player}, you pay extra. That's how this works."
+  ],
+  "contender": [
+   "{you}, {player} is part of my title run. You'll pay to take him.",
+   "Not {player}. He's winning me games right now.",
+   "{player} stays unless you make it worth it.",
+   "I'm high on {player} for the playoffs. Add more.",
+   "{player} is a championship piece. Price it like one."
+  ],
+  "dealer": [
+   "{you}, I'd deal {player}, but not that cheap. Add a bit!",
+   "{player} is my favorite player this week. Costs extra.",
+   "Almost! But {player} is worth more to me. Sweeten it.",
+   "I'll move anyone. {player} just costs more today.",
+   "Let's keep talking. {player} needs a bigger offer."
+  ],
+  "tilted": [
+   "{you}, {player} is the only good thing on my team. No.",
+   "Not {player}. He's all I've got left.",
+   "{player} stays. Unless you really make it worth it.",
+   "You want to take {player} too? Pay up.",
+   "I need {player} to stay sane. More, please."
+  ]
+ },
+ "decline_need": {
+  "balanced": [
+   "{you}, that leaves me weak at {position}. I can't do it.",
+   "I'd be losing a starter at {position}. Pass.",
+   "I already have plenty at {position}. Not what I need.",
+   "That doesn't help my lineup. I need help, not more {position}.",
+   "Not for me. My {position} spot can't take a hit."
+  ],
+  "panicky": [
+   "{you}, I'd have nobody good at {position}! No way.",
+   "That leaves my {position} spot empty. I'd panic.",
+   "More {position}? I need anything else!",
+   "I can't lose a {position}. I just can't.",
+   "My {position} is all I have. Please don't take it."
+  ],
+  "shark": [
+   "{you}, I don't need {position}. Bring me what I need.",
+   "That costs me a starter at {position}. Not happening.",
+   "I'm already deep at {position}. Pass.",
+   "I don't buy {position} I already have. Try again.",
+   "That weakens my {position}. No."
+  ],
+  "steady": [
+   "{you}, that leaves me short at {position}.",
+   "I have enough at {position}. No, thanks.",
+   "I'd rather not lose a starter at {position}.",
+   "A {position} doesn't fit what I need. Pass for now.",
+   "My {position} spot can't spare anyone."
+  ],
+  "gambler": [
+   "{you}, I've got all the {position} I need! Bring me something else!",
+   "That costs me a starter at {position}. Even I won't do that!",
+   "More {position}? I need a different kind of swing.",
+   "I'd be thin at {position}. Too risky, even for me.",
+   "Not that. I need upside somewhere other than {position}."
+  ],
+  "fan": [
+   "{you}, that leaves me weak at {position}.",
+   "I'm set at {position}. I need help elsewhere.",
+   "I'd lose a starter at {position}. Can't do it.",
+   "Doesn't fit my team. My {position} spot needs to stay.",
+   "Plenty of {position} here already. No, thanks."
+  ],
+  "stasher": [
+   "{you}, I need my {position} until my guys are back.",
+   "I'm fine at {position}. Not what I'm looking for.",
+   "That costs me a starter at {position}. Pass.",
+   "I'd be short at {position} for weeks. No.",
+   "More {position} doesn't help my plan."
+  ],
+  "haggler": [
+   "{you}, I don't need {position}. Nobody pays for what they don't need.",
+   "That costs me a {position} starter. Not at any price.",
+   "I'm deep at {position}. Offer me something I'd buy.",
+   "Wrong product. I'm shopping for something besides {position}.",
+   "My {position} spot isn't for sale. Try another aisle."
+  ],
+  "contender": [
+   "{you}, I can't lose a {position} starter with a title on the line.",
+   "I'm set at {position}. I need help that wins now.",
+   "That weakens my {position}. Not before the playoffs.",
+   "More {position} doesn't win me a ring.",
+   "I'd be short at {position}. Pass."
+  ],
+  "dealer": [
+   "{you}, I'm loaded at {position}. Bring me something else and we'll deal!",
+   "That costs me a {position} starter. Let's rework it.",
+   "Not more {position}! Try a different package.",
+   "I'd be thin at {position}. Close, but no.",
+   "Swap the {position} for something I need and we're done."
+  ],
+  "tilted": [
+   "{you}, my {position} spot is already a disaster. No.",
+   "That leaves me with nothing at {position}. Of course it does.",
+   "More {position}? That's the one thing I don't need.",
+   "I can't lose a {position}. I'm barely holding on.",
+   "Not that. My lineup can't take another hit at {position}."
+  ]
+ },
+ "decline_value": {
+  "balanced": [
+   "{you}, that's not enough for {player}.",
+   "Not quite enough value there. {player} is worth more to me.",
+   "I'd need more to give up {player}.",
+   "Fair try, but no. Add a little.",
+   "Not for {player}. Close, but not close enough."
+  ],
+  "panicky": [
+   "{you}, I can't give up {player} for that. I'd regret it all week.",
+   "Not enough for {player}! I'd be a wreck.",
+   "That scares me. {player} is worth more.",
+   "I'd need more for {player}. My nerves say no.",
+   "No, no. {player} for that? I'd never sleep."
+  ],
+  "shark": [
+   "{you}, that's a lowball for {player}. Try harder.",
+   "Not even close for {player}.",
+   "I don't do favors. {player} costs more.",
+   "Come back with a real offer for {player}.",
+   "That's cute. No."
+  ],
+  "steady": [
+   "{you}, I'd need more for {player}.",
+   "Not enough for {player}, I'm afraid.",
+   "{player} is worth more than that to me.",
+   "No, thanks. The value isn't there.",
+   "I'll keep {player} at that price."
+  ],
+  "gambler": [
+   "{you}, that's not enough juice for {player}!",
+   "{player} for that? I need a bigger payoff!",
+   "Not enough upside coming back. Pass!",
+   "Bring me more and we'll roll the dice on {player}.",
+   "That's a small bet for {player}. Go bigger!"
+  ],
+  "fan": [
+   "{you}, that's not enough for {player}.",
+   "I'd need more to let {player} go.",
+   "Not quite. {player} is worth more than that.",
+   "Fair try, friend, but no.",
+   "{player} stays at that price."
+  ],
+  "stasher": [
+   "{you}, I can wait for a better offer for {player}.",
+   "Not enough for {player}. I'm a patient seller.",
+   "{player} is worth more than that. I'll wait.",
+   "No rush on my end. Come back with more.",
+   "That doesn't get {player} done."
+  ],
+  "haggler": [
+   "{you}, that's your opening offer for {player}? Try again.",
+   "Too low for {player}. Come up a bit.",
+   "Not at that price. {player} is worth more.",
+   "Interesting number. Wrong number. Higher.",
+   "{player} for that? Let's keep haggling."
+  ],
+  "contender": [
+   "{you}, that doesn't help me win now. Not for {player}.",
+   "Not enough for {player}. Title teams don't take discounts.",
+   "{player} is worth more to a contender.",
+   "I need more back for {player}. Pass.",
+   "That makes my team worse. No."
+  ],
+  "dealer": [
+   "{you}, close! Add a little more for {player}.",
+   "Not quite for {player}. Let's keep talking!",
+   "Almost there. A bit more and {player} is yours.",
+   "I want to deal, but not at that price.",
+   "{player} for a little more and we're done."
+  ],
+  "tilted": [
+   "{you}, everybody's lowballing me lately. Not enough for {player}.",
+   "Not for {player}. I'm not THAT desperate. Yet.",
+   "{player} for that? Even on my worst week, no.",
+   "No. My season's bad enough without that deal.",
+   "Not enough for {player}. Try me after another loss."
   ]
  }
 }
