@@ -54,6 +54,7 @@ DEFAULT_WEIGHTS = {"vegas_props": 0.30, "experts": 0.35, "espn": 0.15, "model": 
 SOURCE_GROUPS = {"josh_hayden": "experts", "yahoo_consensus": "experts"}
 PSEUDO_ROWS = 1500         # how many player-weeks of evidence the prior counts as
 MIN_POOLED_ROWS = 300      # fewer rows than this: keep the prior
+NO_SPREAD = 1e-9           # sources disagreeing by less than this share of their level: keep the prior
 PROPS_FLOOR = 0.15
 MIN_WEIGHT = 0.05
 RELEVANT_RANKS = {"QB": 24, "RB": 36, "WR": 36, "TE": 36}
@@ -150,6 +151,8 @@ def fit_pooled(samples: Sequence[Sample], prior: Mapping[str, float] = DEFAULT_W
     # as rows. (Scaled by the level, ~1,000 rows moved the weights by 0.05 points.)
     spread = x - x.mean(axis=1, keepdims=True)
     strength = pseudo_rows * float(np.mean(np.sum(spread * spread, axis=1)) / len(keys))
+    if strength <= NO_SPREAD * pseudo_rows * float(np.mean(x * x)):
+        return constrain(dict(prior))       # no row's sources disagree: nothing to learn (and X^T X is singular)
     w = np.linalg.solve(x.T @ x + strength * np.eye(len(keys)), x.T @ y + strength * p)
     w = w / w.sum() if w.sum() > 0 else p
     return constrain(dict(zip(keys, w.tolist())))

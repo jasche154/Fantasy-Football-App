@@ -35,6 +35,15 @@ def test_pooled_fit_moves_toward_the_accurate_source_but_stays_near_the_prior(mo
     assert wl.fit_pooled(samples) == DEFAULT_WEIGHTS                            # too few rows: the prior
 
 
+def test_pooled_fit_keeps_the_prior_when_no_row_has_two_sources(monkeypatch):
+    """Single-source rows (the rest filled with the row mean) never disagree: nothing to learn, and no
+    singular solve."""
+    monkeypatch.setattr(wl, "MIN_POOLED_ROWS", 10)
+    keys = list(DEFAULT_WEIGHTS)
+    samples = [Sample({keys[i % len(keys)]: 3.0 + i * 0.37}, 4.0 + i * 0.3) for i in range(400)]
+    assert wl.fit_pooled(samples) == wl.constrain(DEFAULT_WEIGHTS)
+
+
 def _seed_history(session, seeded, week, final=True, players=120):
     session.add(NflGame(game_id=f"lw{week}", season=2026, week=week, game_type="REG", home_team="AAA",
                         away_team="BBB", home_score=24 if final else None, away_score=20 if final else None))
