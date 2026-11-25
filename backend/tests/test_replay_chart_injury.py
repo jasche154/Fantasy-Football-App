@@ -34,12 +34,21 @@ def test_out_for_the_season_is_the_whole_chart_and_a_late_absence_still_costs():
     assert injury.discount(2, 3) > 0.4                              # out 2 of the last 3 games
 
 
-def test_without_a_report_he_is_expected_back_as_real_absences_come_back():
-    plain = injury.discount(injury.unreported_missed(LEFT, False), LEFT)
+@pytest.mark.parametrize("ir_tag", [False, True])
+def test_without_a_report_he_is_never_worth_zero_and_more_games_left_cost_less(ir_tag):
+    found = [injury.unreported_discount(left, ir_tag) for left in (1, 2, 3, 4, LEFT)]
 
-    assert 0.05 <= plain <= 0.12
-    assert injury.discount(injury.unreported_missed(LEFT, True), LEFT) > 0.5      # tagged IR: most of the rest
-    assert injury.unreported_missed(2, False) == 2.0
+    assert all(0 < d < 1 for d in found)                         # only a season-ending report is zero
+    assert all(later <= earlier for earlier, later in zip(found, found[1:]))
+    assert ir_tag or found[-1] == pytest.approx(sum(odds * injury.discount(LEFT if missed is None else min(missed, LEFT), LEFT)
+                                          for missed, odds in injury.NO_REPORT_ODDS) / sum(
+        odds for _, odds in injury.NO_REPORT_ODDS))
+    assert sum(odds for _, odds in injury.NO_REPORT_ODDS) == pytest.approx(1.0, abs=0.001)
+
+
+def test_tagged_ir_without_a_report_misses_most_of_the_rest():
+    assert injury.unreported_discount(LEFT, True) >= injury.discount(injury.IR_OUT_SHARE * LEFT, LEFT)
+    assert injury.unreported_discount(LEFT, True) > injury.unreported_discount(LEFT, False)
 
 
 def _star_row(week: int) -> tuple[dict, list[int]]:
@@ -83,5 +92,5 @@ def test_an_unreported_absence_and_a_healthy_player():
     unreported, _ = replay_chart._injured(fakes.fake_season(), row, None, week, 17, 600.0, 350.0)
     healthy, _ = replay_chart._injured(fakes.fake_season(), {**row, "out": False}, None, week, 17, 600.0, 350.0)
 
-    assert unreported == pytest.approx(950.0 * (1 - injury.discount(injury.NO_REPORT_MISSED, row["games_left"])))
+    assert unreported == pytest.approx(950.0 * (1 - injury.unreported_discount(row["games_left"], False)))
     assert healthy == 950.0

@@ -15,12 +15,15 @@ keep more (0.63 on average), so within them the deep end is used: the anchors' u
 SHARE_POWER (1.8) that keeps every 1-4-week absence within 12% at 13 games left (held-out RMSE of out
 players 3.20 with the middle of the ranges and a square, 3.17 at the deep end, 2.94 with the old chart).
 
-`unreported_missed`: an out player without a news report (no hard tag streak in replay_news) is expected to
-miss NO_REPORT_MISSED more games, at least IR_OUT_SHARE of the rest when tagged IR or PUP. Measured on
-2018-25 (weeks 1-10, every skill player out with no hard tag: 3,253 player-weeks): 3.3-3.8 more games
-counting this one at every streak length (median 2). A plain O tag's first week, for comparison: median 2,
-mean 3.0, 7% never back that season (604 player-weeks), so a star newly out on an O tag reported back in a
-week or two loses 7-10%.
+`unreported_discount`: an out player without a news report (no hard tag streak in replay_news) loses the
+expected discount over NO_REPORT_ODDS, how many games such absences really missed (counting this week, each
+truncated at the games left, never back = all of them), at least the discount of missing IR_OUT_SHARE of the
+rest when tagged IR or PUP. Measured with `python -m services.replay_chart_eval --absences` (2018-25, weeks
+1-10, every skill player out with no hard tag: 3,253 player-weeks): 16% played that week after all, 23%
+missed one game, 13% two, 19% never came back that season. With 13 games left that costs about 30%; with one
+left 84% (never all: some play after all). A plain O tag's first week, for comparison: median 2 games, mean
+3.0, 7% never back (604 player-weeks); it always has a news report, so a star newly out on an O tag reported
+back in a week or two loses 6-8%.
 
 Pure: no database.
 """
@@ -28,9 +31,11 @@ from bisect import bisect_right
 
 DISCOUNT_ANCHORS = ((0.0, 0.0), (1.0, 0.06), (4.0, 0.12), (6.0, 0.40), (8.0, 0.45), (12.0, 0.45))
 SHARE_POWER = 1.8
-NO_REPORT_MISSED = 3.5         # more games an out player without a report misses (measured, see the docstring)
+# (team games missed counting this week, None = never back that season) -> share of unreported absences
+NO_REPORT_ODDS = ((0, 0.1565), (1, 0.2321), (2, 0.1303), (3, 0.0812), (4, 0.0559), (5, 0.0418), (6, 0.0277),
+                  (7, 0.0264), (8, 0.0209), (9, 0.0157), (10, 0.0101), (11, 0.0052), (12, 0.0043), (13, 0.0028),
+                  (14, 0.0012), (15, 0.0003), (None, 0.1875))
 IR_OUT_SHARE = 0.80            # tagged IR or PUP: at least this share of the remaining games (replay_values)
-LONG_DISCOUNT = DISCOUNT_ANCHORS[-1][1]     # the most a long but not season-long absence takes off by the anchors
 
 
 def _anchored(missed: float) -> float:
@@ -51,7 +56,9 @@ def discount(missed: float, left: float) -> float:
     return max(_anchored(missed), (missed / left) ** SHARE_POWER)
 
 
-def unreported_missed(games_left: int, ir_tag: bool) -> float:
-    """Games an out player with no news report is expected to miss (module docstring)."""
-    missed = min(float(games_left), NO_REPORT_MISSED)
-    return max(missed, IR_OUT_SHARE * games_left) if ir_tag else missed
+def unreported_discount(games_left: int, ir_tag: bool) -> float:
+    """The expected discount of an out player with no news report (module docstring)."""
+    total = sum(odds for _, odds in NO_REPORT_ODDS)
+    expected = sum(odds * discount(games_left if missed is None else min(missed, games_left), games_left)
+                   for missed, odds in NO_REPORT_ODDS) / total
+    return max(expected, discount(IR_OUT_SHARE * games_left, games_left)) if ir_tag else expected

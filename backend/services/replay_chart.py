@@ -28,7 +28,7 @@ bye is behind him.
   alone swung QBs 124 -> 495 -> 633 in three weeks; this halves the weekly moves and ranks no worse.
 - chart: healthy_chart x (1 - replay_chart_injury.discount(games he misses, games left)): with a news report
   (replay_news) the games before the reported return (0 if out for the season; from his second week out only
-  the model half is discounted, the experts already price it); out without one, unreported_missed. The
+  the model half is discounted, the experts already price it); out without one, unreported_discount. The
   discount follows the user's targets (out 1-4 weeks 5-12% off, 6+ weeks 35-45%), not the share of games
   missed: availability and expected_missed (lineups, waivers) stay the real expected games.
 
@@ -213,8 +213,8 @@ def _injured(data: SeasonData, row: dict, news: "replay_news.Report | None", wee
         if not row["out"]:
             return expert + model, {}
         injury = row["injury"]
-        missed = replay_chart_injury.unreported_missed(row["games_left"], injury is not None and injury.tag in ("IR", "PUP"))
-        return (expert + model) * (1 - replay_chart_injury.discount(missed, row["games_left"])), {}
+        ir_tag = injury is not None and injury.tag in ("IR", "PUP")
+        return (expert + model) * (1 - replay_chart_injury.unreported_discount(row["games_left"], ir_tag)), {}
     games = _game_weeks(data, row["team"], week, end_week)
     share = replay_news.share_played(news, games)
     extra = {"availability": round(share, 3), "expected_missed": round(row["games_left"] * (1 - share), 2)}
