@@ -1581,9 +1581,12 @@ read the belief, so, as in a real season, the public learns the truth only from 
   rise), expert ranks are each position ordered by expected value (with each team's scoring from the line
   model, as experts know which offenses score) with a little noise (about 8%, a third of that at quarterback,
   whose values are bunched), and ADP is
-  a 12-team draft in the league's scoring by points over replacement; kickers and defenses take the real
-  average ADP of the Nth one drafted. Going into a whole simulated season the market also leans on last
-  season's points a game, and the **preseason expert ranks** (what the draft room's Rank order comes from)
+  a 12-team draft in the league's scoring by points over replacement; kickers and defenses, and on a 1-QB
+  list the quarterbacks, take the real average ADP of the Nth one drafted (1-QB PPR lists 2021-2025: QB12
+  near pick 96, QB24 near 162, QB32 near 198), so every team's believed starter is drafted as a starter (a
+  superflex list keeps points over replacement, which already takes all of them by about pick 150). Going
+  into a whole simulated season the market also leans on last season's points a game, leaving out a game a
+  player left hurt (under half the snaps, then a hard tag), and the **preseason expert ranks** (what the draft room's Rank order comes from)
   follow that ADP with the same ~8% noise, because real August experts and ADP agree closely (rank
   correlation 0.98 over the real top 150 in 2022-2025; the simulated ones now 0.99, from about 0.86 when the
   experts ignored last season). The weekly experts **revise slowly**: each player's noise carries from week to
@@ -1622,8 +1625,9 @@ read the belief, so, as in a real season, the public learns the truth only from 
   upside, so the market (ADP and the preseason expert ranks, not his role or talent) multiplies his value by
   a premium fitted on the real rookie ADPs of all of 2019-2025 at once, then checked on held-out seasons
   (`rookie_premium` in `sim_next_year.json`; allowed to fall with the pick but never to rise). The fitted
-  premium is flat by position, the same at every pick: x1.22 for a running back, x1.16 for a receiver,
-  x1.11 for a tight end, x1.05 for a quarterback (refitted with the stars-level model).
+  premium is flat by position, the same at every pick: x1.28 for a running back, x1.16 for a receiver,
+  x1.11 for a tight end, none for a quarterback (a 1-QB list takes the Nth QB at the real Nth QB's pick, so
+  a rookie QB's price is his rank among the quarterbacks).
 - **The offseason file** `backend/sim_data/offseason_2027.json` is meant to be edited by hand. `rookies`:
   one entry per player with `name`, `position` (QB/RB/WR/TE/K), `team` (schedule code, e.g. MIA, LA, LV,
   WAS), `pick` (projected overall pick, 1-262: the prospect's rank on the consensus board), `college`, and

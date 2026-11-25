@@ -10,7 +10,7 @@ from types import MappingProxyType
 
 PARAMS_PATH = Path(__file__).with_name("sim_params.json")
 PARAMS_FIT = "python -m services.sim_eval --fit"
-PARAMS_SECTIONS = ("positions", "league", "market", "adp_stdev", "kdst_adp", "adp_curve", "kick", "dst", "game", "rates")
+PARAMS_SECTIONS = ("positions", "league", "market", "adp_stdev", "kdst_adp", "qb_adp", "adp_curve", "kick", "dst", "game", "rates")
 _overrides: dict[str, dict] = {}         # sim_eval --set, for this process only
 
 

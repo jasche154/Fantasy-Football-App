@@ -35,8 +35,9 @@ truth's dated role changes into a noisy hint.
   / 2-QB list the QB's is `market.two_qb_replacement`, set so QB1-QB12 go about where the real 2026 2-QB list
   takes them). The blend weight and replacement ranks maximize agreement with the real ADP lists 2022-2025
   (Spearman over the real top 150; each held-out season agrees as well as the fitted ones). Kickers and
-  defenses at the real average ADP of the Nth one taken (`kdst_adp` in sim_params.json), stdev = a + b x adp
-  as measured. A player believed out for the games left gets none.
+  defenses, and on a 1-QB list the quarterbacks, at the real average ADP of the Nth one taken (`kdst_adp` and
+  `qb_adp` in sim_params.json, 1-QB PPR lists 2021-2025; the Nth by value is the Nth taken), stdev = a + b x adp
+  as measured. A game a player left hurt does not count in his record (`left_hurt`). A player believed out for the games left gets none.
 - `buzz`: before the week a change starts, HINT_RATE of true breakouts, busts and benchings get a news line;
   false lines are added so that about PRECISION of all lines are true, each about a player the change could
   plausibly happen to, weighted by how likely it is for him (sim_talent.rumors: backups break out, leads who
@@ -70,6 +71,7 @@ REPLACEMENT = {"QB": 26, "RB": 32, "WR": 38, "TE": 14}
 ADP_SKILL = 270                  # skill players on a draft board
 MIN_ADP_STDEV = 0.5
 RECORD_MIN_GAMES = 4             # a track record needs this many games
+LEFT_HURT_SNAP = 50.0            # % of the snaps under which a game followed by a hard tag was one he left hurt
 HINT_RATE = 0.6
 PRECISION = 0.6
 BUZZ = {"breakout": "Beat reporters say his role is growing; expect more work.",
@@ -206,7 +208,10 @@ def draft_board(world: World, season: Mapping[int, float], two_qb: bool = False,
     healthy = {pid: v * SEASON_GAMES for pid, v in season.items() if world.players[pid].out_weeks < games_left}
     intercept, slope = params()["adp_stdev"]
     board: dict[int, float] = {}
-    for position, picks in params()["kdst_adp"].items():
+    # a 1-QB list takes QBs as real ones do (QB24 near pick 160): points over a 12th-QB baseline would sink QB20+ past
+    # every deep RB and WR, the last starters off the board
+    curves = {**params()["kdst_adp"], **({} if two_qb else {"QB": params()["qb_adp"]})}
+    for position, picks in curves.items():
         ranked = sorted((pid for pid in healthy if world.players[pid].position == position), key=lambda p: (-healthy[p], p))
         board.update({pid: picks[i] for i, pid in enumerate(ranked[:len(picks)])})
     baseline = {}
@@ -215,7 +220,8 @@ def draft_board(world: World, season: Mapping[int, float], two_qb: bool = False,
     for position, rank in replacement.items():
         points = sorted((v for pid, v in healthy.items() if world.players[pid].position == position), reverse=True)
         baseline[position] = points[min(rank, len(points)) - 1] if points else 0.0
-    skill = sorted((pid for pid in healthy if world.players[pid].position in REPLACEMENT),
+    skill = sorted((pid for pid in healthy if world.players[pid].position in REPLACEMENT
+                    and world.players[pid].position not in curves),
                    key=lambda p: (-(healthy[p] - baseline[world.players[p].position]), p))[:ADP_SKILL]
     taken = {round(v) for v in board.values()}
     slot = 0
@@ -227,12 +233,23 @@ def draft_board(world: World, season: Mapping[int, float], two_qb: bool = False,
     return {pid: (round(value, 1), round(max(MIN_ADP_STDEV, intercept + slope * value), 1)) for pid, value in board.items()}
 
 
+def left_hurt(data: SeasonData, pid: int, week: int) -> bool:
+    """He left `week`'s game hurt: under LEFT_HURT_SNAP % of the snaps, and a hard tag in one of the next two weeks
+    (a bye between). No snap counts: never."""
+    usage = data.usage.get((pid, week))
+    if usage is None or usage.snap_pct is None or usage.snap_pct >= LEFT_HURT_SNAP:
+        return False
+    return any((tag := data.injuries.get((pid, later))) is not None and tag.hard for later in (week + 1, week + 2))
+
+
 def track_record(data: SeasonData) -> dict[int, float]:
     """{player: points a game over his games in `data`} for players with RECORD_MIN_GAMES or more (the market's
-    memory of a season: raw production, not regressed)."""
+    memory of a season: raw production, not regressed), leaving out a game he left hurt (`left_hurt`: Lamar
+    Jackson's 2% of 2026 week 8's snaps is no 0-point game)."""
     totals: dict[int, list[float]] = defaultdict(list)
-    for (pid, _), points in data.actual.items():
-        totals[pid].append(points)
+    for (pid, week), points in data.actual.items():
+        if not left_hurt(data, pid, week):
+            totals[pid].append(points)
     return {pid: sum(games) / len(games) for pid, games in totals.items() if len(games) >= RECORD_MIN_GAMES}
 
 

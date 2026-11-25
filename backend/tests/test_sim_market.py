@@ -167,3 +167,31 @@ def test_a_one_week_absence_costs_one_game_of_rest_of_season_value(belief, monke
     healthy, one, gone = wr_rank(pid, 0), wr_rank(pid, 1), wr_rank(pid, games_left)
     assert healthy == 11 and healthy < one <= healthy + 8
     assert gone == len(wrs)
+
+
+def test_a_one_qb_board_takes_every_starter_where_real_lists_take_the_nth_qb(belief):
+    """Each team's believed starter has an ADP, the Nth QB by value at the real lists' Nth QB pick (QB24 near
+    pick 160, never behind every deep RB and WR); a 2-QB list still prices QBs on points over replacement."""
+    board = sim_market.adp(belief, HALF)
+    worth = sim_market.market_values(belief, HALF)
+    starters = {max((p for p in belief.players.values() if p.team == team and p.position == "QB"),
+                    key=lambda p: p.starts).player_id for team in belief.teams}
+    assert starters <= set(board)
+    by_value = sorted((pid for pid in board if belief.players[pid].position == "QB"), key=lambda pid: (-worth[pid], pid))
+    curve = sim_world.params()["qb_adp"]
+    assert [board[pid][0] for pid in by_value] == curve[:len(by_value)]
+    assert curve == sorted(curve) and 140 < curve[23] < 180
+    two_qb = sim_market.adp(belief, HALF, two_qb=True)
+    assert [two_qb[pid][0] for pid in by_value[:3]] != curve[:3]
+
+
+def test_a_game_he_left_hurt_is_not_in_his_record(data):
+    """Lamar Jackson, 2026 week 8: 2% of the snaps, then IR. Not a 0-point game for the market."""
+    qb = next(pid for (pid, week), usage in data.usage.items()
+              if data.players[pid].position == "QB" and usage.snap_pct and week == 3)
+    hurt = replace(data, actual=MappingProxyType({**data.actual, (qb, 3): 0.0}),
+                   usage=MappingProxyType({**data.usage, (qb, 3): replace(data.usage[(qb, 3)], snap_pct=5.0)}))
+    tagged = replace(hurt, injuries=MappingProxyType({**hurt.injuries, (qb, 4): fakes.Injury("IR")}))
+    assert sim_market.left_hurt(tagged, qb, 3) and not sim_market.left_hurt(hurt, qb, 3)
+    assert sim_market.track_record(tagged)[qb] > sim_market.track_record(hurt)[qb]
+    assert not any(sim_market.left_hurt(data, pid, week) for pid, week in data.usage if data.usage[(pid, week)].snap_pct is None)
