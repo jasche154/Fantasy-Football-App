@@ -12,9 +12,10 @@ import pytest
 
 from services import (
     replay_counter, replay_fans as fans, replay_mood, replay_personas as rp, replay_state as rs,
-    replay_styles as st, replay_trade_ai as ai, replay_trade_value as tv, replay_trades as rt,
+    replay_styles as st, replay_trade_ai as ai, replay_trade_value as tv, replay_trades as rt, replay_values as rv,
 )
 from services.replay_news import Report
+from services.replay_slots import own_slots
 from services.replay_pool import SKILL
 from tests.test_replay_trades import (
     FAIR, NEEDS_RB, SETTINGS, USER, league, lock_free_agents, star, values,
@@ -273,7 +274,7 @@ def test_a_contending_contender_pays_more_for_starters_and_less_for_depth():
     state, know = league()
     state = with_team(results(state, CPU, [True] * 3), CPU, persona="contender")
     team = rs.team(state, CPU)
-    starters = st._starters(know, SETTINGS, team.roster)
+    starters = rv.starters(know, team.roster, SETTINGS)
     starter = next(pid for pid in team.roster if pid in starters and know.by_id[pid].position in SKILL)
     bench = next(pid for pid in team.roster if pid not in starters and know.by_id[pid].position in SKILL)
     mind = st.mind_for(state, SETTINGS, know, team, sends=(starter, bench))
@@ -403,7 +404,7 @@ def test_a_superflex_slot_counts_as_a_qb_slot_for_needs():
                                               "K": 1, "DST": 1})
     state, know = league(settings=superflex)
 
-    assert st.slots_for("QB", superflex.starters) == 2 and st.slots_for("RB", superflex.starters) == 2
+    assert own_slots("QB", superflex.starters) == 2 and own_slots("RB", superflex.starters) == 2
     one_qb = [t.id for t in state.teams if len(st._healthy(know, t.roster, "QB")) < 2]
     needs = st.position_needs(state, superflex, know)
     assert one_qb and all("QB" in needs[tid][0] for tid in one_qb)

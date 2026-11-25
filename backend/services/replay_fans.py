@@ -44,10 +44,6 @@ def banned(team: Team, nfl_team: str | None) -> bool:
     return hated is not None and club(nfl_team) == hated
 
 
-def is_favourite(team: Team, nfl_team: str | None) -> bool:
-    return team.fan_of is not None and club(nfl_team) == team.fan_of
-
-
 def nickname(code: str | None) -> str:
     """"Bears" for CHI; the code itself when unknown."""
     found = club(code)

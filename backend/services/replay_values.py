@@ -357,6 +357,11 @@ def best_lineup(know: Knowledge, player_ids: Iterable[int], settings) -> dict[st
     return mt.best_lineup(players, SimpleNamespace(starters=settings.starters, superflex=False))
 
 
+def starters(know: Knowledge, player_ids: Iterable[int], settings) -> frozenset[int]:
+    """Who starts in `best_lineup`, as a set."""
+    return frozenset(pid for ids in best_lineup(know, player_ids, settings).values() for pid in ids)
+
+
 def idle_slots(know: Knowledge, player_ids: Iterable[int], settings) -> list[str]:
     """The starting slots (FLEX, K and DST included) this roster cannot fill with a projected player this
     week (bye, out or nobody there), once per missing starter."""

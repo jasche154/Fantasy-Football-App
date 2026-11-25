@@ -168,8 +168,8 @@ def _caps(settings: Settings) -> dict[str, int]:
 
 
 def _starting(position: str, settings: Settings) -> int:
-    """Starting slots a CPU fills with this position: its own, and every SUPERFLEX for a QB."""
-    return settings.starters.get(position, 0) + (replay_slots.superflex(settings.starters) if position == "QB" else 0)
+    """Starting slots a CPU fills with this position (replay_slots.own_slots)."""
+    return replay_slots.own_slots(position, settings.starters)
 
 
 def _floors(settings: Settings) -> dict[str, int]:

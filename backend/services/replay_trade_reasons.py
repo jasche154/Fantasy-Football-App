@@ -98,7 +98,7 @@ def side_reasons(side: Side, other: Team, settings: Settings, know: Knowledge, b
     return [*reasons, *([value] if value else [])]
 
 
-def _best(know: Knowledge, player_ids: Sequence[int]) -> int:
+def best_of(know: Knowledge, player_ids: Sequence[int]) -> int:
     return max(player_ids, key=lambda pid: (know.by_id[pid].chart, -pid))
 
 
@@ -123,11 +123,11 @@ def decline(settings: Settings, know: Knowledge, side: Side) -> Decline:
     if loved and takes(side.rescore(attach=False)):
         return "decline_attached", max(loved, key=lambda pid: (replay_styles.markup(know, mind, pid), -pid)), None
     if counted.lineup < 0 and takes(side.rescore(gain_per_week=0.0)):
-        starters = {pid for ids in rv.best_lineup(know, side.team.roster, settings).values() for pid in ids}
-        return "decline_need", None, know.by_id[_best(know, [p for p in side.sends if p in starters] or side.sends)].position
+        starters = rv.starters(know, side.team.roster, settings)
+        return "decline_need", None, know.by_id[best_of(know, [p for p in side.sends if p in starters] or side.sends)].position
     if side.kept and all(know.by_id[pid].position in mind.deep for pid in side.kept):
         wanted = {know.by_id[pid].position for pid in side.kept}
         filled = replace(mind, needs=mind.needs | wanted, deep=mind.deep - wanted, filling=frozenset(side.kept))
         if takes(side.rescore(persona=filled)):
             return "decline_need", None, know.by_id[side.kept[0]].position
-    return "decline_value", _best(know, side.sends), None
+    return "decline_value", best_of(know, side.sends), None

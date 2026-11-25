@@ -80,11 +80,6 @@ def _healthy(know: Knowledge, roster: Sequence[int], position: str) -> list[floa
 Needs = Mapping[int, tuple[frozenset[str], frozenset[str]]]
 
 
-def slots_for(position: str, starters: Mapping[str, int]) -> int:
-    """Starting slots that are this position's own: a SUPERFLEX is a QB's (superflex leagues start two)."""
-    return starters.get(position, 0) + (replay_slots.superflex(starters) if position == "QB" else 0)
-
-
 def position_needs(state: State, settings: Settings, know: Knowledge) -> Needs:
     """{team id: (positions it needs, positions where it is deep)} for every team, from its active roster.
     Cached (read-only): a trade search asks again for every deal it scores on the same rosters."""
@@ -96,7 +91,7 @@ def _needs(know: Knowledge, rosters: tuple[tuple[int, tuple[int, ...]], ...],
            starters: tuple[tuple[str, int], ...]) -> Needs:
     found: dict[int, tuple[set[str], set[str]]] = {team_id: (set(), set()) for team_id, _ in rosters}
     for position in NEED_POSITIONS:
-        slots = slots_for(position, dict(starters))
+        slots = replay_slots.own_slots(position, dict(starters))
         if slots <= 0:
             continue
         charts = {team_id: _healthy(know, roster, position) for team_id, roster in rosters}
@@ -117,10 +112,6 @@ def clear_cache() -> None:
 replay_pool.CLEAR_HOOKS.append(clear_cache)
 
 
-def _starters(know: Knowledge, settings: Settings, roster: Sequence[int]) -> frozenset[int]:
-    return frozenset(pid for ids in rv.best_lineup(know, roster, settings).values() for pid in ids)
-
-
 def mind_for(state: State, settings: Settings, know: Knowledge, team: Team, sends: Sequence[int] = (),
              kept: Sequence[int] = (), needs: Needs | None = None) -> Mind:
     """The CPU's Mind for sending `sends` and keeping `kept` of what it gets (`needs`: position_needs, if known)."""
@@ -130,11 +121,11 @@ def mind_for(state: State, settings: Settings, know: Knowledge, team: Team, send
     wanted = [pid for pid in kept if know.by_id[pid].position in needed]
     if not contends and not wanted:
         return mind
-    after = _starters(know, settings, [pid for pid in team.roster if pid not in sends] + list(kept))
+    after = rv.starters(know, [pid for pid in team.roster if pid not in sends] + list(kept), settings)
     mind = replace(mind, filling=frozenset(pid for pid in wanted if pid in after))
     if not contends:
         return mind
-    starting = (_starters(know, settings, team.roster) & set(sends)) | (after & set(kept))
+    starting = (rv.starters(know, team.roster, settings) & set(sends)) | (after & set(kept))
     return replace(mind, contending=True, starting=frozenset(starting))
 
 
