@@ -349,3 +349,11 @@ def test_migration_backfills_ppr_and_keys_rows_by_format(tmp_path):
         assert session.scalars(select(ReplayAdp.format)).all() == ["ppr"]
         session.add(ReplayAdp(season=2023, player_id=1, format="2qb", adp=2.0, source="ffc"))
         session.commit()                                                        # one row per format now fits
+
+
+def test_stored_donor_lists_carry_the_players_position(db):
+    # a QB borrowed from a stored 1-QB list must be priced as a QB (adp_rows scales position == "QB" only)
+    replay_data.load_adp(db, SEASON, HistoryClient(Sites().client(), pause=0))
+    stored = replay_data._stored_ffc(db, SEASON, set())
+    positions = {entry.position for rows in stored.values() for entry, _ in rows}
+    assert positions and "" not in positions and "RB" in positions

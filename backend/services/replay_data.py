@@ -244,10 +244,10 @@ def _donor_formats(adp_format: str) -> list[str]:
 def _stored_ffc(session: Session, season: int, skip: set[str]) -> dict[str, list[tuple[AdpEntry, int]]]:
     """The season's stored FFC rows (not borrowed ones) of the formats this run does not fetch, as adp_rows' `others`."""
     stored: dict[str, list[tuple[AdpEntry, int]]] = {}
-    for row in session.scalars(select(ReplayAdp).where(
-            ReplayAdp.season == season, ReplayAdp.source == adp_history.FFC, ReplayAdp.format.not_in(skip))
+    for row, position in session.execute(select(ReplayAdp, Player.position).join(Player, Player.id == ReplayAdp.player_id)
+            .where(ReplayAdp.season == season, ReplayAdp.source == adp_history.FFC, ReplayAdp.format.not_in(skip))
             .order_by(ReplayAdp.adp)):
-        entry = AdpEntry(adp_history.FFC, "", "", row.adp, row.stdev, row.team)
+        entry = AdpEntry(adp_history.FFC, "", position or "", row.adp, row.stdev, row.team)
         stored.setdefault(row.format, []).append((entry, row.player_id))
     return stored
 
@@ -350,7 +350,7 @@ def load_adp(session: Session, season: int, client: HistoryClient, force: bool =
         ReplayAdp, ReplayAdp.player_id == Player.id).where(ReplayAdp.season == season, ReplayAdp.format == "ppr")
         .group_by(Player.position)).all())
     return {"rows": len(by_format["ppr"]) if "ppr" in by_format else ppr_stored,
-            "ffc": by_source[adp_history.FFC], "mfl": by_source[adp_history.MFL],
+            "ffc": by_source[adp_history.FFC], "ffc_borrowed": by_source[FFC_BORROWED], "mfl": by_source[adp_history.MFL],
             "ffc_matched": f"{sum(pid is not None for _, pid in pairs.get('ppr', ()))}/{len(lists.get('ppr', ()))}",
             "mfl_matched": f"{sum(pid is not None for _, pid in mfl_pairs)}/{len(mfl)}",
             "formats": {fmt: len(fmt_rows) for fmt, fmt_rows in by_format.items()},

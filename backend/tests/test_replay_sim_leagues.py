@@ -255,7 +255,8 @@ def test_todays_sleeper_status_seeds_the_first_simulated_week_and_no_real_one(ap
                      (suspended, week): replay_pool.Injury("SUS"),       # ir: his real O streak carries on its own
                      (stale_ir, week): replay_pool.Injury("IR", None, "Knee"),   # IR lasts: an old sync still counts
                      (hurt_after, week): replay_pool.Injury("IR", None, "Elbow")}    # newer than the game he played
-    assert "2 of 7 statuses older than" in caplog.text and "WARNING" not in caplog.text
+    assert "2 of 7 statuses older than" in caplog.text
+    assert not [r for r in caplog.records if r.name == "services.sim_setup" and r.levelno >= logging.WARNING]
     assert all(seeded.injuries[key] == injury for key, injury in hard.injuries.items())
     assert seeded.actual == base.actual
 
@@ -486,3 +487,12 @@ def screens_never_leak(client: TestClient, engine: Engine, game: str) -> None:
     rows = get(client, game + "/team", week=LEAK_WEEK)["results"]
     scored = [row for row in rows if row["points"] is not None]
     assert scored and all(row["points"] == hidden.actual[(row["player"]["id"], LEAK_WEEK)] for row in scored)
+
+
+def test_a_last_week_game_without_a_kickoff_counts_as_after_the_sync():
+    # the fake schedule has no game times: a stale IR for a player who played week - 1 is treated as activated
+    base = SimpleNamespace(actual={(7, 4): 12.0}, box={}, team_at=lambda pid, week: "KC",
+                           schedule=SimpleNamespace(game=lambda team, week: SimpleNamespace(kickoff=None)))
+    fetched = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    assert sim_setup._played_since(base, 7, 5, fetched)
+    assert not sim_setup._played_since(base, 7, 6, fetched)      # an older game with no kickoff counts as before it
