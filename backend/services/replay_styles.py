@@ -22,6 +22,7 @@ All numbers are the user's choices, inside the brief's ranges. Pure: the state a
 import statistics
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
+from functools import lru_cache
 
 from services import replay_fans, replay_mood, replay_personas, replay_state as rs, replay_values as rv
 from services.replay_state import Settings, State, Team
@@ -70,13 +71,20 @@ def _healthy(know: Knowledge, roster: Sequence[int], position: str) -> list[floa
 
 
 def position_needs(state: State, settings: Settings, know: Knowledge) -> dict[int, tuple[frozenset[str], frozenset[str]]]:
-    """{team id: (positions it needs, positions where it is deep)} for every team, from its active roster."""
-    found: dict[int, tuple[set[str], set[str]]] = {team.id: (set(), set()) for team in state.teams}
+    """{team id: (positions it needs, positions where it is deep)} for every team, from its active roster.
+    Cached: a trade search asks again for every deal it scores on the same rosters."""
+    return _needs(know, tuple((team.id, team.roster) for team in state.teams), tuple(settings.starters.items()))
+
+
+@lru_cache(maxsize=8)       # few: an entry keeps its Knowledge alive (hashed by identity, so never stale)
+def _needs(know: Knowledge, rosters: tuple[tuple[int, tuple[int, ...]], ...],
+           starters: tuple[tuple[str, int], ...]) -> dict[int, tuple[frozenset[str], frozenset[str]]]:
+    found: dict[int, tuple[set[str], set[str]]] = {team_id: (set(), set()) for team_id, _ in rosters}
     for position in NEED_POSITIONS:
-        slots = settings.starters.get(position, 0)
+        slots = dict(starters).get(position, 0)
         if slots <= 0:
             continue
-        charts = {team.id: _healthy(know, team.roster, position) for team in state.teams}
+        charts = {team_id: _healthy(know, roster, position) for team_id, roster in rosters}
         weakest = {tid: (c[slots - 1] if len(c) >= slots else 0.0) for tid, c in charts.items()}
         bar = statistics.median(weakest.values())
         for tid, held in charts.items():
