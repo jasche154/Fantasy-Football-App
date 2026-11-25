@@ -457,6 +457,20 @@ def test_trending_maps_sleeper_ids_and_handles_outages(client, seeded, monkeypat
     assert client.get("/api/insights/trending").status_code == 502
 
 
+def test_trending_team_defenses_match_their_dst_rows(client, session, monkeypatch):
+    """Sleeper names a defense by its team ("WAS", "LAR"); the app keeps it as the DST-<team> pseudo-player."""
+    import integrations.sleeper as sleeper
+    from services.kdst_rankings import dst_player
+
+    washington, rams = dst_player(session, "WAS").id, dst_player(session, "LA").id
+    session.commit()
+    monkeypatch.setattr(sleeper, "fetch_trending", lambda *a, **k: [{"player_id": "WAS", "count": 5},
+                                                                    {"player_id": "LAR", "count": 4}])
+    rows = client.get("/api/insights/trending").json()["results"]
+    assert [(row["player"] or {}).get("id") for row in rows] == [washington, rams]
+    assert rows[0]["player"]["position"] == "DST"
+
+
 def test_yahoo_endpoints_without_configuration(client):
     assert client.get("/api/integrations/yahoo/auth-url").status_code == 503
     assert client.post("/api/integrations/yahoo/exchange", json={"code": "abc"}).status_code == 503

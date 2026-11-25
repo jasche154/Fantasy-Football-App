@@ -12,6 +12,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from database.models import Player
+from integrations.weekly_sources import normalize_team
+from services.kdst_rankings import DST_PREFIX
 
 BASE_URL = "https://api.sleeper.app/v1"
 TIMEOUT_SECONDS = 10.0
@@ -58,11 +60,15 @@ def fetch_trending(trend_type: str, limit: int = 25, lookback_hours: int = 24,
 
 def trending_players(session: Session, trend_type: str, limit: int = 10,
                      client: httpx.Client | None = None) -> list[dict]:
-    """Trending rows matched to local players through players.sleeper_player_id."""
+    """Trending rows matched to local players through players.sleeper_player_id. Sleeper names a team defense
+    by its team ("WAS", "LAR"): those match the DST-<team> pseudo-player (services.kdst_rankings.dst_player)."""
     rows = fetch_trending(trend_type, limit=limit, client=client)
     sleeper_ids = [str(r.get("player_id")) for r in rows]
     players = {p.sleeper_player_id: p for p in session.scalars(
         select(Player).where(Player.sleeper_player_id.in_(sleeper_ids)))}
+    defenses = {f"{DST_PREFIX}{normalize_team(sid)}": sid for sid in sleeper_ids if not sid.isdigit()}
+    players |= {defenses[p.gsis_id]: p for p in session.scalars(
+        select(Player).where(Player.gsis_id.in_(defenses)))}
     results = []
     for row in rows:
         sleeper_id = str(row.get("player_id"))
