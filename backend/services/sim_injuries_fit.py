@@ -102,7 +102,7 @@ def relevant(data: SeasonData) -> dict[int, str]:
 
 
 def _hurt(injury) -> bool:
-    return (injury is not None and injury.tag != "SUS"
+    return (injury is not None and injury.tag not in ("SUS", "EXE")
             and not (injury.injury or "").lower().startswith(NOT_INJURY))
 
 

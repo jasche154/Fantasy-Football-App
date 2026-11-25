@@ -31,7 +31,7 @@ TEAMS = {1: "ATL", 2: "BUF", 3: "CHI", 4: "CIN", 5: "CLE", 6: "DAL", 7: "DEN", 8
 
 def fetch_week(http: httpx.Client, season: int, week: int) -> dict:
     player_filter = {"players": {
-        "filterStatsForTopScoringPeriodIds": {"value": 1, "additionalValue": [f"11{season}{week}"]},
+        "filterStatsForTopScoringPeriodIds": {"value": 1, "additionalValue": [line_id(season, week)]},
         "filterSlotIds": {"value": SLOT_IDS}, "limit": PLAYER_LIMIT,
         "sortPercOwned": {"sortPriority": 1, "sortAsc": False}}}
     try:
@@ -48,16 +48,27 @@ def fetch_week(http: httpx.Client, season: int, week: int) -> dict:
         raise SourceError("ESPN projections returned a non-JSON response.") from exc
 
 
-def projected_stats(player: dict, week: int) -> dict[str, float] | None:
+def line_id(season: int, week: int) -> str:
+    """ESPN's id for a season-week's projected weekly line (source, split, season, week)."""
+    return f"{PROJECTED}{WEEKLY_SPLIT}{season}{week}"
+
+
+def projected_line(player: dict, season: int, week: int) -> dict | None:
+    """The player's projected line for this season's week. In season ESPN also sends last season's line for
+    the same week number (a bye week then has only that one), so the line is picked by its id."""
+    wanted = line_id(season, week)
+    return next((line for line in player.get("stats") or []
+                 if isinstance(line, dict) and line.get("id") == wanted), None)
+
+
+def projected_stats(player: dict, season: int, week: int) -> dict[str, float] | None:
     """The player's projected stat line for the week, or None (bye week / no projection)."""
-    for line in player.get("stats") or []:
-        if (line.get("statSourceId") == PROJECTED and line.get("scoringPeriodId") == week
-                and line.get("statSplitTypeId") == WEEKLY_SPLIT and line.get("stats")):
-            raw = line["stats"]
-            stats = {key: float(raw[stat_id]) for stat_id, key in STAT_IDS.items() if raw.get(stat_id)}
-            stats["two_pt"] = sum(float(raw.get(stat_id) or 0) for stat_id in TWO_POINT_IDS)
-            return stats
-    return None
+    raw = (projected_line(player, season, week) or {}).get("stats")
+    if not raw:
+        return None
+    stats = {key: float(raw[stat_id]) for stat_id, key in STAT_IDS.items() if raw.get(stat_id)}
+    stats["two_pt"] = sum(float(raw.get(stat_id) or 0) for stat_id in TWO_POINT_IDS)
+    return stats if any(stats.values()) else None
 
 
 def projection_rows(payload: dict, season: int, week: int, matcher: PlayerMatcher) -> list[dict]:
@@ -65,7 +76,7 @@ def projection_rows(payload: dict, season: int, week: int, matcher: PlayerMatche
     for entry in payload.get("players") or []:
         player = entry.get("player") or {}
         position = POSITION_IDS.get(player.get("defaultPositionId"))
-        stats = projected_stats(player, week) if position else None
+        stats = projected_stats(player, season, week) if position else None
         if not stats or not player.get("fullName"):
             continue
         team = TEAMS.get(player.get("proTeamId"))

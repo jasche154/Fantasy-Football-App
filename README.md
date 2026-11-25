@@ -88,7 +88,7 @@ only *explains* numbers that came back from a tool call. Every output is labeled
   "random"), draft against CPU managers who only know that summer's ADP, then play it week by week with
   Wednesday waivers, FAAB bidding or free agency only, and trades; matchups are scored with the players' real points. Every number shown
   before a week is played is point-in-time (preseason ADP, that week's pre-game ESPN/Sleeper projection).
-  Players carry Yahoo-style injury tags (Q, D, O, IR, PUP, SUS) from that week's official report and roster
+  Players carry Yahoo-style injury tags (Q, D, O, IR, PUP, SUS, EXE = commissioner's exempt list) from that week's official report and roster
   status; a tagged starter raises a lineup warning. Each team has one IR slot: a player tagged O, IR or PUP
   can be moved there, which frees his roster spot, and can trade places with another injured player. When
   he loses the tag you must activate him (dropping someone if the roster is full) or drop him before you
@@ -939,16 +939,17 @@ that week's games on; only scoring a week reads its real points.
   draft uses the last cheatsheet taken before week 1's first kickoff (the Thursday opener). A failed
   download or import is reported and never blocks the season; without ranks the values use the app's model
   ranks only ("model ranks" on the Trades screen).
-- **Injuries and IR:** Q, D and O come from the official injury report; IR, PUP and SUS from the weekly
-  roster status (PUP = status PUP or reserve code R04; suspended = SUS or R40/R33/R30; every other
+- **Injuries and IR:** Q, D and O come from the official injury report; IR, PUP, SUS and EXE from the weekly
+  roster status (PUP = status PUP or reserve code R04; suspended = SUS or R40/R33/R30; EXE = status EXE,
+  the commissioner's exempt list, with no injury text (Josh Jacobs 2026 weeks 1-6); every other
   reserve list = IR, except the lists that are not an injury (retired R02, did not report R03, left squad
   R06, the 2020 opt-outs R62), which get no tag, like holdouts; the game-day inactive list is not used).
   A report from a club that is not on the player's roster rows that week is ignored (a player traded
   after his game). An O, IR or PUP tag without text takes last week's injury text unless that text names
   no injury (rest, personal, "not injury related"). A roster status wins over a report tag, and a hard
-  tag is carried over the player's bye. O, IR, PUP and SUS mean "out" this week even if a stale
+  tag is carried over the player's bye. O, IR, PUP, SUS and EXE mean "out" this week even if a stale
   projection exists; Q and D are information only.
-  IR rules: one slot per team; a player is eligible by his tag only (O, IR or PUP: not a suspension,
+  IR rules: one slot per team; a player is eligible by his tag only (O, IR or PUP: not a suspension or EXE,
   not just "no projection"); he does not count against the roster, can't start and can't be traded; he
   can swap places with another eligible player; a team whose IR player lost his tag can't add, claim or
   trade until it activates (dropping someone if full) or drops him, and a CPU in that state declines every
@@ -956,7 +957,7 @@ that week's games on; only scoring a week reads its real points.
   tags are known (when the waiver phase opens, again at the waiver run and at the start of the week), and
   still count an IR player for their positional limits and their view of the rest of the season. A
   week's final report and roster status are shown from the start of that week (before its waiver run),
-  like its projection. The draft shows only week 1's IR, PUP and suspension tags (`replay_pool.PRESEASON_TAGS`):
+  like its projection. The draft shows only week 1's IR, PUP, suspension and exempt-list tags (`replay_pool.PRESEASON_TAGS`):
   those are preseason moves (2021: Gus Edwards' and J.K. Dobbins' ACLs), and a CPU counts such a player at
   twice his ADP (`replay_draft.OUT_PUSH`), so it waits on him. A week-1 O or Q is game-week news and
   appears when the draft ends, and the CPUs make their week-1 moves first, as they do every week.
@@ -1035,7 +1036,9 @@ that week's games on; only scoring a week reads its real points.
   false "out for the season" calls, season-ending injuries first reported as a return weeks out) that
   shrinks as the return nears; it never names a week already reached. Only an IR or PUP tag is ever
   called "out for the season": a plain O tag is week-to-week news (Cam Newton 2019: O from week 3, IR in
-  week 10), so it names a return, the next week once the first guess has passed, until he goes to IR. This is the one sanctioned use of
+  week 10), so it names a return, the next week once the first guess has passed, until he goes to IR. A
+  suspension is reported exactly. The commissioner's exempt list reads "out indefinitely" and never names a
+  week; the values guess one (4-8 weeks after he went on the list, then the next week) without the real return. This is the one sanctioned use of
   later data (a beat report would know as much). Shown under a tagged player on the Players and Trades
   screens.
 - **The week:** Wednesday waivers by rolling priority (CPUs claim when a player adds about a lineup point
@@ -1313,7 +1316,15 @@ read the belief, so, as in a real season, the public learns the truth only from 
   of the game he finished, the body part, how often he comes back listed Q, and how often a healthy starter
   is listed Q or D and plays anyway (who counts as a starter there comes from the public belief, never the
   truth). A long absence is tagged IR, like the real reports. Defenses are never hurt. A player already out
-  when the simulation starts sits a fitting number of further games.
+  when the simulation starts sits a fitting number of further games; a suspension (SUS) or exempt-list (EXE)
+  absence carries on too, keeping its tag and with no Q on his return (lengths from the week-to-week table for
+  a suspension, whose real length the data doesn't hold, and from the long-tailed IR table for the exempt
+  list, which is open-ended). A live league also reads each player's **Sleeper status once, when it is
+  created** (`sim_setup.with_status_now`): Out, Doubtful, IR, PUP, suspended (and Sleeper's other zero-chance
+  statuses) become a hard tag in the first simulated week, so a player hurt in the last real game (Drake Maye,
+  2026 week 10) starts the simulation out, for a length the injury model draws; Questionable is left to the
+  model. Statuses older than 18 hours and players already hard-tagged in the last real week are left alone,
+  and real weeks never change.
 - **Hidden talent:** every player's true role and efficiency differ from his reputation by a random draw,
   widest for rookies and players with few games, smallest for veterans with a full season
   (`services/sim_talent.py`); teams' volume and defenses move the same way. During the season some

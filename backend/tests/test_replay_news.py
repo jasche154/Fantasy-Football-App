@@ -77,6 +77,15 @@ def test_a_suspension_is_reported_exactly():
     assert reports(2, 6, 2, "SUS")[0].text.startswith("Suspended")
 
 
+def test_the_exempt_list_reads_indefinite_and_its_guess_never_uses_the_real_return():
+    for week in (2, 5, 9):
+        got = [r for true_return in (3, 6, 0) for r in reports(2, true_return, week, "EXE")]
+        assert {r.text for r in got} == {"On the commissioner's exempt list since week 2; out indefinitely."}
+        by_return = [[r.back for r in reports(2, true_return, week, "EXE")] for true_return in (3, 6, 0)]
+        assert by_return[0] == by_return[1] == by_return[2]
+        assert all(back is None or back > week for back in by_return[0])
+
+
 def test_the_same_seed_gives_the_same_report_and_seeds_differ():
     assert news.report(3, 7, 4, 10, 5, "O") == news.report(3, 7, 4, 10, 5, "O")
     assert len({r.back for r in reports(4, 10, 4)}) > 1

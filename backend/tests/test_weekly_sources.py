@@ -305,9 +305,13 @@ def test_yahoo_errors_keep_previous_snapshot(session, seeded):
 
 def espn_payload():
     def player(pid, name, position_id, team_id, stats):
-        lines = [{"statSourceId": 0, "scoringPeriodId": WEEK, "statSplitTypeId": 1, "stats": {"42": 999}}]
+        lines = [{"statSourceId": 0, "scoringPeriodId": WEEK, "statSplitTypeId": 1, "stats": {"42": 999}},
+                 # last season's projection for the same week number: ESPN sends it in season
+                 {"id": f"11{SEASON - 1}{WEEK}", "statSourceId": 1, "scoringPeriodId": WEEK, "statSplitTypeId": 1,
+                  "stats": {"42": 555.0}}]
         if stats is not None:
-            lines.append({"statSourceId": 1, "scoringPeriodId": WEEK, "statSplitTypeId": 1, "stats": stats})
+            lines.append({"id": f"11{SEASON}{WEEK}", "statSourceId": 1, "scoringPeriodId": WEEK,
+                          "statSplitTypeId": 1, "stats": stats})
         return {"player": {"id": pid, "fullName": name, "defaultPositionId": position_id,
                            "proTeamId": team_id, "stats": lines}}
     return {"players": [

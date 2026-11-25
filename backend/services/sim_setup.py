@@ -3,7 +3,8 @@ that reads the database; the engine (services/sim_season, sim_world, sim_market)
 
 - live: the season in progress (replay_live.current_live), real through week N, weeks N+1.. simulated from the
   league's own seed. The base is loaded real through week N only, so week N+1's injury report and expert ranks
-  are simulated from what is known through N (the real ones, published during the week, are never read). A
+  are simulated from what is known through N (the real ones, published during the week, are never read), except
+  that each player's Sleeper status at creation seeds week N+1's hard tags (`with_status_now`). A
   league may start "now" (Settings.start_week = N + 1): it drafts on today's market ADP (`_market_adp`: the
   belief before week N + 1 of its own simulated season, the one that week's simulated expert snapshot came
   from), in the league's format.
@@ -76,7 +77,7 @@ def build(session: Session, settings: Settings, seed: int) -> tuple[bytes, Seaso
     else:
         base = replay_pool.load_season_data(session, settings.season, settings.scoring, settings.scoring_rules,
                                             settings.adp_format, through=settings.sim_from - 1)
-        data = sim_season.simulate(base, seed, settings.sim_from)
+        data = sim_season.simulate(with_status_now(session, base, settings.sim_from), seed, settings.sim_from)
         data = _market_adp(data, settings) if settings.start_week > 1 else data
     return replay_blob.freeze(data)
 
@@ -91,6 +92,45 @@ def _market_adp(data: SeasonData, settings: Settings) -> SeasonData:
     week = settings.start_week
     return sim_next_year.with_market_adp(replace(data, adp_format=settings.adp_format),
                                          sim_world.estimate(data, week), data.last_week - week + 1)
+
+
+def with_status_now(session: Session, base: SeasonData, week: int) -> SeasonData:
+    """`base` with week `week`'s tags (the first simulated week of a live league) from each player's current
+    Sleeper status, read once when the league is created: public news of today, so no hindsight, and never for a
+    real week. Without it a player hurt in the last real game (Drake Maye, 2026 week 10) starts the simulation
+    healthy. Out / Doubtful / IR / PUP / suspended become a hard tag that sim_season carries as an open absence
+    (its length drawn by the injury model); Questionable and healthy are left to the model. A player already
+    hard-tagged in the last real week keeps that streak, and a status older than availability's freshness window
+    is not news of this week."""
+    from datetime import datetime, timedelta, timezone
+    from types import MappingProxyType
+
+    from sqlalchemy import select
+
+    from database.models import PlayerStatus
+    from integrations.weekly_sources import utc
+    from services.availability import SLEEPER_FRESH_HOURS
+    from services.replay_injuries import MAX_TEXT
+    from services.replay_pool import Injury
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=SLEEPER_FRESH_HOURS)
+    added = {}
+    for pid, status, body, fetched in session.execute(select(
+            PlayerStatus.player_id, PlayerStatus.injury_status, PlayerStatus.injury_body_part,
+            PlayerStatus.fetched_at).where(PlayerStatus.injury_status.is_not(None))):
+        tag = SLEEPER_TAGS.get(status.upper())
+        last = base.injuries.get((pid, week - 1))
+        if (tag is None or pid not in base.players or (pid, week) in base.injuries or (last and last.hard)
+                or utc(fetched) < cutoff):
+            continue
+        added[(pid, week)] = Injury(tag, None, (body or "").strip()[:MAX_TEXT] or None)
+    return replace(base, injuries=MappingProxyType({**base.injuries, **added})) if added else base
+
+
+# Sleeper injury_status (upper-cased) -> the replay tag that week's absence starts from (services/availability's
+# SLEEPER_ZERO plus Doubtful, which plays about 3% of the time)
+SLEEPER_TAGS = {"OUT": "O", "DOUBTFUL": "O", "DNR": "O", "NA": "O", "COV": "O", "IR": "IR", "IR-R": "IR",
+                "NFI": "IR", "PUP": "PUP", "SUS": "SUS"}
 
 
 # ---------------- the future season ----------------
