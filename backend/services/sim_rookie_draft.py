@@ -14,7 +14,8 @@ the league's seed, decided once when the league is built (sim_setup._future_base
    by about a third of the pick in the first rounds). At each slot the team on the clock takes the best
    prospect whose board spot has come up and that it needs (`needs`); one it does not need it takes with
    `take_anyway` (near 1 for a consensus top pick, TAKE_WITHOUT_NEED from the end of round 1), except a QB in the first QB_NEED_ROUNDS rounds, which slides to a team that needs one.
-   A team needs a QB unless its starter is established (starts weight STARTER_ROLE+, ESTABLISHED_GAMES games
+   A team needs a QB unless its August starter (sim_next_year.restore_starters, after the moves) is
+   established (starts weight STARTER_ROLE+, ESTABLISHED_GAMES games
    of evidence, quality ESTABLISHED_QUALITY+), and an RB / WR / TE when its best one (WR: second-best) has
    less volume than the league's median team. A drafted position is no longer needed. A prospect nobody took
    goes with the first open slot after the last one.
@@ -77,15 +78,20 @@ def draft_order(wins: Mapping[str, float], seed: int) -> list[str]:
     return sorted(wins, key=lambda t: (wins[t], coin[t]))
 
 
-def needs(world: World, moves: Mapping[int, str | None] | None = None) -> dict[str, set[str]]:
-    """{team: positions it needs} from the belief at the end of the season, after the offseason `moves`."""
-    from services.sim_next_year import volume
+def needs(world: World, moves: Mapping[int, str | None] | None = None,
+          season_starts: Mapping[int, Sequence[tuple[int, str | None]]] | None = None) -> dict[str, set[str]]:
+    """{team: positions it needs} from the belief at the end of the season, after the offseason `moves`; with
+    `season_starts` (sim_next_year.starts_by_team) each team's August starter is restored first, so a starter
+    whose decayed starts weight is low (hurt late) does not leave his team needing a QB."""
+    from services.sim_next_year import restore_starters, volume
 
+    players = {pid: replace(p, team=team) for pid, p in world.players.items()
+               for team in [(moves or {}).get(pid, p.team)] if team is not None}
+    if season_starts is not None:
+        restore_starters(players, season_starts)
     rooms: dict[tuple[str, str], list] = {}
-    for pid, p in world.players.items():
-        team = (moves or {}).get(pid, p.team)
-        if team is not None:
-            rooms.setdefault((team, p.position), []).append(p)
+    for p in players.values():
+        rooms.setdefault((p.team, p.position), []).append(p)
     out = {team: set() for team in TEAMS}
     for team in TEAMS:
         qbs = rooms.get((team, "QB"), [])
@@ -147,6 +153,6 @@ def draft(rookies: Sequence[Rookie], order: Sequence[str], need: Mapping[str, se
 
 
 def run(rookies: Sequence[Rookie], games: Sequence[Game], world: World, moves: Mapping[int, str | None],
-        seed: int) -> list[Rookie]:
+        seed: int, season_starts: Mapping[int, Sequence[tuple[int, str | None]]] | None = None) -> list[Rookie]:
     """The seeded draft of `rookies`: standings from `games` (the season so far), needs from `world`."""
-    return draft(rookies, draft_order(final_wins(games, seed), seed), needs(world, moves), seed)
+    return draft(rookies, draft_order(final_wins(games, seed), seed), needs(world, moves, season_starts), seed)

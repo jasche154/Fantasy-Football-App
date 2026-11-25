@@ -107,7 +107,7 @@ def with_status_now(session: Session, base: SeasonData, week: int) -> SeasonData
     (its length drawn by the injury model); Questionable and healthy are left to the model. A player already
     hard-tagged in the last real week keeps that streak, and an Out / Doubtful status older than availability's
     freshness window is not news of this week (skipped, counted in the log); IR / PUP / suspended last weeks, so
-    they count however old the sync is."""
+    they count however old the sync is, unless he played in week - 1 (activated since the sync)."""
     from datetime import datetime, timedelta, timezone
     from types import MappingProxyType
 
@@ -128,12 +128,13 @@ def with_status_now(session: Session, base: SeasonData, week: int) -> SeasonData
         last = base.injuries.get((pid, week - 1))
         if tag is None or pid not in base.players or (pid, week) in base.injuries or (last and last.hard):
             continue
-        if utc(fetched) < cutoff and tag not in LONG_TAGS:
+        if utc(fetched) < cutoff and (tag not in LONG_TAGS or (pid, week - 1) in base.actual
+                                      or (pid, week - 1) in base.box):   # played since: activated
             stale += 1
             continue
         added[(pid, week)] = Injury(tag, None, (body or "").strip()[:MAX_TEXT] or None)
     if stale:
-        log.info("Week %s status: %s Out/Doubtful statuses older than %sh skipped", week, stale, SLEEPER_FRESH_HOURS)
+        log.info("Week %s status: %s statuses older than %sh skipped", week, stale, SLEEPER_FRESH_HOURS)
     return replace(base, injuries=MappingProxyType({**base.injuries, **added})) if added else base
 
 
@@ -272,10 +273,10 @@ def _future_base(session: Session, season: int, settings: Settings, seed: int = 
     # the pool's schedule carries no scores (results live in data.scores): the draft order needs them back
     played = tuple(replace(g, home_score=data.scores.get((g.home_team, g.week)),
                            away_score=data.scores.get((g.away_team, g.week))) for g in data.schedule.games)
-    by_name = {r.name: r for r in sim_rookie_draft.run(rookies, played, world, moved, seed)}
+    starts = sim_next_year.starts_by_team(data)
+    by_name = {r.name: r for r in sim_rookie_draft.run(rookies, played, world, moved, seed, starts)}
     drafted = {pid: by_name[r.name] for pid, r in sim_next_year.rookie_ids(season, rookies).items()}  # ids: file picks
-    belief, pool = sim_next_year.next_year(world, data.players, experience, drafted, moved,
-                                           sim_next_year.starts_by_team(data))
+    belief, pool = sim_next_year.next_year(world, data.players, experience, drafted, moved, starts)
     schedule = _schedule(session, season, data)
     start = sim_carryover.next_week_one(data, schedule)
     carries = {pid: c for pid, c in sim_carryover.carried(data, start, injury_detail(session)).items()

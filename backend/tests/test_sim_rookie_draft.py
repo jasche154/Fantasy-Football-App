@@ -1,4 +1,5 @@
 """sim_rookie_draft: the seeded draft of a future season's rookie class (hand-built worlds, no database)."""
+from dataclasses import replace
 from types import MappingProxyType
 
 from services import sim_rookie_draft as rd
@@ -79,3 +80,13 @@ def test_needs_follow_the_rooms():
     assert "QB" not in need["LAC"] and "QB" in need["MIA"]
     weakest = min(TEAMS, key=lambda t: world.players[TEAMS.index(t) * 10 + 2].carries)
     assert "RB" in need[weakest]
+
+
+def test_a_starter_hurt_late_is_restored_before_the_needs():
+    """2026: Lamar's decayed starts weight (0.38) looked like a backup's, so BAL took rookie QBs; with the
+    season's starts his August job is restored and BAL needs none."""
+    lamar = TEAMS.index("BAL") * 10 + 1
+    world = _world({"BAL"})
+    world = World(MappingProxyType({**world.players, lamar: replace(world.players[lamar], starts=0.38)}), world.teams)
+    assert "QB" in rd.needs(world)["BAL"]
+    assert "QB" not in rd.needs(world, {}, {lamar: [(w, "BAL") for w in range(1, 5)]})["BAL"]

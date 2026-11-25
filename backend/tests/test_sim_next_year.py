@@ -1,6 +1,6 @@
 """sim_next_year: the offseason turns one season's belief into the next one's (hand-built worlds, no database)."""
 from dataclasses import replace
-from types import MappingProxyType
+from types import MappingProxyType, SimpleNamespace
 
 import numpy as np
 import pytest
@@ -125,6 +125,26 @@ def test_a_fill_in_elsewhere_does_not_take_the_job_from_the_teams_own_starter():
     assert belief.players[own].starts == 1.0 > belief.players[fill_in].starts
     signed, _ = _next(rookies=(), moves={pid("DAL", "QB1"): "PIT"}, starts=starts)
     assert signed.players[pid("DAL", "QB1")].starts == 1.0 > signed.players[own].starts
+
+
+def test_a_qb_traded_in_mid_season_brings_no_claim_from_his_old_team():
+    """2026: Brissett led ARI for 8 weeks, then started once for BAL; Lamar (4 starts, hurt late, low starts
+    weight) is still BAL's starter in August."""
+    traded, own = pid("MIA", "QB1"), pid("KC", "QB1")
+    world = _world((replace(_player("MIA", "QB1", 1.0), team="KC", starts=0.6), _player("KC", "QB1", 1.05, starts=0.38)))
+    starts = {traded: [*((w, "MIA") for w in range(1, 9)), (9, "KC")], own: [(w, "KC") for w in range(1, 5)]}
+    belief, _ = _next(world, rookies=(), starts=starts)
+    assert belief.players[own].starts == 1.0 > belief.players[traded].starts
+
+
+def test_each_start_counts_for_the_team_he_played_that_game_for(monkeypatch):
+    """A QB traded before week 9 started week 9 for his new team (team_at would say the old one)."""
+    from services import replay_pool, sim_metrics
+
+    data = SimpleNamespace(team_by_week={7: ((7, "ARI"), (8, "ARI"), (9, "BAL"))}, players={})
+    data.team_at = lambda player_id, week: replay_pool.SeasonData.team_at(data, player_id, week)
+    monkeypatch.setattr(sim_metrics, "qb_starts", lambda _: {7: [7, 8, 9]})
+    assert ny.starts_by_team(data) == {7: [(7, "ARI"), (8, "ARI"), (9, "BAL")]}
 
 
 def test_receivers_carry_their_august_starter_and_a_qbs_rushing_keeps_its_own_regression():

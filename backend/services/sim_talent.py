@@ -31,8 +31,8 @@ reputation, plus dated role changes. Nothing in a simulated SeasonData reads it 
   a team whose next QB in line is an unproven prospect (no games of evidence, starts weight ROOKIE_HOPEFUL or
   more: a drafted rookie, sim_next_year) benches its starter at `rookie_bench_rate` instead: most such
   rookies start before the season is out (sim_next_year_fit's `qb_takeover`, injuries included).
-- Rookie growth (`rookies`: players in their first season): each one's role weights x `gain` from a uniform
-  week around mid-season (split_week - 1 to split_week + 2) with `chance`, both fitted on real rookies against
+- Rookie growth (`rookies`: players in their first season; only RBs, WRs and TEs grow, the positions it is
+  fitted on): each one's role weights x `gain` from a uniform week around mid-season (split_week - 1 to split_week + 2) with `chance`, both fitted on real rookies against
   veterans with the same first half (sim_next_year.json `rookie_growth`, sim_next_year_calib); only steps after
   from_week happen (a live season's real weeks stay real). No buzz: the public learns it from results.
 
@@ -246,6 +246,8 @@ def truth(belief: World, seed: int, from_week: int, last_week: int, rookies: Col
         team_dice = replay_state.rng(seed, "sim", "changes", team)
         changes += _changes([p for p in players.values() if p.team == team], team_dice, (first, last), knobs,
                             from_week == 1, ranks, share)
-    changes += growth([pid for pid in rookies if pid in players], seed, from_week)
+    # growth is fitted on rookie RBs/WRs/TEs only
+    changes += growth([pid for pid in rookies if pid in players and players[pid].position in ("RB", "WR", "TE")],
+                      seed, from_week)
     return World(MappingProxyType(players), MappingProxyType(teams),
                  tuple(sorted(changes, key=lambda c: (c.week, c.player_id))))

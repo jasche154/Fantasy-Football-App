@@ -22,8 +22,10 @@ seasons 2019-2025 by services/sim_next_year_fit.py and lives in sim_next_year.js
 - Starters. A QB's `starts` weight is a decayed share of recent starts, so a starter hurt late in the season
   (or one who changed teams after it) looks like a backup; in August the healthy incumbent is the starter
   again: on each team (after the moves) the QB with the most starts over the whole season (`season_starts`,
-  starts_by_team: starts for his new team, or for a team he was the main starter of, so a fill-in elsewhere
-  does not take the job from the team's own starter while a signed starter does; starting week 1 counts one
+  starts_by_team, each start labelled with that game's team: starts for his new team, or, only when he has
+  none for it (an offseason signing), for a team he was the main starter of, so a fill-in elsewhere does not
+  take the job from the team's own starter while a signed starter does, and a QB traded in mid-season brings
+  no claim from his old team; starting week 1 counts one
   more, which settles a split with an early fill-in; then the better passer) gets
   starts 1.0 and the others at most VETERAN_BACKUP_STARTS. A team left with no QB or kicker (a retirement)
   signs the best spare one: the backup with the highest starts weight on a team that has two or more.
@@ -221,10 +223,12 @@ def _qb_competition(players: dict[int, Player], rookie: Player) -> None:
 
 def starts_by_team(data: SeasonData) -> dict[int, list[tuple[int, str | None]]]:
     """{QB: [(week, team)] of the weeks he started} (sim_metrics.qb_starts), the `season_starts` of next_year."""
-    return {pid: [(week, data.team_at(pid, week)) for week in weeks] for pid, weeks in sim_metrics.qb_starts(data).items()}
+    teams = {pid: dict(games) for pid, games in data.team_by_week.items()}     # the game's team, not the one before it
+    return {pid: [(week, teams.get(pid, {}).get(week) or data.team_at(pid, week)) for week in weeks]
+            for pid, weeks in sim_metrics.qb_starts(data).items()}
 
 
-def _restore_starters(players: dict[int, Player], season_starts: Mapping[int, Sequence[tuple[int, str | None]]]) -> None:
+def restore_starters(players: dict[int, Player], season_starts: Mapping[int, Sequence[tuple[int, str | None]]]) -> None:
     """Each team's August starter by whole-season starts (see the module docstring). Mutates `players`."""
     by_team: dict[str, list[Player]] = defaultdict(list)
     for player in players.values():
@@ -237,7 +241,9 @@ def _restore_starters(players: dict[int, Player], season_starts: Mapping[int, Se
     led = {team: max(counts, key=lambda pid: (counts[pid], -pid)) for team, counts in started.items()}
     for qbs in by_team.values():
         def claim(p: Player) -> int:
-            weeks = [week for week, team in season_starts.get(p.player_id, ()) if team == p.team or led.get(team) == p.player_id]
+            own = [week for week, team in season_starts.get(p.player_id, ()) if team == p.team]
+            # a team he led counts only for a signing: a QB traded in mid-season keeps no claim from his old team
+            weeks = own or [week for week, team in season_starts.get(p.player_id, ()) if led.get(team) == p.player_id]
             return len(weeks) + (1 in weeks)
 
         order = sorted(qbs, key=lambda p: (-claim(p), -p.quality, -p.starts, p.player_id))
@@ -302,7 +308,7 @@ def next_year(world: World, players: Mapping[int, PoolPlayer], experience: Mappi
     `season_starts`: (week, team) of each start a QB made this season (starts_by_team)."""
     teams = _teams(world)
     new = _veterans(world, experience, moves)
-    _restore_starters(new, season_starts or {})
+    restore_starters(new, season_starts or {})
     _fill_vacancies(new, teams)
     for pid, rookie in sorted(rookies.items()):
         if rookie.team in teams and pid not in new:

@@ -1355,7 +1355,7 @@ read the belief, so, as in a real season, the public learns the truth only from 
   2026 week 10) starts the simulation out, for a length the injury model draws; Questionable is left to the
   model. Out / Doubtful statuses older than 18 hours (their count is logged) and players already hard-tagged
   in the last real week are left alone; IR, PUP and suspended last for weeks, so they count however old the
-  sync is. Real weeks never change.
+  sync is, except a stale one for a player who played in the last real week (he has been activated since). Real weeks never change.
   On purpose, simulated players get hurt **about a quarter less often** than real ones (`INJURY_SCALE = 0.75`
   in `sim_injuries.py` multiplies the per-game and preseason injury chances, in whole simulated seasons and
   in the live season's simulated weeks alike); how long an injury lasts stays real, and an absence already
@@ -1372,7 +1372,7 @@ read the belief, so, as in a real season, the public learns the truth only from 
   about 1% a season for the top-rated one, 4-5% around 12th, 15% around 24th and 27% for the lowest (real:
   0 of 42 top-6 starters, 2 of 42 ranked 7-12, 9 of 84 ranked 13-24, 11 of 56 ranked 25-32); in a whole
   simulated season a team with a promising rookie behind its starter usually turns to him before the
-  season is out. **Rookies grow:** about a quarter of the players in their first season get a bigger role
+  season is out. **Rookies grow:** about a quarter of the running backs, receivers and tight ends in their first season get a bigger role
   around mid-season (x1.6 from a week between 8 and 11), fitted on real rookies 2019-2025 against veterans
   with the same first half (real rookies gain about 6% more role than such veterans after week 9, the
   small-role ones about 15%; their points per touch do not grow). In the live season only the simulated
@@ -1415,8 +1415,10 @@ read the belief, so, as in a real season, the public learns the truth only from 
   points a game (slope about 1, lower error). The measured regressions still size the hidden talent's
   offseason spread (what last season leaves unexplained). All of it is measured from real seasons 2019-2025 (`sim_next_year.json`). On each
   team the QB who started the most games last season is the starter again in August; starts made for
-  another team count only when he was that team's main starter (a five-game fill-in elsewhere does not
-  take the job from the team's own starter).
+  another team count only when he was that team's main starter and has no starts for his new team (a
+  five-game fill-in elsewhere does not take the job from the team's own starter, a signed starter does, and a
+  quarterback traded in mid-season brings no claim from his old team: Jacoby Brissett's Arizona starts do not
+  beat Lamar Jackson in Baltimore).
 - **Rookies** get the role a player taken at that pick and position really had as a rookie, and the widest
   talent draw. A rookie QB starts week 1 when his team has no starter, or when his pick makes it likely and
   the incumbent is a below-average passer; otherwise he is next in line. Real drafters pay for a rookie's
@@ -1444,7 +1446,8 @@ read the belief, so, as in a real season, the public learns the truth only from 
   finished from the real results so far, each game left won with a probability from the two teams' points
   differential a game; the draft order is fewest wins first. Each prospect's board spot is his `pick` x a
   random ~30% miss, and the team on the clock takes the best prospect whose spot has come up and that it
-  needs: a QB unless it has an established starter (a full season's evidence, average-ish passing), an
+  needs: a QB unless its August starter (as above, after the moves; not a starter hurt late, whose recent
+  starts look like a backup's) is established (a full season's evidence, average-ish passing), an
   RB/WR/TE when its room is below the league's median. A consensus top pick goes near the top regardless;
   a QB slides past teams that don't need one through round 2. The drafted pick then sets his rookie role,
   his market premium and his place on his new team's depth chart. Shortcut: playoffs, strength-of-schedule

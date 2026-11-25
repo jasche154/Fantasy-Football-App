@@ -94,7 +94,7 @@ def test_the_starters_are_ranked_among_the_starters(belief):
 def test_rookies_grow_after_mid_season_at_the_fitted_rate(belief):
     """Only the rookies, only after from_week, about `chance` of them, by `gain` (sim_next_year.json)."""
     fit = sim_talent.sim_next_year.stored()["rookie_growth"]
-    rookies = sorted(belief.players)[:40]
+    rookies = sorted(pid for pid, p in belief.players.items() if p.position in ("RB", "WR", "TE"))[:40]
     steps = [c for seed in range(30) for c in sim_talent.truth(belief, seed, 1, 17, rookies).changes if c.kind == "growth"]
     assert {c.player_id for c in steps} <= set(rookies)
     assert len(steps) / (30 * len(rookies)) == pytest.approx(fit["chance"], abs=0.05)
@@ -103,3 +103,11 @@ def test_rookies_grow_after_mid_season_at_the_fitted_rate(belief):
     late = [c for seed in range(30) for c in sim_talent.growth(rookies, seed, fit["split_week"])]
     assert late and all(c.week > fit["split_week"] for c in late)          # a live season's real weeks stay real
     assert not [c for c in sim_talent.truth(belief, 1, 1, 17).changes if c.kind == "growth"]
+
+
+def test_rookie_qbs_and_kickers_never_grow(belief):
+    """Growth is fitted on rookie RBs, WRs and TEs only: a rookie QB or K keeps his role."""
+    rookies = [pid for pid, p in belief.players.items() if p.position in ("QB", "K")]
+    assert rookies
+    assert not [c for seed in range(30) for c in sim_talent.truth(belief, seed, 1, 17, rookies).changes
+                if c.kind == "growth"]
