@@ -2,8 +2,7 @@
 
 score = in + premium + spot + 0.5 x lineup - out x multiple x 1.03 (a shark also wants SHARK_MARGIN x out):
 - out: what it sends, at its persona's private value (an emotional CPU's `hype` included); an out player it sends the user counts at least
-  OUT_SELL_SHARE of his healthy chart (the user may know he is back soon; 1 - the deepest discount a long
-  but not season-long absence takes off the chart, replay_chart_injury). A player the CPU is shopping to
+  OUT_SELL_SHARE of his healthy chart (the user may know he is back soon). A player the CPU is shopping to
   the user (`markdown`, replay_mood) counts that share less when sent to the user, before the floor.
 - in: what it receives and keeps, minus its own players it must cut to make room. Depth is worth less than
   quality: when it keeps more players than it sends pieces that matter (worth >= DEPTH_SHARE x its best
@@ -26,7 +25,6 @@ from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
 from services import replay_personas
-from services.replay_chart_injury import LONG_DISCOUNT
 from services.replay_values import Knowledge
 
 STAR_PREMIUM = 0.12            # x B x (1 - v2 / B): the best player in the deal is worth more than parts
@@ -37,7 +35,7 @@ LINEUP_CAP = 0.15              # lineup term clamped to +- this share of `out`
 LINEUP_WEIGHT = 0.5            # a lineup gain counts half
 LINEUP_LOSS_WEIGHT = 1.0       # a lineup loss counts in full: a CPU feels losing a starter (Kelce for Goedert + Davis)
 OUT_MARGIN = 1.03
-OUT_SELL_SHARE = 1 - LONG_DISCOUNT    # an out player sent to the user counts >= this x healthy_chart (0.55)
+OUT_SELL_SHARE = 0.5           # an out player sent to the user counts >= this x healthy_chart (the user's choice)
 MARKET_GUARD = 0.80            # neutral market in >= this x out, whatever the persona
 SHARK_MARGIN = 0.05
 DEPTH_SHARE = 0.35             # a piece beyond the first extra one in a many-for-few deal counts at this share
