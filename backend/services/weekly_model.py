@@ -63,12 +63,27 @@ def weekly_rate(player: PlayerSeason, prior_ppg: float | None, half_life: float 
         return prior_ppg or 0.0
     values = [ACTUAL_WEIGHT * g.fantasy_points + (1 - ACTUAL_WEIGHT) * g.expected_points
               if g.expected_points is not None else g.fantasy_points for g in games]
-    weights = [1.0 if half_life is None else 0.5 ** ((len(games) - 1 - i) / half_life) for i in range(len(games))]
+    weights = _recency_weights(len(games), half_life)
     rate = sum(w * v for w, v in zip(weights, values)) / sum(weights)
     if prior_ppg is None:
         return round(rate, 2)
     shrink = len(games) / (len(games) + PRIOR_STRENGTH_GAMES)
     return round(shrink * rate + (1 - shrink) * prior_ppg, 2)
+
+
+def _recency_weights(count: int, half_life: float | None) -> list[float]:
+    return [1.0 if half_life is None else 0.5 ** ((count - 1 - i) / half_life) for i in range(count)]
+
+
+def rate_share(player: PlayerSeason, weeks: set[int], prior_ppg: float | None,
+               half_life: float | None = RECENCY_HALF_LIFE) -> float:
+    """Share of weekly_rate that comes from the player's games in `weeks` (0-1)."""
+    games = player.games
+    if not games:
+        return 0.0
+    weights = _recency_weights(len(games), half_life)
+    share = sum(w for w, g in zip(weights, games) if g.week in weeks) / sum(weights)
+    return share if prior_ppg is None else share * len(games) / (len(games) + PRIOR_STRENGTH_GAMES)
 
 
 def range_for(position: str, if_active: float) -> dict[str, float] | None:

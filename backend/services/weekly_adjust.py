@@ -5,6 +5,8 @@
      plays, so the expected boost is added in full.
    - When he is already ruled Out or Doubtful, experts and lines have priced it in, so only the
      model's share of the boost is added.
+   - The model's share is cut by the part of its rate already built in games without that
+     teammate (Boost.in_rate), so a fill-in's recent role isn't counted twice.
 2. **Projection:** the if-active number times the player's own chance of playing.
 3. **Floor and ceiling:** the if-active number times the 10th and 90th percentile of
    actual-over-projected points from the backtest, by position. The floor is 0 if he may sit.
@@ -58,7 +60,9 @@ def adjust(position: str, blended: float, tilt: float, matchup: Matchup, model_s
     contributions = []
     for boost in context.boosts.get(player_id, ()):
         teammate_prob = context.of(boost.from_player_id).play_prob
-        share = model_share if teammate_prob < PRICED_IN else 1.0
+        # The model's rate already holds boost.in_rate of it (games he played without the teammate).
+        outside = 0.0 if teammate_prob < PRICED_IN else 1.0 - model_share
+        share = outside + model_share * (1.0 - boost.in_rate)
         contributions.append((boost, boost.expected_points * matchup.multiplier * share, share))
     boost_total = sum(c for _, c, _ in contributions)
     # A starter coming back takes work from his fill-in. Experts and lines already price that
@@ -122,7 +126,9 @@ def explain(name: str, position: str, rate: float | None, prior: float | None, m
     for boost in boosts:
         steps.append(Step(f"If {boost.from_name} sits", f"+{boost.full_points:.1f} pts",
                           f"{boost.from_name}: {boost.from_status}. His vacated work is estimated by {boost.method}; "
-                          f"weighted by his chance of sitting it adds {boost.expected_points:.1f}."))
+                          f"weighted by his chance of sitting it adds {boost.expected_points:.1f}"
+                          + (f"; the model's rate already holds {boost.in_rate:.0%} of it (games without him)."
+                             if boost.in_rate >= 0.005 else ".")))
     availability = adjusted.availability
     if availability.play_prob < 1:
         steps.append(Step("Availability", f"{availability.play_prob:.0%} to play",

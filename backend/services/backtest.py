@@ -103,7 +103,7 @@ def project_week(session: Session, data: SeasonData, week: int, settings: Weekly
         key = ("context", week, settings.half_life)
         if key not in cache:
             cache[key] = build_context(session, before, rates, season, week, schedule, use_live=False,
-                                       exclude_rate_season=season)
+                                       exclude_rate_season=season, priors=priors)
         context = cache[key]
     games_this_week = {p.player_id: next((g for g in p.games if g.week == week), None) for p in current}
     played = {pid: (g.fantasy_points if g else None) for pid, g in games_this_week.items()}
@@ -125,7 +125,9 @@ def project_week(session: Session, data: SeasonData, week: int, settings: Weekly
         if_active = rate * multiplier
         projected = if_active
         if context is not None:
-            if_active += sum(b.expected_points for b in context.boosts.get(player.player_id, ())) * multiplier
+            # Only the part of each boost his rate hasn't already seen (games without the teammate).
+            if_active += sum(b.expected_points * (1 - b.in_rate)
+                             for b in context.boosts.get(player.player_id, ())) * multiplier
             projected = if_active * context.of(player.player_id).play_prob
         actual = played.get(player.player_id)
         game_line = games_this_week.get(player.player_id)

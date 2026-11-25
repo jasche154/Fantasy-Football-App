@@ -26,8 +26,10 @@ export function AccuracyView() {
                 </p>
                 <p>
                   Below the floor {pct(d.live.range?.below_floor)} and above the ceiling {pct(d.live.range?.above_ceiling)} of the
-                  time (each should be about 10%).
-                  {(d.live.range?.below_floor ?? 0) > 0.15 && ' Floors have been too high so far; one or two weeks is a small sample.'}
+                  time with today's ranges (each should be about 10%).
+                  {(d.live.range?.below_floor ?? 0) > 0.15 && (d.live.weeks.length <= 2
+                    ? ' Floors have been too high so far; one or two weeks is a small sample.'
+                    : ' Floors have been too high this season.')}
                 </p>
                 <ul className="reason-list">
                   {Object.entries(d.live.bias_by_position ?? {}).map(([pos, bias]) => (

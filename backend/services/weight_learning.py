@@ -15,6 +15,8 @@ week's weights only ever use earlier weeks):
    the rankings re-balance over the sources a player has.
 2. Fit: least squares shrunk toward the prior (DEFAULT_WEIGHTS) as if the prior were backed
    by PSEUDO_ROWS rows. The sources are 0.9+ correlated, so an unshrunk fit swings wildly.
+   The penalty is scaled by how much the sources disagree within a row (not by the points
+   level), so PSEUDO_ROWS really counts as rows.
 3. Limits: no negative weights, props at least PROPS_FLOOR (their value is late news, which
    the history can't show yet), every other group at least MIN_WEIGHT, then normalize.
 With fewer than MIN_POOLED_ROWS rows the prior is used unchanged.
@@ -143,7 +145,11 @@ def fit_pooled(samples: Sequence[Sample], prior: Mapping[str, float] = DEFAULT_W
         x[row] = [sample.sources.get(k, fill) for k in keys]
     y = np.array([s.actual for s in samples])
     p = np.array([prior[k] for k in keys])
-    strength = pseudo_rows * float(np.mean(np.sum(x * x, axis=1)) / len(keys))
+    # Scale the penalty by how much the sources differ within a row, not by their level: the
+    # weights only decide between those differences, so this is what makes pseudo_rows count
+    # as rows. (Scaled by the level, ~1,000 rows moved the weights by 0.05 points.)
+    spread = x - x.mean(axis=1, keepdims=True)
+    strength = pseudo_rows * float(np.mean(np.sum(spread * spread, axis=1)) / len(keys))
     w = np.linalg.solve(x.T @ x + strength * np.eye(len(keys)), x.T @ y + strength * p)
     w = w / w.sum() if w.sum() > 0 else p
     return constrain(dict(zip(keys, w.tolist())))

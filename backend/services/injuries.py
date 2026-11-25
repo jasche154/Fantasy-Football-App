@@ -10,6 +10,9 @@ are split among his teammates:
   split by current usage.
 - When this season already has games without that player, the teammate's measured change in
   expected points in those games replaces the heuristic, shrunk toward it by sample size.
+- A backup quarterback sitting vacates nothing to the starter (his few games are mop-up duty).
+- Each boost records how much of the teammate's model rate was built in games without that
+  player (`in_rate`): the model already counts that part, so only the rest is added to it.
 """
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
@@ -22,6 +25,7 @@ from sqlalchemy.orm import Session
 from database.models import DepthChartEntry
 from services.projections import PlayerSeason
 from services.schedule_strength import Schedule
+from services.weekly_model import rate_share
 from services.availability import (  # noqa: F401  (re-exported)
     BACKUP_FLOOR, DEFAULT_RATES, HEALTHY, HEALTHY_AVAILABILITY, INACTIVE_LAST_WEEK_PLAYS, SIT_RISK, SLEEPER_ZERO, Availability,
     _rate_cache, backup_qb_availability, learned_play_rates, load_availability, play_probability, qb_depth,
@@ -52,6 +56,7 @@ class Boost:
     full_points: float           # if the teammate sits for sure
     expected_points: float       # weighted by the teammate's chance of sitting
     method: str                  # "with/without (N games)" or "depth chart + usage share"
+    in_rate: float = 0.0         # share of his model rate from games without the teammate (already counted)
 
 
 @dataclass(frozen=True)
@@ -128,11 +133,14 @@ def _heuristic_shares(absent: PlayerSeason, teammates: list[tuple[PlayerSeason, 
 
 def vacated_boosts(seasons: Iterable[PlayerSeason], rates: Mapping[int, float],
                    availability: Mapping[int, Availability], depth: Mapping[int, tuple[str, int]],
-                   schedule: Schedule, week: int) -> dict[int, tuple[Boost, ...]]:
+                   schedule: Schedule, week: int,
+                   priors: Mapping[int, float] | None = None) -> dict[int, tuple[Boost, ...]]:
     """{player_id: boosts} for teammates of players likely to miss the game.
 
-    `rates` are each player's projected points per game before any injury adjustment.
+    `rates` are each player's projected points per game before any injury adjustment;
+    `priors` the last-season rates they were shrunk toward (for Boost.in_rate).
     """
+    priors = priors or {}
     seasons = list(seasons)
     by_team: dict[str, list[PlayerSeason]] = defaultdict(list)
     for player in seasons:
@@ -149,7 +157,12 @@ def vacated_boosts(seasons: Iterable[PlayerSeason], rates: Mapping[int, float],
                          if p.player_id != absent.player_id and availability.get(p.player_id, HEALTHY_AVAILABILITY).play_prob > 0.5]
             shares = _heuristic_shares(absent, teammates, depth)
             sit_chance = 1 - avail.play_prob
+            absent_weeks = set(team_games(absent, team, schedule))
+            played = team_weeks(schedule, team, week)
             for player, _ in teammates:
+                mine = team_games(player, team, schedule)
+                if absent.position == "QB" and player.position == "QB" and len(absent_weeks) < len(mine):
+                    continue                                 # a backup QB sitting leaves the starter nothing
                 heuristic = vacated_rate * shares.get(player.player_id, 0.0)
                 measured = with_without(player, absent, team, schedule, week)
                 if measured is not None and player.position == absent.position and measured[1] >= MIN_WITHOUT_GAMES:
@@ -161,9 +174,11 @@ def vacated_boosts(seasons: Iterable[PlayerSeason], rates: Mapping[int, float],
                     full, method = heuristic, "depth chart + usage share"
                 if full < 0.3:
                     continue
+                without = {w for w in played if w in mine and w not in absent_weeks}
                 boosts[player.player_id].append(Boost(
                     player.player_id, absent.player_id, absent.name, avail.label,
-                    round(full, 2), round(full * sit_chance, 2), method))
+                    round(full, 2), round(full * sit_chance, 2), method,
+                    round(rate_share(player, without, priors.get(player.player_id)), 3)))
     return {pid: tuple(sorted(b, key=lambda x: -x.full_points)) for pid, b in boosts.items()}
 
 
@@ -252,7 +267,8 @@ def ros_role_losses(seasons: Iterable[PlayerSeason], current_week: int, schedule
 
 def build_context(session: Session, seasons: Iterable[PlayerSeason], rates: Mapping[int, float],
                   season: int, week: int, schedule: Schedule, use_live: bool = True,
-                  exclude_rate_season: int | None = None) -> InjuryContext:
+                  exclude_rate_season: int | None = None,
+                  priors: Mapping[int, float] | None = None) -> InjuryContext:
     """use_live adds Sleeper tags and today's depth chart: only for the current week."""
     seasons = list(seasons)
     availability = load_availability(session, season, week, use_live, exclude_rate_season)
@@ -261,5 +277,5 @@ def build_context(session: Session, seasons: Iterable[PlayerSeason], rates: Mapp
         availability = {**availability, **backup_qb_availability(qb_depth(session), availability)}
     depth = _depth(session) if use_live else {}
     return InjuryContext(availability=availability,
-                         boosts=vacated_boosts(seasons, rates, availability, depth, schedule, week),
+                         boosts=vacated_boosts(seasons, rates, availability, depth, schedule, week, priors),
                          returning=returning_competition(seasons, availability, week, schedule))

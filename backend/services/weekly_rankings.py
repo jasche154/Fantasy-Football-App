@@ -365,7 +365,7 @@ def _build(session: Session, league: LeagueSettings, valuation: Valuation, week:
     rates = player_rates(valuation)
     # Sleeper tags and today's depth chart describe now, so they only apply to the current week.
     context = build_context(session, valuation.seasons, rates, valuation.season, week, valuation.schedule,
-                            use_live=week == default_week(valuation))
+                            use_live=week == default_week(valuation), priors=valuation.priors)
     weights, learned = effective_weights(session, valuation.season, week)
     players = blend(candidates, valuation, week, league, require_outside_source=has_outside_sources,
                     context=context, rates=rates, weights=weights,
