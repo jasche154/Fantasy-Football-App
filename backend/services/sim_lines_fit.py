@@ -70,8 +70,8 @@ def _season_rows(session, season: int) -> dict:
             hs, as_ = data.scores.get((g.home_team, week)), data.scores.get((g.away_team, week))
             if hs is None or as_ is None or g.spread_line is None or g.total_line is None:
                 continue
-            bh, ba = sim_lines.mean_points(belief, g.home_team, g.away_team, out)
-            qbs = [sim_lines.quarterback(belief, team, out) for team in (g.home_team, g.away_team)]
+            (bh, ba), quality = sim_lines.summary(belief, g.home_team, g.away_team, out)
+            qbs = [(q, belief.teams[team].passer) for q, team in zip(quality, (g.home_team, g.away_team))]
             games.append({"week": week, "home": g.home_team, "away": g.away_team, "belief": [bh, ba], "qbs": qbs,
                           "rest": [sim_lines.rest_days(known, g.home_team, week),
                                    sim_lines.rest_days(known, g.away_team, week)],

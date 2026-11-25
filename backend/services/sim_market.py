@@ -47,7 +47,7 @@ import numpy as np
 from services.replay_pool import SeasonData
 from services.schedule_strength import Schedule
 from services.scoring import ScoringSettings, scoring_for
-from services.sim_game import expected, team_mean
+from services.sim_game import expected
 from services.sim_world import RoleChange, World, params
 
 MIN_PROJECTION = 0.1
@@ -97,8 +97,8 @@ def values(belief: World, scoring: ScoringSettings, games_left: int = SEASON_GAM
         for start, end in zip(phases, phases[1:]):
             sitting = frozenset(p.player_id for p in roster if p.out_weeks > start)
             if sitting not in lines:
-                target = {team: max(0.0, team_mean(belief, team, sitting) + edges[team])} if edges and team in edges else None
-                lines[sitting] = expected(belief, team, None, sitting, scoring, target=target)
+                shift = {team: edges[team]} if edges and team in edges else None
+                lines[sitting] = expected(belief, team, None, sitting, scoring, shift=shift)
             for pid, line in lines[sitting].items():
                 found[pid] += line.points * (end - start) / max(1, games_left)
     return dict(found)

@@ -9,7 +9,7 @@ never the truth:
    `prior_games` pseudo-games hold each team at last season's final rating x `carry` (`carry_over`), else at 0.
    The league level is this season's mean shrunk toward the long-run one by `level_games` pseudo-games.
 2. The belief's own expectation: each side's mean points under the belief with the week's hard-tagged players
-   out (sim_game.mean_points), the input that knows who plays and who is hurt.
+   out (sim_game.summary), the input that knows who plays and who is hurt.
 3. The quarterbacks: the belief's quality of each side's starter (`qb_level`) and that minus the quality of the
    team's usual passer (`qb_change`: the ratings were earned with him).
 4. Rest: a team coming off its bye (+1), or on a short week (-1, a Thursday game after a Sunday), from the
@@ -26,7 +26,7 @@ games, passed in by sim_setup) replaces the model's.
 import json
 from collections import defaultdict
 from collections.abc import Collection, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from functools import lru_cache
 from pathlib import Path
@@ -34,8 +34,8 @@ from types import MappingProxyType
 
 from services.replay_pool import SeasonData
 from services.sim_constants import fitted_json
-from services.sim_game import _side, mean_points, team_mean
-from services.sim_world import World, params
+from services.sim_game import summary
+from services.sim_world import World
 
 LINES_PATH = Path(__file__).with_name("sim_lines.json")
 LINES_FIT = "python -m services.sim_lines_fit --fit"
@@ -49,6 +49,7 @@ MIN_TOTAL = 20.0                 # a predicted total is kept at or above this (r
 class Line:
     margin: float                # home points minus away points expected
     total: float
+    belief: tuple[float, float] | None = field(default=None, compare=False)   # the belief's own (home, away) points
 
     @property
     def home(self) -> float:
@@ -144,18 +145,11 @@ def _rest(days: int | None) -> float:
     return 1.0 if days >= BYE_DAYS else -1.0 if days <= SHORT_DAYS else 0.0
 
 
-def quarterback(belief: World, team: str, out: Collection[int]) -> tuple[float, float]:
-    """(quality of the team's starting QB under the belief, quality of its usual passer)."""
-    side = _side(belief, team, None, out, {})
-    quality = belief.players[side.qb].quality if side.qb is not None else params()["league"]["backup_quality"]
-    return quality, belief.teams[team].passer
-
-
 def features(rated: Rated, home: str, away: str, belief_points: tuple[float, float],
              rest: tuple[int | None, int | None],
              qbs: tuple[tuple[float, float], tuple[float, float]]) -> dict[str, tuple[float, float]]:
     """{input: (margin part, total part)} of one game: each side's value minus / plus the other's. `qbs`: each
-    side's `quarterback`."""
+    side's (starting QB quality, its usual passer's: World.teams[team].passer)."""
     h, a = rated.teams.get(home, Rating()), rated.teams.get(away, Rating())
     mine, theirs = h.offense + a.defense, a.offense + h.defense
     (hq, hp), (aq, ap) = qbs
@@ -185,15 +179,14 @@ def week_lines(known: SeasonData, week: int, belief: World, out: Collection[int]
     for game in known.schedule.games:
         if game.week != week or game.home_team not in belief.teams or game.away_team not in belief.teams:
             continue
-        line = (posted or {}).get((game.home_team, week))
-        if line is not None:
-            lines[game.home_team] = Line(float(line[0]), float(line[1]))
-            continue
-        parts = features(rated, game.home_team, game.away_team,
-                         mean_points(belief, game.home_team, game.away_team, out),
-                         (rest_days(known, game.home_team, week), rest_days(known, game.away_team, week)),
-                         (quarterback(belief, game.home_team, out), quarterback(belief, game.away_team, out)))
-        lines[game.home_team] = predict(parts)
+        home, away = game.home_team, game.away_team
+        points, quality = summary(belief, home, away, out)
+        line = (posted or {}).get((home, week))
+        if line is None:
+            line = predict(features(rated, home, away, points, (rest_days(known, home, week), rest_days(known, away, week)),
+                                    ((quality[0], belief.teams[home].passer), (quality[1], belief.teams[away].passer))))
+        lines[home] = Line(float(line[0]) if isinstance(line, tuple) else line.margin,
+                           float(line[1]) if isinstance(line, tuple) else line.total, (points[0], points[1]))
     return lines
 
 
@@ -206,8 +199,9 @@ def edges(known: SeasonData, week: int, belief: World, out: Collection[int],
     home_edge = stored()["margin"]["const"]
     out_edges = {}
     for team in sorted(belief.teams):
-        mine = team_mean(belief, team, out)
-        parts = features(rated, team, "", (mine, rated.level), (None, None), (quarterback(belief, team, out), (1.0, 1.0)))
+        (mine,), (quality,) = summary(belief, team, None, out)
+        parts = features(rated, team, "", (mine, rated.level), (None, None),
+                         ((quality, belief.teams[team].passer), (1.0, 1.0)))
         line = predict(parts)
         out_edges[team] = (line.total + line.margin - home_edge) / 2 - mine
     return out_edges

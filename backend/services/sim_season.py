@@ -28,7 +28,7 @@ week's, from what is known through from_week - 1 (a half-published mid-week inju
    - the pregame line of every game (sim_lines.week_lines, from the same public belief and the games so far;
      a `posted` real line instead where the caller passes one) centres both the projections and the game: the
      game's target is each side's line points + what the truth knows that the belief doesn't (the truth's mean
-     points minus the belief's, sim_game.mean_points: talent, in-game injuries, role changes) + the hidden team
+     points minus the belief's, carried on the line: talent, in-game injuries, role changes) + the hidden team
      strength (sim_talent.strength). The lines are stored on the schedule's games of the simulated weeks, as a
      real season's closing lines are;
    - the truth at W plays every game (sim_game.play). Players on the field are hurt with
@@ -45,7 +45,7 @@ from types import MappingProxyType
 
 from services import replay_pool, replay_state, sim_depth, sim_injuries, sim_lines, sim_market, sim_talent
 from services.replay_pool import Injury, SeasonData, hard_tag_returns
-from services.sim_game import mean_points, on_field, play
+from services.sim_game import on_field, play
 from services.sim_world import World, estimate, scoring_of
 
 FULL_EXPOSURE_SNAP = 20.0        # a player who really plays (a recorded game) carries the full injury hazard
@@ -53,7 +53,6 @@ PHANTOM_MIN_SNAP = 50.0          # healthy regulars this involved may be listed 
 INJURY_POSITIONS = ("QB", "RB", "WR", "TE", "K")
 CARRIED = {"SUS": "O", "EXE": "IR"}   # non-injury hard tags an open absence keeps: the open_spell table each draws from
 UNKNOWN_BODY = "Undisclosed"
-MIN_TARGET = 3.0                 # a side's expected points are kept at or above this
 
 
 @dataclass
@@ -277,10 +276,9 @@ def simulate(base: SeasonData, seed: int, from_week: int, prior: World | None = 
             dice = replay_state.rng(seed, "sim", "hurt", week, game.home_team)
             hurt = {**_hurt(world, game.home_team, sitting, dice), **_hurt(world, game.away_team, sitting, dice)}
             exits = {pid: spell.exit_share for pid, spell in hurt.items()}
-            target = _target(pregame.get(game.home_team), game.home_team, game.away_team, world, public, sitting,
-                             public_out, exits, hidden)
+            shift = _shift(pregame.get(game.home_team), game.home_team, game.away_team, hidden)
             result = play(world, game.home_team, game.away_team, sitting,
-                          replay_state.rng(seed, "sim", "game", week, game.home_team), scoring, exits, target)
+                          replay_state.rng(seed, "sim", "game", week, game.home_team), scoring, exits, shift=shift)
             _record(tables, world, result, week)
             played_teams |= {game.home_team, game.away_team}
             fresh |= set(hurt)
@@ -299,18 +297,17 @@ def simulate(base: SeasonData, seed: int, from_week: int, prior: World | None = 
                    schedule=_with_lines(base.schedule, lines))
 
 
-def _target(line: sim_lines.Line | None, home: str, away: str, truth: World, public: World, sitting: Collection[int],
-            public_out: Collection[int], exits: Mapping[int, float],
-            hidden: Mapping[str, tuple[float, float]]) -> dict[str, float] | None:
-    """{team: the points its side is centred on} (see the module docstring); None without a line."""
-    if line is None:
+def _shift(line: sim_lines.Line | None, home: str, away: str,
+           hidden: Mapping[str, tuple[float, float]]) -> dict[str, float] | None:
+    """{team: points added to its side's own mean under the truth} (see the module docstring): the game is centred
+    on the line's points (its edge widened) + the truth's mean points - the belief's (`line.belief`) + the hidden
+    strength. None without a line."""
+    if line is None or line.belief is None:
         return None
-    th, ta = mean_points(truth, home, away, sitting, exits)
-    bh, ba = mean_points(public, home, away, public_out)
+    bh, ba = line.belief
     (ho, hd), (ao, ad) = hidden.get(home, (0.0, 0.0)), hidden.get(away, (0.0, 0.0))
     edge = sim_talent.edge_scale() * line.margin / 2          # the truth's edges are wider than the shrunk line's
-    return {home: max(MIN_TARGET, line.total / 2 + edge + th - bh + ho + ad),
-            away: max(MIN_TARGET, line.total / 2 - edge + ta - ba + ao + hd)}
+    return {home: line.total / 2 + edge - bh + ho + ad, away: line.total / 2 - edge - ba + ao + hd}
 
 
 def _with_lines(schedule, lines: Mapping[tuple[str, int], sim_lines.Line]):
