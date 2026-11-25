@@ -328,6 +328,18 @@ def test_espn_rows_map_stats_and_skip_byes(session, seeded):
     assert json.loads(row["stats"]) == {"rec_yds": 91.0, "rec_tds": 0.8, "rec": 8.0, "two_pt": 0.02}
 
 
+def test_espn_lines_without_an_id_are_matched_by_their_fields():
+    def line(season, stats, **extra):
+        return {"statSourceId": 1, "scoringPeriodId": WEEK, "statSplitTypeId": 1, "stats": stats,
+                **({"seasonId": season} if season else {}), **extra}
+    old_shape = {"stats": [line(SEASON - 1, {"42": 555.0}), line(SEASON, {"42": 91.0})]}
+    assert espn.projected_stats(old_shape, SEASON, WEEK)["rec_yds"] == 91.0
+    assert espn.projected_stats({"stats": [line(None, {"42": 91.0})]}, SEASON, WEEK) is None   # which season?
+    with_id = {"stats": [line(SEASON, {"42": 555.0}, id=f"11{SEASON - 1}{WEEK}"),
+                         line(SEASON, {"42": 91.0}, id=f"11{SEASON}{WEEK}")]}
+    assert espn.projected_stats(with_id, SEASON, WEEK)["rec_yds"] == 91.0                       # the id decides
+
+
 def test_espn_refresh_sends_week_filter(session, seeded):
     seen = []
 

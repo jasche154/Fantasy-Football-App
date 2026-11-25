@@ -55,10 +55,16 @@ def line_id(season: int, week: int) -> str:
 
 def projected_line(player: dict, season: int, week: int) -> dict | None:
     """The player's projected line for this season's week. In season ESPN also sends last season's line for
-    the same week number (a bye week then has only that one), so the line is picked by its id."""
+    the same week number (a bye week then has only that one), so the line is picked by its id; a line without
+    one is picked by its fields, season included (one without a seasonId can't be told apart: skipped)."""
     wanted = line_id(season, week)
-    return next((line for line in player.get("stats") or []
-                 if isinstance(line, dict) and line.get("id") == wanted), None)
+
+    def matches(line: dict) -> bool:
+        if "id" in line:
+            return line["id"] == wanted
+        return (line.get("statSourceId"), line.get("statSplitTypeId"), line.get("seasonId"),
+                line.get("scoringPeriodId")) == (PROJECTED, WEEKLY_SPLIT, season, week)
+    return next((line for line in player.get("stats") or [] if isinstance(line, dict) and matches(line)), None)
 
 
 def projected_stats(player: dict, season: int, week: int) -> dict[str, float] | None:
