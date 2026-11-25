@@ -228,7 +228,7 @@ def _league(session, season: int, seed: int):
     kind, through = sim_setup.kind_of(session, season)
     settings = Settings(season=season, sim_from=1 if kind == sim_setup.FUTURE else through + 1)
     if kind == sim_setup.FUTURE:
-        base, world, carried, qbs = sim_setup._future_base(session, season, settings, seed)
+        base, world, carried, qbs, _ = sim_setup._future_base(session, season, settings, seed)
         rookies = [pid for pid in world.players if pid >= sim_next_year.ROOKIE_ID_BASE]
         started = time.perf_counter()
         data = sim_season.simulate(base, seed, 1, prior=world, carried=carried, rookies=rookies, qbs=qbs)

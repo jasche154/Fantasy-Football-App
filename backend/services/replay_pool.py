@@ -93,7 +93,7 @@ class SeasonData:
     season: int
     scoring: str                                              # "ppr" | "half" | "std"
     players: Mapping[int, PoolPlayer]                         # the whole pool
-    schedule: Schedule                                        # use for byes and opponents only
+    schedule: Schedule                                        # byes, opponents, pregame lines (as_of: through its week)
     actual: Mapping[PlayerWeek, float]                        # real points; missing = did not play
     projected: Mapping[PlayerWeek, float]                     # pre-game projection; missing = none (bye, out)
     team_by_week: Mapping[int, tuple[tuple[int, str], ...]]   # player_id -> ((week, team) per game played), sorted
@@ -123,8 +123,9 @@ class SeasonData:
         player's games before `week`, or else his first game of the season (the `team_at` fallback; an
         accepted limit: wrong only for a drafted player who changed teams before his first game). `players`
         holds only those who existed by then: an ADP, a projection or a real game in those weeks; it only
-        grows with the week, so anyone rostered at week W is in every later copy. Give CPU logic and views
-        this, never the full season."""
+        grows with the week, so anyone rostered at week W is in every later copy. The schedule keeps every game
+        but the pregame lines (spread, total) of weeks after `week` only, like the projections. Give CPU logic
+        and views this, never the full season."""
         if week < 0:
             raise ValueError(f"Week {week} is not a valid week.")
         if self.known_before is not None and self.known_before <= week:
@@ -183,9 +184,19 @@ def _as_of(data: SeasonData, week: int) -> SeasonData:
         usage=MappingProxyType({key: v for key, v in data.usage.items() if key[1] < week and key[0] in players}),
         box=MappingProxyType({key: v for key, v in data.box.items() if key[1] < week and key[0] in players}),
         scores=MappingProxyType({key: v for key, v in data.scores.items() if key[1] < week}),
+        schedule=_lines_through(data.schedule, week),
         expert_ranks=MappingProxyType({key: v for key, v in data.expert_ranks.items() if key[1] <= week}),
         expert_age=MappingProxyType({w: v for w, v in data.expert_age.items() if w <= week}),
         returns=MappingProxyType({key: v for key, v in data.returns.items() if key[1] <= week}))
+
+
+def _lines_through(schedule, week: int):
+    """The schedule with the pregame lines (spread, total) of games after `week` blanked: a later week's line is
+    the future (a real closing line knows that week's injuries; a simulated one, the simulated games before it)."""
+    if not any(g.week > week and (g.spread_line is not None or g.total_line is not None) for g in schedule.games):
+        return schedule
+    return replace(schedule, games=tuple(replace(g, spread_line=None, total_line=None) if g.week > week else g
+                                         for g in schedule.games))
 
 
 # ---------------- loading ----------------

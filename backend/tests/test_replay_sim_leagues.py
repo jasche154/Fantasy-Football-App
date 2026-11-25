@@ -43,7 +43,7 @@ def play_through(session: Session, through: int) -> None:
 
 
 def fake_simulate(base: SeasonData, seed: int, from_week: int, prior=None, carried=None, rookies=(),
-                  qbs=None) -> SeasonData:
+                  qbs=None, team_prior=None, posted=None) -> SeasonData:
     """Weeks from `from_week` on from FULL, real points shifted by the seed (each league its own future)."""
     def later(name: str) -> dict:
         return {key: value for key, value in getattr(FULL, name).items() if key[1] >= from_week}

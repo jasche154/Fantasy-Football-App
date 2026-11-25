@@ -1189,7 +1189,14 @@
    "carries_sd": 0.1,
    "share_sd_targets": 0.05,
    "share_sd_carries": 0.15,
-   "share_sd_qb_carries": 0.45
+   "share_sd_qb_carries": 0.45,
+   "td_drives": 5,
+   "ot_field_goal": 0.5,
+   "ot_td_yards": {
+    "rec": 12,
+    "rush": 4
+   },
+   "fg_power": 1.0
   },
   "rates": {
    "rec_cv": 0.68
@@ -1198,7 +1205,9 @@
    "role_sd": 0.2,
    "evidence": 2,
    "floor": 0.2,
-   "season_spread": 1.0
+   "season_spread": 1.0,
+   "strength_sd": 2,
+   "edge_scale": 1.05
   },
   "market": {
    "two_qb_replacement": 30,
@@ -1208,7 +1217,17 @@
     "RB": 32,
     "WR": 40,
     "TE": 8
-   }
+   },
+   "opinion_spread": {
+    "QB": 0.35,
+    "RB": 1.0,
+    "WR": 1.0,
+    "TE": 1.0,
+    "K": 1.0,
+    "DST": 1.0
+   },
+   "opinion_keep": 0.9,
+   "worth_step": 0.4
   }
  }
 }

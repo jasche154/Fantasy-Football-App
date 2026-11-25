@@ -20,6 +20,9 @@
   an established one, the share of injured starters who start again when healthy; mid: from MID_WEEK on; the
   QB inputs and the established QBs as sim_setup builds them, sim_setup.qb_inputs) and mid how often week
   MID_WEEK's simulated starter is the QB who really started it (sim_qb.same_starters).
+- both modes report whole games (sim_metrics_games.games: the pregame line, a real season's Vegas line and a
+  simulated one's own, against the result; blowouts, home wins, ties, odd team scores) and the expert ranks
+  (sim_metrics_games.experts: week-to-week churn and agreement with the projections), by position.
 - both modes report injuries (sim_metrics.injuries: new injuries per game played, missed share, by position)
   against the real rate and the target, real x sim_injuries.INJURY_SCALE (simulated seasons have fewer on purpose).
 - --set overrides a sim_params.json value for this run (section.key=value, JSON value); --save-tuned writes
@@ -45,8 +48,8 @@ from dataclasses import replace
 from functools import partial
 from pathlib import Path
 
-from services import (replay_pool, sim_carryover, sim_depth, sim_fit, sim_injuries, sim_market, sim_metrics, sim_qb,
-                      sim_qb_jobs, sim_season, sim_setup, sim_world)
+from services import (replay_pool, sim_carryover, sim_depth, sim_fit, sim_injuries, sim_market, sim_metrics,
+                      sim_metrics_games, sim_qb, sim_qb_jobs, sim_season, sim_setup, sim_world)
 from services.replay_adp_format import TWO_QB
 from services.replay_pool import SeasonData
 from services.sim_world import World
@@ -161,8 +164,9 @@ def _mid(session, season: int, seeds: list[int]) -> tuple[dict, dict]:
     rookies = [pid for pid, first in sim_setup.first_seasons(session).items() if first == season]
     qbs = sim_setup.qb_inputs(session, season)
     established = sim_qb_jobs.established_of(base, None, False, qbs)
-    sims = [_mid_sim(sim_season.simulate(base, seed, MID_WEEK, rookies=rookies, qbs=qbs), real, weeks, established)
-            for seed in seeds]
+    teams = sim_setup.team_prior(session, season)
+    sims = [_mid_sim(sim_season.simulate(base, seed, MID_WEEK, rookies=rookies, qbs=qbs, team_prior=teams),
+                     real, weeks, established) for seed in seeds]
     return _mid_sim(real, real, weeks, established), _mean(sims)
 
 
@@ -173,14 +177,16 @@ def _mid_sim(data: SeasonData, real: SeasonData, weeks: range, established: froz
 
 
 def _rest(data: SeasonData, weeks: range) -> dict[str, float]:
-    return {**sim_metrics.weekly(data, weeks), **sim_metrics.leaderboard(data, weeks)}
+    return {**sim_metrics.weekly(data, weeks), **sim_metrics.leaderboard(data, weeks),
+            **sim_metrics_games.games(data, weeks), **sim_metrics_games.experts(data, weeks)}
 
 
 def _whole(data: SeasonData, rookies: set[int], real: SeasonData, established: frozenset[int]) -> dict[str, float]:
     weeks = range(1, data.last_week + 1)
     return {**sim_metrics.season(data), **sim_metrics.rookies(data, rookies),
             **sim_metrics.adp_agreement(data, real, rookies), **sim_metrics.expert_agreement(data),
-            **sim_metrics.weekly(data, weeks), **sim_depth.metrics(data), **sim_qb.job_metrics(data, 1, established)}
+            **sim_metrics.weekly(data, weeks), **sim_depth.metrics(data), **sim_qb.job_metrics(data, 1, established),
+            **sim_metrics_games.games(data, weeks), **sim_metrics_games.experts(data, weeks)}
 
 
 def _full(session, season: int, seeds: list[int], offseason: dict) -> tuple[dict, dict]:
@@ -188,8 +194,9 @@ def _full(session, season: int, seeds: list[int], offseason: dict) -> tuple[dict
     base, prior, rookies, carries = next_season(session, real, offseason)
     qbs = sim_setup.qb_inputs(session, season, offseason["picks"])
     established = sim_qb_jobs.established_of(base, sim_world.estimate(base, 1, prior), True, qbs)
-    sims = [_whole(sim_season.simulate(base, seed, 1, prior, sim_carryover.draw(carries, seed), rookies=rookies, qbs=qbs),
-                   rookies, real, established) for seed in seeds]
+    teams = sim_setup.team_prior(session, season)
+    sims = [_whole(sim_season.simulate(base, seed, 1, prior, sim_carryover.draw(carries, seed), rookies=rookies,
+                                       qbs=qbs, team_prior=teams), rookies, real, established) for seed in seeds]
     return _whole(real, rookies, real, sim_qb_jobs.established_of(real, None, False, qbs)), _mean(sims)
 
 

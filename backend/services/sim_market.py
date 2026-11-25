@@ -4,11 +4,24 @@ Everything here reads a BELIEF World (sim_world.estimate), never the truth, exce
 truth's dated role changes into a noisy hint.
 
 - `projections`: each active player's mean points in his game that week (sim_game.expected) under the
-  belief, with the week's hard-tagged players out, so their teammates' projections rise. Kept above
+  belief, with the week's hard-tagged players out, so their teammates' projections rise, centred on the game's
+  pregame line (sim_lines) as the game itself is. Kept above
   MIN_PROJECTION, like the real tables (a player out or on bye has none).
 - `values`: mean points a game over the games left against a league-average opponent: a player believed out
   (`out_weeks`) scores nothing in his first out_weeks games and his active teammates share his work meanwhile.
-- `expert_ranks`: position ranks by value x lognormal EXPERT_NOISE among the players known that week. The
+- `expert_ranks`: position ranks by value (in a simulated week, with each team's scoring edge from the line
+  model, sim_lines.edges: experts know which offenses score, as the week's projections do) x a lognormal opinion among the players known that week: sigma
+  EXPERT_NOISE x the position's `market.opinion_spread`, so the noise moves ranks about as much at every
+  position (QB values are bunched: the same 8% that barely moves a running back reshuffles the QBs). A simulated
+  season carries each player's opinion from week to week (`opinion`: an AR(1), each week keeping
+  `market.opinion_keep` of the last and a fresh draw for the rest), and the value they rank a healthy player on
+  moves only `market.worth_step` of the way to this week's (`held`: experts revise slowly), except on injury
+  news: a player believed out now, or whose own or a same-position teammate's status (out or not) changed since
+  last week, is valued afresh at once (a backup whose starter just went on IR, a star back from injury). The
+  three knobs live in sim_params.json's tuned `market` section (`sim_eval --set market.worth_step=...`); they
+  were set by hand against the real weeks' rank churn and expert-vs-projection agreement in sim_eval's report
+  (healthy top-16 QB churn: real 1.05-1.15 places a week; QB noise at a third of the others' because QB
+  values are bunched). The
   preseason experts (week 0 of a season simulated from week 1, sim_season) share the preseason market instead:
   given its ADP (`market`), the players it lists rank by ADP x the same noise (real experts and ADP agree as
   closely: expert vs ADP position ranks of the real top 150, Spearman 0.98 in 2022-2025), the rest after them
@@ -42,7 +55,14 @@ from services.sim_game import expected
 from services.sim_world import RoleChange, World, params
 
 MIN_PROJECTION = 0.1
-EXPERT_NOISE = 0.08              # expert opinion vs the belief (lognormal sigma)
+EXPERT_NOISE = 0.08              # expert opinion vs the belief (lognormal sigma; preseason: vs the ADP)
+OPINION_DEFAULTS = {"opinion_spread": {"QB": 0.35, "RB": 1.0, "WR": 1.0, "TE": 1.0, "K": 1.0, "DST": 1.0},
+                    "opinion_keep": 0.9, "worth_step": 0.4}     # defaults of the tuned `market` knobs (see above)
+
+
+def opinion_knob(name: str):
+    """A tuned `market` knob of the weekly experts (opinion_spread, opinion_keep, worth_step)."""
+    return params()["market"].get(name, OPINION_DEFAULTS[name])
 EXPERT_AGE = {"pre": 6, "ros": 2}     # days before the Sunday, as the real snapshots are (week 0 / later weeks)
 SEASON_GAMES = 17
 # The replacement rank at each position: defaults, overlaid by the tuned `market.replacement`.
@@ -58,49 +78,99 @@ BUZZ = {"breakout": "Beat reporters say his role is growing; expect more work.",
 
 
 def projections(belief: World, schedule: Schedule, week: int, out: Collection[int],
-                scoring: ScoringSettings) -> dict[int, float]:
-    """{player: projected points} for every game of `week` (see the module docstring)."""
+                scoring: ScoringSettings, lines: Mapping | None = None) -> dict[int, float]:
+    """{player: projected points} for every game of `week` (see the module docstring). `lines`: {home team:
+    sim_lines.Line} each game is centred on (sim_game.expected's target), as its draw is."""
     found = {}
     for game in schedule.games:
         if game.week != week or game.home_team not in belief.teams or game.away_team not in belief.teams:
             continue
-        for pid, line in expected(belief, game.home_team, game.away_team, out, scoring).items():
+        pregame = (lines or {}).get(game.home_team)
+        target = {game.home_team: pregame.home, game.away_team: pregame.away} if pregame is not None else None
+        for pid, line in expected(belief, game.home_team, game.away_team, out, scoring, target=target).items():
             if line.points >= MIN_PROJECTION:
                 found[pid] = round(line.points, 2)
     return found
 
 
-def values(belief: World, scoring: ScoringSettings, games_left: int = SEASON_GAMES) -> dict[int, float]:
+def values(belief: World, scoring: ScoringSettings, games_left: int = SEASON_GAMES,
+           edges: Mapping[str, float] | None = None) -> dict[int, float]:
     """{player: mean points a game over the next `games_left` games}: a player believed out (`out_weeks`) scores
-    nothing in his first out_weeks games, and his teammates share his work meanwhile."""
+    nothing in his first out_weeks games, and his teammates share his work meanwhile. `edges`: {team: points}
+    its games are centred above the belief's own mean (sim_lines.edges: what the team's scoring says)."""
+    from services.sim_centre import team_factor
     phases = sorted({0, games_left} | {min(p.out_weeks, games_left) for p in belief.players.values()})
     found: dict[int, float] = defaultdict(float)
     for team in sorted(belief.teams):
         roster, lines = belief.roster(team), {}          # lines: one expected() per distinct set of sitters
+        factors = None
+        if edges and team in edges:                      # one factor per team, from its first set of sitters
+            first = frozenset(p.player_id for p in roster if p.out_weeks > 0)
+            factors = {team: team_factor(belief, team, first, edges[team])}
         for start, end in zip(phases, phases[1:]):
             sitting = frozenset(p.player_id for p in roster if p.out_weeks > start)
             if sitting not in lines:
-                lines[sitting] = expected(belief, team, None, sitting, scoring)
+                lines[sitting] = expected(belief, team, None, sitting, scoring, factors=factors)
             for pid, line in lines[sitting].items():
                 found[pid] += line.points * (end - start) / max(1, games_left)
     return dict(found)
 
 
+def opinion(previous: Mapping[int, float], ids: Iterable[int], dice: np.random.Generator) -> dict[int, float]:
+    """{player: this week's opinion z (standard normal)}: opinion_keep of last week's plus a fresh draw (a player
+    with none yet starts from a fresh one). Always one draw per player, in id order."""
+    ids = sorted(ids)
+    fresh = dice.standard_normal(len(ids))
+    keep = float(opinion_knob("opinion_keep"))
+    return {pid: keep * previous[pid] + np.sqrt(1 - keep ** 2) * z if pid in previous else float(z)
+            for pid, z in zip(ids, fresh)}
+
+
+def held(previous: Mapping[int, float], worth: Mapping[int, float], belief: World,
+         was_out: Collection[int] = (), benched: Collection[int] = ()) -> dict[int, float]:
+    """{player: the value experts rank him on this week}: worth_step of the way from last week's to this week's
+    `worth` for a healthy player who had one; this week's in full for a new player, one believed out, or one in a
+    position group (team, position) where somebody's status changed since last week (`was_out`: who was believed
+    out then; `benched`: a QB who lost his job this week, sim_qb_jobs.decide, news like an injury)."""
+    step, was_out = float(opinion_knob("worth_step")), set(was_out)
+    news = {(p.team, p.position) for pid, p in belief.players.items() if (p.out_weeks > 0) != (pid in was_out)}
+    news |= {(belief.players[pid].team, belief.players[pid].position) for pid in benched if pid in belief.players}
+    out = {}
+    for pid, value in worth.items():
+        player = belief.players.get(pid)
+        if player is None:
+            continue
+        settled = pid in previous and player.out_weeks == 0 and (player.team, player.position) not in news
+        out[pid] = previous[pid] + step * (value - previous[pid]) if settled else value
+    return out
+
+
 def expert_ranks(belief: World, known: Iterable[int], week: int, dice: np.random.Generator, scoring: ScoringSettings,
-                 games_left: int, market: Mapping[int, float] | None = None) -> dict[tuple[int, int], int]:
+                 games_left: int, market: Mapping[int, float] | None = None,
+                 opinions: Mapping[int, float] | None = None,
+                 edges: Mapping[str, float] | None = None,
+                 worth: Mapping[int, float] | None = None) -> dict[tuple[int, int], int]:
     """{(player, week): position rank} among the `known` players the belief places on a team. `market`: {player:
-    ADP} of a preseason market the experts share (see the module docstring), else they rank on the belief."""
-    worth = values(belief, scoring, games_left)
+    ADP} of a preseason market the experts share (see the module docstring), else they rank on the belief.
+    `opinions`: {player: z} carried from last week (`opinion`); None: fresh ones. `edges`: each team's scoring
+    edge (`values`), as experts know which offenses score. `worth`: the values to rank on (`held`), else `values`."""
+    worth = worth if worth is not None else values(belief, scoring, games_left, edges)
     ids = sorted(pid for pid in set(known) if pid in belief.players)
-    noise = dict(zip(ids, dice.lognormal(0.0, EXPERT_NOISE, len(ids))))
+    if market:
+        noise = dict(zip(ids, dice.lognormal(0.0, EXPERT_NOISE, len(ids))))
+    else:
+        z = opinions if opinions is not None else opinion({}, ids, dice)
+        spread = opinion_knob("opinion_spread")
+        noise = {pid: float(np.exp(EXPERT_NOISE * spread.get(belief.players[pid].position, 1.0) * z.get(pid, 0.0)))
+                 for pid in ids}
     market = market or {}
 
-    def opinion(pid: int) -> tuple:              # sorts best first: the listed by noisy pick, then the rest by value
+    def view(pid: int) -> tuple:              # sorts best first: the listed by noisy pick, then the rest by value
         return (False, market[pid] * noise[pid]) if pid in market else (True, -worth.get(pid, 0.0) * noise[pid])
 
     ranks = {}
     for position in ("QB", "RB", "WR", "TE", "K", "DST"):
-        order = sorted((pid for pid in ids if belief.players[pid].position == position), key=lambda pid: (opinion(pid), pid))
+        order = sorted((pid for pid in ids if belief.players[pid].position == position), key=lambda pid: (view(pid), pid))
         ranks.update({(pid, week): rank for rank, pid in enumerate(order, start=1)})
     return ranks
 

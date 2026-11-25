@@ -32,6 +32,12 @@ reputation, plus dated role changes. Nothing in a simulated SeasonData reads it 
   veterans with the same first half (sim_next_year.json `rookie_growth`, sim_next_year_calib); only steps after
   from_week happen (a live season's real weeks stay real). No buzz: the public learns it from results.
 
+- Team strength (`strength`): each team's offense and defense differ from the public's line by a hidden
+  number of points, normal with sd `strength_sd`, drawn once per season, and the line's edge (a shrunk,
+  regression estimate, as a real line is: real margins run about 1.2 x the Vegas spread) is widened by
+  `edge_scale` (`edge_scale()`); both tuned so simulated results against the sim's own pregame line look like
+  real results against the Vegas line (sim_eval's game metrics). The public learns them only from the scores.
+
 The spreads and rates are tuned so simulated seasons reshuffle like real ones (`sim_eval --set talent.<knob>=...`
 against ADP rank vs final rank, breakouts, busts; `--save-tuned` stores them in sim_params.json's tuned "talent"
 section).
@@ -49,6 +55,8 @@ from services.sim_world import Player, RoleChange, Team, World, params
 LEADS = {"RB": 1, "WR": 2, "TE": 1}    # this many per position count as a team's lead players
 CHANGE_LAST_WEEKS = 2            # no new role change in the season's last weeks
 STAR_RANK = 12                   # the public's top this many at a position: no bust, no false rumour
+STRENGTH_SD = 2.0               # default of the tuned `talent.strength_sd` (points)
+EDGE_SCALE = 1.05               # default of the tuned `talent.edge_scale`
 SEASON_RATES = ("catch", "ypc", "rec_td", "ypr", "rush_td", "quality", "int_rate")
 MAX_CATCH = 0.95
 DEFAULTS = {"role_sd": 0.30, "eff_sd": 0.12, "quality_sd": 0.08, "evidence": 6.0, "floor": 0.35,
@@ -204,3 +212,17 @@ def truth(belief: World, seed: int, from_week: int, last_week: int, rookies: Col
                       seed, from_week)
     return World(MappingProxyType(players), MappingProxyType(teams),
                  tuple(sorted(changes, key=lambda c: (c.week, c.player_id))))
+
+
+def strength(teams: Collection[str], seed: int) -> dict[str, tuple[float, float]]:
+    """{team: (offense, defense)}: the hidden points it scores and allows over what the public's line expects
+    (see the module docstring). Its own random stream, so no other draw moves."""
+    sd = float(settings().get("strength_sd", STRENGTH_SD))
+    names = sorted(teams)
+    z = replay_state.rng(seed, "sim", "strength").standard_normal((len(names), 2))
+    return {team: (sd * float(z[i, 0]), sd * float(z[i, 1])) for i, team in enumerate(names)}
+
+
+def edge_scale() -> float:
+    """How much wider the truth's margins are than the public line's (see the module docstring)."""
+    return float(settings().get("edge_scale", EDGE_SCALE))
