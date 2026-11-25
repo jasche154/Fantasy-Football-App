@@ -923,16 +923,18 @@ that week's games on; only scoring a week reads its real points.
   2018-2025; a player one list leaves out but another FFC list of the season has takes his ADP and spread
   from that list, PPR first, then the nearest format, because FFC's thinner lists drop top players (2026's
   half-PPR list had no Drake London; he went 13th in PPR; such a row is stored as source `ffc_borrowed` and never
-  lent on again, and a QB the 2-QB list borrows from a 1-QB list has his ADP and spread x `SUPERFLEX_QB_ADP`);
+  lent on again, and a QB the 2-QB list borrows from a 1-QB list moves to the pick where the average 2-QB
+  list takes a QB the average PPR list takes at his pick, `replay_superflex.borrowed_qb_adp`);
   MyFantasyLeague's PPR real drafts fill each list's
   tail past the last pick with the players no FFC list has). A league drafts
   from its own list (`services/replay_adp_format.py`): a superflex league (a SFLX slot or 2+ QB slots) the
-  2-QB list, otherwise its scoring's list, and custom scoring the preset nearest its points per reception
+  2-QB list (it also loads its scoring's list as `SeasonData.scoring_adp`: see superflex values below),
+  otherwise its scoring's list, and custom scoring the preset nearest its points per reception
   (0.75 -> PPR, 0.25 -> half). The list is chosen once, at creation, and saved with the league
   (`Settings.adp_format`; leagues saved before there were several lists keep PPR), so a league never
   switches lists mid-season. A season missing that list uses the nearest one stored (2-QB -> the
-  scoring's list; PPR <-> half <-> standard), and a superflex league without a 2-QB list falls back to
-  scaling QB ADP (`replay_chart.SUPERFLEX_QB_ADP`). A re-run of Prepare fetches only the formats a season
+  scoring's list; PPR <-> half <-> standard), and a superflex league without a 2-QB list places its QBs
+  by the fitted average 2-QB list (`replay_superflex.json`). A re-run of Prepare fetches only the formats a season
   lacks. A format FFC cannot give is reported and leaves what is stored; when FFC answered without a list
   (rather than failing to answer) the format is remembered as having none and not asked for again until
   a forced Prepare. While MyFantasyLeague is down, a format with nothing stored is saved from FFC alone
@@ -998,8 +1000,7 @@ that week's games on; only scoring a week reads its real points.
   Rank, and `star`) is the overall order of these preseason picks: the slot of his preseason expert rank,
   else of his ADP at his position. The rank blends this
   week's expert rank (weight 0.65 for a fresh snapshot, less as it ages) with the app's model rank
-  (`ros_ppg` nudged by his last three real games), and an injured player is priced by the share of his
-  team's remaining games he is expected to play. Two extras keep the model rank from trailing the news
+  (`ros_ppg` nudged by his last three real games). Two extras keep the model rank from trailing the news
   (`services/replay_role.py`): from week 2 his newest projection counts half its gap to `ros_ppg` (a back
   the site re-rates after he wins the job moves now, not a quarter at a time), and when a teammate at his
   position is expected to miss games, a player with no projection since then (out or on a bye himself,
@@ -1016,6 +1017,62 @@ that week's games on; only scoring a week reads its real points.
   card, roster, trade builder, offers), rounded half up, so a player reads the same everywhere.
   Before this, a trade verdict showed one decimal (e.g. 836.8) while lists showed whole numbers, and the
   lists rounded half to even (512.5 -> 512 next to 513 in a deal); every season, 2027 included, worked the same.
+- **Superflex values** (`services/replay_superflex.py`): RBs, WRs, TEs, kickers and defenses are valued
+  exactly as in a regular league of the same scoring (their curves, ranks and `star` come from the
+  league-scoring 1-QB list; a non-QB's chart is identical with and without the SUPERFLEX slot). Each QB takes
+  the value of the non-QBs drafted next to him in the real 2-QB list: count the non-QBs ahead of QB n there
+  (fractionally, by how far his ADP went toward the next one) and give him the pick where that non-QB slot
+  went on the league-scoring list (2026: QB12 goes at pick 23 with 11 non-QBs ahead, so he is worth what the
+  11th-12th non-QB is). The CPU draft and the board's Rank place QBs the same way. A season without a 2-QB
+  list uses the average slot of QB n over the 2018-2026 seasons that have both lists
+  (`python -m services.replay_superflex --fit` -> `replay_superflex.json`); a simulated league saved before
+  `scoring_adp` existed keeps its 2-QB list's order for non-QBs, behind an average 1-QB list's QBs (a live
+  league drafted in August reads its season's real list instead). Before this, a superflex league valued
+  everyone on the 2-QB list's picks: with 13 QBs in the first 24 picks (2026) every non-QB slid down the
+  curve (league "Super", week 8: Ja'Marr Chase 869 -> 709, Amon-Ra St. Brown 855 -> 567, Brock Bowers
+  432 -> 175; now 896, 828 and 385 there, exactly as in the same league without SUPERFLEX), and that list
+  orders non-QBs like standard scoring, which sank tight ends in PPR.
+- **Injured players' charts** (`services/replay_chart_injury.py`): an absence takes a share of his healthy
+  chart that follows the user's targets: out 1-4 weeks about 5-12%, 6+ weeks 35-45% when first reported and
+  less each week as the return nears, out for the season the whole chart. At 13 games left: 1 game missed 6%,
+  3 10%, 4 12%, 6 40%, 8 45%, 10 62% (never less than (share of the remaining games missed)^1.8, so out 2 of
+  the last 3 games still costs 48%). The games missed come from the news report; an out player without one
+  (no hard tag) is expected to miss 3.5 more games (real absences 2018-25: 3.3-3.8 at every streak length,
+  median 2; a plain O tag's first week: median 2, mean 3.0, 7% season-ending). From his second week out
+  only the model half is discounted (the experts already price the injury). Availability and expected games
+  missed (lineups, waivers) stay the real expected games. Before this the chart was healthy x share of games
+  played x 0.9 (a star missing 3 of 13 lost 31%). Measured honestly: real results say a known absence costs
+  about its share of games (out players produced 0.49 of a healthy player's value per game over
+  replacement; the old chart kept 0.49), so the user's targets price injured players above what they
+  realised (held-out error of out players 2.94 -> 3.20, see below); the deep end of the targets keeps that
+  gap smaller.
+- **Chart check against real results** (`python -m services.replay_chart_eval [--seasons 2018-2025]
+  [--weeks 1,4,7,10,13] [--lineups regular,superflex] [--teams 12] [--bench 6] [--out report.json]`;
+  `--compare before.json after.json` scores two saved runs on their common player-weeks): for each real
+  season and week it builds the point-in-time values and scores each skill player's chart against his
+  points over replacement per game he played from then on (an injury that starts later is left out, never
+  counted as zeros: trade value cannot know it); for an absence known that week, his rate after returning x
+  the share of the remaining games that absence left him (3+ games played after, else dropped; a bye is not
+  a missed game). Replacement is the lineup's (teams, starters, FLEX, SUPERFLEX, bench). It reports Spearman
+  correlation overall and by position, mean value per chart band and position, a leave-season-out
+  calibration error (a position-blind band curve fitted on the other seasons) with each position's and
+  position-rank tier's bias, the same for players out that week, and how many player-weeks each rule
+  scored, dropped or changed (12-team PPR, 2018-2025, regular lineup: 2,005 of 4,950 scored player-weeks
+  were healthy players who later missed games, scored on the games they played; 141 healthy and 55 out
+  player-weeks dropped for fewer than 3 games; 184 out for the rest of the season). Results (weeks
+  1/4/7/10/13, common player-weeks): regular lineup Spearman 0.573 -> 0.568, held-out error 3.900 -> 3.924,
+  out players 2.936 -> 3.197 (the injury targets); superflex lineup (QB mapping and injury targets)
+  Spearman 0.570 -> 0.560, held-out error 4.893 -> 4.912; the QB mapping alone 4.893 -> 4.885 (on the full
+  population, which now keeps the non-QBs that used to slide below 50, Spearman 0.570 -> 0.592).
+  What it found and left alone: superflex QBs at every tier produce more per game over a bench-deep
+  replacement than equal-chart non-QBs (about +4 points a game; +0.1 to +0.6 over the last starter), with
+  no sign that mid or lower QBs are worth less than the neighbour mapping gives them (residuals over the
+  last starter: QB1-6 +0.40, 7-12 +0.14, 13-24 +0.58, 25-36 -0.02), so no taper; tight ends are on par in a
+  regular lineup (bias 0.00) and the sign flips with the replacement definition in superflex (-0.95 with
+  bench replacement, +1.35 over the last starter), so no fitted fix; a 14-team superflex lineup shows the
+  same pattern as 12 teams. CPUs in superflex leagues claim QBs only when they start that week (fill-ins
+  projected 8-20), never a sitting backup, though the near-zero QB replacement level (0.6 points a game in
+  a 14-team superflex league) ranks such fill-ins above most bench backs and receivers.
 - **Market reaction (hype):** trade values model what managers would pay, not only the forecast, and CPUs
   price deals with the same values, so you can buy before or sell into a move. `services/replay_shocks.py`
   detects events the market reacts to on little or no game sample, from point-in-time data only: a teammate
@@ -1093,7 +1150,8 @@ that week's games on; only scoring a week reads its real points.
   in full but at most 15% of what it sends (`LINEUP_CAP`), so a CPU can accept a deal that costs its lineup
   when the value is right (selling its QB in a one-QB league), as real managers do. A player on IR can be traded: he takes the receiving team's free IR slot, else a
   roster spot (which may force a drop). A CPU
-  sells you an out player only for at least half his healthy chart value. A player his team added or claimed
+  sells you an out player only for at least 55% of his healthy chart value (1 - the deepest discount a
+  long but not season-long absence takes, `replay_trade_value.OUT_SELL_SHARE`). A player his team added or claimed
   this week and worth under 100 on the chart counts half (`replay_trade_value.PICKUP_SHARE`) in every trade
   price until the next week, for the CPU and in your verdict alike (the row says "Just picked up"), so a
   pickup can't be flipped for value the week he arrives. A CPU's positional limits hold in trades too: a deal
