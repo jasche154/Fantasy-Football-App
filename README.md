@@ -866,7 +866,10 @@ that week's games on; only scoring a week reads its real points.
   tail again while a season has none.
   **ADP per draft format:** `replay_adp` holds one list per `format`: `ppr`, `half`, `std` and `2qb`
   (Fantasy Football Calculator's 12-team PPR, half-PPR, non-PPR and 2-QB mock drafts, every season
-  2018-2025; MyFantasyLeague's PPR real drafts fill each list's tail past FFC's last pick). A league drafts
+  2018-2025; a player one list leaves out but another FFC list of the season has takes his ADP and spread
+  from that list, PPR first, then the nearest format, because FFC's thinner lists drop top players (2026's
+  half-PPR list had no Drake London; he went 13th in PPR); MyFantasyLeague's PPR real drafts fill each list's
+  tail past the last pick with the players no FFC list has). A league drafts
   from its own list (`services/replay_adp_format.py`): a superflex league (a SFLX slot or 2+ QB slots) the
   2-QB list, otherwise its scoring's list, and custom scoring the preset nearest its points per reception
   (0.75 -> PPR, 0.25 -> half). The list is chosen once, at creation, and saved with the league
