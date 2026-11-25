@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ReplayClaim, ReplayClaims, ReplayPlayerRef, ReplaySummary, ReplayWireRow } from '../../api/types';
 import { json, mockFetch, type MockReply, type MockRoute } from '../../test/mockFetch';
+import { AppProviders } from '../../App';
 import { META_ROUTE, renderWithProviders } from '../../test/render';
 import {
   actionResult, COLLINS, COOK, GAME_ID, HILL, MAHOMES, MOSTERT, nextAction, OLAVE, OPPONENT_TEAM_ID, playerRow, rosterRow,
@@ -310,7 +311,7 @@ describe('PlayersView adding a free agent', () => {
     finish(json(actionResult()));
     // The notice takes focus in an effect, a moment after its text is on the page.
     await waitFor(() => expect(screen.getByText('Added Raheem Mostert.')).toHaveFocus());
-    expect(api.callsTo(ADD_DROP, 'POST').map((call) => call.body)).toEqual([{ add: MOSTERT.id }]);
+    expect(api.callsTo(ADD_DROP, 'POST').map((call) => call.body)).toEqual([{ add: MOSTERT.id, week: 5 }]);
     await waitFor(() => expect(api.callsTo(PLAYERS)).toHaveLength(2));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
@@ -342,7 +343,7 @@ describe('PlayersView adding a free agent', () => {
     await user.click(choices[0]);
     await user.click(within(dialog).getByRole('button', { name: 'Add and drop' }));
     expect(await screen.findByText('Added Raheem Mostert, dropping Chris Olave.')).toBeInTheDocument();
-    expect(api.callsTo(ADD_DROP, 'POST')[0].body).toEqual({ add: MOSTERT.id, drop: OLAVE.id });
+    expect(api.callsTo(ADD_DROP, 'POST')[0].body).toEqual({ add: MOSTERT.id, drop: OLAVE.id, week: 5 });
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
@@ -388,8 +389,22 @@ describe('PlayersView waivers', () => {
     expect(await within(dialog).findByRole('radio', { name: 'Don\'t drop anyone' })).toBeChecked();
     await user.click(within(dialog).getByRole('button', { name: 'Submit claim' }));
     expect(await screen.findByText('Claim for Raheem Mostert is in. It is settled on “Sim to Wednesday”.')).toBeInTheDocument();
-    expect(api.callsTo(CLAIMS, 'POST')[0].body).toEqual({ add: MOSTERT.id });
+    expect(api.callsTo(CLAIMS, 'POST')[0].body).toEqual({ add: MOSTERT.id, week: WAIVERS.week });
     await waitFor(() => expect(api.callsTo(CLAIMS)).toHaveLength(2));
+  });
+
+  it('drops the claim confirmation once the waivers have run', async () => {
+    mockFetch([META_ROUTE, post(CLAIMS), { path: PLAYERS, reply: json(wire([wireRow(MOSTERT, { status: 'waivers' })])) },
+      { path: TEAM, reply: json(team()) }, { path: CLAIMS, reply: json(claims()) }]);
+    const user = userEvent.setup();
+    const { rerender } = renderWithProviders(<Hub game={WAIVERS} />);
+    await user.click(await ready('Claim Raheem Mostert'));
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Submit claim' }));
+    const notice = 'Claim for Raheem Mostert is in. It is settled on “Sim to Wednesday”.';
+    expect(await screen.findByText(notice)).toBeInTheDocument();
+
+    rerender(<AppProviders><Hub game={summary()} /></AppProviders>);
+    expect(screen.queryByText(notice)).not.toBeInTheDocument();
   });
 
   it('claims with a drop, and marks players already claimed', async () => {
@@ -400,7 +415,7 @@ describe('PlayersView waivers', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Claim Raheem Mostert' });
     await user.click(await within(dialog).findByRole('radio', { name: /Chris Olave/ }));
     await user.click(within(dialog).getByRole('button', { name: 'Submit claim' }));
-    await waitFor(() => expect(api.callsTo(CLAIMS, 'POST')[0]?.body).toEqual({ add: MOSTERT.id, drop: OLAVE.id }));
+    await waitFor(() => expect(api.callsTo(CLAIMS, 'POST')[0]?.body).toEqual({ add: MOSTERT.id, drop: OLAVE.id, week: 5 }));
   });
 
   it('reorders the pending claims', async () => {

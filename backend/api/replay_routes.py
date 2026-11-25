@@ -118,9 +118,11 @@ class Turn:
 @contextmanager
 def turn(session: Session, game_id: int, week: int | None = None, overall: int | None = None) -> Iterator[Turn]:
     """The game loaded under its lock. `week` is the week the caller believes it is, `overall` the draft
-    pick it believes is on the clock: 409 when either is given and wrong."""
+    pick it believes is on the clock: 409 when either is given and wrong. Nothing changes once the season is over."""
     with errors(), game_lock(game_id):
         row, settings, state = rs.load(session, game_id)
+        if state.phase == "complete":
+            raise ValueError("This season is over.")
         if week is not None and week != state.week:
             raise HTTPException(409, f"This league is in week {state.week}, not week {week}. Reload it.")
         if overall is not None and overall != len(state.picks) + 1:

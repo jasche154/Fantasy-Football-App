@@ -137,7 +137,7 @@ describe('TeamView drag and drop', () => {
     fireEvent.dragEnd(cook);
     await waitFor(() => expect(api.callsTo(LINEUP_PATH, 'POST')).toHaveLength(1));
     expect(api.callsTo(LINEUP_PATH, 'POST')[0].body).toEqual({
-      starters: { QB: [101], RB: [102, 103], WR: [104, 105], TE: [106], FLEX: [COOK.id], K: [108], DST: [109] },
+      starters: { QB: [101], RB: [102, 103], WR: [104, 105], TE: [106], FLEX: [COOK.id], K: [108], DST: [109] }, week: 5,
     });
     expect(rowOf('Patrick Mahomes')).not.toHaveClass('replay-roster__row--dim');
   });
@@ -205,7 +205,7 @@ describe('TeamView lineup editing', () => {
 
     await user.click(screen.getByRole('button', { name: 'Swap James Cook with Isiah Pacheco' }));
     expect(api.callsTo(LINEUP_PATH, 'POST')[0].body).toEqual({
-      starters: { QB: [101], RB: [102, 103], WR: [104, 105], TE: [106], FLEX: [COOK.id], K: [108], DST: [109] },
+      starters: { QB: [101], RB: [102, 103], WR: [104, 105], TE: [106], FLEX: [COOK.id], K: [108], DST: [109] }, week: 5,
     });
     expect(await screen.findByRole('button', { name: 'Move James Cook' })).toBeInTheDocument();     // the move is over
   });
@@ -250,7 +250,7 @@ describe('TeamView lineup editing', () => {
     await table();
     expect(screen.getByText('Lineup set by you')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Reset to best lineup' }));
-    expect(api.callsTo(LINEUP_PATH, 'POST')[0].body).toEqual({ starters: null });
+    expect(api.callsTo(LINEUP_PATH, 'POST')[0].body).toEqual({ starters: null, week: 5 });
   });
 
   it('drops a player after a confirmation, showing the pending state on that button', async () => {
@@ -262,7 +262,7 @@ describe('TeamView lineup editing', () => {
     expect(api.callsTo(DROP_PATH, 'POST')).toHaveLength(0);
     await user.click(screen.getByRole('button', { name: 'Yes, drop Chris Olave' }));
     expect(await within(rowOf('Chris Olave')).findByRole('button', { name: 'Dropping… Chris Olave' })).toBeInTheDocument();
-    expect(api.callsTo(DROP_PATH, 'POST')[0].body).toEqual({ player_id: OLAVE.id });
+    expect(api.callsTo(DROP_PATH, 'POST')[0].body).toEqual({ player_id: OLAVE.id, week: 5 });
     finish(json(actionResult()));
     expect(await within(rowOf('Chris Olave')).findByRole('button', { name: 'Drop Chris Olave' })).toBeInTheDocument();
     // The row's button may be gone after the reload: focus lands on the status line, which says what happened.
@@ -344,7 +344,7 @@ describe('TeamView injuries and IR', () => {
     expect(within(rowOf('Chris Olave')).getByText('O')).toBeInTheDocument();
     expect(within(rowOf('Chris Olave')).queryByText('Out')).not.toBeInTheDocument();         // the tag already says it
     await user.click(screen.getByRole('button', { name: 'Move to IR Chris Olave' }));
-    expect(api.callsTo(PLACE_PATH, 'POST')[0].body).toEqual({ player_id: OLAVE.id });
+    expect(api.callsTo(PLACE_PATH, 'POST')[0].body).toEqual({ player_id: OLAVE.id, week: 5 });
     await expectStatus('Moved Chris Olave to IR.');
   });
 
@@ -363,7 +363,7 @@ describe('TeamView injuries and IR', () => {
     const { api, user } = renderTeam(injured('O', [irRow()]), {}, [{ method: 'POST', path: ACTIVATE_PATH, reply: json(actionResult()) }]);
     expect(await lastRow()).toHaveTextContent('Raheem Mostert');
     await user.click(screen.getByRole('button', { name: 'Swap to IR Chris Olave, activating Raheem Mostert' }));
-    expect(api.callsTo(ACTIVATE_PATH, 'POST')[0].body).toEqual({ player_id: MOSTERT.id, swap: OLAVE.id });
+    expect(api.callsTo(ACTIVATE_PATH, 'POST')[0].body).toEqual({ player_id: MOSTERT.id, swap: OLAVE.id, week: 5 });
     await expectStatus('Moved Chris Olave to IR and activated Raheem Mostert.');
   });
 
@@ -382,7 +382,7 @@ describe('TeamView injuries and IR', () => {
     await table();
     expect(within(await lastRow()).queryByRole('button', { name: /^Move Raheem/ })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Activate Raheem Mostert' }));
-    expect(api.callsTo(ACTIVATE_PATH, 'POST')[0].body).toEqual({ player_id: MOSTERT.id });
+    expect(api.callsTo(ACTIVATE_PATH, 'POST')[0].body).toEqual({ player_id: MOSTERT.id, week: 5 });
     await expectStatus('Activated Raheem Mostert.');
   });
 
@@ -408,7 +408,7 @@ describe('TeamView injuries and IR', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Activate and drop' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(api.callsTo(ACTIVATE_PATH, 'POST').map((call) => call.body)).toEqual([
-      { player_id: MOSTERT.id, drop: OLAVE.id }, { player_id: MOSTERT.id, drop: OLAVE.id },
+      { player_id: MOSTERT.id, drop: OLAVE.id, week: 5 }, { player_id: MOSTERT.id, drop: OLAVE.id, week: 5 },
     ]);
     await expectStatus('Activated Raheem Mostert, dropping Chris Olave.');
   });
@@ -418,7 +418,7 @@ describe('TeamView injuries and IR', () => {
     await table();
     await user.click(screen.getByRole('button', { name: 'Drop Raheem Mostert' }));
     await user.click(screen.getByRole('button', { name: 'Yes, drop Raheem Mostert' }));
-    expect(api.callsTo(DROP_PATH, 'POST')[0].body).toEqual({ player_id: MOSTERT.id });
+    expect(api.callsTo(DROP_PATH, 'POST')[0].body).toEqual({ player_id: MOSTERT.id, week: 5 });
     expect(await screen.findByText(/Dropped Raheem Mostert\./)).toBeInTheDocument();
   });
 

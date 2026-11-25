@@ -22,23 +22,27 @@ PlayerId = Field(..., ge=1)
 Ids = Field(default_factory=list, max_length=MAX_LISTED)
 
 
-class PickBody(BaseModel):
+class AtWeek(BaseModel):
+    week: int | None = Field(None, ge=1, le=MAX_WEEK)       # the week the page is showing: 409 when the league moved on
+
+
+class PickBody(AtWeek):
     player_id: int = PlayerId
     overall: int | None = Field(None, ge=1)         # draft: the pick the page shows on the clock, 409 when stale
 
 
-class LineupBody(BaseModel):
+class LineupBody(AtWeek):
     # null: back to the best lineup. Each slot's list is bounded too: it is checked while the game's lock is held.
     starters: dict[str, Annotated[list[int], Field(max_length=MAX_LISTED)]] | None = Field(..., max_length=MAX_LISTED)
 
 
-class ClaimBody(BaseModel):
+class ClaimBody(AtWeek):
     add: int = PlayerId
     drop: int | None = Field(None, ge=1)
     bid: int | None = Field(None, ge=0, le=rs.FAAB_BUDGET)     # FAAB leagues' claims only
 
 
-class AddBody(BaseModel):
+class AddBody(AtWeek):
     model_config = ConfigDict(extra="forbid")       # a bid means nothing for a free-agent add: refuse it, don't drop it
     add: int = PlayerId
     drop: int | None = Field(None, ge=1)
@@ -48,7 +52,7 @@ class BidBody(BaseModel):
     bid: int = Field(..., ge=0, le=rs.FAAB_BUDGET)
 
 
-class ActivateBody(BaseModel):
+class ActivateBody(AtWeek):
     player_id: int = PlayerId
     drop: int | None = Field(None, ge=1)
     swap: int | None = Field(None, ge=1)            # an injured active player who takes the IR slot instead
@@ -63,7 +67,7 @@ class AdvanceBody(BaseModel):
     week: int = Field(..., ge=1, le=MAX_WEEK)       # the week the page is showing: 409 when the league moved on
 
 
-class CounterBody(BaseModel):
+class CounterBody(AtWeek):
     give: list[int] = Field(..., max_length=MAX_LISTED)     # what the user sends
     get: list[int] = Field(..., max_length=MAX_LISTED)
     drops: list[int] = Ids                          # the user's own drops when the deal overfills the roster
@@ -81,7 +85,7 @@ class RespondBody(BaseModel):
 @router.post("/draft/pick")
 def draft_pick(game_id: GameId, body: PickBody, session: Session = Depends(get_session)) -> dict:
     """The user's pick; the CPUs then pick up to the user's next turn (`events` lists them)."""
-    with turn(session, game_id, overall=body.overall) as t:
+    with turn(session, game_id, body.week, body.overall) as t:
         return t.done(rg.pick(*t.args, t.seed, body.player_id))
 
 
@@ -95,14 +99,14 @@ def draft_auto(game_id: GameId, whole_draft: bool = False, overall: int | None =
 
 @router.post("/lineup")
 def set_lineup(game_id: GameId, body: LineupBody, session: Session = Depends(get_session)) -> dict:
-    with turn(session, game_id) as t:
+    with turn(session, game_id, body.week) as t:
         state = rg.clear_lineup(t.state) if body.starters is None else rg.set_lineup(*t.args, body.starters, seed=t.seed)
         return t.done(state, team=views.team)
 
 
 @router.post("/claims")
 def submit_claim(game_id: GameId, body: ClaimBody, session: Session = Depends(get_session)) -> dict:
-    with turn(session, game_id) as t:
+    with turn(session, game_id, body.week) as t:
         return t.done(rg.submit_claim(*t.args, body.add, body.drop, body.bid, seed=t.seed))
 
 
@@ -128,27 +132,27 @@ def cancel_claim(game_id: GameId, claim_id: DbId, session: Session = Depends(get
 @router.post("/add-drop")
 def add_drop(game_id: GameId, body: AddBody, session: Session = Depends(get_session)) -> dict:
     """Add a free agent now (after the week's waiver run), dropping `drop` when the roster is full."""
-    with turn(session, game_id) as t:
+    with turn(session, game_id, body.week) as t:
         return t.done(rg.add_drop(*t.args, body.add, body.drop, seed=t.seed))
 
 
 @router.post("/drop")
 def drop(game_id: GameId, body: PickBody, session: Session = Depends(get_session)) -> dict:
-    with turn(session, game_id) as t:
+    with turn(session, game_id, body.week) as t:
         return t.done(rg.drop(*t.args, body.player_id, seed=t.seed))
 
 
 @router.post("/ir/place")
 def ir_place(game_id: GameId, body: PickBody, session: Session = Depends(get_session)) -> dict:
     """Move a player tagged O, IR or PUP this week to the team's IR slot."""
-    with turn(session, game_id) as t:
+    with turn(session, game_id, body.week) as t:
         return t.done(rg.ir_place(*t.args, body.player_id, seed=t.seed))
 
 
 @router.post("/ir/activate")
 def ir_activate(game_id: GameId, body: ActivateBody, session: Session = Depends(get_session)) -> dict:
     """Bring a player back from IR, dropping `drop` when the roster is full or moving `swap` to IR instead."""
-    with turn(session, game_id) as t:
+    with turn(session, game_id, body.week) as t:
         return t.done(rg.ir_activate(*t.args, body.player_id, body.drop, body.swap, seed=t.seed))
 
 
@@ -172,7 +176,7 @@ def evaluate_trade(game_id: GameId, body: TradeBody, session: Session = Depends(
 @router.post("/trades/propose")
 def propose_trade(game_id: GameId, body: TradeBody, session: Session = Depends(get_session)) -> dict:
     """Offer a CPU a trade: carried out at once when it accepts, otherwise the verdict says why not."""
-    with turn(session, game_id) as t:
+    with turn(session, game_id, body.week) as t:
         return _proposed(t, *rg.propose_trade(*t.args, t.seed, body.to_team, body.give, body.get, body.drops))
 
 
@@ -180,7 +184,7 @@ def propose_trade(game_id: GameId, body: TradeBody, session: Session = Depends(g
 def counter_offer(game_id: GameId, offer_id: DbId, body: CounterBody, session: Session = Depends(get_session)) -> dict:
     """Answer a CPU's pending offer with a deal of your own: its offer is marked countered and yours is
     proposed to the same CPU (same answer as propose)."""
-    with turn(session, game_id) as t:
+    with turn(session, game_id, body.week) as t:
         return _proposed(t, *rg.counter_offer(*t.args, t.seed, offer_id, body.give, body.get, body.drops))
 
 
