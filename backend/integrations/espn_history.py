@@ -54,30 +54,26 @@ def fetch_week(http: HistoryClient, season: int, week: int) -> dict:
     return payload
 
 
-def _applied_total(player: dict, week: int) -> float:
+def _applied_total(player: dict, season: int, week: int) -> float:
     """ESPN's own projected points for the week (0 when there is no projected line)."""
-    for line in player.get("stats") or []:
-        if (line.get("statSourceId") == espn.PROJECTED and line.get("scoringPeriodId") == week
-                and line.get("statSplitTypeId") == espn.WEEKLY_SPLIT):
-            return float(line.get("appliedTotal") or 0.0)
-    return 0.0
+    return float((espn.projected_line(player, season, week) or {}).get("appliedTotal") or 0.0)
 
 
-def _skill_points(player: dict, week: int, position: str) -> tuple[float, float, float]:
-    stats = espn.projected_stats(player, week) or {}
+def _skill_points(player: dict, season: int, week: int, position: str) -> tuple[float, float, float]:
+    stats = espn.projected_stats(player, season, week) or {}
     ppr, half, std = (points_from_stats(stats, position, scoring_for(fmt)) for fmt in FORMATS)
     return ppr, half, std
 
 
-def _projection(player: dict, week: int) -> WeekProjection | None:
+def _projection(player: dict, season: int, week: int) -> WeekProjection | None:
     position_id, name = player.get("defaultPositionId"), player.get("fullName")
     if not name or player.get("id") is None:
         return None
     if position_id in espn.POSITION_IDS:
         position, team = espn.POSITION_IDS[position_id], None
-        points = _skill_points(player, week, position)
+        points = _skill_points(player, season, week, position)
     elif position_id in (KICKER, DEFENSE):
-        total = round(_applied_total(player, week), 2)
+        total = round(_applied_total(player, season, week), 2)
         position, points = ("K" if position_id == KICKER else "DST"), (total, total, total)
         team = espn.TEAMS.get(DEFENSE_ID_BASE - int(player["id"])) if position_id == DEFENSE else None
     else:
@@ -87,11 +83,12 @@ def _projection(player: dict, week: int) -> WeekProjection | None:
     return WeekProjection(str(player["id"]), str(name), position, *points, team=team)
 
 
-def parse_week(payload: Any, week: int) -> list[WeekProjection]:
-    """Every player ESPN projected above zero for the week."""
+def parse_week(payload: Any, season: int, week: int) -> list[WeekProjection]:
+    """Every player ESPN projected above zero for the season's week."""
     entries = (payload.get("players") or []) if isinstance(payload, dict) else []
-    return parse_rows("ESPN projections", entries, lambda entry: _projection(entry.get("player") or {}, week))
+    return parse_rows("ESPN projections", entries,
+                      lambda entry: _projection(entry.get("player") or {}, season, week))
 
 
 def week_projections(http: HistoryClient, season: int, week: int) -> list[WeekProjection]:
-    return parse_week(fetch_week(http, season, week), week)
+    return parse_week(fetch_week(http, season, week), season, week)
