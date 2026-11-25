@@ -55,7 +55,9 @@ function OfferCard({ game, version, offer, roster, isOpen, actions, openPlayer, 
     const result = await actions.send(accept ? acceptKey : declineKey, () => respondReplayOffer(game.id, offer.id, accept, accept ? drops : []));
     if (!result) return;
     if (result.expired) actions.announce({ text: result.message ?? 'That offer no longer stands.', isGood: false });
-    else actions.announce({ text: result.accepted ? `Trade executed with ${partner}.` : `You declined ${partner}'s offer.`, isGood: result.accepted });
+    else if (result.accepted) actions.announce({ text: `Trade executed with ${partner}.`, isGood: true });
+    // A haggler always comes back after his opening offer is declined: the better one shows under Offers for you.
+    else actions.announce({ text: `You declined ${partner}'s offer.${result.counter ? ` ${partner} came back with a better one: see Offers for you.` : ''}`, isGood: false });
   };
 
   return (

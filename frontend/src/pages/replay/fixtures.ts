@@ -41,7 +41,7 @@ const TEAM_NAMES = ['Gridiron Ghosts', 'Blitz Brigade', 'End Zone Elite', 'Your 
 
 /** The league's 12 teams, team_id 1..12; team 4 is the user's. */
 export const TEAMS: ReplayTeamRef[] = TEAM_NAMES.map((name, index) => ({ team_id: index + 1, name, is_user: index + 1 === USER_TEAM_ID,
-  tendency: null, mood: null }));
+  tendency: null, mood: null, needs: [], deep: [] }));
 
 export function teamRef(teamId: number): ReplayTeamRef {
   return TEAMS[teamId - 1];

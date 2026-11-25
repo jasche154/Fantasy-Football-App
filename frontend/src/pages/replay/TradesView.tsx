@@ -10,7 +10,7 @@ import { useHashLocation } from '../../router/useHashLocation';
 import { TeamBadge } from './gameUi';
 import { TradeBuilder } from './TradeBuilder';
 import { TradeOffers } from './TradeOffers';
-import { PlayerNames, useTradeActions } from './TradeParts';
+import { ManagerQuote, PlayerNames, useTradeActions } from './TradeParts';
 import { ReplayIrBlockedNotice, type ReplayViewProps } from './shared';
 
 const STATUS: Readonly<Record<ReplayOffer['status'], { label: string; tone: string }>> = {
@@ -34,7 +34,7 @@ function closedText(game: ReplaySummary, trades: ReplayTrades): string {
   return `The trade deadline has passed: trades closed at week ${trades.deadline_week}'s waivers.`;
 }
 
-/** Every other offer and trade in the league, newest first. */
+/** Every other offer and trade in the league, newest first; a CPU that turned the user down says why under its name. */
 function TradeHistory({ offers, openPlayer }: { offers: readonly ReplayOffer[]; openPlayer: (playerId: number) => void }) {
   if (offers.length === 0) return <p className="hint">No trades or offers yet.</p>;
   return (
@@ -57,7 +57,10 @@ function TradeHistory({ offers, openPlayer }: { offers: readonly ReplayOffer[]; 
               <td className="num">{offer.week}</td>
               <td>{offer.from_team.name}</td>
               <td className="replay-trade__names"><PlayerNames players={offer.give} onOpen={openPlayer} /></td>
-              <td>{offer.to_team.name}</td>
+              <td>
+                {offer.to_team.name}
+                <ManagerQuote teamId={offer.to_team.team_id} name={offer.to_team.name} text={offer.reply} />
+              </td>
               <td className="replay-trade__names"><PlayerNames players={offer.get} onOpen={openPlayer} /></td>
               <td><span className={`status-badge status-badge--${STATUS[offer.status].tone}`}>{STATUS[offer.status].label}</span></td>
             </tr>

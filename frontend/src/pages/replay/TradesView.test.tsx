@@ -34,7 +34,7 @@ function verdict(overrides: Partial<ReplayVerdict> = {}): ReplayVerdict {
 /** Blitz Brigade offers Mostert for Etienne. */
 function offer(overrides: Partial<ReplayPendingOffer> = {}): ReplayPendingOffer {
   return { id: 61, week: 5, status: 'pending', from_team: BRIGADE, to_team: teamRef(USER_TEAM_ID), give: [MOSTERT], get: [ETIENNE],
-    verdict: verdict(), note: null, counter_to: null, message: null, ...overrides };
+    verdict: verdict(), note: null, counter_to: null, message: null, reply: null, ...overrides };
 }
 
 function trades(overrides: Partial<ReplayTrades> = {}): ReplayTrades {
@@ -63,7 +63,7 @@ async function tickBothSides(user: ReturnType<typeof userEvent.setup>) {
 describe('TradesView offers', () => {
   it('shows an offer with its values, fairness and lineup gain, and the history with a status', async () => {
     const openPlayer = vi.fn();
-    const past = { id: 50, week: 3, status: 'declined' as const, from_team: teamRef(USER_TEAM_ID), to_team: GHOSTS, give: [MCCAFFREY], get: [COLLINS], counter_to: null, message: null };
+    const past = { id: 50, week: 3, status: 'declined' as const, from_team: teamRef(USER_TEAM_ID), to_team: GHOSTS, give: [MCCAFFREY], get: [COLLINS], counter_to: null, message: null, reply: null };
     const { user } = renderTrades(trades({ offers: [offer()], results: [past] }), [], { props: { openPlayer } });
 
     const card = await screen.findByRole('listitem', { name: 'Offer from Blitz Brigade' });
@@ -83,7 +83,7 @@ describe('TradesView offers', () => {
   });
 
   it('accepts an offer and says the trade was executed', async () => {
-    const reply = { ...actionResult(), accepted: true, expired: false, message: null, verdict: null };
+    const reply = { ...actionResult(), accepted: true, expired: false, message: null, verdict: null, counter: null };
     const { api, user } = renderTrades(trades({ offers: [offer()] }), [{ method: 'POST', path: RESPOND_PATH, reply: json(reply) }]);
     await user.click(await screen.findByRole('button', { name: 'Accept offer from Blitz Brigade' }));
 
@@ -92,7 +92,7 @@ describe('TradesView offers', () => {
   });
 
   it('declines an offer', async () => {
-    const reply = { ...actionResult(), accepted: false, expired: false, message: null, verdict: null };
+    const reply = { ...actionResult(), accepted: false, expired: false, message: null, verdict: null, counter: null };
     const { api, user } = renderTrades(trades({ offers: [offer()] }), [{ method: 'POST', path: RESPOND_PATH, reply: json(reply) }]);
     await user.click(await screen.findByRole('button', { name: 'Decline offer from Blitz Brigade' }));
 
@@ -123,7 +123,7 @@ describe('TradesView offers', () => {
     const withDrop = verdict({ your_drops: [MCCAFFREY], get: [{ player: MOSTERT, value: 35 }, { player: COLLINS, value: 18 }] });
     const { api, user } = renderTrades(trades({ offers: [twoForOne] }), [
       { method: 'POST', path: EVALUATE_PATH, reply: json({ verdict: withDrop }) },
-      { method: 'POST', path: RESPOND_PATH, reply: json({ ...actionResult(full), accepted: true, expired: false, message: null, verdict: null }) },
+      { method: 'POST', path: RESPOND_PATH, reply: json({ ...actionResult(full), accepted: true, expired: false, message: null, verdict: null, counter: null }) },
     ], { props: { game: full } });
 
     const card = await screen.findByRole('listitem', { name: 'Offer from Blitz Brigade' });
@@ -419,7 +419,7 @@ describe('TradesView counters', () => {
     const COUNTER_PATH = `${TRADES_PATH}/offers/61/counter`;
     const no = verdict({ accepted: false, reasons: ['Value is too far apart.'], suggestion: 'Add Nico Collins to make this fair.' });
     const back = { id: 71, week: 5, status: 'pending' as const, from_team: BRIGADE, to_team: teamRef(USER_TEAM_ID),
-      give: [MOSTERT], get: [MCCAFFREY], counter_to: 70, message: null };
+      give: [MOSTERT], get: [MCCAFFREY], counter_to: 70, message: null, reply: null };
     const other = offer({ id: 62, from_team: GHOSTS });
     const { user } = renderTrades(trades({ offers: [offer(), other] }), [
       { method: 'POST', path: EVALUATE_PATH, reply: json({ verdict: no }) },
@@ -442,7 +442,7 @@ describe('TradesView counters', () => {
   it("shows the CPU's counter after it turns a proposal down", async () => {
     const no = verdict({ accepted: false, reasons: ['Value is too far apart.'] });
     const counter = { id: 70, week: 5, status: 'pending' as const, from_team: GHOSTS, to_team: teamRef(USER_TEAM_ID),
-      give: [COLLINS], get: [ETIENNE], counter_to: 69, message: null };
+      give: [COLLINS], get: [ETIENNE], counter_to: 69, message: null, reply: null };
     const { user } = renderTrades(trades(), [
       { method: 'POST', path: EVALUATE_PATH, reply: json({ verdict: no }) },
       { method: 'POST', path: PROPOSE_PATH, reply: json({ ...actionResult(), verdict: no, executed: false, counter }) },
@@ -544,7 +544,7 @@ describe('TradesView manager voices', () => {
       const rows = [rosterRow(MOSTERT, 'RB', { value: 35 }), rosterRow(COLLINS, 'WR', { trade_locked: true })];
       return json(team({ team: teamRef(teamId), results: accepted ? rows.slice(1) : rows }));
     };
-    const accept = () => { accepted = true; return json({ ...actionResult(), accepted: true, expired: false, message: null, verdict: null }); };
+    const accept = () => { accepted = true; return json({ ...actionResult(), accepted: true, expired: false, message: null, verdict: null, counter: null }); };
     mockFetch([META_ROUTE, { method: 'POST', path: RESPOND_PATH, reply: accept },
       { path: TRADES_PATH, reply: () => json(trades({ offers: accepted ? [] : [offer()] })) }, { path: `${PATH}/team`, reply: roster }]);
     function Hub() {
@@ -602,6 +602,50 @@ describe('TradesView manager voices', () => {
     const moody = { ...summary(), teams: summary().teams.map((t) => (t.team_id === 1 ? { ...t, mood: 'Worried about Nico Collins.' } : t)) };
     renderTrades(trades(), [], { props: { game: moody } });
     expect(await screen.findByText('Worried about Nico Collins.')).toBeInTheDocument();
+  });
+
+  it("quotes the manager's reply when he turns the proposal down", async () => {
+    const no = verdict({ accepted: false, reasons: ['Value is too far apart.'] });
+    const { user } = renderTrades(trades(), [
+      { method: 'POST', path: EVALUATE_PATH, reply: json({ verdict: no }) },
+      { method: 'POST', path: PROPOSE_PATH, reply: json({ ...actionResult(), verdict: no, executed: false, counter: null,
+        reply: 'Not enough for Raheem Mostert.' }) },
+    ]);
+    await tickBothSides(user);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Propose trade' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Propose trade' }));
+
+    const result = (await screen.findByText('Gridiron Ghosts turned it down.')).closest('.replay-verdict') as HTMLElement;
+    expect(within(result).getByText('Not enough for Raheem Mostert.').closest('blockquote')).toBeInTheDocument();
+  });
+
+  it('shows a past reply under the manager in the history', async () => {
+    const past = { id: 50, week: 3, status: 'declined' as const, from_team: teamRef(USER_TEAM_ID), to_team: GHOSTS, give: [MCCAFFREY],
+      get: [COLLINS], counter_to: null, message: null, reply: 'No Packers on my team. Ever.' };
+    renderTrades(trades({ results: [past] }));
+    const history = await screen.findByRole('table', { name: 'Trades and offers so far' });
+    const cell = within(history).getByText('No Packers on my team. Ever.').closest('td') as HTMLElement;
+    expect(cell).toHaveTextContent('Gridiron Ghosts');
+  });
+
+  it('shows where the partner is short and deep next to his name', async () => {
+    const needy = { ...summary(), teams: summary().teams.map((t) => (t.team_id === 1 ? { ...t, needs: ['RB'], deep: ['WR', 'TE'] } : t)) };
+    renderTrades(trades(), [], { props: { game: needy } });
+    expect(await screen.findByText('Needs RB · Deep at WR, TE')).toBeInTheDocument();
+  });
+
+  it('shows no needs line for a partner with none', async () => {
+    renderTrades(trades());
+    await screen.findByRole('checkbox', { name: 'Give Travis Etienne' });
+    expect(screen.queryByText(/Needs |Deep at /)).not.toBeInTheDocument();
+  });
+
+  it('says a declined manager came back with a better offer', async () => {
+    const counter = { ...offer(), id: 62, counter_to: 61 };
+    const answer = { ...actionResult(), accepted: false, expired: false, message: null, verdict: null, counter };
+    const { user } = renderTrades(trades({ offers: [offer()] }), [{ method: 'POST', path: RESPOND_PATH, reply: json(answer) }]);
+    await user.click(await screen.findByRole('button', { name: 'Decline offer from Blitz Brigade' }));
+    expect(await screen.findByText(/Blitz Brigade came back with a better one/)).toHaveAttribute('role', 'status');
   });
 
   it('hides the strip once trades close', async () => {
