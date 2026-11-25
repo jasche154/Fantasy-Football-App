@@ -4,7 +4,7 @@ from functools import lru_cache
 
 import pytest
 
-from services import replay_draft as rd, replay_personas, replay_state as rs, replay_values as rv
+from services import replay_draft as rd, replay_fans, replay_personas, replay_state as rs, replay_values as rv
 from services.replay_pool import SeasonData
 from services.replay_state import Settings, State
 from tests import replay_fakes as fakes
@@ -389,16 +389,18 @@ def test_hard_difficulty_keeps_cpus_closer_to_adp():
 
 
 def test_players_without_adp_go_only_when_nobody_with_adp_fits():
+    """12 teams: every pick has an ADP unless a fan's last ADP option there was his rival's player (seed 3: a
+    Bills fan skips the last ADP kicker, a Dolphin). 14 teams: 12 kickers and 12 defenses have an ADP."""
     data = fakes.fake_season()
-
-    assert all(player.adp is not None for seed in SEEDS for _, player in picks_with_players(drafted(12, seed)))
-    for seed in SEEDS:                  # 14 teams, 12 kickers and 12 defenses with an ADP
-        state = drafted(14, seed)
+    for teams, seed in ((teams, seed) for teams in (12, 14) for seed in SEEDS):
+        state = drafted(teams, seed)
         for pick, player in picks_with_players(state):
             if player.adp is None:
                 earlier = {p.player_id for p in state.picks[:pick.overall - 1]}
-                same = [p for p in data.players.values() if p.position == player.position and p.adp is not None]
-                assert all(p.player_id in earlier for p in same)
+                picker = rs.team(state, pick.team_id)
+                same = [p for p in data.players.values() if p.position == player.position and p.adp is not None
+                        and not replay_fans.banned(picker, data.as_of(0).team_at(p.player_id, 0))]
+                assert all(p.player_id in earlier for p in same), (teams, seed, pick)
 
 
 @pytest.mark.parametrize("overrides", [

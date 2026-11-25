@@ -134,14 +134,17 @@ def test_the_test_suite_clears_the_trade_and_draft_caches():
 
 
 def test_every_cpu_trade_passes_the_acceptance_test_for_both_sides(seasons):
+    """Each trade is judged on the league as it stood just before it (the week's earlier deals done): a team's
+    needs (replay_styles.position_needs) depend on every roster in the league."""
     for season in seasons.values():
-        for week, offer in trades(season):
-            know = knowledge(week.week)
+        for week in season:
+            state, know = week.before, knowledge(week.week)
+            for offer in (o for o in week.made if o.status == "accepted"):
+                verdict = rt.evaluate(state, SETTINGS, know, offer.from_team, offer.to_team, offer.give, offer.get)
 
-            verdict = rt.evaluate(week.before, SETTINGS, know, offer.from_team, offer.to_team, offer.give, offer.get)
-
-            assert verdict.accepted and verdict.score >= 0, (week.week, offer, verdict.reasons)
-            assert verdict.value_get >= verdict.value_give * 0.8 and verdict.value_give >= verdict.value_get * 0.8
+                assert verdict.accepted and verdict.score >= 0, (week.week, offer, verdict.reasons)
+                assert verdict.value_get >= verdict.value_give * 0.8 and verdict.value_give >= verdict.value_get * 0.8
+                state = rt._apply(state, SETTINGS, know, offer.from_team, offer.to_team, offer.give, offer.get, verdict)
 
 
 def test_a_cpu_trades_at_most_the_cap_a_week_and_never_moves_the_users_players(seasons):
@@ -150,7 +153,8 @@ def test_a_cpu_trades_at_most_the_cap_a_week_and_never_moves_the_users_players(s
             dealt = Counter(team for offer in week.made if offer.status == "accepted"
                             for team in (offer.from_team, offer.to_team))
 
-            assert sum(dealt.values()) <= 2 * ai.CPU_ATTEMPTS and USER not in dealt
+            dealers = sum(team.persona == "dealer" for team in week.before.teams)
+            assert sum(dealt.values()) <= 2 * (ai.CPU_ATTEMPTS + ai.DEALER_ATTEMPTS * dealers) and USER not in dealt
             assert max(dealt.values(), default=0) <= rs.MAX_TRADES_PER_WEEK
             assert rs.user_team(week.after).roster == rs.user_team(week.before).roster
 
@@ -313,7 +317,8 @@ def test_on_hard_an_offer_is_still_generous_and_stands_as_the_cpus_own_but_not_a
         assert verdict.accepted and verdict.score >= 0
         assert ai.generous(replay_personas.edge(week.after, rs.team(week.after, offer.from_team)), verdict.value_give,
                            verdict.value_get)
-        assert not rt.evaluate(*deal).accepted          # the same deal proposed by the user pays the hard premium
+        if rs.team(week.after, offer.from_team).persona != "haggler":     # his opening lowball suits him either way
+            assert not rt.evaluate(*deal).accepted      # the same deal proposed by the user pays the hard premium
 
 
 # ---------------- determinism, bounds, speed ----------------

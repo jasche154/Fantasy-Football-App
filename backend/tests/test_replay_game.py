@@ -322,7 +322,9 @@ def test_the_finished_draft_opens_week_one_with_the_cpus_start_of_week_done():
 
     drafted = run.steps[run.index("auto_draft", 0)].state
 
-    assert (drafted.phase, drafted.week, drafted.locked) == ("open", 1, ())
+    # waivers have cleared; only a player a CPU dropped to cover a slot its week-1 trade emptied is on them
+    covered = {pid for event in drafted.events if event.kind == "add" for pid in event.player_ids[1:]}
+    assert (drafted.phase, drafted.week) == ("open", 1) and set(drafted.locked) <= covered
     assert all(len(team.roster) == LEAGUES[0].roster_size for team in drafted.teams)
     assert len(drafted.schedule) == LEAGUES[0].regular_season_weeks
     for action in (rg.pick, rg.auto_pick, rg.auto_draft):
