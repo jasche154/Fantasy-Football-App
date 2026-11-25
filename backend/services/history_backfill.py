@@ -84,7 +84,7 @@ def project_week(session: Session, league: LeagueSettings, week: int):
             candidates[p.player_id] = _Candidate(p.player_id, p.name, p.position, p.team)
     rates = player_rates(valuation)
     context = build_context(session, valuation.seasons, rates, valuation.season, week, valuation.schedule,
-                            use_live=False, exclude_rate_season=valuation.season)
+                            use_live=False, exclude_rate_season=valuation.season, priors=valuation.priors)
     weights, _ = effective_weights(session, valuation.season, week)
     return blend(candidates, valuation, week, league, require_outside_source=has_outside_sources,
                  context=context, rates=rates, weights=weights,
