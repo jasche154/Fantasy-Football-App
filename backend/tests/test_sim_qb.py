@@ -187,6 +187,17 @@ def test_an_established_qb_who_sat_untagged_is_still_the_holder_of_a_live_start(
         assert played and all(starts[(team, w)] == star or (star, w + 1) in sim.injuries for w in played), seed
 
 
+def test_a_backup_established_only_by_an_old_adp_does_not_take_a_live_job(data):
+    """2026 IND: Anthony Richardson (a top-8 ADP in 2024) is established, but Daniel Jones has held the job all
+    season: Jones is the holder at a live start."""
+    season, star, team = _untagged_absence(data)
+    backup = next(p for p, pl in season.players.items() if pl.position == "QB" and p != star and season.team_at(p, 5) == team)
+    healthy = replace(season, box=MappingProxyType({**data.box, **{(star, w): replace(data.box[(star, w)], pass_yds=250)
+                                                                   for w in range(1, 11) if (star, w) in data.box}}))
+    jobs = sim_qb_jobs.start(healthy, sim_world.estimate(healthy, 11), 11, frozenset({backup}))
+    assert jobs.holders[team] == star
+
+
 def test_a_future_stars_carried_injury_does_not_cost_him_his_protection(data):
     """A season simulated whole ranks on per-game value, nobody believed out: an ADP discounted for a long
     injury carried into it does not drop him out of the established range."""

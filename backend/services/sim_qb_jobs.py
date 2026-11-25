@@ -5,13 +5,13 @@ its fit: services/sim_qb.py).
   QBs established by their real ADP of the seasons before (`past`) and this season's drafted rookie QBs with their
   picks. `established_of`: the season's established QBs (sim_qb.established_qbs on preseason ranks: never
   in-season form).
-- `start`: the holders going into the first simulated week. On each team, an established QB is the holder (the
-  real weeks' holder if he is one, else the one who started most recently, else the highest starts weight); he is
-  OUT when he did not play the team's last real game, never benched. Otherwise, from week 1: the belief's
-  most-starts QB (sim_next_year's August starter); from week N: sim_qb.walk over the real weeks before N, judged
-  on the past only (`causal`: the last real starter, unless the holder sat with a tag, then the holder before
-  him, OUT); a holder no longer on the team falls back to the belief's most-starts QB. Today's status
-  (sim_setup.with_status_now) then sits whoever is hurt.
+- `start`: the holders going into the first simulated week. From week 1: the belief's most-starts QB
+  (sim_next_year's August starter, who is never a rookie named over an established incumbent). From week N:
+  sim_qb.walk over the real weeks before N, judged on the past only (`causal`): the last real starter, unless the
+  holder sat with a tag, or is established and sat at all (an established holder who doesn't play is OUT, never
+  benched), then the holder before him, OUT. A QB established only by an old ADP who never held the job this
+  season does not take it. A holder no longer on the team falls back to the belief's most-starts QB. Today's
+  status (sim_setup.with_status_now) then sits whoever is hurt.
 - `decide`, before each simulated week's games, once its tags are known, for each team with a game that week
   (a bye decides nothing, as the fit has played weeks only): a holder who sits (hurt, tagged out) is OUT and the
   next QB in line plays (sim_game's starter: the highest starts weight among the dressed). Back healthy, he gets
@@ -77,22 +77,14 @@ def start(base: SeasonData, belief: World, from_week: int, established: frozense
           inputs: QbInputs = QbInputs()) -> Jobs:
     """The holders going into from_week (see the module docstring)."""
     real = any(week < from_week for _, week in base.actual)
-    known = base.as_of(from_week)
-    found = sim_qb.walk(known, causal=True)[1] if real else {}
-    starts = sim_qb.starters(known)
-    last_start = {pid: week for (_, week), pid in sorted(starts.items(), key=lambda kv: kv[0][1])}
+    found = sim_qb.walk(base.as_of(from_week), causal=True, established=established)[1] if real else {}
     holders, out = {}, {}
     for team in sorted(belief.teams):
         qbs = _qbs(belief, team)
         if not qbs:
             continue
-        ids = {p.player_id for p in qbs}
         pid, missed = found.get(team, (None, False))
-        secure = [p.player_id for p in qbs if p.player_id in established]
-        if secure and pid not in secure:       # most recent starter first, then the most starts weight (qbs order)
-            pid = max(secure, key=lambda q: last_start.get(q, 0))
-            missed = real and pid != _last_starter(starts, team, from_week)
-        elif pid not in ids:
+        if pid not in {p.player_id for p in qbs}:
             pid, missed = qbs[0].player_id, False
         holders[team], out[team] = pid, missed
     return Jobs(holders, out, sim_qb.market_ranks(base), established, dict(inputs.picks))

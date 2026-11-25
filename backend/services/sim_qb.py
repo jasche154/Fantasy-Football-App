@@ -202,7 +202,8 @@ def walk(data: SeasonData, starts: Mapping[tuple[str, int], int] | None = None, 
          established: Collection[int] = ()) -> tuple[list[Row], dict[str, tuple[int, bool]]]:
     """(decision rows, {team: (holder after the last played week, out: he missed that game hurt)}) of a season
     (module docstring). `starts`: {(team, week): starter}, else `starters`; `causal`: a healthy holder who did
-    not start, nor play in that game, lost the job (no look at later weeks), for a live season's holder; `picks`:
+    not start, nor play in that game, lost the job unless he is `established` (no look at later weeks), for a live
+    season's holder; `picks`:
     {drafted rookie QB: (team, pick)} of this season's draft; `established`: established_qbs."""
     starts = starters(data) if starts is None else starts
     ranks, picks = market_ranks(data), picks or {}
@@ -220,8 +221,8 @@ def walk(data: SeasonData, starts: Mapping[tuple[str, int], int] | None = None, 
                 holder, out = starter, False
                 continue
             tagged = (holder, week) in data.injuries
-            if starter != holder and tagged:
-                out = True
+            if starter != holder and (tagged or (causal and holder in established)):
+                out = True                            # a fill-in (an established holder who sat is OUT, never benched)
                 continue
             kind = "return" if out else "week"
             if not 2 <= week <= data.last_week - CHANGE_LAST_WEEKS or (tagged and kind == "week"):
