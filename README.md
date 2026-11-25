@@ -318,9 +318,11 @@ produce an extreme matchup.
   already has most of the bigger role in his rate. In the point-in-time backtest this cut
   RMSE 6.74 -> 6.70 (2023), 6.91 -> 6.87 (2024) and 6.76 -> 6.66 (2025), with rank
   correlation up each season.
-- **Backup quarterbacks sitting move nothing.** A QB with fewer games for the team than the
-  starter (mop-up duty only) leaves him no vacated work, so the starter isn't boosted when
-  his backup is inactive. A starter who sits still moves his work to the backup.
+- **Backup quarterbacks sitting move nothing.** A QB behind the other on the depth chart (when
+  it lists both), else with fewer passing yards a game for the team (mop-up duty only), leaves
+  him no vacated work, so the starter isn't boosted when his backup is inactive. A starter who
+  sits still moves his work to the backup, even one who has started more games since he got
+  hurt.
 - **Backup quarterbacks.** A backup QB only plays when everyone ahead of him on the depth
   chart (Sleeper's, else nflverse's) sits. His chance to play is the chance they all sit,
   with a 2% floor for QB2 (in-game injuries), and his rest-of-season share is one minus the
