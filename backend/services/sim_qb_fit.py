@@ -44,16 +44,16 @@ import numpy as np
 from sqlalchemy import select
 
 from services import replay_pool, sim_qb
+from services.sim_world import EARLY_PROJECTIONS
+from services.sim_eval import SCORING        # the real seasons are read as sim_eval reads them
 
 log = logging.getLogger(__name__)
 
-SCORING = "half"
 RIDGE = 1.0                      # ridge penalty on each standardized coefficient (31 real losses: small and stable)
 NEWTON_STEPS = 50
 UNDRAFTED = 300                  # draft pick of an undrafted QB (the candidate covariate)
 HISTORY = 3                      # seasons of starts history in the candidate covariates
 FULL_SEASON = 17
-EARLY_PROJECTIONS = 3            # as sim_world.EARLY_PROJECTIONS
 FORM_POINTS = 12.0               # points a start a QB with no history is shrunk toward (candidate covariate)
 MODELS = {"hazard": ("rank", "form", "record"), "rookie": ("rookie_pick", "record", "form"), "return": ("rank",)}
 
@@ -228,10 +228,11 @@ def _league(session, season: int, seed: int):
     kind, through = sim_setup.kind_of(session, season)
     settings = Settings(season=season, sim_from=1 if kind == sim_setup.FUTURE else through + 1)
     if kind == sim_setup.FUTURE:
-        base, world, carried, qbs, _ = sim_setup._future_base(session, season, settings, seed)
+        base, world, carried, qbs, teams = sim_setup._future_base(session, season, settings, seed)
         rookies = [pid for pid in world.players if pid >= sim_next_year.ROOKIE_ID_BASE]
         started = time.perf_counter()
-        data = sim_season.simulate(base, seed, 1, prior=world, carried=carried, rookies=rookies, qbs=qbs)
+        data = sim_season.simulate(base, seed, 1, prior=world, carried=carried, rookies=rookies, qbs=qbs,
+                                   team_prior=teams)
         took = time.perf_counter() - started
         return data, 1, sim_qb_jobs.established_of(base, sim_world.estimate(base, 1, world), True, qbs), set(rookies), took
     base = sim_setup.with_status_now(session, replay_pool.load_season_data(session, season, settings.scoring,
@@ -239,7 +240,9 @@ def _league(session, season: int, seed: int):
     rookies = [pid for pid, first in sim_setup.first_seasons(session).items() if first == season]
     qbs = sim_setup.qb_inputs(session, season)
     started = time.perf_counter()
-    data = sim_season.simulate(base, seed, through + 1, rookies=rookies, qbs=qbs)
+    data = sim_season.simulate(base, seed, through + 1, rookies=rookies, qbs=qbs,
+                               team_prior=sim_setup.team_prior(session, season),
+                               posted=sim_setup.posted_lines(base, through + 1))
     took = time.perf_counter() - started
     return data, through + 1, sim_qb_jobs.established_of(base, None, False, qbs), set(rookies), took
 
@@ -277,12 +280,9 @@ def check(season: int, seeds: int, workers: int) -> dict[str, float]:
     return report
 
 
-def _seasons(text: str) -> list[int]:
-    first, _, last = text.partition("-")
-    return list(range(int(first), int(last or first) + 1))
-
-
 def main(argv: list[str] | None = None) -> None:
+    from services.replay_data import parse_seasons     # the CLI's only use of the importer
+
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--fit", action="store_true", help="measure and write sim_qb.json")
@@ -296,7 +296,7 @@ def main(argv: list[str] | None = None) -> None:
         from database.db import SessionLocal
 
         with SessionLocal() as session:
-            fitted = fit(session, _seasons(args.seasons))
+            fitted = fit(session, parse_seasons(args.seasons))
         sim_qb.PATH.write_text(json.dumps(fitted, indent=1) + "\n")
         sim_qb.stored.cache_clear()
         log.info("wrote %s: %s", sim_qb.PATH.name, json.dumps({k: v for k, v in fitted.items() if k != "losers"}))

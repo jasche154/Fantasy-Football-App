@@ -37,29 +37,23 @@ from pathlib import Path
 
 import numpy as np
 
-from services import sim_lines
+from services import sim_lines, sim_metrics_games
+from services.sim_eval import SCORING        # the real seasons are read as sim_eval reads them
 
 log = logging.getLogger(__name__)
 
 CACHE = Path(__file__).resolve().parent.parent / "data" / "cache" / "sim_lines_games.json"
-SCORING = "half"
 INPUTS = ("points", "belief", "qb_level", "qb_change", "rest")
 TOTAL_INPUTS = ("points", "belief", "qb_level", "qb_change")
 GRID = {"decay": (0.9, 0.95, 1.0), "prior_games": (4.0, 8.0, 12.0), "carry": (0.5, 0.7, 0.85)}
 LEVEL_GAMES = 64.0               # pseudo team-games holding the league level (about four weeks of games)
-BLOWOUT = 21
-
-
-def _seasons(text: str) -> list[int]:
-    first, _, last = text.partition("-")
-    return list(range(int(first), int(last or first) + 1))
+BLOWOUT = sim_metrics_games.BLOWOUTS[0]
 
 
 def _season_rows(session, season: int) -> dict:
     """The cached inputs of one real season: its games (with belief points, rest, Vegas, result), its scores,
     last season's scores and (points, box-score yards) of each team game."""
-    from services import replay_pool, sim_world
-    from services.schedule_strength import load_schedule
+    from services import replay_pool, sim_setup, sim_world
 
     data = replay_pool.load_season_data(session, season, SCORING)
     games = []
@@ -79,8 +73,7 @@ def _season_rows(session, season: int) -> dict:
                           "rest": [sim_lines.rest_days(known, g.home_team, week),
                                    sim_lines.rest_days(known, g.away_team, week)],
                           "vegas": [g.spread_line, g.total_line], "score": [hs, as_]})
-    previous = [(g.week, g.home_team, g.away_team, g.home_score, g.away_score)
-                for g in load_schedule(session, season - 1).games if g.is_final]
+    previous = sim_setup.final_scores(session, season - 1)
     seen = sim_world._seen(data, data.last_week + 1)
     yards = [(data.scores[key], seen.pass_yards[key] + sum(line.rush_yds for line in lines.values()))
              for key, lines in seen.games.items() if key in data.scores]
@@ -170,12 +163,8 @@ def _report(feats: dict[int, dict], pred: dict[int, np.ndarray], weeks: tuple[in
     p = np.vstack([pred[s][mask[s]] for s in feats])
     v = np.vstack([feats[s]["vegas"][mask[s]] for s in feats])
     r = np.vstack([feats[s]["score"][mask[s]] for s in feats])
-    corr = lambda a, b: float(np.corrcoef(a, b)[0, 1])  # noqa: E731
-
-    def fifths(m: np.ndarray) -> tuple[float, float]:
-        big, small = np.abs(m) >= np.quantile(np.abs(m), 0.8), np.abs(m) <= np.quantile(np.abs(m), 0.2)
-        return float((np.abs(r[big, 0]) >= BLOWOUT).mean()), float((np.abs(r[small, 0]) >= BLOWOUT).mean())
-
+    corr = sim_metrics_games.corr
+    ours, vegas = sim_metrics_games.fifths(p[:, 0], r[:, 0], BLOWOUT), sim_metrics_games.fifths(v[:, 0], r[:, 0], BLOWOUT)
     return {"games": len(p), "r margin": corr(p[:, 0], r[:, 0]), "vegas r margin": corr(v[:, 0], r[:, 0]),
             "r total": corr(p[:, 1], r[:, 1]), "vegas r total": corr(v[:, 1], r[:, 1]),
             "r vs vegas margin": corr(p[:, 0], v[:, 0]), "r vs vegas total": corr(p[:, 1], v[:, 1]),
@@ -183,8 +172,8 @@ def _report(feats: dict[int, dict], pred: dict[int, np.ndarray], weeks: tuple[in
             "home edge": float(p[:, 0].mean()), "vegas home edge": float(v[:, 0].mean()),
             "real home edge": float(r[:, 0].mean()), "resid sd": float((r[:, 0] - p[:, 0]).std()),
             "vegas resid sd": float((r[:, 0] - v[:, 0]).std()),
-            "21+ in lopsided fifth": fifths(p[:, 0])[0], "21+ in closest fifth": fifths(p[:, 0])[1],
-            "vegas 21+ in lopsided fifth": fifths(v[:, 0])[0], "vegas 21+ in closest fifth": fifths(v[:, 0])[1]}
+            "21+ in lopsided fifth": ours[0], "21+ in closest fifth": ours[1],
+            "vegas 21+ in lopsided fifth": vegas[0], "vegas 21+ in closest fifth": vegas[1]}
 
 
 def _rmse(feats: dict[int, dict], pred: dict[int, np.ndarray]) -> float:
@@ -239,13 +228,15 @@ def fit(seasons: list[int], refresh: bool = False) -> tuple[dict, dict]:
 
 
 def main(argv: list[str] | None = None) -> None:
+    from services.replay_data import parse_seasons     # the CLI's only use of the importer
+
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--seasons", default="2018-2025")
     parser.add_argument("--fit", action="store_true", help="write sim_lines.json")
     parser.add_argument("--refresh", action="store_true", help="rebuild the cached per-game inputs")
     args = parser.parse_args(argv)
-    model, report = fit(_seasons(args.seasons), args.refresh)
+    model, report = fit(parse_seasons(args.seasons), args.refresh)
     log.info("%s", json.dumps(report, indent=1))
     log.info("%s", json.dumps(model, indent=1))
     if args.fit:

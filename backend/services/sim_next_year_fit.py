@@ -53,6 +53,7 @@ from services.sim_metrics import qb_starts
 from services.replay_pool import SeasonData
 from services.sim_next_year import PATH, RECEIVER_RATES, RECEIVERS, VOLUME_MIN, premium_at, volume
 from services.sim_offseason import Rookie
+from services.sim_eval import SCORING        # the real seasons are read as sim_eval reads them
 from services.sim_schedule import TEAMS
 from services.sim_draft_picks import draft_picks
 from services.sim_eval import season_end
@@ -60,7 +61,6 @@ from services.sim_setup import first_seasons
 
 log = logging.getLogger(__name__)
 
-SCORING = "half"
 POSITIONS = ("QB", "RB", "WR", "TE")
 EXPERIENCE_EDGES = (1, 2, 3, 4, 6, 9)           # experience buckets: 1, 2, 3, 4-5, 6-8, 9+ seasons
 GAMES_MIN = 6
@@ -337,12 +337,9 @@ def summarize(rows: Mapping[str, list[dict]], seasons: list[int]) -> dict:
             "efficiency_sd": _spread_fit(rows["veterans"], efficiency), "team_keep": _team_fit(rows["teams"])}
 
 
-def _seasons(text: str) -> list[int]:
-    first, _, last = text.partition("-")
-    return list(range(int(first), int(last or first) + 1))
-
-
 def main(argv: list[str] | None = None) -> None:
+    from services.replay_data import parse_seasons     # the CLI's only use of the importer
+
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--fit", action="store_true", help="measure and write sim_next_year.json")
@@ -355,7 +352,7 @@ def main(argv: list[str] | None = None) -> None:
         return
     from database.db import SessionLocal
 
-    seasons = _seasons(args.seasons)
+    seasons = parse_seasons(args.seasons)
     if args.refresh:
         draft_picks(range(DRAFT_HISTORY_FROM, max(seasons) + 1), refresh=True)
     with SessionLocal() as session:

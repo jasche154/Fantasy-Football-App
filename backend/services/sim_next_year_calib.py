@@ -20,10 +20,10 @@ from collections.abc import Collection, Iterable, Mapping
 import numpy as np
 
 from services import replay_pool, sim_world
+from services.sim_eval import SCORING        # the real seasons are read as sim_eval reads them
 
 log = logging.getLogger(__name__)
 
-SCORING = "half"
 SKILL = ("QB", "RB", "WR", "TE")
 SCALE_GRID = (0.0, 0.25, 0.5, 0.75, 1.0)
 GAMES_MIN = 8

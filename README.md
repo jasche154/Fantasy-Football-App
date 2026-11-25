@@ -1015,9 +1015,8 @@ that week's games on; only scoring a week reads its real points.
   Median week-to-week move of a top-24 QB 0.40 -> 0.26 (log; 2018 0.53 -> 0.29), and Spearman against real
   points from then on 0.484 -> 0.495 (2018 0.500 -> 0.512); seasons with expert ranks are unchanged. Nothing
   goes above 1000, the bye bump and hype included; values show as whole numbers on every screen (lists,
-  card, roster, trade builder, offers), rounded half up, so a player reads the same everywhere.
-  Before this, a trade verdict showed one decimal (e.g. 836.8) while lists showed whole numbers, and the
-  lists rounded half to even (512.5 -> 512 next to 513 in a deal); every season, 2027 included, worked the same.
+  card, roster, trade builder, offers), rounded half up, so a player reads the same everywhere, in every
+  season, 2027 included.
 - **Superflex values** (`services/replay_superflex.py`): RBs, WRs, TEs, kickers and defenses are valued
   exactly as in a regular league of the same scoring (their curves, ranks and `star` come from the
   league-scoring 1-QB list; a non-QB's chart is identical with and without the SUPERFLEX slot). Each QB takes
@@ -1029,12 +1028,10 @@ that week's games on; only scoring a week reads its real points.
   only (`python -m services.replay_superflex --fit` -> `replay_superflex.json`; it refuses to write when a
   list is stored for no season); a league saved before `scoring_adp` existed keeps its 2-QB list's order for
   non-QBs, behind an average 1-QB list's QBs (frozen: today's database is never read for it), and so does a
-  non-QB the scoring list lacks. Before this, a superflex league valued
-  everyone on the 2-QB list's picks: with 13 QBs in the first 24 picks (2026) every non-QB slid down the
-  curve (league "Super", week 8: Ja'Marr Chase 869 -> 709, Amon-Ra St. Brown 855 -> 567, Brock Bowers
-  432 -> 175), and that list orders non-QBs like standard scoring, which sank tight ends in PPR. A new
-  superflex league values them as its regular twin does; "Super" itself was saved before, so its non-QBs keep
-  the 2-QB list's order on the 1-QB scale.
+  non-QB the scoring list lacks. Non-QBs are not valued on the 2-QB list's own picks: with 13 QBs in its
+  first 24 picks (2026) every non-QB would sit far down the curve (Ja'Marr Chase at 709 instead of 869 in
+  week 8 of a 2026 superflex league), and that list orders non-QBs like standard scoring, which sinks tight
+  ends in PPR.
 - **Injured players' charts** (`services/replay_chart_injury.py`): an absence takes a share of his healthy
   chart that follows the user's targets: out 1-4 weeks about 5-12%, 6+ weeks 35-45% when first reported and
   less each week as the return nears, out for the season the whole chart. At 13 games left: 1 game missed 6%,
@@ -1046,11 +1043,11 @@ that week's games on; only scoring a week reads its real points.
   at 13 games left, 51% at 4, 84% at 1, never all of it (only a season-ending report is zero). A plain O
   tag's first week: median 2 games, mean 3.0, 7% season-ending. From his second week out
   only the model half is discounted (the experts already price the injury). Availability and expected games
-  missed (lineups, waivers) stay the real expected games. Before this the chart was healthy x share of games
-  played x 0.9 (a star missing 3 of 13 lost 31%). Measured honestly: real results say a known absence costs
+  missed (lineups, waivers) stay the real expected games. Measured on real results, a known absence costs
   about its share of games (out players produced 0.48 of a healthy player's value per game over
-  replacement; the old chart kept 0.50, the new one 0.61), so the user's targets price injured players above
-  what they realised (held-out error of out players 3.006 -> 3.159, see below). Within the targets the
+  replacement; the chart keeps 0.61 of it), so the user's targets price injured players above what they
+  realised (held-out error of out players 3.159; a chart of healthy x share of games played x 0.9, which
+  keeps 0.50, scores 3.006). Within the targets the
   deepest end is used: the power 1.8 is the lowest that keeps 4 games missed within 12% at 13 left, and a
   shallower curve fits worse (power 2.5: 3.186, 4.0: 3.214).
 - **Chart check against real results** (`python -m services.replay_chart_eval [--seasons 2018-2025]
@@ -1067,14 +1064,12 @@ that week's games on; only scoring a week reads its real points.
   overall and by position, mean value per chart band and position, a leave-season-out calibration error (a
   position-blind band curve fitted on the other seasons) with each position's and position-rank tier's
   bias, the same for players out that week, and how many player-weeks each rule scored (12-team PPR,
-  2018-2025, regular lineup, before this round's changes: 2,402 healthy; 1,385 healthy with a later injury
-  left out; 643 healthy with missed games counted as 0; 369 out and back, 50 of them back late; 184 out for
-  the rest of the season; 113 dropped for fewer than 3 games). Results (weeks 1/4/7/10/13, common
-  player-weeks, before -> after): regular lineup Spearman 0.561 -> 0.555, held-out error 4.008 -> 4.023, out
-  players 3.006 -> 3.159 (the injury targets); superflex lineup (QB mapping and injury targets) Spearman
-  0.561 -> 0.553, held-out error 5.040 -> 5.046; over the last starter (`--bench 0`) 0.533 -> 0.532 and
-  4.118 -> 4.114. On the full population, which now keeps the non-QBs that used to slide below 50, superflex
-  Spearman 0.561 -> 0.579 and held-out error 5.043 -> 4.998.
+  2018-2025, regular lineup: 2,402 healthy; 1,385 healthy with a later injury left out; 643 healthy with
+  missed games counted as 0; 369 out and back, 50 of them back late; 184 out for the rest of the season; 113
+  dropped for fewer than 3 games; superflex: 5,638 player-weeks). Results (weeks 1/4/7/10/13): regular
+  lineup Spearman 0.555, held-out error 4.023, out players 3.159 (the injury targets); superflex lineup
+  Spearman 0.579, held-out error 4.998; over the last starter (`--bench 0`) regular 0.496 / 4.041 and
+  superflex 0.552 / 4.100.
   What it found and left alone: superflex QBs at every tier produce more per game over a bench-deep
   replacement than equal-chart non-QBs (QB1-6 +4.8, 7-12 +5.3, 13-24 +5.7, 25-36 +3.3 points a game), and
   over the last starter QB1-6 +0.85, 7-12 +1.05, 13-24 +0.98, 25-36 -0.30, where running backs below the top
@@ -1482,9 +1477,9 @@ read the belief, so, as in a real season, the public learns the truth only from 
   0.19% against 0.29% / 0.19%). Known gaps: shutouts are still rarer than real (0.8% of team scores
   against 1.1-1.4%), a score of 13 is too common (5.5% against 3.6%), in the closest fifth of lines in the
   mid-season mode a 21+ blowout is more common than real (13.9% against 7.9%), and since weak offenses now
-  kick fewer field goals (kickers average 8.0-8.2 points a game against a real 8.2; they were 8.7-8.8) their
+  kick fewer field goals (kickers average 8.0-8.2 points a game against a real 8.2) their
   points come more from touchdowns, so skill players score about 2.3 / 2.1 fantasy points a team-game more
-  than real (it was 1.4 / 1.1), and the best quarterback's season about 1.2-1.5 points a game more. No setting
+  than real, and the best quarterback's season about 1.2-1.5 points a game more. No setting
   of the tuned knobs closes that without losing the game rows: weak offenses kicking every field goal
   (`game.fg_power` 0) with half the hidden strength (`talent.strength_sd` 1.0) brings skill points back to 1.4
   / 1.0 over real, but blowouts in the most lopsided fifth of lines fall to 20% (real 25%), shutouts to 0.4%
@@ -1588,14 +1583,12 @@ read the belief, so, as in a real season, the public learns the truth only from 
   into a whole simulated season the market also leans on last season's points a game, leaving out a game a
   player left hurt (under half the snaps, then a hard tag), and the **preseason expert ranks** (what the draft room's Rank order comes from)
   follow that ADP with the same ~8% noise, because real August experts and ADP agree closely (rank
-  correlation 0.98 over the real top 150 in 2022-2025; the simulated ones now 0.99, from about 0.86 when the
-  experts ignored last season). The weekly experts **revise slowly**: each player's noise carries from week to
+  correlation 0.98 over the real top 150 in 2022-2025; the simulated ones 0.99). The weekly experts **revise slowly**: each player's noise carries from week to
   week (90% of last week's), and the value a healthy player is ranked on moves 40% of the way to this week's
   (on injury news, a player ruled out or back, or a teammate at his position ruled out or back, is re-ranked
   at once: the backup whose starter just went on IR moves up that week; a quarterback benching is news for
-  both of the team's quarterbacks the same way), so a healthy star no longer jumps from QB1 to QB9 and back: a
-  healthy top-16 quarterback's expert rank moves about 1.2-1.5 places a week (real: about 1.1; it moved about
-  five). Quarterback expert ranks still agree less with the week's projections than real ones (rank correlation
+  both of the team's quarterbacks the same way), so a healthy star does not jump from QB1 to QB9 and back: a
+  healthy top-16 quarterback's expert rank moves about 1.2-1.5 places a week (real: about 1.1). Quarterback expert ranks still agree less with the week's projections than real ones (rank correlation
   about 0.6-0.68 against 0.72-0.75): QB values are bunched, and the projections follow each week's matchup line.
 
 **2027 specifics:**

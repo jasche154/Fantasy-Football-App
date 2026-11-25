@@ -60,13 +60,6 @@ MID_WEEK = 12
 SCORING = "half"
 
 
-def _seasons(text: str) -> list[int]:
-    if "-" in text:
-        first, last = text.split("-")
-        return list(range(int(first), int(last) + 1))
-    return [int(s) for s in text.split(",")]
-
-
 def cut(real: SeasonData, week: int) -> SeasonData:
     """The real season as known before `week`, with the full schedule (the mid-season base)."""
     return replace(real.as_of(week), schedule=real.schedule, known_before=None)
@@ -296,6 +289,8 @@ def run(seasons: list[int], seeds: list[int], mode: str, workers: int = 1, overr
 
 
 def main(argv: list[str] | None = None) -> None:
+    from services.replay_data import parse_seasons     # the CLI's only use of the importer
+
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--seasons", default="2021-2025")
@@ -309,7 +304,7 @@ def main(argv: list[str] | None = None) -> None:
                         help="processes for the (mode, season) cases (default: one per CPU; 1 = serial)")
     parser.add_argument("--refresh", action="store_true", help="download the draft picks again (else cached)")
     args = parser.parse_args(argv)
-    seasons = _seasons(args.seasons)
+    seasons = parse_seasons(args.seasons)
     if args.fit:
         from database.db import SessionLocal
         with SessionLocal() as session:

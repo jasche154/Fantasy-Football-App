@@ -25,8 +25,16 @@ CHURN_TOP = {"QB": 16, "RB": 24, "WR": 36, "TE": 12}
 FIFTH = 0.2
 
 
-def _corr(a: np.ndarray, b: np.ndarray) -> float:
+def corr(a: np.ndarray, b: np.ndarray) -> float:
+    """Pearson's r, NaN for fewer than 3 pairs or a constant side."""
     return float(np.corrcoef(a, b)[0, 1]) if len(a) > 2 and a.std() > 0 and b.std() > 0 else float("nan")
+
+
+def fifths(line: np.ndarray, margin: np.ndarray, blowout: int = BLOWOUTS[0]) -> tuple[float, float]:
+    """(share of games won by `blowout`+ in the most lopsided fifth of `line` margins, in the closest fifth)."""
+    big = np.abs(line) >= np.quantile(np.abs(line), 1 - FIFTH)
+    close = np.abs(line) <= np.quantile(np.abs(line), FIFTH)
+    return float((np.abs(margin[big]) >= blowout).mean()), float((np.abs(margin[close]) >= blowout).mean())
 
 
 def games(data: SeasonData, weeks: Iterable[int]) -> dict[str, float]:
@@ -39,15 +47,13 @@ def games(data: SeasonData, weeks: Iterable[int]) -> dict[str, float]:
     if len(rows) < 5:
         return {}
     line_m, line_t, margin, total, home, away = np.array(rows, dtype=float).T
-    big = np.abs(line_m) >= np.quantile(np.abs(line_m), 1 - FIFTH)
-    close = np.abs(line_m) <= np.quantile(np.abs(line_m), FIFTH)
+    lopsided, closest = fifths(line_m, margin)
     points = np.concatenate([home, away])
-    out = {"line r margin": _corr(line_m, margin), "line r total": _corr(line_t, total),
+    out = {"line r margin": corr(line_m, margin), "line r total": corr(line_t, total),
            "line margin sd": float(line_m.std()), "result - line sd": float((margin - line_m).std()),
            "line home edge": float(line_m.mean()), "home edge": float(margin.mean())}
     out.update({f"{b}+ margin %": 100 * float((np.abs(margin) >= b).mean()) for b in BLOWOUTS})
-    out.update({"21+ in lopsided 5th %": 100 * float((np.abs(margin[big]) >= 21).mean()),
-                "21+ in closest 5th %": 100 * float((np.abs(margin[close]) >= 21).mean()),
+    out.update({"21+ in lopsided 5th %": 100 * lopsided, "21+ in closest 5th %": 100 * closest,
                 "home win %": 100 * float((margin > 0).mean() + 0.5 * (margin == 0).mean()),
                 "tie %": 100 * float((margin == 0).mean()), "team score mean": float(points.mean()),
                 "team score sd": float(points.std()), "team score 0 %": 100 * float((points == 0).mean()),

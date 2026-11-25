@@ -30,6 +30,7 @@ TARGET_TOLERANCE = 0.05          # points, on the real means (else one correctio
 MIN_TARGET = 1.0                 # a side is never centred below this many points
 FG_POWER = 1.0                   # default of the tuned `game.fg_power`
 REGULATION_TIES = 0.043          # share of simulated games tied after regulation (measured over 6,000 draws, td_drives 5)
+# re-measure REGULATION_TIES whenever `game.td_drives` is retuned: the drive dispersion sets how often regulation ends tied
 
 
 def ot_points() -> float:

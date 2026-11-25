@@ -91,14 +91,20 @@ def build(session: Session, settings: Settings, seed: int) -> tuple[bytes, Seaso
     return replay_blob.freeze(data)
 
 
+def final_scores(session: Session, season: int) -> list[tuple[int, str, str, int, int]]:
+    """(week, home, away, home points, away points) of `season`'s finished games in the database."""
+    from services.schedule_strength import load_schedule
+
+    return [(g.week, g.home_team, g.away_team, g.home_score, g.away_score)
+            for g in load_schedule(session, season).games if g.is_final]
+
+
 def team_prior(session: Session, season: int) -> dict:
     """{team: sim_lines.Rating}: the points ratings `season`'s games start from, last season's final ones
     regressed (sim_lines.carry_over), from its real scores in the database (none: {})."""
     from services import sim_lines
-    from services.schedule_strength import load_schedule
 
-    scores = [(g.week, g.home_team, g.away_team, g.home_score, g.away_score)
-              for g in load_schedule(session, season - 1).games if g.is_final]
+    scores = final_scores(session, season - 1)
     return sim_lines.carry_over(scores) if scores else {}
 
 

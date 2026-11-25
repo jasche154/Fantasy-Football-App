@@ -60,6 +60,7 @@ UNRANKED = 40                    # market rank of a QB the ADP list does not car
 FORM_PRIOR_STARTS = 3.0          # pseudo-starts at zero points over projection in `form`
 CHANGE_LAST_WEEKS = 2            # no benching in the season's last weeks (as sim_talent.CHANGE_LAST_WEEKS)
 TOP_RANK = 12                    # sim_metrics: a "top-12" QB by market rank
+SWAP_WEEKS = 4                   # `swap_backs`: a healthy benching undone within this many weeks
 
 
 @dataclass(frozen=True)
@@ -86,8 +87,8 @@ def stored() -> dict:
 
 def market_ranks(data: SeasonData) -> dict[int, int]:
     """{QB: his preseason ADP rank among the season's QBs} (data's ADP list; absent: UNRANKED)."""
-    order = sorted((p.adp, pid) for pid, p in data.players.items() if p.position == "QB" and p.adp)
-    return {pid: min(rank, UNRANKED) for rank, (_, pid) in enumerate(order, start=1)}
+    return {pid: min(rank, UNRANKED) for pid, rank in sim_metrics.adp_ranks(data).items()
+            if data.players[pid].position == "QB"}
 
 
 def preseason_ranks(belief: World) -> dict[int, int]:
@@ -240,18 +241,90 @@ def walk(data: SeasonData, starts: Mapping[tuple[str, int], int] | None = None, 
     return rows, holders
 
 
+def swap_backs(data: SeasonData, from_week: int = 1) -> tuple[int, int]:
+    """(healthy benchings, those undone within SWAP_WEEKS), measured the same way on real and simulated seasons
+    (the passing-yards leader, `starters`): a team's starter differs from its last game's, and that one did not
+    play in the game, carries no tag that week or the two after (not hurt) and is still on the team (weeks
+    from_week and 2 to the last minus CHANGE_LAST_WEEKS). Undone: the old starter is the next one other than the
+    new, within SWAP_WEEKS, and the new one carries no tag that week."""
+    by_team: dict[str, dict[int, int]] = defaultdict(dict)
+    for (team, week), pid in starters(data).items():
+        by_team[team][week] = pid
+    changes = undone = 0
+    for team, weeks in by_team.items():
+        order = sorted(weeks)
+        for prev, week in zip(order, order[1:]):
+            old, new = weeks[prev], weeks[week]
+            if (old == new or (old, week) in data.box or _gone(data, old, team, week)
+                    or any((old, w) in data.injuries for w in range(week, week + 3))
+                    or not max(2, from_week) <= week <= data.last_week - CHANGE_LAST_WEEKS):
+                continue
+            changes += 1
+            later = next((w for w in order if w > week and weeks[w] != new), None)
+            undone += (later is not None and later <= week + SWAP_WEEKS and weeks[later] == old
+                       and (new, later) not in data.injuries)
+    return changes, undone
+
+
+_played: list = []               # [(seen, (team games, games of each player))]: the last _Seen's index
+
+
+def _index(seen) -> tuple[dict[str, list[tuple[str, int]]], dict[int, list[tuple[str, int]]]]:
+    """({team: its played games' keys}, {player: the keys of the games he played}) of a sim_world._Seen, built once
+    per _Seen (every team's qb_starts of one belief reads the same one)."""
+    last = _played[0] if _played else None             # one read: another thread may replace it
+    if last is not None and last[0] is seen:
+        return last[1]
+    teams: dict[str, list[tuple[str, int]]] = defaultdict(list)
+    players: dict[int, list[tuple[str, int]]] = defaultdict(list)
+    for key, lines in seen.games.items():
+        teams[key[0]].append(key)
+        for pid in lines:
+            players[pid].append(key)
+    _played[:] = [(seen, (teams, players))]
+    return teams, players
+
+
+def qb_starts(team: str, seen, prior: Mapping[int, float], week: int) -> dict[int, float]:
+    """Each QB's decayed share of the passing yards in the games he was available for (sim_world's docstring), with
+    ROLE_PRIOR_GAMES pseudo-games at his prior. `seen`: sim_world._Seen of the games before `week`."""
+    from services.sim_world import DECAY, ROLE_PRIOR_GAMES
+
+    team_games, games_of = _index(seen)
+    out = {}
+    for pid, share in prior.items():
+        numerator, total_weight = ROLE_PRIOR_GAMES * share, ROLE_PRIOR_GAMES
+        his = games_of.get(pid, ())
+        joined = max((w for t, w in his if t != team), default=0)
+        for game_team, game_week in sorted({*team_games.get(team, ()), *his}):
+            lines = seen.games[(game_team, game_week)]
+            played = pid in lines
+            if not played and (game_team != team or game_week <= joined or (pid, game_week) in seen.hurt):
+                continue                     # another team's game, before he joined, or missed hurt
+            yards = seen.pass_yards[(game_team, game_week)]
+            if yards <= 0:
+                continue
+            decay = DECAY ** max(0, week - 1 - game_week)
+            total_weight += decay
+            numerator += decay * max(0, lines[pid].pass_yds) / yards if played else 0.0
+        out[pid] = numerator / total_weight
+    return out
+
+
 def job_metrics(data: SeasonData, from_week: int = 1, established: Collection[int] = ()) -> dict[str, float]:
     """The realism check's season numbers from `walk` (decisions in weeks >= from_week): healthy job losses (a
     benching, or a fill-in keeping the job), those of a top-TOP_RANK QB by market rank and of an `established`
-    one, and the share of holders back from injury who start again."""
+    one, the share of holders back from injury who start again, and healthy benchings undone (`swap_backs`)."""
     rows = [r for r in walk(data, established=established)[0] if r.week >= from_week]
     lost = [r for r in rows if r.lost]
     back = [r for r in rows if r.kind == "return"]
+    changes, undone = swap_backs(data, from_week)
     return {"QB benched healthy": float(sum(1 for r in lost if r.kind == "week")),
             "QB lost job on return": float(sum(1 for r in lost if r.kind == "return")),
             "QB top-12 lost job": float(sum(1 for r in lost if r.rank <= TOP_RANK)),
             "QB established lost job": float(sum(1 for r in lost if r.established)),
-            "QB back after injury %": 100.0 * sum(1 for r in back if not r.lost) / len(back) if back else float("nan")}
+            "QB back after injury %": 100.0 * sum(1 for r in back if not r.lost) / len(back) if back else float("nan"),
+            "QB healthy benchings": float(changes), "QB benchings undone in 4 wk": float(undone)}
 
 
 def same_starters(sim: SeasonData, real: SeasonData, week: int) -> dict[str, float]:

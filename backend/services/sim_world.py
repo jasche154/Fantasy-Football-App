@@ -24,7 +24,7 @@ A World is everything the game simulator (services/sim_game.py) needs to play an
   averaged with projections: in a simulated season the projections come from the belief itself, and
   averaging them back in pulls every role toward an average player's (a rushing QB's carries toward the
   norm, an efficient receiver's targets up) a little more each week.
-- A QB's starts weight (`_qb_starts`) is the decayed share of passing yards he threw in the games he was
+- A QB's starts weight (`sim_qb.qb_starts`) is the decayed share of passing yards he threw in the games he was
   available for, over ROLE_PRIOR_GAMES pseudo-games at his prior: his team's games since he joined it (a game
   he missed with an injury tag does not count against him) and his games for any other team this season (a
   starter traded in keeps his record). A kicker's is the decayed share of his team's games he kicked.
@@ -206,29 +206,6 @@ def _starts(games: list[tuple[float, dict[int, float]]], prior: Mapping[int, flo
     return {member: value / total_weight for member, value in numerators.items()}
 
 
-def _qb_starts(team: str, seen: "_Seen", prior: Mapping[int, float], week: int) -> dict[int, float]:
-    """Each QB's decayed share of the passing yards in the games he was available for (module docstring), with
-    ROLE_PRIOR_GAMES pseudo-games at his prior."""
-    out = {}
-    for pid, share in prior.items():
-        numerator, total_weight = ROLE_PRIOR_GAMES * share, ROLE_PRIOR_GAMES
-        his = seen.games_of.get(pid, ())
-        joined = max((w for t, w in his if t != team), default=0)
-        for game_team, game_week in sorted({*seen.team_games.get(team, ()), *his}):
-            lines = seen.games[(game_team, game_week)]
-            played = pid in lines
-            if not played and (game_team != team or game_week <= joined or (pid, game_week) in seen.hurt):
-                continue                     # another team's game, before he joined, or missed hurt
-            yards = seen.pass_yards[(game_team, game_week)]
-            if yards <= 0:
-                continue
-            decay = DECAY ** max(0, week - 1 - game_week)
-            total_weight += decay
-            numerator += decay * max(0, lines[pid].pass_yds) / yards if played else 0.0
-        out[pid] = numerator / total_weight
-    return out
-
-
 def _shrink(total: float, volume: float, norm: float, strength: float) -> float:
     return (total + norm * strength) / (volume + strength)
 
@@ -243,23 +220,6 @@ class _Seen:
     kicks: Mapping[tuple[str, int], tuple[int, ...]]          # kickers who played it
     pass_yards: Mapping[tuple[str, int], float]               # team passing yards in that game
     hurt: frozenset[tuple[int, int]] = frozenset()            # (player, week) with an injury tag, played or not
-
-    @cached_property
-    def team_games(self) -> dict[str, list[tuple[str, int]]]:
-        """{team: its played games' keys}."""
-        out: dict[str, list[tuple[str, int]]] = defaultdict(list)
-        for key in self.games:
-            out[key[0]].append(key)
-        return out
-
-    @cached_property
-    def games_of(self) -> dict[int, list[tuple[str, int]]]:
-        """{player: the keys of the games he played}."""
-        out: dict[int, list[tuple[str, int]]] = defaultdict(list)
-        for key, lines in self.games.items():
-            for pid in lines:
-                out[pid].append(key)
-        return out
 
 
 def _seen(known: SeasonData, week: int) -> _Seen:
@@ -330,6 +290,7 @@ def _prior_roles(known: SeasonData, team_of: Mapping[int, str], prior: World | N
 def _team_roles(team: str, seen: _Seen, members: list[int], roles: Mapping[int, tuple[float, float, float]],
                 positions: Mapping[int, str], week: int, other: tuple[float, float]) -> dict[str, dict[int, float]]:
     """{"targets"|"carries"|"starts": {player: weight}} for one team's current players (OTHER included)."""
+    from services import sim_qb          # it imports this module
     league = params()["league"]
     target_games, carry_games, kick_games = [], [], []
     for (game_team, game_week), lines in seen.games.items():
@@ -349,7 +310,7 @@ def _team_roles(team: str, seen: _Seen, members: list[int], roles: Mapping[int, 
     kickers = {pid: roles[pid][2] for pid in members if positions[pid] == "K"}
     return {"targets": _luce(target_games, {**receivers, OTHER: other[0]}, league["targets"]),
             "carries": _luce(carry_games, {**rushers, OTHER: other[1]}, league["carries"]),
-            "starts": {**_qb_starts(team, seen, qbs, week), **_starts(kick_games, kickers)}}
+            "starts": {**sim_qb.qb_starts(team, seen, qbs, week), **_starts(kick_games, kickers)}}
 
 
 BOX_KEYS = ("targets", "rec", "rec_yds", "rec_td", "carries", "rush_yds", "rush_td", "pass_yds", "pass_int")

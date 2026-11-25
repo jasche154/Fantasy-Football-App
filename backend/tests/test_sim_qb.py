@@ -254,8 +254,8 @@ def test_the_belief_keeps_a_starter_who_missed_games_hurt_and_counts_starts_for_
     seen = sim_world._Seen(games={(TEAM, 1): {A: line}, (TEAM, 2): {B: line}, (TEAM, 3): {B: line},
                                   (TEAM, 4): {A: line}, ("LV", 1): {7: line}, ("LV", 2): {7: line}},
                            targets={}, kicks={}, pass_yards=dict.fromkeys(keys, 250.0), hurt=frozenset({(A, 2), (A, 3)}))
-    weights = sim_world._qb_starts(TEAM, seen, {A: 0.5, B: 0.5, 7: 0.05}, 5)
-    healthy = sim_world._qb_starts(TEAM, replace(seen, hurt=frozenset()), {A: 0.5, B: 0.5, 7: 0.05}, 5)
+    weights = sim_qb.qb_starts(TEAM, seen, {A: 0.5, B: 0.5, 7: 0.05}, 5)
+    healthy = sim_qb.qb_starts(TEAM, replace(seen, hurt=frozenset()), {A: 0.5, B: 0.5, 7: 0.05}, 5)
     assert weights[A] > weights[B] and weights[A] > healthy[A]             # weeks missed hurt don't count against him
     assert weights[7] > 0.2 > 0.05                                         # LV's starter traded in keeps his record
 
