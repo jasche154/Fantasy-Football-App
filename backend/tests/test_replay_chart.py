@@ -167,3 +167,39 @@ def test_early_dst_adp_puts_dst1_behind_every_skill_player_drafted_before_150():
              if p.position not in chart.KDST and p.adp is not None and p.adp < chart.KDST_FIRST_PICK]
     assert skill and dst1 > max(skill)
     assert chart.pick_value(chart.pre_picks(data)[fakes.player_id("DST", 1)]) < chart.pick_value(chart.KDST_FIRST_PICK - 1)
+
+
+def test_no_chart_value_ever_tops_the_scale_even_after_the_bye_bump():
+    """2026: Gibbs at 1030 (1000 x BYE_BUMP) on a scale documented as 0-1000."""
+    top = max((v for week in range(1, 15) for v in fakes.fake_knowledge(week).values), key=lambda v: v.healthy_chart)
+    assert top.healthy_chart == chart.CHART_MAX and top.chart <= chart.CHART_MAX
+
+
+def _hot_streak_rise(data, monkeypatch, stand_in: bool) -> tuple[float, dict]:
+    """How far a mid QB's chart rises when his last three games turn into 40-point games (week 6)."""
+    monkeypatch.setattr(chart, "STAND_IN_EXPERTS", stand_in)
+    week, settings = 6, fakes.fake_settings()
+    seen = data.as_of(week)
+    priors = replay_values._priors(seen)
+    rows = [replay_values._row(seen, p, priors[pid], week, seen.team_at(pid, week), 10) for pid, p in seen.players.items()]
+    qbs = sorted((r for r in rows if r["position"] == "QB"), key=lambda r: -r["ros_ppg"])
+    mid = qbs[len(qbs) // 2]["player_id"]
+    hot = [{**r, "recent_points": (40.0, 40.0, 40.0)} if r["player_id"] == mid else r for r in rows]
+    before = chart.base_charts(seen, rows, priors, week, settings.end_week)[0]
+    after = chart.base_charts(seen, hot, priors, week, settings.end_week)[0]
+    return after[mid]["chart"] - before[mid]["chart"], after[mid]
+
+
+def test_without_any_expert_ranks_the_sites_consensus_stands_in_and_damps_a_hot_streak(monkeypatch):
+    """2018-19 have no expert ranks: the model alone swung QBs 124 -> 495 -> 633 in three weeks."""
+    data = replace(fakes.fake_season(), expert_ranks=MappingProxyType({}))
+
+    damped, shown = _hot_streak_rise(data, monkeypatch, True)
+    wild, _ = _hot_streak_rise(data, monkeypatch, False)
+    assert 0 < damped <= (1 - chart.EXPERT_WEIGHT) * wild + 1
+    assert shown["expert_rank"] is None                     # nothing pretends to be an expert rank
+
+
+def test_a_season_with_expert_ranks_never_uses_the_stand_in(monkeypatch):
+    data = fakes.fake_season()
+    assert _hot_streak_rise(data, monkeypatch, True) == _hot_streak_rise(data, monkeypatch, False)

@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import type { ReplayPlayerSort, ReplaySummary, ReplayWireRow } from '../../api/types';
 import { SortableHeader, type SortState } from '../../components/SortableHeader';
-import { EMPTY_VALUE, formatNumber } from '../../lib/format';
+import { EMPTY_VALUE, formatInteger } from '../../lib/format';
 import { buildHash, paths } from '../../router/routes';
 import { DefenseChip } from './gameUi';
 import type { StatColumn } from './playerColumns';
@@ -145,7 +145,7 @@ export function PlayersTable({ game, week, rows, columns, sort, onSort, claimedI
                     {!row.bye && <DefenseChip rating={row.defense} position={row.player.position} />}
                   </td>
                   {columns.map((column) => <td key={column.id} className="num">{column.text(row)}</td>)}
-                  <td className="num replay-players__pin-value">{formatNumber(row.value)}</td>
+                  <td className="num replay-players__pin-value">{formatInteger(row.value)}</td>
                   <td className="replay-players__action replay-players__pin-action">
                     <RowAction game={game} row={row} hasClaim={claimedIds.has(row.player.id)} moves={moves} onAdd={onAdd} onClaim={onClaim} />
                   </td>

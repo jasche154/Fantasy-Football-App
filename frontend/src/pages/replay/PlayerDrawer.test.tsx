@@ -26,7 +26,7 @@ describe('PlayerDrawer card', () => {
     expect(await dialog.findByText('Ankle: limited in practice, expected back week 6.')).toBeInTheDocument();
     expect(dialog.getByText(/Rostered by Sunday Scaries/)).toBeInTheDocument();
     expect(dialog.getAllByRole('term').map((term) => term.textContent)).toEqual(['Games', 'Points', 'Per game', 'Rest of season', 'Trade value']);
-    expect(dialog.getAllByRole('definition').map((value) => value.textContent)).toEqual(['4', '60.40', '15.10', '13.80', '31.5']);
+    expect(dialog.getAllByRole('definition').map((value) => value.textContent)).toEqual(['4', '60.40', '15.10', '13.80', '32']);
   });
 
   it('logs box scores for played weeks only, with @ for away games', async () => {
