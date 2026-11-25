@@ -13,6 +13,7 @@ import type {
   ReplayPhase,
   ReplayPlayerRef,
   ReplayPlayerRow,
+  ReplayPosition,
   ReplayPositionFilter,
   ReplayRecord,
   ReplayTeamRef,

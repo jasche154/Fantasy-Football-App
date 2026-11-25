@@ -346,7 +346,7 @@ def seeded_db():
     """One database holding the fake season, shared by the read-only tests below."""
     engine = _fresh_engine()
     with Session(engine) as session:
-        fakes.seed_db(session, fakes.fake_season())
+        fakes.seed_db(session, fakes.fake_season(), scores=True)
         yield session
     engine.dispose()
 
@@ -370,7 +370,7 @@ def small_db():
 def test_the_raiders_are_oak_before_2020_although_nflverse_says_lv(loaded):
     engine = _fresh_engine()
     with Session(engine) as session:
-        fakes.seed_db(session, fakes.fake_season(2019))
+        fakes.seed_db(session, fakes.fake_season(2019), scores=True)
         old = replay_pool.load_season_data(session, 2019, "half")
     engine.dispose()
 

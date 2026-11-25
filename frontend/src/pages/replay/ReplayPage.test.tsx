@@ -46,6 +46,13 @@ describe('PlayPage', () => {
     expect(document.title).toBe('Sunday Replay · Gridiron Edge');
   });
 
+  it('opens the Matchup tab on the game named by week and team', async () => {
+    const api = mockApi();
+    renderWithProviders(<PlayPage query={{ game: String(GAME_ID), view: 'matchup', week: '3', team: '2' }} />);
+    expect(await currentTab()).toBe('Matchup');
+    await waitFor(() => expect(api.callsTo(`/api/replay/games/${GAME_ID}/matchup`)[0]?.url.search).toBe('?week=3&team_id=2'));
+  });
+
   it('falls back to My Team for an unknown tab and to the lobby for a bad game id', async () => {
     mockApi();
     const { unmount } = renderWithProviders(<PlayPage query={{ game: String(GAME_ID), view: 'nope' }} />);

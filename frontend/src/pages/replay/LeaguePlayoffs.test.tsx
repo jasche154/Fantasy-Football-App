@@ -178,6 +178,34 @@ describe('LeaguePlayoffs once the season is over', () => {
   });
 });
 
+describe('LeaguePlayoffs links to each game\'s matchup', () => {
+  const hrefs = (scope: HTMLElement) => within(scope).queryAllByRole('link').map((link) => link.getAttribute('href'));
+
+  it('opens a played game on the Matchup tab, by week and team', async () => {
+    renderPlayoffs(json(finished()), summary({ phase: 'complete', week: 16 }));
+    const title = await screen.findByRole('list', { name: 'Title bracket' });
+    expect(hrefs(column(/Semi-finals\s*Week 15/, title))).toEqual([
+      `#/play?game=${GAME_ID}&view=matchup&week=15&team=1`, `#/play?game=${GAME_ID}&view=matchup&week=15&team=2`]);
+    const pool = screen.getByRole('region', { name: '5th–12th place Consolation' });
+    expect(hrefs(column(/^Week 16$/, pool))).toEqual([`#/play?game=${GAME_ID}&view=matchup&week=16&team=5`]);
+    expect(within(title).getAllByRole('link')[0]).toHaveAccessibleName(/open the week 15 matchup$/);
+  });
+
+  it('links this week\'s games (their preview) but never a later week, a projected round or an open slot', async () => {
+    const live = finished();
+    renderPlayoffs(json({ ...live, champion: null }), summary({ week: 15 }));
+    const title = await screen.findByRole('list', { name: 'Title bracket' });
+    expect(hrefs(column(/Semi-finals\s*Week 15/, title))).toHaveLength(2);
+    expect(hrefs(column(/Final\s*Week 16/, title))).toEqual([]);              // week 16 hasn't come
+  });
+
+  it('has no links while round one is only projected', async () => {
+    renderPlayoffs(json(PROJECTED), summary({ ...SIX_TEAM_GAME, week: 15 }));
+    const title = await screen.findByRole('list', { name: 'Title bracket' });
+    expect(within(title).queryAllByRole('link')).toEqual([]);
+  });
+});
+
 describe('LeaguePlayoffs errors', () => {
   it('says the bracket could not be loaded', async () => {
     renderPlayoffs(json({ detail: 'boom' }, 500));

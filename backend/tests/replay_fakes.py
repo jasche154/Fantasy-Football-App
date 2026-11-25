@@ -418,11 +418,11 @@ def _player_rows(data: SeasonData) -> list[dict]:
     return rows
 
 
-def _game_rows(data: SeasonData) -> list[dict]:
+def _game_rows(data: SeasonData, scores: bool = False) -> list[dict]:
     return [{"game_id": f"{data.season}_{g.week:02d}_{g.away_team}_{g.home_team}", "season": data.season,
              "week": g.week, "game_type": "REG", "home_team": g.home_team, "away_team": g.away_team,
-             "gameday": g.gameday, "home_score": data.scores.get((g.home_team, g.week)),
-             "away_score": data.scores.get((g.away_team, g.week))} for g in data.schedule.games]
+             "gameday": g.gameday, "home_score": data.scores.get((g.home_team, g.week)) if scores else None,
+             "away_score": data.scores.get((g.away_team, g.week)) if scores else None} for g in data.schedule.games]
 
 
 def _expert_rows(data: SeasonData) -> list[dict]:
@@ -501,13 +501,14 @@ def _projection_rows(data: SeasonData) -> list[dict]:
     return rows
 
 
-def seed_db(session: Session, data: SeasonData) -> None:
+def seed_db(session: Session, data: SeasonData, scores: bool = False) -> None:
     """Write the season into the real tables (players keep their fake ids) and commit.
 
     Afterwards `replay_pool.load_season_data(session, data.season, data.scoring)` returns the same pool,
-    points, usage, projections, injury tags, expert ranks, returns, final scores, teams and schedule. K and DST points must be whole numbers (DST -4
+    points, usage, projections, injury tags, expert ranks, returns, teams and schedule, and with `scores` the
+    final scores (off by default: the live-season tests decide which weeks are final by writing scores). K and DST points must be whole numbers (DST -4
     or more)."""
-    tables = {Player: _player_rows(data), NflGame: _game_rows(data), **_result_rows(data),
+    tables = {Player: _player_rows(data), NflGame: _game_rows(data, scores), **_result_rows(data),
               ReplayAdp: [{"season": data.season, "player_id": pid, "adp": p.adp, "stdev": p.adp_stdev,
                            "source": "ffc", "team": p.adp_team}
                           for pid, p in data.players.items() if p.adp is not None],

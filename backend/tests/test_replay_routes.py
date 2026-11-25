@@ -36,7 +36,7 @@ def _client(data, url: str = "sqlite://") -> Iterator[TestClient]:
                            **({"poolclass": StaticPool} if url == "sqlite://" else {}))
     Base.metadata.create_all(engine)
     with Session(engine) as session:
-        fakes.seed_db(session, data)
+        fakes.seed_db(session, data, scores=True)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
 
     def override() -> Iterator[Session]:
