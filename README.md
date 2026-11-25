@@ -1332,6 +1332,36 @@ trades, IR, playoffs, no hindsight) are the same as in a past season. A new leag
 games so far say). Only the games (and the buzz, below) read the truth; projections, expert ranks, ADP and every CPU decision
 read the belief, so, as in a real season, the public learns the truth only from results.
 
+- **Every game has a pregame line** (`services/sim_lines.py`): an expected margin and total, built only
+  from what is public before the week. Its inputs: each team's offense and defense rating from the points it
+  scored and allowed so far (opponent-adjusted, recent games counting more, home field removed, last
+  season's final rating carried in at 70% and fading as games come in), the belief's own expected points
+  for each side with the players ruled out removed, each side's starting quarterback (his quality, and how
+  far it is from the passer the team's numbers were earned with) and rest (coming off a bye, or a short
+  week). How much each counts is fitted to the Vegas closing lines of 2018-2025, one season held out at a
+  time (`python -m services.sim_lines_fit --fit`, coefficients in `sim_lines.json`), and judged on the real
+  results of the held-out seasons: 2023-2025 weeks 5-18, the line's margin correlates 0.43 with the real
+  margin (Vegas 0.51; the old belief alone 0.38) and its total 0.23 with the real total (Vegas 0.31; old
+  0.21); its margins spread like Vegas's (sd 6.0 against 6.1) with the same home edge (1.6 points). Tried
+  and dropped because they added nothing on held-out seasons: yards per play, team EPA (simulated games
+  have none anyway), a dome flag, capping blowouts. In the live season the real lines already posted for
+  games still to be played (2026: weeks 12 and 13) are used as they are (`sim_setup.posted_lines`). Each
+  simulated game's line is stored as that game's spread and total, as a real season's closing line is.
+- **The result is drawn around the line:** the truth's expected points for each side are the line's plus
+  what the public doesn't know (the truth's own expected points minus the belief's: hidden talent, a starter
+  hurt during the game, a benching), plus each team's hidden strength (offense and defense, a few points each,
+  drawn once a season; the public learns it from the scores), with the line's edge widened a little (real
+  margins run about 1.1 x the Vegas spread). Each side's yards and touchdown rates are then scaled by one
+  factor so its expected points hit that number, and the game is drawn as below; the week's projections are
+  centred on the same line, so they stay unbiased. A team's touchdowns are drive-limited (their total is a
+  binomial over a handful of "drives" around its expected touchdowns, then shared out play by play), because
+  independent plays made scores too spread out once team strength was right. A game tied after regulation
+  goes to **overtime**: one side wins it with a field goal or a touchdown (credited to a receiver or a
+  rusher, so the box score still adds up), and about 9% of overtimes end tied, so ties stay as rare as real
+  ones (0.29% of games). The hidden strength, the widened edge and the drive count are tuned so simulated
+  results against the sim's own line look like real results against Vegas (2022-2025 weeks 6-18: line vs
+  result correlation 0.49 in both, results around the line spread 12.5 against 12.0, margins of 21+ 15.6%
+  against 16.0%, 35+ 1.3% in both, team scores sd 9.9 against 9.8).
 - **Games are played top-down,** so box scores always add up (`services/sim_game.py`): first each
   team's targets and carries (its volume, a shared game draw for shootouts, the leader running more and the
   trailer passing more), then they are split among the active players by their roles (an injured player's
@@ -1396,13 +1426,18 @@ read the belief, so, as in a real season, the public learns the truth only from 
 - **Projections, expert ranks and ADP** are computed from the belief each week (`services/sim_market.py`):
   the belief is refitted from the games played so far (recent games count more), a projection is a
   player's expected points in that week's game with the players ruled out removed (so their teammates
-  rise), expert ranks are each position ordered by expected value with a little noise (about 8%), and ADP is
+  rise), expert ranks are each position ordered by expected value (with each team's scoring from the line
+  model, as experts know which offenses score) with a little noise (about 8%, a third of that at quarterback,
+  whose values are bunched), and ADP is
   a 12-team draft in the league's scoring by points over replacement; kickers and defenses take the real
   average ADP of the Nth one drafted. Going into a whole simulated season the market also leans on last
   season's points a game, and the **preseason expert ranks** (what the draft room's Rank order comes from)
   follow that ADP with the same ~8% noise, because real August experts and ADP agree closely (rank
   correlation 0.98 over the real top 150 in 2022-2025; the simulated ones now 0.99, from about 0.86 when the
-  experts ignored last season).
+  experts ignored last season). The weekly experts **revise slowly**: each player's noise carries from week to
+  week (90% of last week's), and the value a healthy player is ranked on moves 40% of the way to this week's
+  (a player ruled out is re-ranked at once), so a healthy star no longer jumps from QB1 to QB9 and back: a
+  healthy top-16 quarterback's expert rank moves about one place a week, as real ones do (it moved about five).
 
 **2027 specifics:**
 
@@ -1529,7 +1564,15 @@ how its preseason expert ranks agree with its ADP). Both modes end with an injur
 ADP skill players, new injuries per game played (he played and missed his team's next game with any injury
 tag: a real player ruled out on game day often keeps his Q or D, while a simulated one is always O or IR, so
 counting only O/IR would undercount the real rate by about a third) and the share of team games missed,
-with the real value, the target and the simulated one.
+with the real value, the target and the simulated one. Both modes also report whole games
+(`sim_metrics_games`: the pregame line against the result, a real season's Vegas line and a simulated one's own,
+the spread of margins, blowouts of 21+, 28+ and 35+, blowouts in the most lopsided and the closest fifth of
+games, home wins, ties, team scores and how often a rare score such as 5 shows up) and the expert ranks
+(week-to-week churn of healthy players and agreement with the projections, by position).
+
+```bash
+python -m services.sim_lines_fit [--fit] [--seasons 2018-2025] [--refresh]   # the pregame line model (sim_lines.json)
+```
 
 ## API reference
 
