@@ -36,7 +36,9 @@ from services.injuries import InjuryContext, build_context
 from services.valuation import Valuation, build_valuation
 from services.threshold_odds import threshold_odds
 from services.weekly_adjust import Adjusted, Scenario, Step, adjust, explain
-from services.weekly_model import Matchup, matchup_for, model_stats, points_from_stats, props_line, weekly_rate
+from services.weekly_model import (
+    Matchup, matchup_for, model_stats, points_from_stats, props_line, snap_trend, weekly_rate,
+)
 
 # The starting weights. Each completed week nudges them toward what actually predicted best
 # (services/weight_learning.py); WeeklyRankings.weights holds the ones a build used.
@@ -284,7 +286,8 @@ def blend(candidates: Mapping[int, _Candidate], valuation: Valuation, week: int,
         steps = explain(candidate.name, candidate.position, rates.get(candidate.player_id),
                         valuation.priors.get(candidate.player_id), matchup, sources, own_weights, SOURCE_LABELS,
                         combined, tilt, adjusted, context.boosts.get(candidate.player_id, ()),
-                        context.returning.get(candidate.player_id, ()))
+                        context.returning.get(candidate.player_id, ()),
+                        snap_trend(seasons[candidate.player_id]) if candidate.player_id in seasons else 0.0)
         if "model" in sources and abs(model_factor[0] - 1.0) >= 0.01:
             steps = (*steps[:1], Step("Model adjustments", f"x{model_factor[0]:.2f}",
                                       f"Applied to the model's number only: {model_factor[1]}"), *steps[1:])

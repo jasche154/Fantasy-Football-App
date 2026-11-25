@@ -33,6 +33,13 @@ from services.scoring import ScoringSettings, reception_points
 SOS_WEIGHT = 0.5
 IMPLIED_TOTAL_WEIGHT = 0.5
 RECENCY_HALF_LIFE: float | None = 4.0     # games; None = every game this season counts equally
+# Snap-share trend (rate x (1 + USAGE_TREND_WEIGHT x trend)): one weight for every position, least
+# squares on 2021-2025 backtest player-weeks. Fit on earlier seasons only, it lowered held-out RMSE
+# and raised rank correlation in 2023, 2024 and 2025 (README, "Weekly model"). Per-position weights
+# and the target / carry / air-yards share, WOPR, opportunity, separation and RYOE trends didn't.
+USAGE_TREND_WEIGHT = 0.10
+TREND_RECENT_GAMES = 3
+TREND_MIN_GAMES = 5
 RANGES_PATH = Path(__file__).with_name("projection_ranges.json")
 
 
@@ -45,15 +52,18 @@ class WeeklyModelSettings:
     implied_weight: float = IMPLIED_TOTAL_WEIGHT
     use_injuries: bool = True
     use_factors: bool = True        # calibration + EPA matchup + weather (services/projection_factors.py)
+    usage_weight: float = USAGE_TREND_WEIGHT
 
     def describe(self) -> str:
         recency = "season" if self.half_life is None else f"half-life {self.half_life:g}"
         return (f"{recency}, sos^{self.sos_weight:g}, implied^{self.implied_weight:g}, "
-                f"injuries {'on' if self.use_injuries else 'off'}, factors {'on' if self.use_factors else 'off'}")
+                f"injuries {'on' if self.use_injuries else 'off'}, factors {'on' if self.use_factors else 'off'}, "
+                f"snap trend {self.usage_weight:g}")
 
 
-def weekly_rate(player: PlayerSeason, prior_ppg: float | None, half_life: float | None = RECENCY_HALF_LIFE) -> float:
-    """Recency-weighted points per game, shrunk toward last season.
+def weekly_rate(player: PlayerSeason, prior_ppg: float | None, half_life: float | None = RECENCY_HALF_LIFE,
+                usage_weight: float = USAGE_TREND_WEIGHT) -> float:
+    """Recency-weighted points per game, shrunk toward last season, scaled by the snap-share trend.
 
     Each game counts 0.6 x actual + 0.4 x expected points (usage is stickier than results);
     a game half_life games ago counts half as much as the latest. With no prior, no shrinkage.
@@ -65,10 +75,26 @@ def weekly_rate(player: PlayerSeason, prior_ppg: float | None, half_life: float 
               if g.expected_points is not None else g.fantasy_points for g in games]
     weights = _recency_weights(len(games), half_life)
     rate = sum(w * v for w, v in zip(weights, values)) / sum(weights)
-    if prior_ppg is None:
-        return round(rate, 2)
-    shrink = len(games) / (len(games) + PRIOR_STRENGTH_GAMES)
-    return round(shrink * rate + (1 - shrink) * prior_ppg, 2)
+    if prior_ppg is not None:
+        shrink = len(games) / (len(games) + PRIOR_STRENGTH_GAMES)
+        rate = shrink * rate + (1 - shrink) * prior_ppg
+    return round(rate * (1 + usage_weight * snap_trend(player)), 2)
+
+
+def snap_trend(player: PlayerSeason) -> float:
+    """Last 3 games' average snap share over the season's, minus 1, within +-1 (0 before 5 games).
+
+    A rising share is a growing role the recency weights haven't fully caught up with yet.
+    """
+    games = player.games
+    if len(games) < TREND_MIN_GAMES:
+        return 0.0
+    season = [g.snap_pct for g in games if g.snap_pct is not None]
+    recent = [g.snap_pct for g in games[-TREND_RECENT_GAMES:] if g.snap_pct is not None]
+    if not recent or not sum(season):
+        return 0.0
+    trend = (sum(recent) / len(recent)) / (sum(season) / len(season)) - 1
+    return max(-1.0, min(1.0, trend))
 
 
 def _recency_weights(count: int, half_life: float | None) -> list[float]:

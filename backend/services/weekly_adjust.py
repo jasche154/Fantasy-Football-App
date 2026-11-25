@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from services.injuries import Availability, Boost, InjuryContext
 from services import score_ranges
 from services.weight_learning import source_shares
-from services.weekly_model import Matchup, range_for
+from services.weekly_model import USAGE_TREND_WEIGHT, Matchup, range_for
 
 PRICED_IN = 0.1            # teammates below this chance to play are already priced in by outside sources
 
@@ -91,14 +91,18 @@ def adjust(position: str, blended: float, tilt: float, matchup: Matchup, model_s
 def explain(name: str, position: str, rate: float | None, prior: float | None, matchup: Matchup,
             sources: Mapping[str, object], weights: Mapping[str, float], labels: Mapping[str, str],
             blended: float, tilt: float, adjusted: Adjusted, boosts: tuple[Boost, ...],
-            returning: tuple = ()) -> tuple[Step, ...]:
+            returning: tuple = (), snap_trend: float = 0.0) -> tuple[Step, ...]:
     """Plain-English steps from inputs to the final projection."""
     steps = []
     if rate is not None:
         prior_text = f", shrunk toward last season's {prior:.1f}" if prior is not None else ""
+        effect = USAGE_TREND_WEIGHT * snap_trend
+        trend_text = (f" His snap share over the last 3 games is {abs(snap_trend):.0%} "
+                      f"{'above' if snap_trend > 0 else 'below'} his season average ({effect:+.0%} to the rate)."
+                      if abs(effect) >= 0.01 else "")
         steps.append(Step("Recent production", f"{rate:.1f} pts/game",
                           "Recent games count more (a game four weeks ago counts half); each game blends 60% actual "
-                          f"and 40% usage-based expected points{prior_text}."))
+                          f"and 40% usage-based expected points{prior_text}.{trend_text}"))
     venue = "home" if matchup.home else "away"
     rank_text = f" (#{matchup.sos_rank} easiest vs {position})" if matchup.sos_rank else ""
     steps.append(Step("Matchup", f"x{matchup.sos_factor:.2f} defense, x{matchup.implied_factor:.2f} Vegas",

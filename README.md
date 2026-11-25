@@ -350,6 +350,12 @@ season left out.
 
 The grid search (`--ablation` for the table above) chose these settings:
 - **Recency:** a half-life of 4 games (a game four weeks ago counts half).
+- **Snap-share trend:** the rate is multiplied by `1 + 0.10 x trend`, where trend = the last 3
+  games' average snap share / the season's average - 1 (capped at +-1, 0 before 5 games or
+  without snap counts). A WR whose snaps rose from 60% to 78% over the last 3 games gets about
+  +3%. "Why?" mentions it under Recent production when it moves the rate 1% or more. One weight
+  for every position (`USAGE_TREND_WEIGHT` in `services/weekly_model.py`), least squares on
+  2021-2025 backtest player-weeks; `--ablation` includes a run without it.
 - **Vegas:** implied team total^0.5.
 - **Schedule strength: 0.5.** Inside the model it adds nothing beyond Vegas lines, which
   already price the defense. It's kept at 0.5, at a cost of about 0.02 MAE, because schedule
@@ -364,11 +370,38 @@ the 10th/90th percentile of actual ÷ projected points.
 - Example: a WR projected for 16+ has a floor of about 0.40× his projection (a 20-point
   projection floors near 8, not 2).
 
+### Usage signals tested (2026-11)
+Each candidate was fit on earlier seasons only and scored on the next one (2023 fit on 2021–22,
+2024 on 2021–23, 2025 on 2021–24), same player-weeks as the production backtest. Kept only if
+RMSE and rank correlation both improved in 2024 and 2025 (and not worse in 2023).
+
+| Candidate | 2023 RMSE / rank r | 2024 RMSE / rank r | 2025 RMSE / rank r | Result |
+|---|---|---|---|---|
+| Production before | 6.703 / 0.6321 | 6.871 / 0.6314 | 6.660 / 0.6457 | |
+| Actual vs expected points weight (now 60/40; fitted 0.6, 0.6, 0.7) | 6.703 / 0.6321 | 6.871 / 0.6315 | 6.662 / 0.6458 | dropped: 60/40 is already the fitted optimum |
+| Same, per position | 6.702 / 0.6323 | 6.874 / 0.6303 | 6.663 / 0.6455 | dropped |
+| Faster half-life for expected points | 6.705 / 0.6321 | 6.875 / 0.6304 | 6.661 / 0.6451 | dropped (training picked a slower one) |
+| **Snap-share trend, one weight** | 6.703 / 0.6323 | **6.866 / 0.6317** | **6.658 / 0.6468** | **kept** |
+| Snap-share trend, per position | 6.708 / 0.6291 | 6.866 / 0.6321 | 6.654 / 0.6471 | dropped: 2023 worse, weights flip sign |
+| Target-share trend | 6.711 / 0.6302 | 6.873 / 0.6316 | 6.657 / 0.6464 | dropped |
+| Carry-share trend | 6.701 / 0.6320 | 6.869 / 0.6316 | 6.659 / 0.6459 | dropped: within noise |
+| Air-yards-share trend | 6.705 / 0.6316 | 6.865 / 0.6317 | 6.658 / 0.6459 | dropped: 2023 worse, sign says mean reversion |
+| WOPR trend | 6.710 / 0.6306 | 6.871 / 0.6310 | 6.657 / 0.6467 | dropped |
+| Opportunity (carries + targets) trend | 6.715 / 0.6291 | 6.880 / 0.6305 | 6.661 / 0.6455 | dropped |
+| Expected-points trend | 6.713 / 0.6296 | 6.895 / 0.6291 | 6.661 / 0.6456 | dropped |
+| NGS separation (WR/TE) | 6.702 / 0.6312 | 6.872 / 0.6330 | 6.660 / 0.6461 | dropped |
+| NGS rush yards over expected per carry (RB) | 6.708 / 0.6319 | 6.862 / 0.6322 | 6.669 / 0.6455 | dropped |
+
+Trends are the last 3 games' average over the season's average, minus 1. The snap trend's gain is
+small (about 0.1% RMSE; a week-clustered bootstrap puts it below zero in 100% / 84% of draws for
+2024 / 2025), so it is a nudge, not a new signal. Expected points already carry most of what the
+usage shares know. FTN route participation isn't loaded, so it wasn't tested.
+
 ### Model adjustments: calibration, EPA matchup, weather
 `python -m services.projection_factors --fit` refits these and prints how they do on held-out seasons.
 - **What it does:** multiplies the model's number, and only the model's (props and experts
   already price matchups and weather), by `1 + b . x` per position:
-  - **Calibration:** the raw model ran 3–11% high depending on position.
+  - **Calibration:** the raw model runs 3–12% high depending on position.
   - **EPA matchup:** the opponent's EPA allowed per dropback and per run, and its sack rate,
     from data before the week.
   - **Weather:** wind over 10 mph and cold under 40°F outdoors, and domes.
@@ -388,14 +421,18 @@ the 10th/90th percentile of actual ÷ projected points.
 
 | Held-out season | RMSE | MAE | Rank correlation |
 |---|---|---|---|
-| 2024 (fit on 2021–23) | 7.71 → **7.55** | 6.05 → **5.85** | 0.526 → **0.529** |
-| 2025 (fit on 2021–24) | 7.65 → **7.45** | 6.01 → **5.77** | 0.502 → **0.506** |
+| 2024 (fit on 2021–23) | 6.96 → **6.89** | 5.35 → **5.18** | 0.630 → **0.631** |
+| 2025 (fit on 2021–24) | 6.80 → **6.69** | 5.20 → **4.99** | 0.638 → **0.642** |
+
+(Refit with the snap-share trend and the current injury layer. The first fit, on the older model,
+went 7.71 → 7.55 and 7.65 → 7.45 RMSE; the "before" model has since improved, so there is less
+left for the factors to fix.)
 
 Most of the gain is calibration (getting the level right). The matchup and weather terms add
 a little to ranking; Vegas totals already price in most of what they know.
 
-**Overfitting check.** Each season is scored by a fit on earlier seasons only. The held-out
-gain (−0.19 to −0.21 RMSE) matches the in-sample gain (7.74 → 7.53 on 2021–24), and the
+**Overfitting check** (first fit). Each season is scored by a fit on earlier seasons only. The held-out
+gain (−0.19 to −0.21 RMSE) matched the in-sample gain (7.74 → 7.53 on 2021–24), and the
 results barely move between ridge 0 and 2000, so the few adjustment terms are not memorizing
 noise. The production ridge (20) stays. Learned source weights move in small capped steps.
 
