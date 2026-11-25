@@ -35,7 +35,7 @@ import statistics
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 
-from services import replay_personas, replay_state as rs
+from services import replay_fans, replay_personas, replay_state as rs
 from services.replay_pool import SKILL, SeasonData
 from services.replay_state import Settings, Shop, State, Team
 from services.replay_values import Knowledge, ReplayValue
@@ -146,7 +146,10 @@ def _slumping(value: ReplayValue) -> bool:
 
 def _worry(state: State, value: ReplayValue, team: Team, hurt: Callable[[int], bool]) -> float | None:
     """His worry (> 0) when this manager would shop him now: worried enough, slumping, not trade locked and not
-    maybe hurt (a manager never frets out loud about a player who may be injured); else None."""
+    maybe hurt (a manager never frets out loud about a player who may be injured), and not a fan's own team's
+    player (he never shops those); else None."""
+    if replay_fans.cheers_for(team, value.team):
+        return None
     felt = feeling(value, replay_personas.now(state, team), team.hype)
     if felt is None or felt.strength > -SHOP_WORRY or not _slumping(value) or rs.retrade_locked(state, value.player_id):
         return None

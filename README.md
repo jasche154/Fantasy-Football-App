@@ -1144,17 +1144,23 @@ that week's games on; only scoring a week reads its real points.
   the user more than 2 points ahead of the best measured (all at or below even except the stasher, +1.2%).
   Leagues saved before these styles keep their old personas, but the need bonus and the "high on" mark-up apply
   to their CPUs too. A haggler's "opening offer" line and a fan's refusal of a rival's player can give the style
-  away before the week-3 tendency hint does (intended). Panicky and gambler CPUs are also **emotional**: they price a
+  away before the week-3 tendency hint does (intended). A fan never shops his own team's players, nor sends a
+  worried line about one; a stasher's worried line is about a cold streak (he only buys and holds players coming
+  back from injury). Panicky and gambler CPUs are also **emotional**: they price a
   hype move at 1.25x its calibrated size (`replay_personas.HYPE`, at most 8 chart points more), both when
   buying and when holding; the rest stay calm. Small on purpose: Javonte Williams' week-2 jump of 15 points
   becomes about 19 to an emotional CPU. **Counters:** a CPU that turns down a deal on value alone may
   answer with a counter offer it would take (`services/replay_counter.py`; one roll and at most one counter
   per CPU per week). A CPU that says no tells you why in one line in its voice, under its name in the trade
-  window and in the trade history (`Offer.reply`): your player is a rival's (a fan), no roster or lineup room,
-  it is high on the player you asked for and would have taken the deal without that mark-up, it would take the
-  deal without the starter it loses (or if what it gets filled a need rather than a position where it is deep),
-  or not enough value: the first that is true, each tested by taking that one term away
-  (`services/replay_trade_reasons.py`); shown under Offers for you (an offer lapses when the week is played: the hub warns
+  window and in the trade history (`Offer.reply`). A league rule comes first, in his voice: a player in the deal
+  was traded in the last 2 weeks, he has made his 3 trades this week, he has to sort out his IR first, or the deal
+  would leave you a starting slot nobody can fill. Then: your player is a rival's (a fan), no roster or lineup
+  room, it is high on the player you asked for and would have taken the deal without that mark-up, it loses
+  lineup value that sank the deal (without the loss it would take it, or the loss is bigger than the value gap
+  left; the "Value is too far apart" sentence then leads with that loss), what it gets would only fill positions
+  where it is deep, or value: "close" when it needed at most 15% more than you offered, a lowball beyond that.
+  The first that is true, each tested by taking that one term away (`services/replay_trade_reasons.py`); a
+  declined proposal always gets a reply; shown under Offers for you (an offer lapses when the week is played: the hub warns
   while one is waiting);
   you can counter a CPU's offer from the trade builder (the offer is marked "countered"). The **deadline**:
   trades are open through week 11 and its waiver phase, and close when you press Sim to Wednesday after

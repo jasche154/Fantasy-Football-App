@@ -2000,11 +2000,11 @@
    "Trying to move on from {player}. Take a look."
   ],
   "stasher": [
-   "{you}, {player} isn't part of my long plan. Offer attached.",
-   "Moving {player} while he still has value. Interested?",
-   "I don't love where {player} is headed. Take a look.",
-   "{player} is the one piece I won't wait on. Here's my offer.",
-   "Here's a deal for {player}, {you}. My patience has a limit."
+   "{you}, {player} has gone cold, and I only wait on players coming back, not slumps. Offer attached.",
+   "{player} is in a cold stretch. Not my kind of wait. Interested?",
+   "I'll hold a player who's out, not one who's slumping. {player} for this?",
+   "{player}'s slump isn't the sort of thing I stash. Take a look.",
+   "Here's a deal for {player}, {you}. Cold streaks aren't my game."
   ],
   "haggler": [
    "{you}, special offer: {player}, priced to move.",

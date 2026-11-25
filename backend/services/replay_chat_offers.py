@@ -3,7 +3,7 @@ turns the user's proposal down (`decline_reply`). Re-exported by replay_chat; li
 
 - `label_offers`: every new CPU offer to the user gets his one-line reason (Offer.message), the first that fits:
   worried about a player he sends (one he is shopping, or one he feels worried about who nobody could think was
-  hurt); a counter (a haggler answering the user declining his own opening offer: offer_haggle_counter, else
+  hurt; never a fan's own team's player); a counter (a haggler answering the user declining his own opening offer: offer_haggle_counter, else
   offer_counter); a haggler's opening offer (offer_haggle: it says it is an opening offer); high on a player
   he asks for; buying low (offer_buy_low: a player he asks for is slumping, or out with a return date); short at
   a position (offer_need: he asks for a player at a position he needs, `replay_styles.position_needs`, the one
@@ -37,9 +37,9 @@ def _offer_kind(state: State, settings: Settings, know: Knowledge, played: Seaso
     cpu = rs.team(state, offer.from_team)
     persona = replay_personas.now(state, cpu)
     shopped = rs.markdowns(state, cpu.id)
-    worried = [pid for pid in offer.give if pid in shopped or (
+    worried = [pid for pid in offer.give if not replay_fans.cheers_for(cpu, know.by_id[pid].team) and (pid in shopped or (
         (felt := replay_mood.feeling(know.by_id[pid], persona, cpu.hype)) and felt.kind == "worried"
-        and not might_be_hurt(know, played, pid, state.week - 1))]
+        and not might_be_hurt(know, played, pid, state.week - 1)))]
     if worried:     # the player he is shopping first, so the offer names the one his shop message did
         return "offer_worried", min(worried, key=lambda pid: pid not in shopped)
     if offer.counter_to is not None:
