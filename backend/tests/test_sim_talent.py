@@ -6,7 +6,7 @@ from types import MappingProxyType
 import numpy as np
 import pytest
 
-from services import sim_talent, sim_world
+from services import sim_market, sim_talent, sim_world
 from tests import replay_fakes as fakes
 
 
@@ -67,7 +67,7 @@ def test_a_whole_season_draws_the_talent_its_regressed_belief_cannot_know(belief
 
 
 def test_stars_never_bust_and_rumours_spare_them(belief):
-    ranks = sim_talent.public_ranks(belief)
+    ranks = sim_market.position_ranks(belief)
     stars = {pid for pid, rank in ranks.items() if rank <= sim_talent.STAR_RANK}
     busted = {c.player_id for seed in range(40) for c in sim_talent.truth(belief, seed, 1, 17).changes if c.kind == "bust"}
     assert busted and not busted & stars
@@ -75,13 +75,6 @@ def test_stars_never_bust_and_rumours_spare_them(belief):
     assert rumors["bust"] and not set(rumors["bust"]) & stars
     assert rumors["bench"] == {}                         # job-in-danger rumours come from sim_qb_jobs only
     assert sim_talent.rumors(belief, ranks, {7: 0.3})["bench"] == {7: 0.3}
-
-
-def test_the_starters_are_ranked_among_the_starters(belief):
-    ranks = sim_talent.public_ranks(belief)
-    starters = {max((p for p in belief.roster(t) if p.position == "QB"), key=lambda p: (p.starts, -p.player_id)).player_id
-                for t in belief.teams if any(p.position == "QB" for p in belief.roster(t))}
-    assert sorted(ranks[pid] for pid in starters) == list(range(1, len(starters) + 1))
 
 
 def test_rookies_grow_after_mid_season_at_the_fitted_rate(belief):

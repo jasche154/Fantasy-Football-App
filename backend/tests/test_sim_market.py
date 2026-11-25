@@ -79,11 +79,11 @@ def test_standard_scoring_moves_a_pass_catching_back_down(belief):
 
 def test_buzz_hints_most_changes_and_is_right_about_as_often_as_promised(belief):
     true = wrong = hinted = changed = 0
-    ranks = sim_talent.public_ranks(belief)
+    ranks = sim_market.position_ranks(belief)
     rumors = sim_talent.rumors(belief, ranks)
     for seed in range(40):
         truth = sim_talent.truth(belief, seed, 1, 17)
-        rate = sim_market.expected_hints(sim_talent.expected_changes(belief, ranks, 1, 17), 17)
+        rate = sim_market.expected_hints(sim_talent.expected_changes(belief), 17)
         for week in range(1, 18):
             notes = sim_market.buzz(truth.changes, belief, week, np.random.default_rng([seed, week]), rate, (), rumors)
             real = {c.player_id for c in truth.changes if c.week == week}

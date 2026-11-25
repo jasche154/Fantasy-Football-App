@@ -49,7 +49,6 @@ from services.sim_world import Player, RoleChange, Team, World, params
 LEADS = {"RB": 1, "WR": 2, "TE": 1}    # this many per position count as a team's lead players
 CHANGE_LAST_WEEKS = 2            # no new role change in the season's last weeks
 STAR_RANK = 12                   # the public's top this many at a position: no bust, no false rumour
-UNRANKED = 32                    # the rank of a player the public does not rank
 SEASON_RATES = ("catch", "ypc", "rec_td", "ypr", "rush_td", "quality", "int_rate")
 MAX_CATCH = 0.95
 DEFAULTS = {"role_sd": 0.30, "eff_sd": 0.12, "quality_sd": 0.08, "evidence": 6.0, "floor": 0.35,
@@ -110,20 +109,6 @@ def _ranked(players: list[Player], position: str) -> list[Player]:
     return sorted((p for p in players if p.position == position), key=lambda p: (-(p.targets + p.carries), p.player_id))
 
 
-def _starter(qbs: list[Player]) -> Player:
-    return max(qbs, key=lambda p: (p.starts, -p.player_id))
-
-
-def public_ranks(belief: World) -> dict[int, int]:
-    """{player: the public's rank at his position} (sim_market.position_ranks), except that each team's starting
-    QB (most starts weight) is ranked among the starting QBs only."""
-    ranks = sim_market.position_ranks(belief)
-    starters = [_starter(qbs) for team in sorted(belief.teams)
-                if (qbs := [p for p in belief.roster(team) if p.position == "QB"])]
-    order = sorted(starters, key=lambda p: (ranks.get(p.player_id, UNRANKED), p.player_id))
-    return {**ranks, **{p.player_id: rank for rank, p in enumerate(order, start=1)}}
-
-
 def _roles(team_players: list[Player], ranks: Mapping[int, int]) -> tuple[list[Player], list[Player]]:
     """(leads who may bust: not a top-STAR_RANK player at his position, backups who may break out)."""
     leads, backups = [], []
@@ -169,7 +154,7 @@ def rumors(belief: World, ranks: Mapping[int, int], bench: Mapping[int, float] |
     return out
 
 
-def expected_changes(belief: World, ranks: Mapping[int, int], from_week: int, last_week: int) -> float:
+def expected_changes(belief: World) -> float:
     """The true breakouts and busts a season makes on average (with sim_qb_jobs.expected_benchings, sizes the
     false buzz: sim_market.expected_hints)."""
     knobs = settings()
@@ -209,7 +194,7 @@ def truth(belief: World, seed: int, from_week: int, last_week: int, rookies: Col
         season = replay_state.rng(seed, "sim", "offseason").standard_normal((len(ids), len(SEASON_RATES)))
         players = {pid: _offseason(players[pid], season[i], knobs) for i, pid in enumerate(ids)}
     first, last = change_weeks(from_week, last_week)
-    ranks = public_ranks(belief)
+    ranks = sim_market.position_ranks(belief)
     changes = []
     for team in names:
         team_dice = replay_state.rng(seed, "sim", "changes", team)
