@@ -33,6 +33,7 @@ TOP_FINISH, BREAKOUT_ADP, BUST_FINISH = 12, 24, 24
 TOP_ADP_FOR_MISSED = 150
 BIG_GAMES = (25, 30, 35)         # skill games of this many points or more, counted
 LEADERS = (1, 6, 12, 24)         # leaderboard: mean points per game of the top N finishers at a position
+SPLIT_WEEK, HALF_GAMES = 9, 4    # second_half: weeks 1-9 against 10 on, this many games in each
 
 
 def adp_ranks(data: SeasonData) -> dict[int, int]:
@@ -231,7 +232,22 @@ def rookies(data: SeasonData, ids: set[int]) -> dict[str, float]:
     later = [pid for pid in qbs if pid not in first and starts.get(pid)]
     return {"rookie ADP vs finish r": spearman([data.players[p].adp for p in drafted], [-totals.get(p, 0.0) for p in drafted]),
             "rookie top-24 finishes": float(top24), "rookie QB wk1 starters": float(len(first)),
-            "rookie QB later starters": float(len(later))}
+            "rookie QB later starters": float(len(later)), **second_half(data, ids)}
+
+
+def second_half(data: SeasonData, rookies: set[int]) -> dict[str, float]:
+    """Points a game after SPLIT_WEEK minus before, for the backs and receivers with HALF_GAMES games in each
+    half: the rookies' mean and the veterans' (rookies grow, sim_talent.growth)."""
+    games: dict[int, list[list[float]]] = defaultdict(lambda: [[], []])
+    for (pid, week), points in data.actual.items():
+        if pid in data.players and data.players[pid].position in ("RB", "WR", "TE"):
+            games[pid][week > SPLIT_WEEK].append(points)
+    change = {pid: float(np.mean(b) - np.mean(a)) for pid, (a, b) in games.items()
+              if len(a) >= HALF_GAMES and len(b) >= HALF_GAMES}
+    mine = [v for pid, v in change.items() if pid in rookies]
+    rest = [v for pid, v in change.items() if pid not in rookies]
+    return {"rookie 2nd-half ppg change": float(np.mean(mine)) if mine else float("nan"),
+            "veteran 2nd-half ppg change": float(np.mean(rest)) if rest else float("nan")}
 
 
 def adp_agreement(data: SeasonData, real: SeasonData, rookies: Iterable[int] = (),

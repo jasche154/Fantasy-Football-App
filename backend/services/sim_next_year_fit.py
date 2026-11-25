@@ -52,7 +52,7 @@ from services import replay_pool, sim_next_year, sim_world
 from services.replay_adp_format import TWO_QB
 from services.sim_metrics import qb_starts
 from services.replay_pool import SeasonData
-from services.sim_next_year import PATH, VOLUME_MIN, premium_at, volume
+from services.sim_next_year import PATH, RECEIVER_RATES, RECEIVERS, VOLUME_MIN, premium_at, volume
 from services.sim_offseason import Rookie
 from services.sim_schedule import TEAMS
 from services.sim_draft_picks import draft_picks
@@ -73,6 +73,7 @@ DRAFT_HISTORY_FROM = 1995
 RAW = {"catch": ("rec", "targets", 20), "ypc": ("rec_yds", "rec", 15), "rec_td": ("rec_td", "rec", 15),
        "ypr": ("rush_yds", "carries", 30), "rush_td": ("rush_td", "carries", 30)}    # numerator, volume, minimum
 QB_SHRINK = {"quality": 150.0, "int_rate": 250.0}     # sim_world.EFFICIENCY_PRIOR, in pass attempts
+QB_RUSHING = ("ypr", "rush_td")                 # a QB's rates fitted on QBs alone
 TEAM_FIELDS = ("targets", "carries", "pass_def", "rush_def", "takeaways")
 PREMIUM_MISSING = 300.0                         # premium fit: a rookie off an ADP list (real or ours) counts as this
 # the a and b searched; b <= 0: a later pick never carries more premium than an earlier one (free, the line rose
@@ -144,6 +145,7 @@ def observations(session, seasons: list[int]) -> dict[str, list[dict]]:
                 continue
             veterans.append({"position": was.position, "experience": exp[pid], "games": (was.games, now.games),
                              "volume": (volume(was), volume(now)), "raw": dict(raw.get(pid, {})),
+                             "passer": (old.teams[was.team].passer, new.teams[now.team].passer),
                              **{name: (getattr(was, name), getattr(now, name)) for name in (*RAW, *QB_SHRINK)}})
         teams += [{name: (getattr(old.teams[t], name), getattr(new.teams[t], name)) for name in TEAM_FIELDS}
                   for t in old.teams if t in new.teams]
@@ -197,20 +199,31 @@ def _age_fit(rows: list[dict], position: str) -> tuple[dict, float, float]:
             round(min(1.0, 1.0 + float(solved[-1])), 4), round(center, 4))      # never anti-regression
 
 
+def _passer_scale(row: dict, name: str, which: int) -> float:
+    """A receiver's yards and TDs per catch are measured with his team's usual passer: divided out, so the
+    fit (and sim_next_year) regress his own part and the QB's apart (the QB's with his quality)."""
+    return row["passer"][which] if name in RECEIVER_RATES and row["position"] in RECEIVERS else 1.0
+
+
 def _efficiency_fit(rows: list[dict]) -> dict:
+    """{rate: keep}, plus "QB ypr" / "QB rush_td": a QB's rushing is fitted on QBs alone (a scrambler keeps
+    far more of his edge than a back's TD rate suggests)."""
     norms, league = sim_world.params()["positions"], sim_world.params()["league"]
     out = {}
     for name, (numerator, base, minimum) in RAW.items():
-        x, y, w = [], [], []
-        for r in rows:
-            norm, n = norms[r["position"]].get(name), r["raw"].get(base, 0.0)
-            if not _relevant(r) or r["position"] == "QB" or not norm or n < minimum:
+        for qbs in (False, True):
+            if qbs and name not in QB_RUSHING:
                 continue
-            x.append(r[name][0] / norm - 1)
-            y.append(r["raw"][numerator] / n / norm - 1)
-            w.append(n)
-        x, y, w = np.array(x), np.array(y), np.array(w)
-        out[name] = round(float((w * x * y).sum() / (w * x * x).sum()), 4)
+            x, y, w = [], [], []
+            for r in rows:
+                norm, n = norms[r["position"]].get(name), r["raw"].get(base, 0.0)
+                if not _relevant(r) or (r["position"] == "QB") != qbs or not norm or n < minimum:
+                    continue
+                x.append(r[name][0] / _passer_scale(r, name, 0) / norm - 1)
+                y.append(r["raw"][numerator] / n / _passer_scale(r, name, 1) / norm - 1)
+                w.append(n)
+            x, y, w = np.array(x), np.array(y), np.array(w)
+            out[f"QB {name}" if qbs else name] = round(min(1.0, float((w * x * y).sum() / (w * x * x).sum())), 4)
     for name, prior in QB_SHRINK.items():
         qbs = [r for r in rows if r["position"] == "QB" and _relevant(r) and r[name][0] > 0 and r[name][1] > 0]
         norm = 1.0 if name == "quality" else league["int_rate"]
@@ -238,18 +251,20 @@ def _spread_fit(rows: list[dict], keep: Mapping[str, float]) -> dict:
                 if r[name][0] > 0:
                     cells[(position, name)][0].append(float(np.log(r[name][0] / norm)))
                     cells[(position, name)][1].append(1.0)
-            continue
         for name, (_, base, minimum) in RAW.items():
             norm, n = norms[position].get(name), r["raw"].get(base, 0.0)
+            if position == "QB" and name not in QB_RUSHING:
+                continue
             if norm and n >= minimum and r[name][0] > 0:
-                cells[(position, name)][0].append(float(np.log(r[name][0] / norm)))
+                cells[(position, name)][0].append(float(np.log(r[name][0] / _passer_scale(r, name, 0) / norm)))
                 cells[(position, name)][1].append(n)
     out: dict[str, dict[str, float]] = defaultdict(dict)
     for (position, name), (x, w) in sorted(cells.items()):
         if len(x) >= MIN_ROOKIES:
             x, w = np.array(x), np.array(w)
             spread = float(np.sqrt((w * x * x).sum() / w.sum()))
-            out[position][name] = round(spread * float(np.sqrt(max(0.0, min(1.0, keep[name])))), 4)
+            k = keep.get(f"{position} {name}", keep[name])
+            out[position][name] = round(spread * float(np.sqrt(max(0.0, min(1.0, k)))), 4)
     return dict(out)
 
 
@@ -353,12 +368,39 @@ def main(argv: list[str] | None = None) -> None:
         if args.dump:
             Path(args.dump).write_text(json.dumps(rows))
         fitted = summarize(rows, seasons)
+        fitted.update(whole_season_fits(session, seasons, fitted))
         # the premium is measured on the market of the model just fitted, with no premium yet
         with _in_use({**fitted, "rookie_premium": {}}):
             premium = _premium_fit(premium_cases(session, seasons))
     PATH.write_text(json.dumps({**fitted, "rookie_premium": premium}, indent=1) + "\n")    # once, every step done
     sim_next_year.stored.cache_clear()
-    log.info("wrote %s (rookie premium %s)", PATH.name, premium)
+    log.info("wrote %s (scale %s, bench %s, growth %s, rookie premium %s)", PATH.name, fitted.get("efficiency_scale"),
+             fitted.get("bench"), fitted.get("rookie_growth"), premium)
+
+
+def whole_season_fits(session, seasons: list[int], fitted: Mapping) -> dict:
+    """{"efficiency_scale", "bench"} (services/sim_next_year_calib.py) on the model just fitted."""
+    from services import sim_next_year_calib as calib
+
+    offseason = {"picks": draft_picks(range(DRAFT_HISTORY_FROM, max(seasons) + 1)), "first": first_seasons(session)}
+    reals = calib.load(session, seasons)
+    no_bench = {"logit": [0.0, 0.0]}
+    by_scale = {}
+    for scale in calib.SCALE_GRID:
+        with _in_use({**fitted, "efficiency_scale": dict.fromkeys(POSITIONS, scale), "bench": no_bench,
+                      "rookie_premium": {}}):
+            by_scale[scale] = calib.errors(session, reals, offseason)
+        log.info("efficiency scale %s: %s", scale, by_scale[scale])
+    out = {"efficiency_scale": calib.best_scale(by_scale, seasons)}
+    with _in_use({**fitted, **out, "bench": no_bench, "rookie_premium": {}}):
+        out["bench"] = calib.logistic(calib.lost_jobs(session, reals, offseason))
+    growth = []
+    for real in reals:
+        rookies = set(draft_class(session, real.season, offseason["picks"]))
+        rookies |= {pid for pid, first in offseason["first"].items() if first == real.season}
+        growth += calib.growth_rows(real, rookies)
+    out["rookie_growth"] = calib.growth_fit(growth)
+    return out
 
 
 @contextmanager

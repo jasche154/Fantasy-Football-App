@@ -66,17 +66,19 @@ def build(session: Session, settings: Settings, seed: int) -> tuple[bytes, Seaso
     """The whole season a new simulated league plays (real weeks before settings.sim_from, its own simulated
     future after), to be frozen with it: (its save's bytes, the season as the save holds it; replay_blob.freeze).
     NoDataError when the season's data is not ready."""
-    from services import sim_season                     # the engine, imported only when a league is built
+    from services import sim_next_year, sim_season      # the engine, imported only when a league is built
 
     if settings.sim_from is None:
         raise ValueError(f"{settings.season} is not a simulated season.")
     if settings.sim_from == 1:
         base, world = _future_base(session, settings.season, settings)
-        data = sim_season.simulate(base, seed, 1, prior=world)
+        rookies = [pid for pid in world.players if pid >= sim_next_year.ROOKIE_ID_BASE]     # this draft class
+        data = sim_season.simulate(base, seed, 1, prior=world, rookies=rookies)
     else:
         base = replay_pool.load_season_data(session, settings.season, settings.scoring, settings.scoring_rules,
                                             settings.adp_format, through=settings.sim_from - 1)
-        data = sim_season.simulate(base, seed, settings.sim_from)
+        rookies = [pid for pid, first in first_seasons(session).items() if first == settings.season]
+        data = sim_season.simulate(base, seed, settings.sim_from, rookies=rookies)
         data = _market_adp(data, settings) if settings.start_week > 1 else data
     return replay_blob.freeze(data)
 
@@ -182,7 +184,7 @@ def _future_base(session: Session, season: int, settings: Settings) -> tuple[Sea
     """(the season to simulate: every player of the new belief, the schedule, preseason ADP and week-1
     projections, no games; the prior World) for the season after the newest one, from what is known today
     (sim_next_year). Raises NoDataError when it can't be built (future_problem says why)."""
-    from services import sim_market, sim_metrics, sim_next_year, sim_offseason, sim_world
+    from services import sim_market, sim_next_year, sim_offseason, sim_world
 
     problem = future_problem(session, season)
     if problem:
@@ -202,7 +204,7 @@ def _future_base(session: Session, season: int, settings: Settings) -> tuple[Sea
     drafted = sim_next_year.rookie_ids(season, rookies)
     belief, pool = sim_next_year.next_year(world, data.players, experience, drafted,
                                            {matched[m.name]: m.team for m in moves if m.name in matched},
-                                           sim_metrics.qb_starts(data))
+                                           sim_next_year.starts_by_team(data))
     prior = _defense_prior(data)
     base = sim_next_year.season_base(season, belief, pool, _schedule(session, season, data), settings.scoring,
                                      settings.scoring_rules, prior, settings.adp_format, sim_market.track_record(data),

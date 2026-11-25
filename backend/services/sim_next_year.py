@@ -11,14 +11,20 @@ seasons 2019-2025 by services/sim_next_year_fit.py and lives in sim_next_year.js
   returning players are then rescaled to the weight they had, so the curve moves work between teammates and
   never changes a team's total; a moved player brings his weight, a retired one takes his away (shares are
   weight / active teammates' weights at game time). Efficiency regresses toward the position norm
-  (`efficiency_keep`: rate = norm x (rate / norm) ^ keep). A moved receiver's rates are re-scaled to his new
-  team's usual passer. Everyone is healthy (preseason injuries are drawn where the season is simulated).
+  (rate = norm x (rate / norm) ^ keep, keep = keep_of: 1 - `efficiency_scale` x (1 - `efficiency_keep`); a
+  QB's rushing has its own keeps, "QB ypr" / "QB rush_td"). A receiver's yards and TDs per catch come with
+  his team's usual passer: that is divided out before the regression and his August starter's (regressed)
+  quality multiplied back in (`_with_passers`, which also makes him the team's passer), so the QB's part
+  regresses once, with the QB, and a QB change moves his receivers. Everyone is healthy (preseason injuries
+  are drawn where the season is simulated).
   `Player.games` stays the evidence of last season: sim_world.estimate counts a prior season's games at
   PRIOR_GAMES_CARRY, which is what makes August less certain than December.
 - Starters. A QB's `starts` weight is a decayed share of recent starts, so a starter hurt late in the season
   (or one who changed teams after it) looks like a backup; in August the healthy incumbent is the starter
-  again: on each team (after the moves) the QB with the most starts over the whole season (`season_starts`;
-  starting week 1 counts one more, which settles a split with an early fill-in; then the better passer) gets
+  again: on each team (after the moves) the QB with the most starts over the whole season (`season_starts`,
+  starts_by_team: starts for his new team, or for a team he was the main starter of, so a fill-in elsewhere
+  does not take the job from the team's own starter while a signed starter does; starting week 1 counts one
+  more, which settles a split with an early fill-in; then the better passer) gets
   starts 1.0 and the others at most VETERAN_BACKUP_STARTS. A team left with no QB or kicker (a retirement)
   signs the best spare one: the backup with the highest starts weight on a team that has two or more.
 - Rookies get the role a player drafted at that pick and position really had as a rookie (`rookies`: a line
@@ -28,7 +34,9 @@ seasons 2019-2025 by services/sim_next_year_fit.py and lives in sim_next_year.js
   (nobody with STARTER_ROLE starts), when his pick makes week 1 very likely (week-1 chance ROOKIE_QB_FRANCHISE
   or more), or likely (ROOKIE_QB_NAMED) and the incumbent is a below-average passer; otherwise his starts
   weight is his week-1 chance, which
-  puts him next in line (sim_talent's rookie takeover).
+  puts him next in line (sim_talent's rookie takeover). A rookie with `hype` (offseason file) gets his role x
+  hype ^ HYPE_ROLE (1: the coaches buy the hype; tuned so Jeremiah Smith, hype 1.3, finishes a top-12 WR
+  about 30% of seeds, top-24 55%, outside the top 36 25%); the market's premium is x hype as well.
 - Teams: volume and defenses regress toward the league (`team_keep`); the passer scale and the "other"
   buckets stay.
 
@@ -49,7 +57,7 @@ from functools import lru_cache
 from pathlib import Path
 from types import MappingProxyType
 
-from services import sim_market
+from services import sim_market, sim_metrics
 from services.replay_adp_format import TWO_QB
 from services.replay_pool import PoolPlayer, SeasonData
 from services.replay_scoring import ScoringRules
@@ -69,7 +77,9 @@ ROOKIE_QB_FRANCHISE = 0.5               # ... and this likely (about the top 5 p
 AVERAGE_PASSER = 1.0
 VETERAN_BACKUP_STARTS = 0.15            # a veteran backup's starts weight at most (a first-round rookie is ahead)
 PREMIUM_PICK_CAP = 100                  # rookie_premium: picks past this one price like it
+HYPE_ROLE = 1.0                         # a hyped rookie's role x hype ^ this (tuned: see the module docstring)
 RECEIVER_RATES = ("ypc", "rec_td")      # measured with his team's usual passer
+RECEIVERS = ("RB", "WR", "TE")
 EFFICIENCY = ("catch", "ypc", "rec_td", "ypr", "rush_td")
 POSITIONS = ("QB", "RB", "WR", "TE")
 
@@ -79,7 +89,7 @@ def stored() -> dict:
     """The fitted offseason model (sim_next_year.json)."""
     return fitted_json(PATH, "python -m services.sim_next_year_fit --fit",
                        ("age", "keep", "center", "efficiency_keep", "efficiency_sd", "rookies", "team_keep",
-                        "rookie_premium"))
+                        "rookie_premium", "efficiency_scale", "bench", "rookie_growth"))
 
 
 def rookie_ids(season: int, rookies: Sequence[Rookie]) -> dict[int, Rookie]:
@@ -99,7 +109,7 @@ def rookie_premium(rookies: Mapping[int, Rookie]) -> dict[int, float]:
     for a rookie's upside (sim_market.adp's `premium`; fitted on real rookie ADPs, `rookie_premium` in
     sim_next_year.json). The belief and the truth never see it."""
     fit = stored()["rookie_premium"]
-    return {pid: premium_at(fit, r.position, r.pick) for pid, r in rookies.items()}
+    return {pid: premium_at(fit, r.position, r.pick) * r.hype for pid, r in rookies.items()}
 
 
 def _bucket(value: float, edges: Sequence[int]) -> int:
@@ -124,17 +134,29 @@ def _role_change(player: Player, experience: int) -> float:
     return math.exp(change)
 
 
-def _efficiency(player: Player) -> dict[str, float]:
-    keep, norms = stored()["efficiency_keep"], params()["positions"].get(player.position, {})
+def keep_of(position: str, name: str, scaled: bool = True) -> float:
+    """A rate's efficiency_keep: the position's own when fitted (a QB's rushing), else the shared one; `scaled`:
+    as the belief applies it, 1 - efficiency_scale x (1 - keep) (sim_next_year_calib)."""
+    keep = stored()["efficiency_keep"]
+    raw = keep.get(f"{position} {name}", keep[name])
+    return 1.0 - stored()["efficiency_scale"].get(position, 1.0) * (1.0 - raw) if scaled else raw
+
+
+def _efficiency(player: Player, passer: float = AVERAGE_PASSER) -> dict[str, float]:
+    """His rates regressed toward the norm. A receiver's RECEIVER_RATES come out at an average passer (his
+    `passer`, his team's usual one, divided out first: it regresses with that QB's quality instead)."""
+    norms = params()["positions"].get(player.position, {})
     league = params()["league"]
     out = {}
     for name in EFFICIENCY:
         norm, value = norms.get(name), getattr(player, name)
-        out[name] = norm * (value / norm) ** keep[name] if norm and value > 0 else value
+        if name in RECEIVER_RATES and player.position in RECEIVERS:
+            value /= max(passer, 1e-6)
+        out[name] = norm * (value / norm) ** keep_of(player.position, name) if norm and value > 0 else value
     if player.position == "QB":
-        out["quality"] = player.quality ** keep["quality"] if player.quality > 0 else player.quality
+        out["quality"] = player.quality ** keep_of("QB", "quality") if player.quality > 0 else player.quality
         rate = league["int_rate"]
-        out["int_rate"] = rate * (player.int_rate / rate) ** keep["int_rate"] if player.int_rate > 0 else rate
+        out["int_rate"] = rate * (player.int_rate / rate) ** keep_of("QB", "int_rate") if player.int_rate > 0 else rate
     return out
 
 
@@ -145,10 +167,7 @@ def _veterans(world: World, experience: Mapping[int, int], moves: Mapping[int, s
         if team is None or team not in world.teams:
             continue                                          # retired, or left the league
         m = _role_change(player, experience.get(pid, 1))
-        rates = _efficiency(player)
-        if team != player.team and player.position in ("RB", "WR", "TE"):
-            scale = world.teams[team].passer / max(world.teams[player.team].passer, 1e-6)
-            rates.update({name: rates[name] * scale for name in RECEIVER_RATES})
+        rates = _efficiency(player, world.teams[player.team].passer)
         aged[pid] = replace(player, team=team, targets=player.targets * m, carries=player.carries * m,
                             out_weeks=0, **rates)
     stayed = [pid for pid, p in aged.items() if p.team == world.players[pid].team]
@@ -174,11 +193,12 @@ def _line(position: str, field: str, pick: int) -> float:
 def rookie_player(pid: int, rookie: Rookie, team: Team) -> Player:
     """A rookie as the public sees him in August (see the module docstring)."""
     norm, league = params()["positions"].get(rookie.position, {}), params()["league"]
+    lift = rookie.hype ** HYPE_ROLE                     # the coaches share part of the hype: a bigger role
     starts = _line(rookie.position, "starts", rookie.pick) if rookie.position == "K" else 0.0
     if rookie.position == "QB":
         starts = min(1.0, _line("QB", "week1", rookie.pick))
-    return Player(pid, rookie.position, team.team, targets=_line(rookie.position, "targets", rookie.pick),
-                  carries=_line(rookie.position, "carries", rookie.pick), starts=starts,
+    return Player(pid, rookie.position, team.team, targets=_line(rookie.position, "targets", rookie.pick) * lift,
+                  carries=_line(rookie.position, "carries", rookie.pick) * lift, starts=starts,
                   catch=norm.get("catch", 0.0), ypc=norm.get("ypc", 0.0) * team.passer,
                   rec_td=norm.get("rec_td", 0.0) * team.passer, ypr=norm.get("ypr", 0.0),
                   rush_td=norm.get("rush_td", 0.0),
@@ -199,15 +219,25 @@ def _qb_competition(players: dict[int, Player], rookie: Player) -> None:
             players[incumbent.player_id] = replace(incumbent, starts=min(incumbent.starts, VETERAN_BACKUP_STARTS))
 
 
-def _restore_starters(players: dict[int, Player], season_starts: Mapping[int, Sequence[int]]) -> None:
+def starts_by_team(data: SeasonData) -> dict[int, list[tuple[int, str | None]]]:
+    """{QB: [(week, team)] of the weeks he started} (sim_metrics.qb_starts), the `season_starts` of next_year."""
+    return {pid: [(week, data.team_at(pid, week)) for week in weeks] for pid, weeks in sim_metrics.qb_starts(data).items()}
+
+
+def _restore_starters(players: dict[int, Player], season_starts: Mapping[int, Sequence[tuple[int, str | None]]]) -> None:
     """Each team's August starter by whole-season starts (see the module docstring). Mutates `players`."""
     by_team: dict[str, list[Player]] = defaultdict(list)
     for player in players.values():
         if player.position == "QB":
             by_team[player.team].append(player)
+    started: dict[str | None, dict[int, int]] = defaultdict(lambda: defaultdict(int))
+    for pid, weeks in season_starts.items():
+        for _, team in weeks:
+            started[team][pid] += 1
+    led = {team: max(counts, key=lambda pid: (counts[pid], -pid)) for team, counts in started.items()}
     for qbs in by_team.values():
         def claim(p: Player) -> int:
-            weeks = season_starts.get(p.player_id, ())
+            weeks = [week for week, team in season_starts.get(p.player_id, ()) if team == p.team or led.get(team) == p.player_id]
             return len(weeks) + (1 in weeks)
 
         order = sorted(qbs, key=lambda p: (-claim(p), -p.quality, -p.starts, p.player_id))
@@ -234,6 +264,21 @@ def _fill_vacancies(players: dict[int, Player], teams: Mapping[str, Team]) -> No
             rosters[team].append(players[signed.player_id])
 
 
+def _with_passers(players: dict[int, Player], teams: dict[str, Team]) -> dict[str, Team]:
+    """Each team's usual passer is now its August starter (his regressed quality); its receivers' rates (held
+    at an average passer until now) are scaled to him. Mutates `players`; returns the teams."""
+    starter: dict[str, Player] = {}
+    for player in players.values():
+        if player.position == "QB" and (player.team not in starter or (player.starts, -player.player_id) > (
+                starter[player.team].starts, -starter[player.team].player_id)):
+            starter[player.team] = player
+    passer = {team: starter[team].quality if team in starter else AVERAGE_PASSER for team in teams}
+    for pid, player in players.items():
+        if player.position in RECEIVERS and player.team in passer:
+            players[pid] = replace(player, **{name: getattr(player, name) * passer[player.team] for name in RECEIVER_RATES})
+    return {name: replace(team, passer=passer[name]) for name, team in teams.items()}
+
+
 def _teams(world: World) -> dict[str, Team]:
     keep, league = stored()["team_keep"], params()["league"]
 
@@ -250,21 +295,22 @@ def _teams(world: World) -> dict[str, Team]:
 
 def next_year(world: World, players: Mapping[int, PoolPlayer], experience: Mapping[int, int],
               rookies: Mapping[int, Rookie], moves: Mapping[int, str | None],
-              season_starts: Mapping[int, Sequence[int]] | None = None) -> tuple[World, dict[int, PoolPlayer]]:
+              season_starts: Mapping[int, Sequence[tuple[int, str | None]]] | None = None) -> tuple[World, dict[int, PoolPlayer]]:
     """(the belief going into next season, its player pool: names, positions and teams, no ADP yet) from the
     belief at the end of this one. `players`: names and positions of the world's players; `experience`: seasons each has played
     through this one; `rookies`: {id: rookie} (rookie_ids); `moves`: {id: new team, or None = gone};
-    `season_starts`: the weeks each QB started this season (sim_metrics.qb_starts)."""
+    `season_starts`: (week, team) of each start a QB made this season (starts_by_team)."""
     teams = _teams(world)
     new = _veterans(world, experience, moves)
     _restore_starters(new, season_starts or {})
     _fill_vacancies(new, teams)
     for pid, rookie in sorted(rookies.items()):
         if rookie.team in teams and pid not in new:
-            new[pid] = rookie_player(pid, rookie, teams[rookie.team])
+            new[pid] = rookie_player(pid, rookie, replace(teams[rookie.team], passer=AVERAGE_PASSER))
     for pid in sorted(rookies):
         if pid in new and new[pid].position == "QB":
             _qb_competition(new, new[pid])
+    teams = _with_passers(new, teams)
     belief = World(MappingProxyType(new), MappingProxyType(teams))
     pool = {}
     for pid, player in new.items():

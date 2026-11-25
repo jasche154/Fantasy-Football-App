@@ -28,7 +28,7 @@ later week's, from what is known through from_week - 1 (a half-published mid-wee
 Deterministic for (base, seed, from_week, prior): every draw comes from replay_state.rng(seed, "sim", ...).
 """
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass, replace
 from types import MappingProxyType
 
@@ -166,7 +166,7 @@ def _hurt(world: World, team: str, out: set[int], dice) -> dict[int, sim_injurie
 
 
 def _market(tables: _Tables, base: SeasonData, belief: World, truth: World, seed: int, week: int, out: set[int],
-            false_rate: float) -> None:
+            false_rate: float, ranks: Mapping[int, int]) -> None:
     scoring, last = scoring_of(base), base.last_week
     known = _known(base, tables, week)
     snapshot = sorted(pid for pid, w in tables.projected if w == week)      # the snapshot's own (from_week only)
@@ -191,21 +191,25 @@ def _market(tables: _Tables, base: SeasonData, belief: World, truth: World, seed
                 last - max(1, rank_week) + 1, market))
             tables.expert_age[rank_week] = sim_market.EXPERT_AGE["ros" if rank_week else "pre"]
     tables.notes.update(sim_market.buzz(truth.changes, belief, week, replay_state.rng(seed, "sim", "buzz", week),
-                                        false_rate, out))
+                                        false_rate, out, sim_talent.rumors(belief, ranks) if false_rate else None))
 
 
-def simulate(base: SeasonData, seed: int, from_week: int, prior: World | None = None) -> SeasonData:
-    """A new SeasonData with weeks from_week..base.last_week simulated (see the module docstring)."""
+def simulate(base: SeasonData, seed: int, from_week: int, prior: World | None = None,
+             rookies: Collection[int] = ()) -> SeasonData:
+    """A new SeasonData with weeks from_week..base.last_week simulated (see the module docstring); `rookies`:
+    the players in their first season (sim_talent.growth)."""
     if not 1 <= from_week <= base.last_week:
         raise ValueError(f"Week {from_week} is outside the season (1-{base.last_week}).")
     scoring, last = scoring_of(base), base.last_week
     tables = _real(base, from_week)
     belief = estimate(base, from_week, prior)
-    truth = sim_talent.truth(belief, seed, from_week, last)
+    truth = sim_talent.truth(belief, seed, from_week, last, rookies)
     absences = _absences(base, belief, seed, from_week)
     returning: dict[int, sim_injuries.Spell] = {}
     buzz_weeks = sim_talent.change_weeks(from_week, last)          # false buzz only where true buzz can land
-    false_rate = sim_market.expected_hints(len(truth.teams), buzz_weeks[1] - buzz_weeks[0] + 1, sim_talent.settings())
+    ranks = sim_talent.public_ranks(belief)                        # the public's ranks the rumours lean on
+    false_rate = sim_market.expected_hints(sim_talent.expected_changes(belief, ranks, from_week, last),
+                                           buzz_weeks[1] - buzz_weeks[0] + 1)
     public = belief                                  # the latest public belief (last week's, for this week's tags)
     for week in range(from_week, last + 1):
         tags = _tags(base, public, absences, returning, week, from_week, replay_state.rng(seed, "sim", "tags", week))
@@ -214,7 +218,7 @@ def simulate(base: SeasonData, seed: int, from_week: int, prior: World | None = 
         sitting = public_out | {pid for pid, a in absences.items() if a.left > 0}
         public = estimate(_known(base, tables, week), week, prior)
         _market(tables, base, public, truth, seed, week, public_out,
-                false_rate if buzz_weeks[0] <= week <= buzz_weeks[1] else 0.0)
+                false_rate if buzz_weeks[0] <= week <= buzz_weeks[1] else 0.0, ranks)
         world = truth.at(week)
         played_teams, fresh = set(), set()
         for game in sorted((g for g in base.schedule.games if g.week == week), key=lambda g: g.home_team):

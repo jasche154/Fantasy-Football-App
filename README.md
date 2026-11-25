@@ -1280,15 +1280,27 @@ read the belief, so, as in a real season, the public learns the truth only from 
 - **Hidden talent:** every player's true role and efficiency differ from his reputation by a random draw,
   widest for rookies and players with few games, smallest for veterans with a full season
   (`services/sim_talent.py`); teams' volume and defenses move the same way. During the season some
-  players **break out** (a backup's role grows), some **bust** (a lead player's shrinks) and some starting
-  quarterbacks are **benched** (a poor passer more often; in a whole simulated season a team with a promising rookie behind its
-  starter usually turns to him before the season is out). These spreads and rates are tuned so a
+  players **break out** (a backup's role grows), some **bust** (a lead player's shrinks, but never one of the
+  top 12 at his position by the public's rating: real stars lose work to injuries, not to a coach's whim) and
+  some starting quarterbacks are **benched**. The benching chance depends on how the public rates the
+  starter among the 32 starters, fitted on real week-1 starters 2019-2025 who lost the job while healthy:
+  about 1% a season for the top-rated one, 4-5% around 12th, 15% around 24th and 27% for the lowest (real:
+  0 of 42 top-6 starters, 2 of 42 ranked 7-12, 9 of 84 ranked 13-24, 11 of 56 ranked 25-32); in a whole
+  simulated season a team with a promising rookie behind its starter usually turns to him before the
+  season is out. **Rookies grow:** about a quarter of the players in their first season get a bigger role
+  around mid-season (x1.6 from a week between 8 and 11), fitted on real rookies 2019-2025 against veterans
+  with the same first half (real rookies gain about 6% more role than such veterans after week 9, the
+  small-role ones about 15%; their points per touch do not grow). In the live season only the simulated
+  weeks can carry a step; the public learns it from the games. These spreads and rates are tuned so a
   simulated season reshuffles like a real one (preseason rank against final rank, breakouts, busts).
 - **Buzz:** before the week a breakout, bust or benching starts, a news line is published for 60% of
   them ("Beat reporters say his role is growing; expect more work.", "Reports say his snaps and touches are
-  shrinking.", "Reports say his starting job is in danger."), and false lines about other starters are added
-  so only about 60% of all lines are true, in the same weeks a change can start (never the first simulated
-  week or the last two). It shows as a small **Buzz** chip (named "Buzz: ..." for screen readers and voice control, tooltip "Buzz (a rumor): ...") on player rows
+  shrinking.", "Reports say his starting job is in danger."), and false lines are added so only about 60% of
+  all lines are true, in the same weeks a change can start (never the first simulated week or the last two).
+  A false line is only about a change that could plausibly happen to him, as often as it really does: a
+  backup's role growing, a lead player who is not a top-12 star losing work, or a starting quarterback outside
+  the top 12 losing his job (weighted by his benching chance), so an elite starter never reads "his starting
+  job is in danger". It shows as a small **Buzz** chip (named "Buzz: ..." for screen readers and voice control, tooltip "Buzz (a rumor): ...") on player rows
   and the draft board (press it to open his card), and under **News** on his card. It is the only way the truth reaches the screen
   before the games, and it is right only some of the time.
 - **Projections, expert ranks and ADP** are computed from the belief each week (`services/sim_market.py`):
@@ -1307,8 +1319,18 @@ read the belief, so, as in a real season, the public learns the truth only from 
 - **Aging:** each veteran's role grows or fades by his position's curve for his years in the league (1, 2,
   3, 4-5, 6-8, 9+), big and small roles move partway back toward the usual one, and each team's
   returning players are rescaled so the curve moves work between teammates without changing the team's
-  total. Efficiency regresses toward the position norm. All of it is measured from real seasons 2019-2025
-  (`sim_next_year.json`). On each team the QB who started the most games last season is the starter again in August.
+  total. Efficiency regresses toward the position norm, a quarterback's rushing with its own (much weaker)
+  regression measured on quarterbacks: a scrambler keeps most of his edge. A receiver's yards and TDs per
+  catch are split into his own part and his quarterback's: his own regresses, the quarterback's moves with the
+  August starter's passing (so a great passer's receivers stay good, and a QB change moves them). How much of
+  the measured regression the preseason belief applies is fitted on whole seasons: each real season 2021-2025
+  rebuilt from the year before, against what players really scored. Applying all of it left the August
+  belief too flat (real stars outscored it by 1.5-3 points a game); the fitted share is a quarter of it for
+  quarterbacks and none for the others, which made the preseason values match real points a game (slope
+  about 1, lower error). All of it is measured from real seasons 2019-2025 (`sim_next_year.json`). On each
+  team the QB who started the most games last season is the starter again in August; starts made for
+  another team count only when he was that team's main starter (a five-game fill-in elsewhere does not
+  take the job from the team's own starter).
 - **Rookies** get the role a player taken at that pick and position really had as a rookie, and the widest
   talent draw. A rookie QB starts week 1 when his team has no starter, or when his pick makes it likely and
   the incumbent is a below-average passer; otherwise he is next in line. Real drafters pay for a rookie's
@@ -1319,7 +1341,12 @@ read the belief, so, as in a real season, the public learns the truth only from 
   x1.05 for a tight end, none for a quarterback (rookie QBs already go where real ones do).
 - **The offseason file** `backend/sim_data/offseason_2027.json` is meant to be edited by hand. `rookies`:
   one entry per player with `name`, `position` (QB/RB/WR/TE/K), `team` (schedule code, e.g. MIA, LA, LV,
-  WAS), `pick` (projected overall pick, 1-262) and `college`. `moves`: `name` (as the app spells him),
+  WAS), `pick` (projected overall pick, 1-262) and `college`, and optionally `hype` (1-3, default 1) for a
+  prospect rated beyond his pick: the market's rookie premium and his expected role are both multiplied by
+  it (his talent is still drawn around that role, with a rookie's wide spread, so he can still bust).
+  Jeremiah Smith carries 1.3, set so his ADP lands where Marvin Harrison Jr.'s did as a rookie (14.5 in
+  2024's PPR ADP); across 20 simulated seasons he finished a top-12 receiver 30% of the time, top-24 55%
+  and outside the top 36 25%. `moves`: `name` (as the app spells him),
   `position`, `team` (the new team, or `null` for retired / out of the league) and a `note`. Names must be
   unique across both lists; everyone else stays on his team. A bad entry greys out the 2027 card with the
   file name and the problem; a move whose name matches nobody is skipped (logged as a warning). Saved
