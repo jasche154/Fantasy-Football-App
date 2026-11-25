@@ -1351,8 +1351,9 @@ read the belief, so, as in a real season, the public learns the truth only from 
   created** (`sim_setup.with_status_now`): Out, Doubtful, IR, PUP, suspended (and Sleeper's other zero-chance
   statuses) become a hard tag in the first simulated week, so a player hurt in the last real game (Drake Maye,
   2026 week 10) starts the simulation out, for a length the injury model draws; Questionable is left to the
-  model. Statuses older than 18 hours and players already hard-tagged in the last real week are left alone,
-  and real weeks never change.
+  model. Out / Doubtful statuses older than 18 hours (their count is logged) and players already hard-tagged
+  in the last real week are left alone; IR, PUP and suspended last for weeks, so they count however old the
+  sync is. Real weeks never change.
   On purpose, simulated players get hurt **about a quarter less often** than real ones (`INJURY_SCALE = 0.75`
   in `sim_injuries.py` multiplies the per-game and preseason injury chances, in whole simulated seasons and
   in the live season's simulated weeks alike); how long an injury lasts stays real, and an absence already

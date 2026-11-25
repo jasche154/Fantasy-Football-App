@@ -102,8 +102,9 @@ def with_status_now(session: Session, base: SeasonData, week: int) -> SeasonData
     real week. Without it a player hurt in the last real game (Drake Maye, 2026 week 10) starts the simulation
     healthy. Out / Doubtful / IR / PUP / suspended become a hard tag that sim_season carries as an open absence
     (its length drawn by the injury model); Questionable and healthy are left to the model. A player already
-    hard-tagged in the last real week keeps that streak, and a status older than availability's freshness window
-    is not news of this week."""
+    hard-tagged in the last real week keeps that streak, and an Out / Doubtful status older than availability's
+    freshness window is not news of this week (skipped, counted in the log); IR / PUP / suspended last weeks, so
+    they count however old the sync is."""
     from datetime import datetime, timedelta, timezone
     from types import MappingProxyType
 
@@ -116,16 +117,20 @@ def with_status_now(session: Session, base: SeasonData, week: int) -> SeasonData
     from services.replay_pool import Injury
 
     cutoff = datetime.now(timezone.utc) - timedelta(hours=SLEEPER_FRESH_HOURS)
-    added = {}
+    added, stale = {}, 0
     for pid, status, body, fetched in session.execute(select(
             PlayerStatus.player_id, PlayerStatus.injury_status, PlayerStatus.injury_body_part,
             PlayerStatus.fetched_at).where(PlayerStatus.injury_status.is_not(None))):
         tag = SLEEPER_TAGS.get(status.upper())
         last = base.injuries.get((pid, week - 1))
-        if (tag is None or pid not in base.players or (pid, week) in base.injuries or (last and last.hard)
-                or utc(fetched) < cutoff):
+        if tag is None or pid not in base.players or (pid, week) in base.injuries or (last and last.hard):
+            continue
+        if utc(fetched) < cutoff and tag not in LONG_TAGS:
+            stale += 1
             continue
         added[(pid, week)] = Injury(tag, None, (body or "").strip()[:MAX_TEXT] or None)
+    if stale:
+        log.info("Week %s status: %s Out/Doubtful statuses older than %sh skipped", week, stale, SLEEPER_FRESH_HOURS)
     return replace(base, injuries=MappingProxyType({**base.injuries, **added})) if added else base
 
 
@@ -133,6 +138,7 @@ def with_status_now(session: Session, base: SeasonData, week: int) -> SeasonData
 # SLEEPER_ZERO plus Doubtful, which plays about 3% of the time)
 SLEEPER_TAGS = {"OUT": "O", "DOUBTFUL": "O", "DNR": "O", "NA": "O", "COV": "O", "IR": "IR", "IR-R": "IR",
                 "NFI": "IR", "PUP": "PUP", "SUS": "SUS"}
+LONG_TAGS = {"IR", "PUP", "SUS"}     # absences of weeks: still news when the status sync is a few days old
 
 
 # ---------------- the future season ----------------

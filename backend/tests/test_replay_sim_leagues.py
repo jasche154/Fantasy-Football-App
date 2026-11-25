@@ -3,6 +3,7 @@ new league freezes its own simulated season in its save, later real data never c
 never show an unplayed week. The engine (services/sim_season, sim_world, sim_market) is a stand-in here; the
 real engine runs end to end in test_replay_future_leagues.py."""
 import json
+import logging
 from collections.abc import Iterator
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -224,15 +225,16 @@ def _played_last_week(count: int) -> list[int]:
                   and FULL.players[pid].position in ("QB", "RB", "WR", "TE"))[:count]
 
 
-def test_todays_sleeper_status_seeds_the_first_simulated_week_and_no_real_one(app):
+def test_todays_sleeper_status_seeds_the_first_simulated_week_and_no_real_one(app, caplog):
     """Hurt in the last real game (Drake Maye, 2026 week 10): Out today, so out when the simulation starts."""
     _, engine = app
-    out, doubtful, questionable, suspended, stale, ir = _played_last_week(6)
+    out, doubtful, questionable, suspended, stale, ir, stale_ir = _played_last_week(7)
+    caplog.set_level(logging.INFO, logger="services.sim_setup")
     week = THROUGH + 1
     with Session(engine) as session:
         _sleeper(session, {out: ("Out", "Ankle"), doubtful: ("Doubtful", None), questionable: ("Questionable", "Knee"),
                            suspended: ("Sus", None), ir: ("IR", "Knee - ACL")})
-        _sleeper(session, {stale: ("Out", "Hip")}, hours_old=48)          # last week's news, not this week's
+        _sleeper(session, {stale: ("Out", "Hip"), stale_ir: ("IR", "Knee")}, hours_old=48)  # Out: last week's news
         base = replay_pool.load_season_data(session, LIVE, "half", through=THROUGH)
         hard = replace(base, injuries=MappingProxyType({**base.injuries, (ir, THROUGH): replay_pool.Injury("O")}))
         seeded = sim_setup.with_status_now(session, hard, week)
@@ -241,7 +243,9 @@ def test_todays_sleeper_status_seeds_the_first_simulated_week_and_no_real_one(ap
 
     added = {key: injury for key, injury in seeded.injuries.items() if key not in hard.injuries}
     assert added == {(out, week): replay_pool.Injury("O", None, "Ankle"), (doubtful, week): replay_pool.Injury("O"),
-                     (suspended, week): replay_pool.Injury("SUS")}       # ir: his real O streak carries on its own
+                     (suspended, week): replay_pool.Injury("SUS"),       # ir: his real O streak carries on its own
+                     (stale_ir, week): replay_pool.Injury("IR", None, "Knee")}   # IR lasts: an old sync still counts
+    assert "1 Out/Doubtful statuses older than" in caplog.text
     assert all(seeded.injuries[key] == injury for key, injury in hard.injuries.items())
     assert seeded.actual == base.actual
 
