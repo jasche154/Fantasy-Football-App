@@ -168,16 +168,26 @@ export function TeamNeeds({ team }: { team: ReplayTeamRef | undefined }) {
   if (!team || (team.needs.length === 0 && team.deep.length === 0)) return null;
   const parts = [team.needs.length > 0 ? `Needs ${team.needs.join(', ')}` : '', team.deep.length > 0 ? `Deep at ${team.deep.join(', ')}` : '']
     .filter(Boolean);
-  return <p className="game-mood"><span className="game-mood__label">Roster</span> {parts.join(' · ')}</p>;
+  return (
+    <p className="game-mood">
+      <span className="game-mood__label">Roster</span>{' '}
+      {parts.map((part, index) => (
+        <Fragment key={part}>
+          {index > 0 && <><span aria-hidden="true"> · </span><span className="sr-only">; </span></>}
+          {part}
+        </Fragment>
+      ))}
+    </p>
+  );
 }
 
-/** A CPU manager's own words on a trade (why he turned it down), in his team's quote style. */
-export function ManagerQuote({ teamId, name, text }: { teamId: number; name: string; text: string | null | undefined }) {
+/** A CPU manager's own words on a trade (why he turned it down), in his team's quote style. `lead`: words only a
+ * screen reader hears first (the history's "said:" after the name shown next to it); his name is never repeated. */
+export function ManagerQuote({ teamId, text, lead }: { teamId: number; text: string | null | undefined; lead?: string }) {
   if (!text) return null;
   return (
     <blockquote className="game-quote" data-team={teamId}>
-      <p>{text}</p>
-      <footer className="sr-only">{name}</footer>
+      <p>{lead && <span className="sr-only">{lead} </span>}{text}</p>
     </blockquote>
   );
 }

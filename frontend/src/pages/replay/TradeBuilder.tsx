@@ -230,7 +230,7 @@ export function TradeBuilder({ game, version, roster, ir, maxPlayers, counterTo,
         {declined && (
           <div className="replay-verdict">
             <p className="error-text"><strong>{partner} turned it down.</strong></p>
-            <ManagerQuote teamId={partnerId} name={partner} text={reply} />
+            <ManagerQuote teamId={partnerId} text={reply} />
             <ul>{declined.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
             {declined.suggestion && <p className="hint">{declined.suggestion}</p>}
             {counter && (

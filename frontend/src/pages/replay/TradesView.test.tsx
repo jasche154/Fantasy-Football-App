@@ -604,40 +604,94 @@ describe('TradesView manager voices', () => {
     expect(await screen.findByText('Worried about Nico Collins.')).toBeInTheDocument();
   });
 
-  it("quotes the manager's reply when he turns the proposal down", async () => {
+  async function proposeDeclined(reply: string | null) {
     const no = verdict({ accepted: false, reasons: ['Value is too far apart.'] });
-    const { user } = renderTrades(trades(), [
+    const rendered = renderTrades(trades(), [
       { method: 'POST', path: EVALUATE_PATH, reply: json({ verdict: no }) },
-      { method: 'POST', path: PROPOSE_PATH, reply: json({ ...actionResult(), verdict: no, executed: false, counter: null,
-        reply: 'Not enough for Raheem Mostert.' }) },
+      { method: 'POST', path: PROPOSE_PATH, reply: json({ ...actionResult(), verdict: no, executed: false, counter: null, reply }) },
     ]);
-    await tickBothSides(user);
+    await tickBothSides(rendered.user);
     await waitFor(() => expect(screen.getByRole('button', { name: 'Propose trade' })).toBeEnabled());
-    await user.click(screen.getByRole('button', { name: 'Propose trade' }));
+    await rendered.user.click(screen.getByRole('button', { name: 'Propose trade' }));
+    await screen.findByText('Gridiron Ghosts turned it down.');
+    return rendered;
+  }
 
-    const result = (await screen.findByText('Gridiron Ghosts turned it down.')).closest('.replay-verdict') as HTMLElement;
-    expect(within(result).getByText('Not enough for Raheem Mostert.').closest('blockquote')).toBeInTheDocument();
+  it("quotes the manager's reply inside the turned-down result", async () => {
+    await proposeDeclined('Not enough for Raheem Mostert.');
+
+    const status = screen.getByText('Gridiron Ghosts turned it down.').closest('[role="status"]') as HTMLElement;
+    const quote = within(status).getByText('Not enough for Raheem Mostert.').closest('blockquote') as HTMLElement;
+    expect(quote).toBeInTheDocument();
+    expect(quote).not.toHaveTextContent('Gridiron Ghosts');            // his name is said once, above it
   });
 
-  it('shows a past reply under the manager in the history', async () => {
+  it('drops the reply once the deal changes', async () => {
+    const { user } = await proposeDeclined('Not enough for Raheem Mostert.');
+    await user.click(screen.getByRole('checkbox', { name: 'Give Travis Etienne' }));
+    expect(screen.queryByText('Not enough for Raheem Mostert.')).not.toBeInTheDocument();
+  });
+
+  it('drops the reply when another manager is picked', async () => {
+    const { user } = await proposeDeclined('Not enough for Raheem Mostert.');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Trade with' }), 'Hail Marys');
+    expect(screen.queryByText('Not enough for Raheem Mostert.')).not.toBeInTheDocument();
+  });
+
+  it('shows no quote when the CPU gave no reply', async () => {
+    await proposeDeclined(null);
+    const status = screen.getByText('Gridiron Ghosts turned it down.').closest('[role="status"]') as HTMLElement;
+    expect(within(status).queryByRole('blockquote')).not.toBeInTheDocument();
+    expect(status.querySelector('blockquote')).toBeNull();
+  });
+
+  it('quotes the reply when a counter is turned down', async () => {
+    const COUNTER_PATH = `${TRADES_PATH}/offers/61/counter`;
+    const no = verdict({ accepted: false, reasons: ['Value is too far apart.'] });
+    const { user } = renderTrades(trades({ offers: [offer()] }), [
+      { method: 'POST', path: EVALUATE_PATH, reply: json({ verdict: no }) },
+      { method: 'POST', path: COUNTER_PATH, reply: json({ ...actionResult(), verdict: no, executed: false, counter: null,
+        reply: 'Opening offers are just the start, but not that start.' }) },
+    ]);
+    await user.click(await screen.findByRole('button', { name: 'Counter offer from Blitz Brigade' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send counter' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Send counter' }));
+
+    const status = (await screen.findByText('Blitz Brigade turned it down.')).closest('[role="status"]') as HTMLElement;
+    expect(within(status).getByText('Opening offers are just the start, but not that start.')).toBeInTheDocument();
+  });
+
+  it('shows a past reply under the manager in the history, read as what he said', async () => {
     const past = { id: 50, week: 3, status: 'declined' as const, from_team: teamRef(USER_TEAM_ID), to_team: GHOSTS, give: [MCCAFFREY],
       get: [COLLINS], counter_to: null, message: null, reply: 'No Packers on my team. Ever.' };
-    renderTrades(trades({ results: [past] }));
+    const quiet = { ...past, id: 49, reply: null };
+    renderTrades(trades({ results: [past, quiet] }));
     const history = await screen.findByRole('table', { name: 'Trades and offers so far' });
     const cell = within(history).getByText('No Packers on my team. Ever.').closest('td') as HTMLElement;
-    expect(cell).toHaveTextContent('Gridiron Ghosts');
+    expect(cell).toHaveTextContent('Gridiron Ghostssaid: No Packers on my team. Ever.');
+    expect(history.querySelectorAll('blockquote')).toHaveLength(1);       // the row with no reply has no quote
   });
 
-  it('shows where the partner is short and deep next to his name', async () => {
-    const needy = { ...summary(), teams: summary().teams.map((t) => (t.team_id === 1 ? { ...t, needs: ['RB'], deep: ['WR', 'TE'] } : t)) };
+  it.each([
+    [['RB'], ['WR', 'TE'], 'Needs RB', 'Deep at WR, TE'],
+    [['RB', 'TE'], [], 'Needs RB, TE', null],
+    [[], ['QB'], null, 'Deep at QB'],
+  ])('shows where the partner is short (%j) and deep (%j) next to his name', async (needs, deep, short, spare) => {
+    const needy = { ...summary(), teams: summary().teams.map((t) => (t.team_id === 1 ? { ...t, needs, deep } : t)) };
     renderTrades(trades(), [], { props: { game: needy } });
-    expect(await screen.findByText('Needs RB · Deep at WR, TE')).toBeInTheDocument();
+    const line = (await screen.findByText('Roster')).closest('p') as HTMLElement;
+
+    for (const part of [short, spare]) {
+      if (part) expect(line).toHaveTextContent(part);
+    }
+    expect(line).toHaveTextContent(short && spare ? `${short} · ; ${spare}` : (short ?? spare)!);
+    expect(within(line).queryByText('·')?.getAttribute('aria-hidden') ?? 'true').toBe('true');
   });
 
   it('shows no needs line for a partner with none', async () => {
     renderTrades(trades());
     await screen.findByRole('checkbox', { name: 'Give Travis Etienne' });
-    expect(screen.queryByText(/Needs |Deep at /)).not.toBeInTheDocument();
+    expect(screen.queryByText('Roster')).not.toBeInTheDocument();
   });
 
   it('says a declined manager came back with a better offer', async () => {

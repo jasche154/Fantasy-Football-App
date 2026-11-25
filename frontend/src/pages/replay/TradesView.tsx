@@ -59,7 +59,7 @@ function TradeHistory({ offers, openPlayer }: { offers: readonly ReplayOffer[]; 
               <td className="replay-trade__names"><PlayerNames players={offer.give} onOpen={openPlayer} /></td>
               <td>
                 {offer.to_team.name}
-                <ManagerQuote teamId={offer.to_team.team_id} name={offer.to_team.name} text={offer.reply} />
+                <ManagerQuote teamId={offer.to_team.team_id} text={offer.reply} lead="said:" />
               </td>
               <td className="replay-trade__names"><PlayerNames players={offer.get} onOpen={openPlayer} /></td>
               <td><span className={`status-badge status-badge--${STATUS[offer.status].tone}`}>{STATUS[offer.status].label}</span></td>
