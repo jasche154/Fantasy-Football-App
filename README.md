@@ -1131,20 +1131,30 @@ that week's games on; only scoring a week reads its real points.
   a strong feeling, from anyone, CPUs included; worried caps his price at the chart, so a mood and a price never
   point opposite ways. **Needs:** a CPU needs a position when its weakest starter there is under half the
   league's median weakest starter (or it has too few), and is deep at one when it has a starter-quality player
-  (at least that median) more than its starting slots (`replay_styles.position_needs`); the trade builder shows
-  "Needs RB · Deep at WR" under the mood. It pays 5% more for a player at a position it needs, 10% when it
-  pays only from positions where it is deep (a team short at RB with many good WRs gives a 5% better WR for a
-  back); that and its lineup gain together add at most 10% of what it gives. Every style stays inside the
-  market guard (it never takes back under 80% of what it gives on the plain chart), and a round-trip test
-  holds each style's stated edge (`replay_trade_value.stated_edge`). Panicky and gambler CPUs are also **emotional**: they price a
+  (at least that median) more than its starting slots there (a superflex slot counts as a QB slot; a flex slot
+  belongs to no one position) (`replay_styles.position_needs`); the trade builder shows "Needs RB · Deep at
+  WR" under the mood. It pays 5% more on its net gain at a position it needs: what it gets there that would
+  start for it after the deal, less what it sends at that position (so swapping one back for a lesser one
+  earns nothing); 10% when it pays only from positions where it is deep (a team short at RB with many good WRs
+  gives a 5% better WR for a starting back); that and its lineup gain together add at most 10% of what it
+  gives. Chaining such deals barely pays: in the test league a greedy user gains 1.5% of his roster's chart value
+  in a week and 3.8% over four (1.3% without the bonus), because the re-trade lock keeps a player he just got for
+  two weeks. Every style stays inside the market guard (it never takes back under 80% of what it gives on the
+  plain chart), and a test trades round trips (one or two players each way) against every style: none leaves
+  the user more than 2 points ahead of the best measured (all at or below even except the stasher, +1.2%).
+  Leagues saved before these styles keep their old personas, but the need bonus and the "high on" mark-up apply
+  to their CPUs too. A haggler's "opening offer" line and a fan's refusal of a rival's player can give the style
+  away before the week-3 tendency hint does (intended). Panicky and gambler CPUs are also **emotional**: they price a
   hype move at 1.25x its calibrated size (`replay_personas.HYPE`, at most 8 chart points more), both when
   buying and when holding; the rest stay calm. Small on purpose: Javonte Williams' week-2 jump of 15 points
   becomes about 19 to an emotional CPU. **Counters:** a CPU that turns down a deal on value alone may
   answer with a counter offer it would take (`services/replay_counter.py`; one roll and at most one counter
   per CPU per week). A CPU that says no tells you why in one line in its voice, under its name in the trade
   window and in the trade history (`Offer.reply`): your player is a rival's (a fan), no roster or lineup room,
-  it is high on the player you asked for and would have taken the deal without that mark-up, it would only get
-  positions where it is deep or lose a starter, or not enough value (the first that applies); shown under Offers for you (an offer lapses when the week is played: the hub warns
+  it is high on the player you asked for and would have taken the deal without that mark-up, it would take the
+  deal without the starter it loses (or if what it gets filled a need rather than a position where it is deep),
+  or not enough value: the first that is true, each tested by taking that one term away
+  (`services/replay_trade_reasons.py`); shown under Offers for you (an offer lapses when the week is played: the hub warns
   while one is waiting);
   you can counter a CPU's offer from the trade builder (the offer is marked "countered"). The **deadline**:
   trades are open through week 11 and its waiver phase, and close when you press Sim to Wednesday after
