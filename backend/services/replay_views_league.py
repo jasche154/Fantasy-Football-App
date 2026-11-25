@@ -139,7 +139,7 @@ def offer_row(game: Game, offer: Offer) -> dict:
             "from_team": team_ref(game, rs.team(state, offer.from_team)),
             "to_team": team_ref(game, rs.team(state, offer.to_team)),
             "give": refs(game, offer.give), "get": refs(game, offer.get), "counter_to": offer.counter_to,
-            "message": offer.message or None}
+            "message": offer.message or None, "reply": offer.reply}
 
 
 def _preview(game: Game, offer: Offer) -> dict:

@@ -63,7 +63,7 @@ def test_streaks_and_upsets_wait_for_league_weeks():
     assert all(league_weeks(c.week) >= chat.UPSET_FROM_WEEK for c in upsets)
     for line in streaks:                    # the streak he talks about is made of league games only
         state = next(s for s in season(K8) if s.results and s.results[-1].week == line.week)
-        assert chat.STREAK <= abs(chat._streak(state, line.team_id)) <= len(state.results)
+        assert chat.STREAK <= abs(rs.streak(state, line.team_id)) <= len(state.results)
 
 
 def test_clinching_counts_the_weeks_left_from_the_league_week_not_from_week_one():

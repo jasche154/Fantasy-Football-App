@@ -1,11 +1,12 @@
 """Replay League: a CPU filling the starting slots a trade left it unable to fill (`cpu_cover`).
 
 Called by replay_game after an accepted trade (and by `start_week` for every CPU once waivers clear). Only
-unlocked free agents who are not out; no dice roll, so the same state gives the same moves.
+unlocked free agents who are not out (a fan skips his rival's players unless nobody else can play the slot); no dice
+roll, so the same state gives the same moves.
 """
 from collections.abc import Iterable
 
-from services import replay_ir, replay_state as rs, replay_values as rv, replay_waivers
+from services import replay_fans, replay_ir, replay_state as rs, replay_values as rv, replay_waivers
 from services.replay_pool import SKILL
 from services.replay_state import Settings, State
 from services.replay_values import Knowledge, ReplayValue
@@ -39,15 +40,17 @@ def _by_chart(value: ReplayValue) -> tuple[float, float, int]:
 def _cover_move(state: State, settings: Settings, know: Knowledge, team_id: int) -> Move | None:
     """The first move that fills one of the team's missing slots, trying each slot in turn. Drops go by
     healthy chart (like `replay_trades._cpu_drops`), so a false out-for-season report never makes one."""
-    roster = [know.by_id[pid] for pid in rs.team(state, team_id).roster]
+    team = rs.team(state, team_id)
+    roster = [know.by_id[pid] for pid in team.roster]
     missing = rv.missing_slots([v.position for v in roster], settings)
     taken = rs.rostered(state) | set(state.locked)
     free = [v for v in know.values if v.player_id not in taken and not v.out]
     cuts = sorted((v for v in roster if v.position in SKILL),
                   key=lambda v: (v.healthy_chart, v.healthy_value, v.ros_ppg, v.player_id))
     for slot in missing:
-        eligible = rv.eligible(slot)
-        add = max((v for v in free if v.position in eligible), key=_by_chart, default=None)
+        eligible = [v for v in free if v.position in rv.eligible(slot)]
+        # a fan takes his rival's player only when nobody else can play there
+        add = max((v for v in eligible if not replay_fans.banned(team, v.team)) or eligible, key=_by_chart, default=None)
         if add is None:
             continue
         if len(roster) < settings.roster_size:

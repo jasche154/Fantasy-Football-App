@@ -34,8 +34,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from functools import lru_cache
 
-from services import (lineup_gain, replay_ir, replay_personas, replay_state as rs, replay_trade_value as tv,
-                      replay_values as rv, trade)
+from services import (lineup_gain, replay_fans, replay_ir, replay_personas, replay_state as rs, replay_styles,
+                      replay_trade_value as tv, replay_values as rv, trade)
 from services.replay_pool import SKILL
 from services.replay_state import Offer, Settings, State, Team
 from services.replay_values import Knowledge
@@ -48,6 +48,7 @@ CPU_TRADE_MULTIPLE = 0.95       # between two CPUs: each needs back at least thi
 SUGGEST_WITHIN = 1.5            # a player suggested to close a value gap is worth at most this x what is missing
 VALUE_REASON = "Value is too far apart"     # every value decline starts so (a counter-offer answers only those)
 DEPTH_HINT = "They'd rather have fewer, better players: offer one stronger player in place of several."
+DECLINE_KINDS = ("decline_rival", "decline_room", "decline_attached", "decline_need", "decline_value")  # first wins
 
 
 @dataclass(frozen=True)
@@ -68,6 +69,10 @@ class Verdict:
     suggestion: str | None = None           # a hint that would fix a value decline
     score: float = 0.0                      # the lowest CPU net in the deal on the 1000 chart scale (to_team's
                                             # when the user proposes); accepted needs >= 0
+    decline: str | None = None              # why to_team said no, as a chat kind (`DECLINE_KINDS`); None when it
+                                            # accepted or only a league rule or the user's own side stopped it
+    decline_player: int | None = None       # the player its reply names (decline_rival / _attached / _value)
+    decline_position: str | None = None     # the position it names (decline_need)
 
 
 class OfferExpired(ValueError):
@@ -91,6 +96,7 @@ class _Side:
     gain: float
     tally: tv.Tally | None = None           # CPU sides only
     market_ok: bool = True
+    mind: replay_styles.Mind | None = None  # CPU sides only
 
 
 def needed_multiple(settings: Settings, other: Team) -> float:
@@ -98,13 +104,14 @@ def needed_multiple(settings: Settings, other: Team) -> float:
     return rs.USER_TRADE_MULTIPLE[settings.difficulty] if other.is_user else CPU_TRADE_MULTIPLE
 
 
-def offer_multiple(team: Team) -> float:
-    """The multiple on a CPU's own offer to the user: it gives up to its persona's top edge more than it gets."""
-    return 1.0 / ((1.0 + replay_personas.offer_edge(team.persona)[1]) * tv.OUT_MARGIN)
+def offer_multiple(state: State, team: Team, counter: bool = False) -> float:
+    """The multiple on a CPU's own offer to the user: it gives up to its top edge now
+    (`replay_personas.edge`; `counter`: an offer answering another) more than it gets."""
+    return 1.0 / ((1.0 + replay_personas.edge(state, team, counter)[1]) * tv.OUT_MARGIN)
 
 
-def _multiple(settings: Settings, team: Team, other: Team, offered: bool) -> float:
-    return offer_multiple(team) if offered and other.is_user else needed_multiple(settings, other)
+def _multiple(state: State, settings: Settings, team: Team, other: Team, offered: bool, counter: bool = False) -> float:
+    return offer_multiple(state, team, counter) if offered and other.is_user else needed_multiple(settings, other)
 
 
 def fair_label(value_give: float, value_get: float) -> str:
@@ -252,7 +259,8 @@ def clear_cache() -> None:
 def _side(state: State, settings: Settings, know: Knowledge, team: Team, other: Team, sends: tuple[int, ...],
           receives: tuple[int, ...], drops: tuple[int, ...], pool: Sequence[int],
           used: frozenset[int] = frozenset(), just_added: frozenset[int] = frozenset(),
-          offered: bool = False) -> _Side:
+          offered: bool = False, counter: bool = False,
+          needs: dict[int, tuple[frozenset[str], frozenset[str]]] | None = None) -> _Side:
     after, ir = _landing(team, other, sends, receives)
     if team.is_user:
         cut = _user_drops(team, settings, after, drops)
@@ -270,9 +278,11 @@ def _side(state: State, settings: Settings, know: Knowledge, team: Team, other: 
         return side
     own_cuts = tuple(pid for pid in (cut or ()) if pid not in receives)
     per_week = gain / max(1e-9, sum(rv.horizon(know, settings).weights.values()))
-    counted = tv.tally(know, team.persona, sends, kept, own_cuts, per_week, _multiple(settings, team, other, offered),
-                       other.is_user, team.hype, rs.markdowns(state, team.id), just_added, offered and other.is_user)
-    return replace(side, tally=counted, market_ok=tv.market_ok(know, sends, kept, own_cuts, just_added))
+    mind = replay_styles.mind_for(state, settings, know, team, sends, kept, needs)
+    multiple = _multiple(state, settings, team, other, offered, counter)
+    counted = tv.tally(know, mind, sends, kept, own_cuts, per_week, multiple, other.is_user, team.hype,
+                       rs.markdowns(state, team.id), just_added, offered and other.is_user)
+    return replace(side, tally=counted, market_ok=tv.market_ok(know, sends, kept, own_cuts, just_added), mind=mind)
 
 
 def _rule_reasons(state: State, know: Knowledge, sender: Team, receiver: Team, moved: tuple[int, ...]) -> list[str]:
@@ -289,10 +299,11 @@ def _rule_reasons(state: State, know: Knowledge, sender: Team, receiver: Team, m
     return reasons
 
 
-def _value_reason(side: _Side, other: Team, settings: Settings, know: Knowledge, offered: bool = False) -> str | None:
+def _value_reason(state: State, side: _Side, other: Team, settings: Settings, know: Knowledge, offered: bool = False,
+                  counter: bool = False) -> str | None:
     counted, name = side.tally, side.team.name
     if counted is not None and counted.score < 0:
-        bar = _multiple(settings, side.team, other, offered) * tv.OUT_MARGIN
+        bar = _multiple(state, settings, side.team, other, offered, counter) * tv.OUT_MARGIN
         extra = f" They want {bar - 1:.0%} more than they give." if bar > 1 else ""
         if counted.lineup < 0:
             extra += f" It would weaken their starting lineup (worth {-counted.lineup:.0f} of value to them)."
@@ -310,16 +321,51 @@ def _value_reason(side: _Side, other: Team, settings: Settings, know: Knowledge,
     return None
 
 
-def _side_reasons(side: _Side, other: Team, settings: Settings, know: Knowledge, offered: bool = False) -> list[str]:
+def _rivals(know: Knowledge, side: _Side) -> list[int]:
+    """Players of his rival team a fan would receive (replay_fans)."""
+    return [pid for pid in side.receives if replay_fans.banned(side.team, know.by_id[pid].team)]
+
+
+def _side_reasons(state: State, side: _Side, other: Team, settings: Settings, know: Knowledge, offered: bool = False,
+                  counter: bool = False) -> list[str]:
     name, reasons = side.team.name, []
+    hated = _rivals(know, side) if not side.team.is_user else []
+    if hated:
+        reasons.append(f"{name} won't take a {replay_fans.nickname(replay_fans.rival(side.team))} player: "
+                       f"{_names(know, hated)}.")
     if side.drops is None:
         reasons.append(f"{name} would be over the roster or a position limit with nobody it could drop.")
     if side.cover is None:
         short = ", ".join(rv.missing_slots(_positions(know, side.roster), settings))
         reasons.append(f"It would leave {name} without a full starting lineup (short at {short}) and no free "
                        f"agent to fill it.")
-    value = _value_reason(side, other, settings, know, offered)
+    value = _value_reason(state, side, other, settings, know, offered, counter)
     return [*reasons, *([value] if value else [])]
+
+
+def _decline(settings: Settings, know: Knowledge, side: _Side) -> tuple[str | None, int | None, str | None]:
+    """(chat kind, player, position) for why this CPU side said no: the first of DECLINE_KINDS that applies;
+    (None, None, None) when it had nothing against the deal."""
+    counted, mind = side.tally, side.mind
+    if counted is None or mind is None:
+        return None, None, None
+    hated = _rivals(know, side)
+    if hated:
+        return "decline_rival", hated[0], None
+    if side.drops is None or side.cover is None:
+        return "decline_room", None, None
+    if counted.score >= 0 and side.market_ok:
+        return None, None, None
+    loved = [pid for pid in side.sends if replay_styles.markup(know, mind, pid) > 0]
+    if loved and counted.bare_score >= 0 and side.market_ok:
+        return "decline_attached", max(loved, key=lambda pid: (replay_styles.markup(know, mind, pid), -pid)), None
+    if counted.lineup < 0:
+        starters = {pid for ids in rv.best_lineup(know, side.team.roster, settings).values() for pid in ids}
+        lost = [pid for pid in side.sends if pid in starters] or list(side.sends)
+        return "decline_need", None, know.by_id[max(lost, key=lambda pid: (know.by_id[pid].chart, -pid))].position
+    if side.kept and all(know.by_id[pid].position in mind.deep for pid in side.kept):
+        return "decline_need", None, know.by_id[side.kept[0]].position
+    return "decline_value", max(side.sends, key=lambda pid: (know.by_id[pid].chart, -pid)), None
 
 
 def _points_text(points: float) -> str:
@@ -368,21 +414,25 @@ def _suggestion(state: State, settings: Settings, know: Knowledge, mine: _Side, 
 
 def evaluate(state: State, settings: Settings, know: Knowledge, from_team: int, to_team: int,
              give: Sequence[int], get: Sequence[int], proposer_drops: Sequence[int] = (),
-             offered: bool = False) -> Verdict:
+             offered: bool = False, counter: bool = False) -> Verdict:
     """Would this deal go through? from_team sends `give` and receives `get`; to_team is a CPU.
-    `offered`: the deal is to_team's own offer to the user (mirrored), judged at `offer_multiple`.
+    `offered`: the deal is to_team's own offer to the user (mirrored), judged at `offer_multiple`; `counter`:
+    that offer answers another (a haggler's counter gives his normal edge).
 
     ValueError for input that cannot be a trade (wrong roster, too many players, past the deadline, the
     user's drops not covering the overflow). Otherwise a Verdict, the same one every time it is asked."""
     give, get = tuple(give), tuple(get)
     sender, receiver = _check(state, settings, know, from_team, to_team, give, get)
     pool, just_added = free_agents(state, know), tv.fresh(know, rs.pickups(state))
+    needs = replay_styles.position_needs(state, settings, know)
     mine = _side(state, settings, know, sender, receiver, give, get, tuple(proposer_drops), pool,
-                 just_added=just_added, offered=offered)
+                 just_added=just_added, offered=offered, counter=counter, needs=needs)
     theirs = _side(state, settings, know, receiver, sender, get, give, (), pool, frozenset(mine.cover or ()),
-                   just_added, offered)
+                   just_added, offered, counter, needs)
     reasons = [*_rule_reasons(state, know, sender, receiver, (*give, *get)),
-               *_side_reasons(theirs, sender, settings, know, offered), *_side_reasons(mine, receiver, settings, know)]
+               *_side_reasons(state, theirs, sender, settings, know, offered, counter),
+               *_side_reasons(state, mine, receiver, settings, know)]
+    decline = _decline(settings, know, theirs) if reasons else (None, None, None)
     bonus = tv.premium(know, "balanced", give, mine.kept, just_added)
     value_give = round(_chart(know, give, just_added) + max(0.0, -bonus), 2)
     value_get = round(_chart(know, mine.kept, just_added) - _chart(know, mine.drops or (), just_added)
@@ -395,7 +445,8 @@ def evaluate(state: State, settings: Settings, know: Knowledge, from_team: int, 
         your_drops=mine.drops or (),
         give_values=tuple((pid, tv.chart(know, pid, just_added)) for pid in give),
         get_values=tuple((pid, tv.chart(know, pid, just_added)) for pid in get),
-        suggestion=_suggestion(state, settings, know, mine, theirs, just_added), score=min(scores, default=0.0))
+        suggestion=_suggestion(state, settings, know, mine, theirs, just_added), score=min(scores, default=0.0),
+        decline=decline[0], decline_player=decline[1], decline_position=decline[2])
 
 
 def record_offer(state: State, from_team: int, to_team: int, give: Sequence[int], get: Sequence[int],
@@ -498,7 +549,7 @@ def respond(state: State, settings: Settings, know: Knowledge, offer_id: int, ac
         _check(state, settings, know, *deal)
     except ValueError as exc:
         raise OfferExpired(f"That offer no longer stands. {exc}", expired) from exc
-    verdict = evaluate(state, settings, know, *deal, user_drops, offered=True)
+    verdict = evaluate(state, settings, know, *deal, user_drops, offered=True, counter=offer.counter_to is not None)
     if not verdict.accepted:
         raise OfferExpired(f"That offer no longer stands. {' '.join(verdict.reasons)}", expired, verdict)
     return _apply(state, settings, know, *deal, verdict, offer_id)

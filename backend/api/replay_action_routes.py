@@ -188,15 +188,16 @@ def counter_offer(game_id: GameId, offer_id: DbId, body: CounterBody, session: S
         return _proposed(t, *rg.counter_offer(*t.args, t.seed, offer_id, body.give, body.get, body.drops))
 
 
-def _proposed(t: Turn, state: rs.State, found: rg.Verdict, counter: rs.Offer | None) -> dict:
+def _proposed(t: Turn, state: rs.State, found: rg.Verdict, counter: rs.Offer | None, reply: str | None) -> dict:
+    """reply: the CPU's one line when it turned the deal down (also stored on the declined offer), else null."""
     return t.done(state, verdict=lambda game: league_views.verdict(game, found), executed=found.accepted,
-                  counter=(lambda game: league_views.offer_row(game, counter)) if counter else None)
+                  counter=(lambda game: league_views.offer_row(game, counter)) if counter else None, reply=reply)
 
 
 @router.post("/trades/offers/{offer_id}/respond")
 def respond_offer(game_id: GameId, offer_id: DbId, body: RespondBody, session: Session = Depends(get_session)) -> dict:
     """Accept or decline a CPU's offer. One that no longer stands is saved as expired and answered with
-    expired=true and the reason."""
+    expired=true and the reason. counter: a haggler's better offer after a decline, else null."""
     with turn(session, game_id) as t:
         try:
             state = rg.respond_offer(*t.args, offer_id, body.accept, body.drops, seed=t.seed)
@@ -204,4 +205,6 @@ def respond_offer(game_id: GameId, offer_id: DbId, body: RespondBody, session: S
             found = exc.verdict
             return t.done(exc.state, accepted=False, expired=True, message=str(exc),
                           verdict=(lambda game: league_views.verdict(game, found)) if found else None)
-        return t.done(state, accepted=body.accept, expired=False, message=None, verdict=None)
+        counter = next((o for o in state.offers if o.counter_to == offer_id and o.status == "pending"), None)
+        return t.done(state, accepted=body.accept, expired=False, message=None, verdict=None,
+                      counter=(lambda game: league_views.offer_row(game, counter)) if counter and not body.accept else None)

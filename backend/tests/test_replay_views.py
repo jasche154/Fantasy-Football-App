@@ -177,7 +177,8 @@ def test_a_cpus_tendency_shows_after_three_weeks_and_its_persona_never_does():
 
     assert all(team["tendency"] is None for team in early["teams"])
     assert [team["tendency"] is None for team in later["teams"]] == [team["is_user"] for team in later["teams"]]
-    assert not any(persona in json.dumps(views.summary(game(at(4)))) for persona in personas - {"balanced"})
+    # "fan" is not hidden: a fan's tendency names his team ("Bears fan. Wants no Packers."), the user's choice
+    assert not any(persona in json.dumps(views.summary(game(at(4)))) for persona in personas - {"balanced", "fan"})
 
 
 def test_moods_are_worked_out_once_per_team_per_request(monkeypatch):

@@ -10,6 +10,10 @@ BANNED = re.compile(
     r"\b(damn|hell|crap|shit\w*|fuck\w*|ass|asses|bitch\w*|bastard|piss\w*|dick|sucks?|kill\w*|die|died|dead|death"
     r"|injur\w*|hurt\w*|torn|concussion|surgery|hospital|retard\w*|stupid|idiot|slur)\b", re.IGNORECASE)
 BUCKETS = [(kind, voice) for kind in chat.KINDS for voice in chat.VOICES if voice not in chat.QUIET.get(kind, ())]
+NEW_VOICES = ("fan", "stasher", "haggler", "contender", "dealer", "tilted")
+NEW_KINDS = ("offer_buy_low", "offer_haggle", "offer_haggle_counter", "decline_rival", "decline_room",
+             "decline_attached", "decline_need", "decline_value")
+NEW_LINES = 5           # the newer styles and kinds have five lines a bucket (the user's choice)
 
 
 def _fields(line: str) -> set[str]:
@@ -28,7 +32,8 @@ def test_voices_are_the_personas_and_every_kind_is_in_the_bank():
 @pytest.mark.parametrize(("kind", "voice"), BUCKETS)
 def test_every_bucket_has_enough_distinct_clean_lines(kind, voice):
     lines = chat.bank()[kind][voice]
-    least = chat.MIN_LINES_COMMON if kind in chat.COMMON else chat.MIN_LINES
+    least = (NEW_LINES if voice in NEW_VOICES or kind in NEW_KINDS
+             else chat.MIN_LINES_COMMON if kind in chat.COMMON else chat.MIN_LINES)
 
     assert len(lines) >= least
     assert len({_squashed(line) for line in lines}) == len(lines), "near-duplicate lines"
@@ -40,7 +45,8 @@ def test_every_bucket_has_enough_distinct_clean_lines(kind, voice):
         assert line.format_map({name: "X" for name in chat.PLACEHOLDERS[kind]})
 
 
-@pytest.mark.parametrize("kind", ["boom", "bust", "shop", "offer_worried", "offer_high"])
+@pytest.mark.parametrize("kind", ["boom", "bust", "shop", "offer_worried", "offer_high", "offer_buy_low",
+                                  "offer_haggle", "offer_haggle_counter", "decline_attached", "decline_rival"])
 def test_a_line_about_one_player_names_him(kind):
     # The chat shows only the text: "5.2. A bad game is one game." leaves the league guessing who.
     unnamed = [line for lines in chat.bank()[kind].values() for line in lines if "{player}" not in line]
@@ -57,6 +63,19 @@ def test_quiet_voices_have_no_bucket_and_never_post_it():
     for kind, voices in chat.QUIET.items():
         assert not set(voices) & set(chat.bank()[kind])
     assert all(replay_mood.SHOP_RATE[voice] == 0.0 for voice in chat.QUIET["shop"])
+    assert all(replay_mood.SHOP_RATE[voice] > 0.0 for voice in chat.VOICES if voice not in chat.QUIET["shop"])
+
+
+def test_the_one_style_kinds_belong_to_their_style_only():
+    assert {kind: set(chat.bank()[kind]) for kind in chat.ONLY} == {kind: {voice} for kind, voice in chat.ONLY.items()}
+
+
+def test_a_haggler_says_his_first_offer_is_an_opening_one():
+    assert all(re.search(r"open|first|start", line, re.IGNORECASE) for line in chat.bank()["offer_haggle"]["haggler"])
+
+
+def test_a_decline_need_line_names_the_position():
+    assert all("{position}" in line for lines in chat.bank()["decline_need"].values() for line in lines)
 
 
 def test_the_bank_is_big():

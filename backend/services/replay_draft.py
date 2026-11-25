@@ -32,7 +32,7 @@ from collections.abc import Sequence
 from dataclasses import replace
 from functools import lru_cache
 
-from services import replay_chart, replay_personas, replay_pool, replay_slots, replay_state as rs
+from services import replay_chart, replay_fans, replay_personas, replay_pool, replay_slots, replay_state as rs
 from services.replay_pool import ALL_POSITIONS, PoolPlayer, SeasonData
 from services.replay_state import Pick, Settings, State, Team
 from services.replay_values import lineup_holes, missing_slots, position_cap
@@ -82,7 +82,8 @@ def new_game(settings: Settings, seed: int, team_names: Sequence[str] | None = N
     """A league about to draft: teams 1..N in round-1 order, the user at `settings.draft_slot`.
 
     `team_names`, when given, names all N teams by id. The user's team has chaos 0 and no lean, which is
-    what `autopick_user` drafts with. Each CPU gets its trading persona here, once (kept hidden from views)."""
+    what `autopick_user` drafts with. Each CPU gets its trading persona here, once (kept hidden from views),
+    and a fan his favourite NFL team (replay_fans.pick_team)."""
     draw = rs.rng(seed, "teams")
     names = _names(settings, [int(i) for i in draw.permutation(len(CPU_TEAM_NAMES))], team_names)
     chaos = draw.uniform(*CHAOS_RANGE, settings.teams)
@@ -93,9 +94,10 @@ def new_game(settings: Settings, seed: int, team_names: Sequence[str] | None = N
         is_user = index + 1 == settings.draft_slot
         taste = {position: 1.0 if is_user else round(float(lean[index, n]), 3)
                  for n, position in enumerate(ALL_POSITIONS)}
+        persona = personas.get(index + 1, "balanced")
         teams.append(Team(index + 1, name, is_user, (), 0.0 if is_user else round(float(chaos[index]), 3), taste,
-                          persona=personas.get(index + 1, "balanced"),
-                          hype=replay_personas.hype_for(personas.get(index + 1, "balanced"))))
+                          persona=persona, hype=replay_personas.hype_for(persona),
+                          fan_of=replay_fans.pick_team(seed, index + 1) if persona == "fan" and not is_user else None))
     ids = tuple(team.id for team in teams)
     return State(phase="draft", week=rs.draft_week(settings), teams=tuple(teams), draft_order=ids, picks=(),
                  schedule=(), results=(),
@@ -219,11 +221,14 @@ def _need(position: str, counts: Counter, round_: int, settings: Settings) -> fl
 
 
 def _candidates(state: State, known: SeasonData, allowed: Sequence[str], round_: int,
-                overall: int) -> tuple[list[PoolPlayer], bool]:
+                overall: int, team: Team | None = None) -> tuple[list[PoolPlayer], bool]:
     """(players to choose from, whether they have an ADP). Within reach when anyone is; with no ADP player
-    left at an allowed position, the one with the best preseason projection."""
+    left at an allowed position, the one with the best preseason projection. A fan (`team`) skips his rival's
+    players while anyone else fits (replay_fans)."""
     taken = rs.rostered(state)
     pool = [p for p in _board(known) if p.position in allowed and p.player_id not in taken]
+    if team is not None and team.fan_of:
+        pool = [p for p in pool if not replay_fans.banned(team, known.team_at(p.player_id, state.week))] or pool
     if not pool:
         raise ValueError("No player is left who fits this roster.")
     ranked = [p for p in pool if p.adp is not None][:WINDOWS[_band(round_)]]
@@ -264,7 +269,7 @@ def cpu_pick(state: State, settings: Settings, data: SeasonData, seed: int) -> i
         known = replay_chart.superflex_view(known)
     round_ = _slot(state, overall)[0]
     mine = [known.players[pid].position for pid in team.roster]
-    players, ranked = _candidates(state, known, _positions(mine, round_, settings), round_, overall)
+    players, ranked = _candidates(state, known, _positions(mine, round_, settings), round_, overall, team)
     if not ranked:
         return players[0].player_id
     noise = rs.rng(seed, "draft", overall).standard_normal(len(players))

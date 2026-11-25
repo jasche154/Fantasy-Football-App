@@ -9,7 +9,8 @@ than one attempt; the re-trade lock keeps it from moving the same players again.
 
 1. Each side's TOP_SKILL tradable skill players (out players too, from the active roster), most valuable
    first; a shark looks first at the other side's slumping stars (star x a negative form_chart: buy low)
-   and offers its own hot players (sell high). Packages of one or two of them.
+   and offers its own hot players (sell high); a stasher looks first at the other side's out stars with a
+   return date (healthy_chart). Packages of one or two of them. A fan never receives his rival's players.
 2. Keep the deals that pass every CPU's market guard on package chart sums (cheap: no lineup maths) and,
    for an offer to the user, need no drop from him and look right for him: a shop's is fair for him
    (`fair_for_user`); one a CPU makes because it wants his player gives him more than he sends, by its
@@ -18,7 +19,11 @@ than one attempt; the re-trade lock keeps it from moving the same players again.
    wanted (none between CPUs, the persona's edge for a CPU's offer) and take the accepted one with the best
    `Verdict.score` (the lowest CPU net in the deal); two CPUs only make a deal that nets both at least
    SEEK_SCORE. A CPU's own offer is evaluated as one (`offered`, at `replay_trades.offer_multiple`), as
-   `replay_trades.respond` re-checks it, and must be `generous` on the verdict's values.
+   `replay_trades.respond` re-checks it, and must be `generous` on the verdict's values. A dealer looks at
+   2-for-2 swaps first.
+A dealer also makes DEALER_ATTEMPTS extra CPU-CPU attempts a week (each with EXTRA_ATTEMPT_CHANCE), only with
+pairs that include him. Offer rates and edges come from the state (`replay_personas.edge`: a tilted manager on a
+skid offers more often and gives more; a haggler's opening offer is a lowball, `haggle_deal` his counter).
 Package sums count a player his team picked up this week at his trade discount (`replay_trade_value.fresh`).
 
 A CPU shopping a player to the user (`State.shops`, replay_mood) offers first: the best deal that includes
@@ -34,7 +39,7 @@ from itertools import combinations
 
 import numpy as np
 
-from services import replay_personas, replay_state as rs, replay_trade_value as tv, replay_trades as rt
+from services import replay_fans, replay_personas, replay_state as rs, replay_trade_value as tv, replay_trades as rt
 from services.replay_pool import SKILL
 from services.replay_state import Settings, State, Team
 from services.replay_values import Knowledge, ReplayValue
@@ -49,6 +54,8 @@ PAIR_SCORED = 8                 # and for each pair of CPUs
 EDGE_SLACK = 0.04                # package sums leave out the star premium: look a little wider before evaluating
 SEEK_SCORE = 20.0               # chart points both CPUs must net before they go looking for a deal (they accept
                                 # one at 0, but don't chase it: at 0 the fake league traded ~15 times a season)
+DEALER_ATTEMPTS = 1             # extra CPU-CPU attempts a week per dealer (the user's "more attempts")
+Edge = tuple[float, float]      # (least, most) extra share a CPU's own offer gives the user
 
 Deal = tuple[tuple[int, ...], tuple[int, ...]]      # (what the first team sends, what it receives)
 Package = tuple[float, tuple[int, ...]]             # (chart sum, ids)
@@ -56,8 +63,10 @@ Package = tuple[float, tuple[int, ...]]             # (chart sum, ids)
 
 def _order(value: ReplayValue, look: str) -> tuple:
     """Search order: most valuable first; a shark buying looks at slumping stars first (star x a negative
-    form_chart), a shark selling offers its hot players (a positive form_chart) first."""
-    first = {"buy": value.star * max(0.0, -value.form_chart), "sell": max(0.0, value.form_chart)}.get(look, 0.0)
+    form_chart), a shark selling offers its hot players (a positive form_chart) first, a stasher buying looks at
+    out stars with a return date first (by healthy chart)."""
+    first = {"buy": value.star * max(0.0, -value.form_chart), "sell": max(0.0, value.form_chart),
+             "stash": value.healthy_chart if replay_personas.stashable(value) else 0.0}.get(look, 0.0)
     return -first, -value.chart, value.player_id
 
 
@@ -82,53 +91,68 @@ def fair_for_user(settings: Settings, know: Knowledge, value_give: float, value_
     return not rt.fair_label(value_give, value_get * asked).endswith("loss")
 
 
-def generous(persona: str, value_give: float, value_get: float, slack: float = 0.0) -> bool:
-    """Does a CPU's offer give the user (who sends `value_give`) its persona's edge more than he sends?"""
-    least, most = replay_personas.offer_edge(persona)
+def generous(edge: Edge, value_give: float, value_get: float, slack: float = 0.0) -> bool:
+    """Does a CPU's offer give the user (who sends `value_give`) its edge (`replay_personas.edge`) more than he
+    sends? A haggler's opening edge is below 0: then it gives him less, by that share."""
+    least, most = edge
     return value_give > 0 and least - slack <= value_get / value_give - 1.0 <= most + slack
 
 
+def _hated(know: Knowledge, team: Team, ids: tuple[int, ...]) -> bool:
+    return any(replay_fans.banned(team, know.by_id[pid].team) for pid in ids)
+
+
 def _candidates(state: State, settings: Settings, know: Knowledge, sender: Team, receiver: Team,
-                want: bool = False) -> list[Deal]:
+                want: Edge | None = None) -> list[Deal]:
     """Deals that pass the cheap checks, closest to the gap wanted first (`want`: the receiver's own offer to
-    the user, the sender, for his player; its persona's edge). `receiver` is a CPU."""
+    the user, the sender, for his player, at that edge; a dealer's 2-for-2 swaps first). `receiver` is a CPU."""
     def look(team: Team, other: Team) -> str:
-        return "sell" if team.persona == "shark" and not team.is_user else "buy" if other.persona == "shark" else ""
+        if team.persona == "shark" and not team.is_user:
+            return "sell"
+        return "buy" if other.persona == "shark" else "stash" if other.persona == "stasher" else ""
 
     just_added = tv.fresh(know, rs.pickups(state))
     shopped = frozenset() if sender.is_user else frozenset(shop.player_id for shop in state.shops)   # the user's to buy
     mine = _packages(know, _tradable(state, know, sender, look(sender, receiver), shopped), just_added)
     theirs = _packages(know, _tradable(state, know, receiver, look(receiver, sender), shopped), just_added)
-    edge = sum(replay_personas.offer_edge(receiver.persona)) / 2 if want else 0.0
+    edge = sum(want) / 2 if want else 0.0
+    swaps = receiver.persona == "dealer" or sender.persona == "dealer"
     found = []
     for give in mine:
+        if _hated(know, receiver, give[1]):
+            continue
         for get in theirs:
-            if give[0] < tv.MARKET_GUARD * get[0]:                       # the receiving CPU's guard
+            if give[0] < tv.MARKET_GUARD * get[0] or _hated(know, sender, get[1]):    # the receiving CPU's guard
                 continue
             if sender.is_user:
                 fits = len(sender.roster) - len(give[1]) + len(get[1]) <= settings.roster_size
-                looks_right = (generous(receiver.persona, give[0], get[0], EDGE_SLACK) if want
+                looks_right = (generous(want, give[0], get[0], EDGE_SLACK) if want
                                else fair_for_user(settings, know, give[0], get[0]))
                 if not fits or not looks_right:
                     continue
             elif get[0] < tv.MARKET_GUARD * give[0]:
                 continue
-            found.append((abs(give[0] * (1 + edge) - get[0]), len(give[1]) + len(get[1]), give[1], get[1]))
-    return [(give, get) for _, _, give, get in sorted(found)]
+            size = len(give[1]) + len(get[1])
+            found.append((swaps and size != 4, abs(give[0] * (1 + edge) - get[0]), size, give[1], get[1]))
+    return [(give, get) for *_, give, get in sorted(found)]
 
 
 def _best_deal(state: State, settings: Settings, know: Knowledge, sender: Team, receiver: Team,
-               scored: int = MAX_SCORED, need: int | None = None, want: bool = False) -> Deal | None:
+               scored: int = MAX_SCORED, need: int | None = None, want: bool = False, counter: bool = False,
+               sends: tuple[int, ...] | None = None) -> Deal | None:
     """The accepted deal with the best score among the `scored` candidates closest to the gap wanted (only
-    those where the receiver sends `need`, when given). `want`: the receiver's own offer for the user's
-    player, judged as one and generous to him."""
+    those where the receiver sends `need`, and where the sender sends exactly `sends`, when given). `want`: the
+    receiver's own offer for the user's player, judged as one and generous to him (`counter`: one that answers
+    another, at that edge)."""
     best: tuple[float, Deal] | None = None
-    found = _candidates(state, settings, know, sender, receiver, want)
-    for give, get in [deal for deal in found if need is None or need in deal[1]][:scored]:
-        verdict = rt.evaluate(state, settings, know, sender.id, receiver.id, give, get, offered=want)
+    edge = replay_personas.edge(state, receiver, counter) if want else None
+    found = _candidates(state, settings, know, sender, receiver, edge)
+    wanted = [deal for deal in found if (need is None or need in deal[1]) and (sends is None or set(deal[0]) == set(sends))]
+    for give, get in wanted[:scored]:
+        verdict = rt.evaluate(state, settings, know, sender.id, receiver.id, give, get, offered=want, counter=counter)
         if not verdict.accepted or (not sender.is_user and verdict.score < SEEK_SCORE):
             continue
-        if sender.is_user and not (generous(receiver.persona, verdict.value_give, verdict.value_get) if want
+        if sender.is_user and not (generous(edge, verdict.value_give, verdict.value_get) if edge
                                    else fair_for_user(settings, know, verdict.value_give, verdict.value_get)):
             continue
         if best is None or verdict.score > best[0]:
@@ -142,9 +166,12 @@ def _free_cpus(state: State) -> list[Team]:
             if not team.is_user and rs.trades_this_week(state, team.id) < rs.MAX_TRADES_PER_WEEK]
 
 
-def _cpu_attempt(state: State, settings: Settings, know: Knowledge, dice: np.random.Generator) -> State:
-    """Up to MAX_PAIRS seeded pairs of CPUs below the weekly trade cap: the first with a deal makes it."""
-    pairs = list(combinations(_free_cpus(state), 2))
+def _cpu_attempt(state: State, settings: Settings, know: Knowledge, dice: np.random.Generator,
+                 with_team: int | None = None) -> State:
+    """Up to MAX_PAIRS seeded pairs of CPUs below the weekly trade cap (only those with `with_team`, when
+    given): the first with a deal makes it."""
+    pairs = [pair for pair in combinations(_free_cpus(state), 2)
+             if with_team is None or with_team in (pair[0].id, pair[1].id)]
     for index in dice.permutation(len(pairs))[:MAX_PAIRS]:
         first, second = pairs[int(index)]
         deal = _best_deal(state, settings, know, first, second, PAIR_SCORED)
@@ -173,8 +200,11 @@ def _user_offer(state: State, settings: Settings, know: Knowledge, dice: np.rand
                 return rt.record_offer(state, team.id, user.id, deal[1], deal[0], "pending")
     rolls = dice.random(len(free))
     order = dice.permutation(len(free))
-    partner = next((free[int(i)] for i in order if rolls[int(i)] < replay_personas.offer_rate(free[int(i)].persona)),
-                   None)
+
+    def rate(team: Team) -> float:
+        return replay_personas.offer_rate(team.persona, rs.losses_in_a_row(state, team.id))
+
+    partner = next((free[int(i)] for i in order if rolls[int(i)] < rate(free[int(i)])), None)
     if partner is None:
         return state
     deal = _best_deal(state, settings, know, user, partner, want=True)
@@ -191,4 +221,18 @@ def cpu_trades(state: State, settings: Settings, know: Knowledge, seed: int) -> 
         dice = rs.rng(seed, "trades", state.week, attempt)
         if attempt == 0 or dice.random() < EXTRA_ATTEMPT_CHANCE:
             state = _cpu_attempt(state, settings, know, dice)
+    for dealer in [team.id for team in state.teams if team.persona == "dealer" and not team.is_user]:
+        for attempt in range(DEALER_ATTEMPTS):
+            dice = rs.rng(seed, "dealer-trades", state.week, dealer, attempt)
+            if dice.random() < EXTRA_ATTEMPT_CHANCE:
+                state = _cpu_attempt(state, settings, know, dice, dealer)
     return _user_offer(state, settings, know, rs.rng(seed, "offer", state.week))
+
+
+def haggle_deal(state: State, settings: Settings, know: Knowledge, offer_from: Team, user_sends: tuple[int, ...]) -> Deal | None:
+    """A haggler's counter after the user declines his opening offer: the best deal for the same players of the
+    user's (`user_sends`) at his normal edge (`replay_personas.HAGGLE_COUNTER_EDGE`), or None."""
+    user = rs.user_team(state)
+    if any(pid not in user.roster for pid in user_sends):
+        return None
+    return _best_deal(state, settings, know, user, offer_from, want=True, counter=True, sends=user_sends)

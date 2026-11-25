@@ -260,7 +260,8 @@ def test_a_shark_wants_an_edge_and_an_out_player_is_sold_to_the_user_at_a_floor(
 
 
 def test_an_emotional_cpu_pays_more_for_a_hyped_player_and_asks_more_for_its_own():
-    know = values(p1=star(400.0, shock_chart=30.0), p2=star(400.0))
+    # 500, not 400: at 400 the hype makes him feel "high on" his player, which adds a mark-up (replay_styles)
+    know = values(p1=star(500.0, shock_chart=30.0), p2=star(500.0))
 
     def score(sends, kept, hype):
         return tv.tally(know, "balanced", sends, kept, [], 0.0, 1.0, True, hype).score
