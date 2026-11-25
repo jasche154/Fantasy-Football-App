@@ -172,15 +172,15 @@ def test_a_full_roster_needs_a_drop():
         ir.activate(full(placed()), SETTINGS, know(), OWNER.id, STAR)
 
 
-def test_activate_with_a_drop_logs_the_drop_then_the_ir_move():
+def test_activate_with_a_drop_logs_one_event_for_the_whole_move():
     before = full(placed())
     after = ir.activate(before, SETTINGS, know(), OWNER.id, STAR, drop=MATE)
     team = rs.team(after, OWNER.id)
 
     assert STAR in team.roster and MATE not in rs.held(team) and MATE in after.locked and team.ir == ()
     assert len(team.roster) == SETTINGS.roster_size
-    drop, move = after.events[-2:]
-    assert (drop.kind, drop.player_ids) == ("drop", (MATE,))
+    assert len(after.events) == len(before.events) + 1           # not "dropped X" and then "..., dropping X"
+    move = after.events[-1]
     assert (move.kind, move.text, move.player_ids) == (
         "ir", f"{OWNER.name} activated {name(STAR)} from IR, dropping {name(MATE)}", (STAR, MATE))
     check_invariants(after)

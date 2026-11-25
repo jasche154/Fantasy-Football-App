@@ -63,7 +63,7 @@ Shared pieces
                     "Consolation")
   Event      {id, week, kind, team: TeamRef | null, text, players: PlayerRef[]}
       kind          draft | add | drop | claim | trade | ir | result | playoffs | champion
-      an add or claim with a drop is ONE event (no separate "drop"): players = [added, dropped]
+      an add, claim or IR activation with a drop is ONE event (no separate "drop"): players = [added, dropped]
   Page       {total, limit, offset, results: [...]}
   Verdict    {accepted, reasons: string[], fair_label, value_give, value_get, percent, your_gain, their_gain,
               give: [{player: PlayerRef, value}], get: [same], your_drops: PlayerRef[], their_drops: PlayerRef[],
