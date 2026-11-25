@@ -1035,24 +1035,32 @@ that week's games on; only scoring a week reads its real points.
   432 -> 175), and that list orders non-QBs like standard scoring, which sank tight ends in PPR. A new
   superflex league values them as its regular twin does; "Super" itself was saved before, so its non-QBs keep
   the 2-QB list's order on the 1-QB scale.
-- **Injured players' charts** (`services/replay_chart_injury.py`): an absence takes a share of his healthy
-  chart that follows the user's targets: out 1-4 weeks about 5-12%, 6+ weeks 35-45% when first reported and
-  less each week as the return nears, out for the season the whole chart. At 13 games left: 1 game missed 6%,
-  3 10%, 4 12%, 6 40%, 8 45%, 10 62% (never less than (share of the remaining games missed)^1.8, so out 2 of
-  the last 3 games still costs 48%). The games missed come from the news report. An out player without one
-  (no hard tag) loses the expected discount over how long such absences really lasted (2018-25, 3,253
-  player-weeks: 16% played that week after all, 23% missed one game, 13% two, 19% never came back that
-  season; `python -m services.replay_chart_eval --absences`), each outcome cut at the games left: about 30%
-  at 13 games left, 51% at 4, 84% at 1, never all of it (only a season-ending report is zero). A plain O
-  tag's first week: median 2 games, mean 3.0, 7% season-ending. From his second week out
-  only the model half is discounted (the experts already price the injury). Availability and expected games
-  missed (lineups, waivers) stay the real expected games. Before this the chart was healthy x share of games
-  played x 0.9 (a star missing 3 of 13 lost 31%). Measured honestly: real results say a known absence costs
-  about its share of games (out players produced 0.48 of a healthy player's value per game over
-  replacement; the old chart kept 0.50, the new one 0.61), so the user's targets price injured players above
-  what they realised (held-out error of out players 3.006 -> 3.159, see below). Within the targets the
-  deepest end is used: the power 1.8 is the lowest that keeps 4 games missed within 12% at 13 left, and a
-  shallower curve fits worse (power 2.5: 3.186, 4.0: 3.214).
+- **Injured players' charts** (`services/replay_chart_injury.py`, `replay_values._frozen`): while a player is
+  out with an injury or suspension (a hard tag since his last game), and until he has played a game again, his
+  healthy value is the one he had the week before the absence began (built from what was known that week; a
+  player hurt before week 1 keeps his draft-time value; one listed nowhere that week keeps his live value), and
+  the chart is that value less a share that follows the user's targets: out 1-4 weeks about 5-12% (one game
+  6% at any point of the season), 6+ weeks 35-45% when first reported and less each week as the return nears,
+  out for the season the whole chart. At 13 games left: 1 game missed 6%, 3 10%, 4 12%, 6 40%, 8 45%, 10 45%,
+  12 75% (past 4 games never less than (share of the remaining games missed)^3.6, so the 45% cap holds until
+  he misses 80% of what is left). So the value falls once when he goes out and climbs back each week, reaching
+  his old value the week he returns: before this the experts' and the model's ranks fell while he was out and
+  the discount came on top (2026 superflex QA league: Aaron Rodgers missing one game 474 -> 129, now 446;
+  2027: Jonathan Taylor out weeks 7-14 789 -> 209, now 454 climbing to 741; real 2024: Puka Nacua worth least,
+  214, the week he returned, now 714). The games missed come from the news report. An "out for the season"
+  report may be wrong (Puka Nacua 2027, back in week 14), so it keeps what such reports were really worth over
+  every IR or PUP absence 2018-25 (`python -m services.replay_chart_eval --season-reports`): 0.3% of the chart
+  with 0-3 games left, 1.8% with 4-7, 6.5% with 8-11, 16.7% with 12+ (they came back 0.3%, 2.3%, 9.5% and 27%
+  of the time). An out player without a report (no hard tag: his live value, not frozen, since that is how a
+  lost role looks too) loses the expected discount over how long such absences really lasted (2018-25, 3,253
+  player-weeks: 16% played that week after all, 23% missed one game, 13% two, 19% never came back that season;
+  `--absences`), each outcome cut at the games left: about 29% at 13 games left, 43% at 4, 84% at 1, never all
+  of it; tagged IR, at least 45%. Availability and expected games missed (lineups, waivers) stay the real
+  expected games. Before this round the chart was healthy x share of games played x 0.9 (a star missing 3 of 13
+  lost 31%). Measured honestly: real results say a known absence costs at least its share of games, and players
+  come back worse than before it (out players produced 0.40 of their pre-injury value per game over
+  replacement; the chart keeps 0.63), so the user's targets price injured players above what they realised
+  (held-out error of out players 3.185 -> 3.516 with the frozen value, see below).
 - **Chart check against real results** (`python -m services.replay_chart_eval [--seasons 2018-2025]
   [--weeks 1,4,7,10,13] [--lineups regular,superflex] [--teams 12] [--bench 6] [--out report.json]`;
   `--compare before.json after.json` scores two saved runs on their common player-weeks; `--absences`
@@ -1070,11 +1078,12 @@ that week's games on; only scoring a week reads its real points.
   2018-2025, regular lineup, before this round's changes: 2,402 healthy; 1,385 healthy with a later injury
   left out; 643 healthy with missed games counted as 0; 369 out and back, 50 of them back late; 184 out for
   the rest of the season; 113 dropped for fewer than 3 games). Results (weeks 1/4/7/10/13, common
-  player-weeks, before -> after): regular lineup Spearman 0.561 -> 0.555, held-out error 4.008 -> 4.023, out
-  players 3.006 -> 3.159 (the injury targets); superflex lineup (QB mapping and injury targets) Spearman
-  0.561 -> 0.553, held-out error 5.040 -> 5.046; over the last starter (`--bench 0`) 0.533 -> 0.532 and
-  4.118 -> 4.114. On the full population, which now keeps the non-QBs that used to slide below 50, superflex
-  Spearman 0.561 -> 0.579 and held-out error 5.043 -> 4.998.
+  player-weeks, before -> after): QB mapping and injury targets: regular lineup Spearman 0.561 -> 0.555,
+  held-out error 4.008 -> 4.023, out players 3.006 -> 3.159; superflex 0.561 -> 0.553, 5.040 -> 5.046; over the
+  last starter (`--bench 0`) 0.533 -> 0.532 and 4.118 -> 4.114. The frozen value of injured players: regular
+  0.552 -> 0.538, 4.028 -> 4.072, out players 3.185 -> 3.516; superflex 0.575 -> 0.560, 5.007 -> 5.069, out
+  players 3.732 -> 4.162. On the full population, which now keeps the non-QBs that used to slide below 50,
+  superflex Spearman 0.561 -> 0.579 and held-out error 5.043 -> 4.998 for the QB mapping.
   What it found and left alone: superflex QBs at every tier produce more per game over a bench-deep
   replacement than equal-chart non-QBs (QB1-6 +4.8, 7-12 +5.3, 13-24 +5.7, 25-36 +3.3 points a game), and
   over the last starter QB1-6 +0.85, 7-12 +1.05, 13-24 +0.98, 25-36 -0.30, where running backs below the top

@@ -19,11 +19,11 @@ The chart discounts the value he had before the absence (replay_values._frozen),
 curve and climbs back as the return nears; the experts' and the model's ranks, which drop while he is out,
 are not read until he plays again.
 At 13 games left: 1 missed 6%, 2 8%, 3 10%, 4 12%, 6 40%, 8 45%, 10 45%, 12 75%.
-Real results (services.replay_chart_eval, 2018-25, regular lineup) say a known absence costs about its share
-of games (out players realised 0.48 of a healthy player's value; the old share x 0.9 chart kept 0.50). The
-user's targets keep more (0.61), so within them the deep end is used: the anchors' upper bounds and the
-lowest SHARE_POWER (1.8) that keeps every 1-4-week absence within 12% at 13 games left (held-out RMSE of out
-players: 3.006 with the old chart, 3.159 at power 1.8, 3.186 at 2.5, 3.214 at 4.0).
+Real results (services.replay_chart_eval, 2018-25, regular lineup) say a known absence costs at least its share
+of games and players come back worse (out players realised 0.40 of their pre-injury value; the chart keeps 0.63),
+so the user's targets price injured players above what they realised (held-out RMSE of out players 3.185 ->
+3.516 with the frozen value). SHARE_POWER (3.6) is the user's 45% cap reached at 80% of the remaining games
+missed; a lower power fit the results a little better (1.8: 3.159, 4.0: 3.214 before the freeze).
 
 `unreported_discount`: an out player without a news report (no hard tag streak in replay_news) loses the
 expected discount over NO_REPORT_ODDS, how many games such absences really missed (counting this week, each
