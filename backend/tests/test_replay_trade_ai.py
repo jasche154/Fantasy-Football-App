@@ -226,8 +226,9 @@ def test_the_user_gets_at_most_one_offer_a_week_and_each_passes_the_cpus_own_tes
 
             assert offer.to_team == USER and offer.week == week.week
             assert verdict.accepted and verdict.your_drops == (), (week.week, offer, verdict.reasons)
-            assert ai.generous(persona, verdict.value_give, verdict.value_get), (persona, verdict)
-            assert not verdict.fair_label.endswith("loss")
+            edge = replay_personas.edge(week.after, rs.team(week.after, offer.from_team))
+            assert ai.generous(edge, verdict.value_give, verdict.value_get), (persona, verdict)
+            assert persona == "haggler" or not verdict.fair_label.endswith("loss")     # his opening is a lowball
     assert sum(len(offers(season)) for season in seasons.values()) >= len(SEEDS)
 
 
@@ -310,7 +311,8 @@ def test_on_hard_an_offer_is_still_generous_and_stands_as_the_cpus_own_but_not_a
         deal = (week.after, hard, know, USER, offer.from_team, offer.get, offer.give)
         verdict = rt.evaluate(*deal, offered=True)
         assert verdict.accepted and verdict.score >= 0
-        assert ai.generous(rs.team(week.after, offer.from_team).persona, verdict.value_give, verdict.value_get)
+        assert ai.generous(replay_personas.edge(week.after, rs.team(week.after, offer.from_team)), verdict.value_give,
+                           verdict.value_get)
         assert not rt.evaluate(*deal).accepted          # the same deal proposed by the user pays the hard premium
 
 
@@ -400,7 +402,7 @@ def test_a_shopping_cpu_offers_its_shopped_player_first_without_a_roll(monkeypat
     from tests.test_replay_mood import WEEK, shop_league
     state, know, cpu, star = shop_league()
     state = replace(state, shops=(rs.Shop(cpu.id, star.player_id, WEEK, 0.15),))
-    after = _shop_offer(state, know, monkeypatch, lambda persona: 0.0)
+    after = _shop_offer(state, know, monkeypatch, lambda persona, losses=0: 0.0)
     offer = after.offers[-1]
 
     assert (offer.from_team, offer.to_team, offer.status) == (cpu.id, rs.user_team(state).id, "pending")
@@ -418,7 +420,7 @@ def test_the_second_shopper_offers_when_the_first_has_no_deal(monkeypatch):
     real = ai._best_deal
     monkeypatch.setattr(ai, "_best_deal", lambda state, settings, know, sender, receiver, *rest, **kw:
                         None if receiver.id == cpu.id else real(state, settings, know, sender, receiver, *rest, **kw))
-    offer = _shop_offer(state, know, monkeypatch, lambda persona: 0.0).offers[-1]
+    offer = _shop_offer(state, know, monkeypatch, lambda persona, losses=0: 0.0).offers[-1]
 
     assert offer.from_team == second.id and other.player_id in offer.give
 
@@ -427,7 +429,7 @@ def test_a_declined_shop_offer_is_not_repeated_and_another_cpu_can_offer(monkeyp
     from tests.test_replay_mood import WEEK, knowledge as mood_knowledge, shop_league, slumping, with_values
     state, know, cpu, star = shop_league()
     state = replace(state, shops=(rs.Shop(cpu.id, star.player_id, WEEK, 0.15),))
-    rate = lambda persona: 0.0 if persona == "panicky" else 1.0         # noqa: E731 - only the shopper never rolls
+    rate = lambda persona, losses=0: 0.0 if persona == "panicky" else 1.0         # noqa: E731 - only the shopper never rolls
     first = _shop_offer(state, know, monkeypatch, rate)
     assert first.offers[-1].from_team == cpu.id and star.player_id in first.offers[-1].give
     declined = replace(first, offers=tuple(replace(o, status="declined") for o in first.offers))
@@ -448,7 +450,7 @@ def test_a_shop_that_closes_and_reopens_later_sends_one_new_offer(monkeypatch):
     from tests.test_replay_mood import WEEK, knowledge as mood_knowledge, shop_league, slumping, with_values
     state, know, cpu, star = shop_league()
     state = replace(state, shops=(rs.Shop(cpu.id, star.player_id, WEEK, 0.15, opened=WEEK),))
-    never = lambda persona: 0.0                                          # noqa: E731 - only the shop path offers
+    never = lambda persona, losses=0: 0.0                                          # noqa: E731 - only the shop path offers
     first = _shop_offer(state, know, monkeypatch, never)
     declined = replace(first, offers=tuple(replace(o, status="declined") for o in first.offers))
 

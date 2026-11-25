@@ -33,7 +33,7 @@ CONTEND_START = 0.09            # "about 8-10% more"
 CONTEND_BENCH = 0.10            # "about 10% less"
 ATTACH_LOW, ATTACH_HIGH = 0.08, 0.15
 ATTACH_STRONG = 3 * replay_mood.HIGH    # a feeling this strong (0.24) asks the full ATTACH_HIGH
-NEED_SHARE = 0.75               # a weakest starter below 75% of the league's median one is a weak spot
+NEED_SHARE = 0.5                # a weakest starter below half the league's median one is a weak spot
 NEED_BONUS, NEED_DEEP_BONUS, NEED_CAP = 0.05, 0.10, 0.10
 NEED_POSITIONS = ("QB", "RB", "WR", "TE")
 

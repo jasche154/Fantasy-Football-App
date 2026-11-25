@@ -139,16 +139,16 @@ def _candidates(state: State, settings: Settings, know: Knowledge, sender: Team,
 
 def _best_deal(state: State, settings: Settings, know: Knowledge, sender: Team, receiver: Team,
                scored: int = MAX_SCORED, need: int | None = None, want: bool = False, counter: bool = False,
-               sends: tuple[int, ...] | None = None) -> Deal | None:
+               wanted: int | None = None) -> Deal | None:
     """The accepted deal with the best score among the `scored` candidates closest to the gap wanted (only
-    those where the receiver sends `need`, and where the sender sends exactly `sends`, when given). `want`: the
+    those where the receiver sends `need`, and where the sender sends `wanted`, when given). `want`: the
     receiver's own offer for the user's player, judged as one and generous to him (`counter`: one that answers
     another, at that edge)."""
     best: tuple[float, Deal] | None = None
     edge = replay_personas.edge(state, receiver, counter) if want else None
     found = _candidates(state, settings, know, sender, receiver, edge)
-    wanted = [deal for deal in found if (need is None or need in deal[1]) and (sends is None or set(deal[0]) == set(sends))]
-    for give, get in wanted[:scored]:
+    for give, get in [deal for deal in found if (need is None or need in deal[1])
+                      and (wanted is None or wanted in deal[0])][:scored]:
         verdict = rt.evaluate(state, settings, know, sender.id, receiver.id, give, get, offered=want, counter=counter)
         if not verdict.accepted or (not sender.is_user and verdict.score < SEEK_SCORE):
             continue
@@ -230,9 +230,12 @@ def cpu_trades(state: State, settings: Settings, know: Knowledge, seed: int) -> 
 
 
 def haggle_deal(state: State, settings: Settings, know: Knowledge, offer_from: Team, user_sends: tuple[int, ...]) -> Deal | None:
-    """A haggler's counter after the user declines his opening offer: the best deal for the same players of the
-    user's (`user_sends`) at his normal edge (`replay_personas.HAGGLE_COUNTER_EDGE`), or None."""
+    """A haggler's counter after the user declines his opening offer: the best deal at his normal edge
+    (`replay_personas.HAGGLE_COUNTER_EDGE`) that still gets him the best of the user's players he asked for
+    (`user_sends`), or None."""
     user = rs.user_team(state)
-    if any(pid not in user.roster for pid in user_sends):
+    held = [pid for pid in user_sends if pid in user.roster]
+    if not held:
         return None
-    return _best_deal(state, settings, know, user, offer_from, want=True, counter=True, sends=user_sends)
+    best = max(held, key=lambda pid: (know.by_id[pid].chart, -pid))
+    return _best_deal(state, settings, know, user, offer_from, want=True, counter=True, wanted=best)

@@ -29,7 +29,7 @@ Pure: takes a Knowledge and the players, no state.
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
-from services import replay_styles
+from services import replay_personas, replay_styles
 from services.replay_styles import Mind
 from services.replay_values import Knowledge
 
@@ -144,3 +144,18 @@ def market_ok(know: Knowledge, sends: Sequence[int], kept: Sequence[int], drops:
 
     got = depth_counted(worth(kept), worth(sends)) - sum(worth(drops))
     return got >= MARKET_GUARD * sum(worth(sends))
+
+
+LEAN = {"panicky": 0.15, "steady": 0.15, "gambler": 0.15, "tilted": 0.15,      # replay_personas.PRIVATE_CLAMP
+        "fan": replay_styles.FAN_BONUS, "contender": replay_styles.CONTEND_START, "stasher": 1.0}
+
+
+def stated_edge(persona: str) -> float:
+    """The most a style may leave the user ahead on neutral chart in deals with him, as a share of what the user
+    sends: its top offer edge (a haggler's counter), plus the need bonus cap and how far its own prices lean from
+    the chart (a panicky or tilted manager selling low, a steady one holding a star, a gambler's hot streak, a
+    fan's team, a contender's starters, a stasher's hurt stars), never more than the market guard allows
+    (1 / MARKET_GUARD - 1). A test trades round trips against every style to hold it."""
+    top = max(replay_personas.offer_edge(persona)[1], replay_personas.offer_edge(persona, counter=True)[1],
+              replay_personas.offer_edge(persona, losses=99)[1])
+    return min(1 / MARKET_GUARD - 1, top + replay_styles.NEED_CAP + LEAN.get(persona, 0.0))

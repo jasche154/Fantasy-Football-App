@@ -188,10 +188,10 @@ def counter_offer(game_id: GameId, offer_id: DbId, body: CounterBody, session: S
         return _proposed(t, *rg.counter_offer(*t.args, t.seed, offer_id, body.give, body.get, body.drops))
 
 
-def _proposed(t: Turn, state: rs.State, found: rg.Verdict, counter: rs.Offer | None, reply: str | None) -> dict:
+def _proposed(t: Turn, state: rs.State, found: rg.Verdict, counter: rs.Offer | None) -> dict:
     """reply: the CPU's one line when it turned the deal down (also stored on the declined offer), else null."""
     return t.done(state, verdict=lambda game: league_views.verdict(game, found), executed=found.accepted,
-                  counter=(lambda game: league_views.offer_row(game, counter)) if counter else None, reply=reply)
+                  counter=(lambda game: league_views.offer_row(game, counter)) if counter else None, reply=found.reply)
 
 
 @router.post("/trades/offers/{offer_id}/respond")

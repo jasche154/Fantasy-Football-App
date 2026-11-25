@@ -50,7 +50,7 @@ def _cover_move(state: State, settings: Settings, know: Knowledge, team_id: int)
     for slot in missing:
         eligible = [v for v in free if v.position in rv.eligible(slot)]
         # a fan takes his rival's player only when nobody else can play there
-        add = max((v for v in eligible if not replay_fans.banned(team, v.team)) or eligible, key=_by_chart, default=None)
+        add = max([v for v in eligible if not replay_fans.banned(team, v.team)] or eligible, key=_by_chart, default=None)
         if add is None:
             continue
         if len(roster) < settings.roster_size:

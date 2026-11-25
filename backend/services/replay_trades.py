@@ -73,6 +73,7 @@ class Verdict:
                                             # accepted or only a league rule or the user's own side stopped it
     decline_player: int | None = None       # the player its reply names (decline_rival / _attached / _value)
     decline_position: str | None = None     # the position it names (decline_need)
+    reply: str | None = None                # its one line on why (replay_chat.decline_reply), set by replay_game
 
 
 class OfferExpired(ValueError):

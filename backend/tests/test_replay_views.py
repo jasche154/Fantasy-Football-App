@@ -24,7 +24,8 @@ USER = SETTINGS.draft_slot
 PLAYER_ROW = {"player", "opponent", "bye", "out", "projection", "points", "ros_ppg", "value", "rank", "pos_rank",
               "adp", "pre_rank", "expert_rank", "news", "buzz", "games", "ppg", "trade_locked", "defense"}
 WIRE_ROW = PLAYER_ROW | {"status", "owner", "season_points", "last_points", "usage", "line"}
-SIDE = {"team_id", "name", "is_user", "tendency", "mood", "projected", "points", "record"}
+TEAM_REF = {"team_id", "name", "is_user", "tendency", "mood", "needs", "deep"}
+SIDE = TEAM_REF | {"projected", "points", "record"}
 RECORD = {"wins", "losses", "ties", "rank", "points_for", "points_against", "place"}
 PLAYER_REF = {"id", "name", "position", "team", "injury", "hype"}
 SUMMARY = {"id", "name", "season", "phase", "week", "end_week", "user_team_id", "settings", "teams", "on_the_clock",
@@ -186,7 +187,7 @@ def test_moods_are_worked_out_once_per_team_per_request(monkeypatch):
     Game works each team's mood out once."""
     calls: list[int] = []
     real = views.replay_mood.mood_line
-    monkeypatch.setattr(views.replay_mood, "mood_line", lambda know, team: (calls.append(team.id), real(know, team))[1])
+    monkeypatch.setattr(views.replay_mood, "mood_line", lambda know, team, persona=None: (calls.append(team.id), real(know, team, persona))[1])
     shown = game(at(8))
     for screen in (views.summary, league.trades, league.activity, league.chat, league.standings):
         screen(shown)
@@ -285,8 +286,10 @@ def test_team_lists_starters_in_slot_order_then_the_bench():
                                                                                                    False)
     assert all(row["points"] is None for row in rows)
     assert {row["player"]["id"] for row in rows} == set(rs.user_team(state).roster)
-    assert views.team(game(state), team_id=9)["team"] == {"team_id": 9, "name": state.teams[8].name, "is_user": False,
-                                                          "tendency": None, "mood": None}
+    shown = views.team(game(state), team_id=9)["team"]
+    assert {key: shown[key] for key in TEAM_REF - {"needs", "deep"}} == {
+        "team_id": 9, "name": state.teams[8].name, "is_user": False, "tendency": None, "mood": None}
+    assert set(shown["needs"]) | set(shown["deep"]) <= {"QB", "RB", "WR", "TE"}
     with pytest.raises(ValueError, match="No team 99"):
         views.team(game(state), team_id=99)
 
@@ -383,7 +386,7 @@ def test_standings_run_from_seeds_to_the_final_order():
     assert set(early) == {"results", "regular_season_weeks", "playoff_teams", "playoff_weeks", "byes", "seeds_final"}
     assert (early["playoff_weeks"], early["byes"], early["playoff_teams"]) == ([15, 16], 0, 4)
     assert [row["in_playoffs"] for row in early["results"]] == [True] * 4 + [False] * 8
-    assert set(early["results"][0]) == RECORD | {"team_id", "name", "is_user", "tendency", "mood", "seed", "in_playoffs"}
+    assert set(early["results"][0]) == RECORD | TEAM_REF | {"seed", "in_playoffs"}
     assert [row["seed"] for row in early["results"]] == list(range(1, 13))
     assert early["seeds_final"] is False
     assert all(row["place"] is None for row in early["results"])
@@ -572,7 +575,7 @@ def test_trades_show_pending_offers_with_a_preview_and_the_history_newest_first(
     offer = screen["offers"][0]
     assert set(screen) == {"open", "deadline_week", "max_players", "offers", "results", "shops"}
     assert set(offer) == {"id", "week", "status", "from_team", "to_team", "give", "get", "counter_to", "message",
-                          "verdict", "note"}
+                          "reply", "verdict", "note"}
     assert (offer["status"], offer["from_team"]["team_id"], offer["to_team"]["is_user"]) == ("pending", 9, True)
     assert [p["id"] for p in offer["give"]] == theirs and [p["id"] for p in offer["get"]] == mine
     assert [row["player"]["id"] for row in offer["verdict"]["give"]] == mine and offer["note"] is None

@@ -160,8 +160,9 @@ def test_a_carried_out_trade_leaves_the_cpu_within_the_limit():
 
 def test_each_persona_pays_its_edge_careful_ones_least():
     assert rp.offer_edge("steady")[1] < rp.offer_edge("balanced")[1] < rp.offer_edge("panicky")[1] == 0.10
-    assert all(0.05 <= low <= high <= 0.10 for low, high in rp.OFFER_EDGE.values())
-    assert rt.offer_multiple(replace(rs.team(drafted(1), 2), persona="steady")) == pytest.approx(
+    assert all(0.05 <= low <= high <= 0.10 for persona, (low, high) in rp.OFFER_EDGE.items() if persona != "haggler")
+    state = drafted(1)
+    assert rt.offer_multiple(state, replace(rs.team(state, 2), persona="steady")) == pytest.approx(
         1 / (1.06 * tv.OUT_MARGIN))
 
 

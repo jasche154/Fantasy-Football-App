@@ -54,7 +54,7 @@ __all__ = [
 ]
 
 WEDNESDAY, PLAY = "wednesday", "play"
-Proposed = tuple[State, Verdict, Offer | None, str | None]       # (state, verdict, counter, the CPU's reply)
+Proposed = tuple[State, Verdict, Offer | None]       # (state, verdict with the CPU's `reply`, its counter)
 STEPS = (WEDNESDAY, PLAY)
 SEASON_PHASES = ("waivers", "open")
 
@@ -253,24 +253,24 @@ def _propose(state: State, settings: Settings, data: SeasonData, seed: int, to_t
                                            counter_to=counter_to)
     if verdict.accepted:            # the CPU fills any starting slot the deal emptied (waivers phase: at start_week)
         state = replay_chat.trade_reactions(state, [o.id for o in state.offers[before:]], know, seed)
-        return replay_waiver_ai.cpu_cover(state, settings, know, [to_team]), verdict, None, None
+        return replay_waiver_ai.cpu_cover(state, settings, know, [to_team]), verdict, None
     if len(state.offers) == before:                 # the same proposal was already declined this week: same reply
         same = next((o for o in reversed(state.offers) if o.status == "declined" and o.to_team == to_team
                      and (o.give, o.get) == (tuple(give), tuple(get)) and o.week == state.week), None)
-        return state, verdict, None, same.reply if same else None
+        return state, replace(verdict, reply=same.reply if same else None), None
     state = replay_chat.decline_reply(state, know, seed, state.offers[-1].id, verdict)
     declined = state.offers[-1]
     countered = replay_counter.counter_offer(state, settings, know, declined, seed, user_drops)
     countered = replay_chat.label_offers(countered, know, seed, data.as_of(state.week), settings)
     answer = next((o for o in countered.offers[len(state.offers):] if o.counter_to == declined.id), None)
-    return countered, verdict, answer, declined.reply
+    return countered, replace(verdict, reply=declined.reply), answer
 
 
 def propose_trade(state: State, settings: Settings, data: SeasonData, seed: int, to_team: int, give: Sequence[int],
                   get: Sequence[int], user_drops: Sequence[int] = ()) -> Proposed:
-    """The user offers a CPU a trade: (state, verdict, counter, reply). A declined deal may get the CPU's counter
-    offer (pending, `counter_to` the user's declined offer; None otherwise) and its one-line reply (None when
-    only a league rule or the user's own side stopped it)."""
+    """The user offers a CPU a trade: (state, verdict, counter). A declined deal may get the CPU's counter
+    offer (pending, `counter_to` the user's declined offer; None otherwise) and carries its one-line reply in
+    `Verdict.reply` (None when only a league rule or the user's own side stopped it)."""
     return _propose(state, settings, data, seed, to_team, give, get, user_drops, None)
 
 
