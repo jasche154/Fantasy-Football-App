@@ -25,7 +25,7 @@ A World is everything the game simulator (services/sim_game.py) needs to play an
 - Efficiency is his own rates shrunk toward the prior World's value (else the position norm) by
   EFFICIENCY_PRIOR pseudo-volume. Team volume and defense factors are decayed means of its games shrunk
   toward the prior World / league (last season's `defense_prior` stands in when there is no prior World).
-- `out_weeks`: a hard tag known before `week` means IR_BELIEF_WEEKS (IR, PUP) or 1 more game out.
+- `out_weeks`: a hard tag known before `week` means IR_BELIEF_WEEKS (IR, PUP, EXE: indefinite) or 1 more game out.
 
 Constants measured from real seasons live in sim_params.json (`python -m services.sim_eval --fit`).
 """
@@ -384,6 +384,6 @@ def estimate(data: SeasonData, week: int, prior: World | None = None) -> World:
 
 
 def believed_out(tag: str | None) -> int:
-    if tag in ("IR", "PUP"):
+    if tag in ("IR", "PUP", "EXE"):
         return IR_BELIEF_WEEKS
     return 1 if tag in ("O", "SUS") else 0

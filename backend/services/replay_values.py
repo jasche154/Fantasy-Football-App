@@ -19,7 +19,7 @@ results are used only for weeks already played: the `games` / `ppg` display fiel
 - Trade chart (services/replay_chart.py): `chart` on a 0-1000 rank-based scale from expert ranks and the
   model, after injury news (services/replay_news.py). rank / pos_rank sort by it.
   A hard-tagged player with a `returns` entry gets a news report; his availability comes from it.
-- Injury tags (week >= 1; at the draft, week 1's preseason IR, PUP and SUS): a hard tag (O, IR, PUP, SUS) means
+- Injury tags (week >= 1; at the draft, week 1's preseason IR, PUP, SUS and EXE): a hard tag (O, IR, PUP, SUS, EXE) means
   out, and that week's projection counts as 0.
   Tagged IR or PUP, he is expected to miss at least IR_OUT_SHARE of his remaining games. Q and D change nothing.
 

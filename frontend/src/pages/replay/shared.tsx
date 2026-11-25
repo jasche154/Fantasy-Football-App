@@ -108,12 +108,13 @@ interface ReplayPlayerCellProps {
 
 const TAG_WORDS: Record<ReplayInjuryTag, string> = {
   Q: 'Questionable', D: 'Doubtful', O: 'Out', IR: 'Injured reserve', PUP: 'Physically unable to perform', SUS: 'Suspended',
+  EXE: "Commissioner's exempt list",
 };
 const PRACTICE_WORDS: Record<ReplayPractice, string> = { DNP: 'did not practice', LP: 'limited practice', FP: 'full practice' };
-const HARD_TAGS: readonly ReplayInjuryTag[] = ['O', 'IR', 'PUP', 'SUS'];
+const HARD_TAGS: readonly ReplayInjuryTag[] = ['O', 'IR', 'PUP', 'SUS', 'EXE'];
 const IR_TAGS: readonly ReplayInjuryTag[] = ['O', 'IR', 'PUP'];
 
-/** O, IR, PUP, SUS: he does not play this week. */
+/** O, IR, PUP, SUS, EXE: he does not play this week. */
 export function isHardTag(injury: ReplayInjury | null | undefined): boolean {
   return !!injury && HARD_TAGS.includes(injury.tag);
 }

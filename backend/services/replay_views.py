@@ -22,7 +22,7 @@ Shared pieces
                     known (replay_mood.moods_known: week 4 on, which is the first week of a league that jumped in at
                     week 4 or later), once the season is over, or with no
                     feelings
-  Injury     {tag: Q | D | O | IR | PUP | SUS, practice: DNP | LP | FP | null, injury: string | null}
+  Injury     {tag: Q | D | O | IR | PUP | SUS | EXE, practice: DNP | LP | FP | null, injury: string | null}
   PlayerRef  {id, name, position, team, injury: Injury | null, hype: {reason} | null}
       team          his NFL team as known before the week shown, or null
       hype          the trade market is hyping him: an opportunity shock (services/replay_shocks.py) lifted his
@@ -32,7 +32,7 @@ Shared pieces
       injury        his tag in the CURRENT week, wherever the ref appears (events, offers, verdicts, claims). Only a
                     PlayerRow built for another week (team / matchup with ?week=) carries that week's tag. Always null
                     in a preseason draft room (a jump-in league's draft room shows its start week's tags).
-                    O, IR, PUP and SUS mean he does not play; O, IR and PUP may go on IR.
+                    O, IR, PUP, SUS and EXE (exempt list) mean he does not play; O, IR and PUP may go on IR.
   PlayerRow  {player: PlayerRef, opponent, bye, out, projection, points, ros_ppg, value, rank, pos_rank, adp,
               pre_rank, expert_rank, news: {back, text} | null, buzz: string | null, games, ppg, trade_locked,
               defense}
@@ -51,7 +51,7 @@ Shared pieces
                     a rumour, right only some of the time. Null otherwise (always in a real replay).
       games, ppg    real games and points a game BEFORE that week
       out           no projection in his team's latest game week (this one, or the one before a bye), or an
-                    O / IR / PUP / SUS tag this week
+                    O / IR / PUP / SUS / EXE tag this week
       trade_locked  traded in the last two weeks
       defense       DefenseRating (services/replay_defense.py) of that week's opponent vs his position, as known
                     before that week; null for K/DST, a bye, an unknown team or nothing known
