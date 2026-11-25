@@ -212,8 +212,10 @@ def _qb_starts(team: str, seen: "_Seen", prior: Mapping[int, float], week: int) 
     out = {}
     for pid, share in prior.items():
         numerator, total_weight = ROLE_PRIOR_GAMES * share, ROLE_PRIOR_GAMES
-        joined = max((w for (t, w), lines in seen.games.items() if t != team and pid in lines), default=0)
-        for (game_team, game_week), lines in seen.games.items():
+        his = seen.games_of.get(pid, ())
+        joined = max((w for t, w in his if t != team), default=0)
+        for game_team, game_week in sorted({*seen.team_games.get(team, ()), *his}):
+            lines = seen.games[(game_team, game_week)]
             played = pid in lines
             if not played and (game_team != team or game_week <= joined or (pid, game_week) in seen.hurt):
                 continue                     # another team's game, before he joined, or missed hurt
@@ -241,6 +243,23 @@ class _Seen:
     kicks: Mapping[tuple[str, int], tuple[int, ...]]          # kickers who played it
     pass_yards: Mapping[tuple[str, int], float]               # team passing yards in that game
     hurt: frozenset[tuple[int, int]] = frozenset()            # (player, week) with an injury tag, played or not
+
+    @cached_property
+    def team_games(self) -> dict[str, list[tuple[str, int]]]:
+        """{team: its played games' keys}."""
+        out: dict[str, list[tuple[str, int]]] = defaultdict(list)
+        for key in self.games:
+            out[key[0]].append(key)
+        return out
+
+    @cached_property
+    def games_of(self) -> dict[int, list[tuple[str, int]]]:
+        """{player: the keys of the games he played}."""
+        out: dict[int, list[tuple[str, int]]] = defaultdict(list)
+        for key, lines in self.games.items():
+            for pid in lines:
+                out[pid].append(key)
+        return out
 
 
 def _seen(known: SeasonData, week: int) -> _Seen:
