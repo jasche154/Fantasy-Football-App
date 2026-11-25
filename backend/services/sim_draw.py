@@ -11,12 +11,21 @@ spread of results around the pregame line and of team scores). Per-catch
 and per-carry yards are shifted gammas (mean m, standard deviation sd, never below -shift), so a sum over n
 plays is one gamma draw: Gamma(n k, theta) - n shift with k = (m + shift)^2 / sd^2, theta = sd^2 / (m + shift).
 
+Field-goal tries (`_kicking`) are a binomial over fga_chances around the side's expected tries (sim_game.fga_mean at
+its expected yards and TDs, x its field-goal scale), moved linearly by how far the game's own TDs and yards land
+from their means (the fitted log slopes, so a team that scores fewer TDs kicks more): linear, so the draw's mean
+tries are the analytic ones (a log-linear move would kick more on average than sim_game's mean says).
+
 Overtime (`_overtime`): a game tied after regulation stays tied with OT_TIE, else one side wins it (in proportion
-to the two sides' mean points) with a field goal (OT_FIELD_GOAL of the time, a made kick in a distance band
+to the two sides' mean points) with a field goal (`game.ot_field_goal` of the time, a made kick in a distance band
 drawn like any other) or a touchdown (no try: it ends the game), credited to a receiver or a rusher drawn in
-proportion to his expected TDs, with OT_TD_YARDS on the play, so the passer's line (the receivers' sum) and the
-box score still add up. OT_TIE is set so simulated games end tied about as often as real ones (0.29% of regular
-season games 2021-2025); the field goal share is the design choice of about half of decided overtimes.
+proportion to his expected TDs (never one who left the game hurt), with `game.ot_td_yards` on the play and one
+more pass attempt for a catch, so the passer's line (the receivers' sum) and the box score still add up; a field
+goal is the kicker's unless he left hurt (then a fill-in's: points, no kick on his line). OT_TIE is set so
+simulated games end tied about as often as real ones (0.29% of regular season games 2021-2025; simulated games
+are tied after regulation 3.2% of the time). `game.ot_field_goal` (0.5) and `game.ot_td_yards` (12 yards on a
+catch, 4 on a run) are hand-set: no overtime play-by-play is loaded; the tie rate and the box score are what the
+realism check measures.
 """
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
@@ -36,8 +45,16 @@ from services.sim_world import params
 
 TD_DRIVES = 6.0                  # default of the tuned `game.td_drives`
 OT_TIE = 0.09                    # a tied game stays tied after overtime: 0.29% real ties / 3.2% simulated regulation ties
-OT_FIELD_GOAL = 0.5              # a decided overtime ends on a field goal, else on a touchdown
-OT_TD_YARDS = {"rec": 12, "rush": 4}   # yards on the winning touchdown play
+OT_DEFAULTS = {"ot_field_goal": 0.5, "ot_td_yards": {"rec": 12, "rush": 4}}   # hand-set (see above); tuned section
+
+
+def ot_field_goal() -> float:
+    """The share of decided overtimes that end on a field goal (`game.ot_field_goal`)."""
+    return float(params()["game"].get("ot_field_goal", OT_DEFAULTS["ot_field_goal"]))
+
+
+def _ot_yards() -> dict:
+    return dict(params()["game"].get("ot_td_yards", OT_DEFAULTS["ot_td_yards"]))
 
 
 @dataclass(frozen=True)
@@ -180,14 +197,19 @@ def _passers(side, o: _Offense, rng: np.random.Generator) -> dict[int, dict]:
     return out
 
 
-def _kicking(o: _Offense, def_tds: int, rng: np.random.Generator) -> tuple[int, dict]:
-    """(points scored, kicker counts) for one team."""
+def _kicking(o: _Offense, def_tds: int, rng: np.random.Generator, m: dict) -> tuple[int, dict]:
+    """(points scored, kicker counts) for one team; `m`: its side's means (sim_game._side_means)."""
     kick = params()["kick"]
     tds = o.tds + def_tds
     two = int(rng.binomial(tds, kick["two_point"]))
     pat_att = tds - two
     pat_made = int(rng.binomial(pat_att, kick["xp"]))
-    fga = int(rng.binomial(round(kick["fga_chances"]), min(1.0, fga_mean(o.yards, o.tds) / round(kick["fga_chances"]))))
+    mean_tds = float(m["rec_td"].sum() + m["rush_td"].sum())
+    mean_yards = max(1.0, float(m["rec_yds"].sum() + m["rush_yds"].sum()))
+    move = 1 + kick["fga_tds"] * (o.tds - mean_tds) + kick["fga_yards"] * (o.yards - mean_yards) / mean_yards
+    chances = round(kick["fga_chances"])
+    tries = m.get("fg_scale", 1.0) * fga_mean(mean_yards, mean_tds) * max(0.0, move)
+    fga = int(rng.binomial(chances, min(1.0, tries / chances)))
     bands = rng.multinomial(fga, kick["bands"])
     made = rng.binomial(bands, kick["make"])
     counts = {"made": made, "missed": bands - made, "pat_made": pat_made, "pat_att": pat_att}
@@ -204,11 +226,12 @@ def draw_game(sides: Sequence, rng: np.random.Generator, scoring: ScoringSetting
                    + rng.poisson(dst["st_td"])) for i in range(2)]
     safeties = rng.poisson(dst["safety"], 2)
     blocks = rng.poisson(dst["block"], 2)
-    scored = [_kicking(offense[i], returns[i], rng) for i in range(2)]
+    means = [_side_means(side) for side in sides]
+    scored = [_kicking(offense[i], returns[i], rng, means[i]) for i in range(2)]
     points = [scored[i][0] + 2 * int(safeties[i]) for i in range(2)]
     if points[0] == points[1]:
         offense, scored, points, n_targets, n_carries = _overtime(sides, offense, scored, points, n_targets,
-                                                                  n_carries, rng)
+                                                                  n_carries, rng, means)
     players: dict[int, PlayerGame] = {}
     for i, side in enumerate(sides):
         o, opp = offense[i], offense[1 - i]
@@ -236,36 +259,39 @@ def draw_game(sides: Sequence, rng: np.random.Generator, scoring: ScoringSetting
 
 
 def _overtime(sides, offense: list, scored: list, points: list, n_targets: np.ndarray, n_carries: np.ndarray,
-              rng: np.random.Generator) -> tuple[list, list, list, np.ndarray, np.ndarray]:
-    """A tied game's overtime (see the module docstring): the winner's offense or kicker gets the winning play."""
+              rng: np.random.Generator, means: list) -> tuple[list, list, list, np.ndarray, np.ndarray]:
+    """A tied game's overtime (see the module docstring): the winner's offense or kicker gets the winning play.
+    `means`: each side's sim_game._side_means."""
     if rng.random() < OT_TIE:
         return offense, scored, points, n_targets, n_carries
-    means = [_side_means(side) for side in sides]
     expect = [max(0.1, _mean_points(means[i], means[1 - i])) for i in range(2)]
     winner = 0 if rng.random() < expect[0] / sum(expect) else 1
     offense, scored, points = list(offense), list(scored), list(points)
     n_targets, n_carries = n_targets.copy(), n_carries.copy()
-    if rng.random() < OT_FIELD_GOAL:
+    if rng.random() < ot_field_goal():
         kick = params()["kick"]
         counts = dict(scored[winner][1])
         band = int(rng.choice(len(kick["bands"]), p=np.array(kick["bands"]) / sum(kick["bands"])))
-        counts["made"] = counts["made"].copy()
-        counts["made"][band] += 1
+        if sides[winner].kicker_share >= 1.0:            # a kicker who left hurt: a fill-in kicked it
+            counts["made"] = counts["made"].copy()
+            counts["made"][band] += 1
         scored[winner] = (scored[winner][0] + 3, counts)
         points[winner] += 3
         return offense, scored, points, n_targets, n_carries
-    m, o = means[winner], offense[winner]
-    rec, rush = m["rec_td"][:-1], m["rush_td"][:-1]           # the "other" bucket's line is not kept
-    weights = np.concatenate([rec, rush])
+    side, m, o, yards = sides[winner], means[winner], offense[winner], _ot_yards()
+    left = side.exited
+    rec = m["rec_td"][:-1] * np.array([pid not in left for pid in side.receivers[:-1]], dtype=float)
+    rush = m["rush_td"][:-1] * np.array([pid not in left for pid in side.rushers[:-1]], dtype=float)
+    weights = np.concatenate([rec, rush])               # the "other" bucket's line is not kept
     pick = int(rng.choice(len(weights), p=weights / weights.sum())) if weights.sum() > 0 else len(rec)
     if pick < len(rec):
         one = np.eye(len(o.targets), dtype=int)[pick]
-        offense[winner] = replace(o, targets=o.targets + one, catches=o.catches + one,
-                                  rec_yds=o.rec_yds + OT_TD_YARDS["rec"] * one, rec_td=o.rec_td + one)
+        offense[winner] = replace(o, targets=o.targets + one, catches=o.catches + one, attempts=o.attempts + 1,
+                                  rec_yds=o.rec_yds + yards["rec"] * one, rec_td=o.rec_td + one)
         n_targets[winner] += 1
     else:
         one = np.eye(len(o.carries), dtype=int)[min(pick - len(rec), len(o.carries) - 1)]
-        offense[winner] = replace(o, carries=o.carries + one, rush_yds=o.rush_yds + OT_TD_YARDS["rush"] * one,
+        offense[winner] = replace(o, carries=o.carries + one, rush_yds=o.rush_yds + yards["rush"] * one,
                                   rush_td=o.rush_td + one)
         n_carries[winner] += 1
     scored[winner] = (scored[winner][0] + 6, scored[winner][1])

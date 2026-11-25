@@ -27,14 +27,14 @@ For each team (a `_Side` built from a World, who is out, and who leaves the game
    special-teams ones, return TDs ride on them; points allowed = the opponent's points.
 7. Points come from services/scoring.py (skill) and kdst_model's formulas (K, D/ST), so custom league
    scoring works. `expected` gives the analytic means of the same model (game noise at its mean).
-8. Centred on a prediction: given `target` (each side's expected points, from the game's line, sim_lines),
-   each side's yards and TD rates per catch and per carry are multiplied by one factor (`_centred`: TD rates
-   x f, yards x f ** yards_power, the fitted slope of yards on points in real team games, sim_lines.json),
-   solved so that its mean points (`_mean_points`) equal the target. `expected` and `play` apply the same
-   factor, so projections stay unbiased for the draw.
+8. Centred on a prediction (services/sim_centre.py): given each side's wanted mean points (from the game's
+   line, sim_lines), its TD rates and field-goal tries are multiplied by one factor and its yards by a power of
+   it. `expected` and `play` apply the same factor, so projections stay unbiased for the draw.
+9. A side built from a World with no in-game exits is cached per World (`_side_of`): a week's line, projections,
+   expert values and tags rebuild the same belief sides many times.
 """
 from collections.abc import Collection, Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from functools import lru_cache
 from types import SimpleNamespace
 
@@ -54,10 +54,8 @@ FULL_STRENGTH = 1.0              # role weights of a team at full strength sum t
 ACTIVE_SLOTS = {"RB": 3, "WR": 5, "TE": 3}     # game-day actives at a position (the top healthy by role weight)
 PA_GRID = np.arange(0, 80)       # points allowed values for the D/ST expectation
 TWO_POINT_SUCCESS = 0.48
-FACTOR_RANGE = (0.25, 4.0)       # a side's centring factor stays in this range
-FACTOR_STEPS = 6                 # secant steps solving it (converged to TARGET_TOLERANCE well before)
-TARGET_TOLERANCE = 0.05          # points
-MIN_TARGET = 3.0                 # a side is never centred below this many points
+SIDE_CACHE = 4096                # cached sides (`_side_of`); the cache is emptied when it is full
+_sides: dict[tuple, tuple] = {}
 
 
 @dataclass(frozen=True)
@@ -86,6 +84,8 @@ class _Side:
     dst: int | None
     positions: Mapping[int, str] = field(default_factory=dict)
     snaps: Mapping[int, float] = field(default_factory=dict)
+    fg_scale: float = 1.0               # field-goal tries x this (the centring factor, sim_centre)
+    exited: frozenset[int] = frozenset()   # players who leave the game hurt (no overtime score)
 
 
 @dataclass(frozen=True)
@@ -157,7 +157,21 @@ def _side(world: World, team: str, opponent: str | None, out: Collection[int],
         kicker=kicker.player_id if kicker else None,
         kicker_share=exits.get(kicker.player_id, 1.0) if kicker else 1.0,
         dst=next((p.player_id for p in roster if p.position == "DST"), None),
-        positions=positions, snaps=snaps)
+        positions=positions, snaps=snaps, exited=frozenset(pid for pid, share in exits.items() if share < 1.0))
+
+
+def _side_of(world: World, team: str, opponent: str | None, out: Collection[int]) -> _Side:
+    """`_side` with no exits, cached per World object (it is immutable; the entry keeps it alive, so its id is
+    not reused while cached)."""
+    key = (id(world), team, opponent, frozenset(out))
+    hit = _sides.get(key)
+    if hit is not None and hit[0] is world:
+        return hit[1]
+    if len(_sides) >= SIDE_CACHE:
+        _sides.clear()
+    side = _side(world, team, opponent, out, {})
+    _sides[key] = (world, side)
+    return side
 
 
 def _dressed(healthy: list) -> list:
@@ -253,9 +267,10 @@ def fga_mean(yards: float, tds: float) -> float:
                         + kick["fga_tds"] * (tds - league["tds"])))
 
 
-def _fga_drawn(yards: float, tds: float) -> float:
-    """Mean field-goal attempts as sim_draw draws them (a binomial over fga_chances, so capped there)."""
-    return min(fga_mean(yards, tds), float(round(params()["kick"]["fga_chances"])))
+def _fga_drawn(yards: float, tds: float, scale: float = 1.0) -> float:
+    """Mean field-goal attempts as sim_draw draws them (a binomial over fga_chances, so capped there); `scale`:
+    the side's field-goal scale (sim_centre)."""
+    return min(scale * fga_mean(yards, tds), float(round(params()["kick"]["fga_chances"])))
 
 
 def _takeaways(against: dict | None) -> tuple[float, float, float]:
@@ -276,7 +291,7 @@ def _mean_points(m: dict, against: dict | None) -> float:
     per_td = 6 + (1 - kick["two_point"]) * kick["xp"] + kick["two_point"] * 2 * TWO_POINT_SUCCESS
     make = float(np.dot(kick["bands"], kick["make"]))
     yards = float(m["rec_yds"].sum() + m["rush_yds"].sum())
-    return scored * per_td + 3 * make * _fga_drawn(yards, tds) + 2 * dst["safety"]
+    return scored * per_td + 3 * make * _fga_drawn(yards, tds, m.get("fg_scale", 1.0)) + 2 * dst["safety"]
 
 
 # ---------------- the analytic mean ----------------
@@ -292,75 +307,23 @@ def _side_means(side: _Side) -> dict:
             "rush_yds": rush_yds, "rush_td": rush_td, "ints": attempts * side.int_rate,
             "sacks": attempts * side.sack_rate,
             "fumbles": float((carries * side.fumble).sum() + (catches * side.rec_fumble).sum()
-                             + attempts * side.sack_rate * params()["league"]["sack_fumble"])}   # sack fumbles too
-
-
-# ---------------- centring on a prediction ----------------
-
-def _scaled(side: _Side, factor: float, power: float) -> _Side:
-    """`side` with TD rates x factor and yards x factor ** power (sim_lines.yards_power)."""
-    yards = factor ** power
-    return replace(side, ypc=side.ypc * yards, rec_td=side.rec_td * factor, ypr=side.ypr * yards,
-                   rush_td=side.rush_td * factor)
-
-
-def _factor(side: _Side, against: dict | None, target: float, p0: float) -> float:
-    """The factor that makes `side`'s mean points (`p0` as it is) `target` (secant steps on the points it gives)."""
-    from services.sim_lines import yards_power        # it imports this module
-    low, high, power = *FACTOR_RANGE, yards_power()
-    f0 = 1.0
-    f1 = min(high, max(low, target / max(p0, 0.1)))
-    for _ in range(FACTOR_STEPS):
-        p1 = _mean_points(_side_means(_scaled(side, f1, power)), against)
-        if abs(p1 - target) < TARGET_TOLERANCE or p1 == p0:
-            break
-        f0, p0, f1 = f1, p1, min(high, max(low, f1 + (target - p1) * (f1 - f0) / (p1 - p0)))
-    return f1
-
-
-def _centred(sides: dict[str, _Side], target: Mapping[str, float] | None = None,
-             shift: Mapping[str, float] | None = None) -> dict[str, _Side]:
-    """`sides` with each one's factor applied so its mean points are target[team], or its own mean points +
-    shift[team] (kept at MIN_TARGET or more); a team in neither stays as it is."""
-    if not target and not shift:
-        return sides
-    from services.sim_lines import yards_power        # it imports this module
-    means = {team: _side_means(side) for team, side in sides.items()}
-    teams = list(sides)
-    against = {teams[0]: means[teams[-1]], teams[-1]: means[teams[0]]} if len(teams) == 2 else {}
-    out = {}
-    for team, side in sides.items():
-        own = _mean_points(means[team], against.get(team))
-        wanted = (target or {}).get(team)
-        if wanted is None and team in (shift or {}):
-            wanted = own + shift[team]
-        out[team] = side if wanted is None else _scaled(side, _factor(side, against.get(team), max(MIN_TARGET, wanted), own), yards_power())
-    return out
-
-
-def summary(world: World, home: str, away: str | None, out: Collection[int]) -> tuple[tuple[float, ...], tuple[float, ...]]:
-    """((home, away) mean points, (home, away) starting QB quality) under `world` as it stands; `away` None:
-    `home` alone against a league-average opponent (one-element tuples). One side built per team."""
-    league = params()["league"]
-    teams = [home] if away is None else [home, away]
-    sides = [_side(world, team, (away if team == home else home), out, {}) for team in teams]
-    means = [_side_means(side) for side in sides]
-    points = tuple(_mean_points(m, means[1 - i] if len(means) == 2 else None) for i, m in enumerate(means))
-    quality = tuple(world.players[s.qb].quality if s.qb is not None else league["backup_quality"] for s in sides)
-    return points, quality
+                             + attempts * side.sack_rate * params()["league"]["sack_fumble"]),   # sack fumbles too
+            "fg_scale": side.fg_scale}
 
 
 def expected(world: World, home: str, away: str | None, out: Collection[int], scoring: ScoringSettings,
              exits: Mapping[int, float] | None = None, target: Mapping[str, float] | None = None,
-             shift: Mapping[str, float] | None = None) -> dict[int, Expected]:
+             shift: Mapping[str, float] | None = None, factors: Mapping[str, float] | None = None) -> dict[int, Expected]:
     """Mean line and points of every active player of `home` (and of `away` when given) in their game.
     `away` None: `home` against a league-average opponent (only home's players are returned). `target`:
     {team: mean points} the game is centred on (see the module docstring); `shift`: {team: points} added to
-    its own mean instead."""
+    its own mean instead; `factors`: {team: factor} to apply as given (sim_centre.factor)."""
+    from services.sim_centre import centred
     exits = exits or {}
     teams = [home] if away is None else [home, away]
-    sides = _centred({team: _side(world, team, (away if team == home else home), out, exits) for team in teams},
-                     target, shift)
+    built = {team: _side(world, team, (away if team == home else home), out, exits) if exits
+             else _side_of(world, team, (away if team == home else home), out) for team in teams}
+    sides = centred(built, target, shift, factors)
     means = {team: _side_means(side) for team, side in sides.items()}
     dst = params()["dst"]
     league = params()["league"]
@@ -373,7 +336,7 @@ def expected(world: World, home: str, away: str | None, out: Collection[int], sc
         if side.kicker is not None:
             tds = float(m["rec_td"].sum() + m["rush_td"].sum())
             yards = float(m["rec_yds"].sum() + m["rush_yds"].sum())
-            out_lines[side.kicker] = Expected(BoxLine(), round(_kick_points(_fga_drawn(yards, tds), tds), 2))
+            out_lines[side.kicker] = Expected(BoxLine(), round(_kick_points(_fga_drawn(yards, tds, side.fg_scale), tds), 2))
         if side.dst is not None:
             allowed = team_points.get(opp, league["points"])
             sacks, ints, fumbles = _takeaways(means.get(opp))
@@ -409,7 +372,7 @@ def _expected_players(side: _Side, m: dict, scoring: ScoringSettings) -> dict[in
 
 def on_field(world: World, team: str, out: Collection[int]) -> dict[int, float]:
     """{player: expected snap share 0-100} of the team's active QB starter, kicker and skill players."""
-    side = _side(world, team, None, out, {})
+    side = _side_of(world, team, None, out)
     snaps = dict(side.snaps)
     if side.kicker is not None:
         snaps[side.kicker] = 100.0
@@ -421,8 +384,9 @@ def play(world: World, home: str, away: str, out: Collection[int], rng: np.rando
          target: Mapping[str, float] | None = None, shift: Mapping[str, float] | None = None) -> GameResult:
     """One random draw of the game (see the module docstring); `target`: {team: mean points} it is centred on,
     or `shift`: {team: points} added to each side's own mean points under `world`."""
+    from services.sim_centre import centred
     from services.sim_draw import draw_game      # the random half (split out for size)
     exits = exits or {}
-    sides = _centred({home: _side(world, home, away, out, exits), away: _side(world, away, home, out, exits)},
-                     target, shift)
+    sides = centred({home: _side(world, home, away, out, exits), away: _side(world, away, home, out, exits)},
+                    target, shift)
     return draw_game((sides[home], sides[away]), rng, scoring)

@@ -9,7 +9,7 @@ never the truth:
    `prior_games` pseudo-games hold each team at last season's final rating x `carry` (`carry_over`), else at 0.
    The league level is this season's mean shrunk toward the long-run one by `level_games` pseudo-games.
 2. The belief's own expectation: each side's mean points under the belief with the week's hard-tagged players
-   out (sim_game.summary), the input that knows who plays and who is hurt.
+   out (`summary`), the input that knows who plays and who is hurt.
 3. The quarterbacks: the belief's quality of each side's starter (`qb_level`) and that minus the quality of the
    team's usual passer (`qb_change`: the ratings were earned with him).
 4. Rest: a team coming off its bye (+1), or on a short week (-1, a Thursday game after a Sunday), from the
@@ -34,8 +34,8 @@ from types import MappingProxyType
 
 from services.replay_pool import SeasonData
 from services.sim_constants import fitted_json
-from services.sim_game import summary
-from services.sim_world import World
+from services.sim_game import _mean_points, _side_means, _side_of
+from services.sim_world import World, params
 
 LINES_PATH = Path(__file__).with_name("sim_lines.json")
 LINES_FIT = "python -m services.sim_lines_fit --fit"
@@ -125,6 +125,18 @@ def carry_over(games: Collection[tuple[int, str, str, int, int]], knobs: Mapping
     knobs = knobs or stored()["ratings"]
     rated = ratings(games, max((g[0] for g in games), default=0) + 1, None, knobs)
     return {t: Rating(r.offense * knobs["carry"], r.defense * knobs["carry"]) for t, r in rated.teams.items()}
+
+
+def summary(world: World, home: str, away: str | None, out: Collection[int]) -> tuple[tuple[float, ...], tuple[float, ...]]:
+    """((home, away) mean points, (home, away) starting QB quality) under `world` as it stands; `away` None:
+    `home` alone against a league-average opponent (one-element tuples). One side built per team."""
+    league = params()["league"]
+    teams = [home] if away is None else [home, away]
+    sides = [_side_of(world, team, (away if team == home else home), out) for team in teams]
+    means = [_side_means(side) for side in sides]
+    points = tuple(_mean_points(m, means[1 - i] if len(means) == 2 else None) for i, m in enumerate(means))
+    quality = tuple(world.players[s.qb].quality if s.qb is not None else league["backup_quality"] for s in sides)
+    return points, quality
 
 
 def rest_days(known: SeasonData, team: str, week: int) -> int | None:

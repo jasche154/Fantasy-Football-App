@@ -90,15 +90,19 @@ def values(belief: World, scoring: ScoringSettings, games_left: int = SEASON_GAM
     """{player: mean points a game over the next `games_left` games}: a player believed out (`out_weeks`) scores
     nothing in his first out_weeks games, and his teammates share his work meanwhile. `edges`: {team: points}
     its games are centred above the belief's own mean (sim_lines.edges: what the team's scoring says)."""
+    from services.sim_centre import team_factor
     phases = sorted({0, games_left} | {min(p.out_weeks, games_left) for p in belief.players.values()})
     found: dict[int, float] = defaultdict(float)
     for team in sorted(belief.teams):
         roster, lines = belief.roster(team), {}          # lines: one expected() per distinct set of sitters
+        factors = None
+        if edges and team in edges:                      # one factor per team, from its first set of sitters
+            first = frozenset(p.player_id for p in roster if p.out_weeks > 0)
+            factors = {team: team_factor(belief, team, first, edges[team])}
         for start, end in zip(phases, phases[1:]):
             sitting = frozenset(p.player_id for p in roster if p.out_weeks > start)
             if sitting not in lines:
-                shift = {team: edges[team]} if edges and team in edges else None
-                lines[sitting] = expected(belief, team, None, sitting, scoring, shift=shift)
+                lines[sitting] = expected(belief, team, None, sitting, scoring, factors=factors)
             for pid, line in lines[sitting].items():
                 found[pid] += line.points * (end - start) / max(1, games_left)
     return dict(found)

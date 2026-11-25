@@ -5,7 +5,7 @@ from types import MappingProxyType
 import numpy as np
 import pytest
 
-from services import replay_blob, sim_draw, sim_game, sim_lines, sim_market, sim_season, sim_world
+from services import replay_blob, sim_centre, sim_draw, sim_game, sim_lines, sim_market, sim_season, sim_world
 from tests import replay_fakes as fakes
 
 WEEK = 9
@@ -83,15 +83,26 @@ def test_a_posted_line_replaces_the_model(data, belief):
     assert lines[home] == sim_lines.Line(-6.5, 41.5)
 
 
+def test_a_centred_side_hits_any_reasonable_target(data, belief):
+    """The closed-form solve reaches every target from a weak offense to a blowout (overtime points included)."""
+    worst = 0.0
+    for game in (g for g in data.schedule.games if g.week == WEEK):
+        home, away = game.home_team, game.away_team
+        for wanted in (3.0, 6.0, 10.0, 14.0, 21.0, 28.0, 35.0, 45.0, 60.0):
+            sides = sim_centre.centred({home: sim_game._side(belief, home, away, set(), {}),
+                                        away: sim_game._side(belief, away, home, set(), {})}, {home: wanted, away: 20.0})
+            means = {t: sim_game._side_means(s) for t, s in sides.items()}
+            got = sim_game._mean_points(means[home], means[away]) + sim_centre.ot_points()
+            worst = max(worst, abs(got - wanted))
+    assert worst < 0.05
+
+
 def test_a_centred_game_averages_its_target_and_projections_follow(data, belief):
     game = next(g for g in data.schedule.games if g.week == WEEK)
     home, away = game.home_team, game.away_team
     target = {home: 31.0, away: 13.0}
-    sides = sim_game._centred({home: sim_game._side(belief, home, away, set(), {}),
-                               away: sim_game._side(belief, away, home, set(), {})}, target)
-    means = {t: sim_game._side_means(s) for t, s in sides.items()}
-    assert sim_game._mean_points(means[home], means[away]) == pytest.approx(31.0, abs=0.05)
-    assert sim_game._mean_points(means[away], means[home]) == pytest.approx(13.0, abs=0.05)
+    sides = sim_centre.centred({home: sim_game._side(belief, home, away, set(), {}),
+                                away: sim_game._side(belief, away, home, set(), {})}, target)
     scoring = sim_world.scoring_of(data)
     plain = sim_game.expected(belief, home, away, set(), scoring)
     centred = sim_game.expected(belief, home, away, set(), scoring, target=target)
@@ -99,8 +110,8 @@ def test_a_centred_game_averages_its_target_and_projections_follow(data, belief)
     assert centred[qb_home].points > plain[qb_home].points and centred[qb_away].points < plain[qb_away].points
     rng = np.random.default_rng(3)
     drawn = np.array([[r.points[home], r.points[away]] for r in
-                      (sim_game.play(belief, home, away, set(), rng, scoring, None, target) for _ in range(400))])
-    assert drawn.mean(axis=0) == pytest.approx([31.0, 13.0], abs=1.5)
+                      (sim_game.play(belief, home, away, set(), rng, scoring, None, target) for _ in range(4000))])
+    assert drawn.mean(axis=0) == pytest.approx([31.0, 13.0], abs=0.3)        # unbiased, overtime included
 
 
 def test_touchdowns_are_drive_limited_and_never_outnumber_the_plays():
