@@ -40,6 +40,7 @@ REGULAR_DECAY = 0.95
 PLAYOFF_MIN = 0.1
 DEFAULT_PLAYOFF_ODDS = 0.6
 HANDCUFF_MULTIPLE = 2.0           # drop your own starter's handcuff only for an add worth 2x as much
+MAX_LINEUPS = 20_000              # lineup solves cached per projector (replay_values keeps 64 projectors)
 
 
 def _after_injury(weeks_ahead: int, missed: float) -> float:
@@ -144,6 +145,8 @@ def week_lineup(values: Sequence, week: int, projector: Projector, settings) -> 
     cache = projector.__dict__.setdefault("_lineups", {})    # also a stand-in projector that skips __init__
     cached = cache.get(key)
     if cached is None:
+        if len(cache) >= MAX_LINEUPS:
+            cache.clear()               # shortcut: drop all, not least recent; a waiver plan refills it fast
         pool = [SimpleNamespace(player_id=v.player_id, position=v.position, projection=projector.points(v, week))
                 for v in modeled]
         best = mt.best_lineup(pool, settings)

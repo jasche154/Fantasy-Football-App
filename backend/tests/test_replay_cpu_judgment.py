@@ -285,3 +285,16 @@ def test_lineup_solves_are_cached_with_the_same_answer_whatever_the_roster_order
     other = lineup_gain.week_lineup(roster, 5, rv.projector.__wrapped__(knowledge), knowledge.league)
 
     assert again is first and other == first and first[0] > 0
+
+
+def test_the_lineup_cache_is_capped(monkeypatch):
+    monkeypatch.setattr(lineup_gain, "MAX_LINEUPS", 3)
+    knowledge = know(4)
+    roster = [knowledge.by_id[pid] for pid in drafted(4).teams[3].roster]
+    fresh = rv.projector.__wrapped__(knowledge)
+
+    answers = [lineup_gain.week_lineup(roster, week, fresh, knowledge.league) for week in range(5, 12)]
+
+    assert 0 < len(fresh._lineups) <= 3
+    assert answers == [lineup_gain.week_lineup(roster, week, rv.projector.__wrapped__(knowledge), knowledge.league)
+                       for week in range(5, 12)]
