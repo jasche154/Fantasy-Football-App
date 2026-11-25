@@ -110,6 +110,8 @@ class SeasonData:
     defense_prior: Mapping[tuple[str, str], float] = field(default_factory=lambda: MappingProxyType({}))  # last season
     rules: ScoringRules | None = None                         # custom key settings on `scoring` (replay_scoring)
     adp_format: str = "ppr"                                   # the replay_adp list `players` carry (replay_adp_format)
+    # with adp_format "2qb": {player: ADP on the league-scoring 1-QB list} (replay_superflex); preseason data
+    scoring_adp: Mapping[int, float] = field(default_factory=lambda: MappingProxyType({}))
     notes: Mapping[PlayerWeek, str] = field(default_factory=lambda: MappingProxyType({}))  # news before the week
     # (team, week) -> points the team scored in that week's game: a result, like `actual` (as_of keeps played weeks)
     scores: Mapping[tuple[str, int], int] = field(default_factory=lambda: MappingProxyType({}))
@@ -345,6 +347,25 @@ def _pool(session: Session, season: int, ids: set[int], two_way: Mapping[int, tu
             for pid, name, position in people if pid in ids or pid in adp}
 
 
+def _scoring_adp(session: Session, season: int, scoring: str, rules: ScoringRules | None,
+                 players: Mapping[int, PoolPlayer]) -> dict[int, float]:
+    """{player: ADP} on the stored 1-QB list nearest the league's scoring, for the pool's players."""
+    listed = replay_adp_format.stored(session, season, scoring, rules)
+    if listed == replay_adp_format.TWO_QB:
+        return {}
+    return {pid: adp for pid, adp in session.execute(select(ReplayAdp.player_id, ReplayAdp.adp).where(
+        ReplayAdp.season == season, ReplayAdp.format == listed)) if pid in players}
+
+
+def with_scoring_adp(session: Session, data: SeasonData) -> SeasonData:
+    """A real season on the 2-QB list saved before `scoring_adp` existed, with its scoring's stored 1-QB list
+    (an old live league drafted on the real August lists; replay_routes); anything else as is."""
+    if data.adp_format != replay_adp_format.TWO_QB or data.scoring_adp:
+        return data
+    found = _scoring_adp(session, data.season, data.scoring, data.rules, data.players)
+    return replace(data, scoring_adp=MappingProxyType(found)) if found else data
+
+
 def _defense_ids(session: Session) -> dict[str, int]:
     rows = session.execute(select(Player.gsis_id, Player.id).where(Player.position == "DST"))
     return {gsis.removeprefix(DST_PREFIX): pid for gsis, pid in rows if gsis and gsis.startswith(DST_PREFIX)}
@@ -416,6 +437,7 @@ def _build(session: Session, season: int, scoring: str, rules: ScoringRules | No
     adp_format = replay_adp_format.stored(session, season, scoring, rules, want)
     players = _pool(session, season, {pid for pid, _ in (*actual, *projected)}, two_way,
                     {team for team, _ in schedule.opponents}, adp_format)
+    scoring_adp = _scoring_adp(session, season, scoring, rules, players) if adp_format == replay_adp_format.TWO_QB else {}
     if rules is not None:
         projected = replay_scoring.convert(projected, {pid: p.position for pid, p in players.items()}, box, rules)
     actual, projected, teams, usage, box = ({key: value for key, value in table.items() if key[0] in players}
@@ -436,6 +458,7 @@ def _build(session: Session, season: int, scoring: str, rules: ScoringRules | No
                       expert_ranks=MappingProxyType(expert_ranks), expert_age=MappingProxyType(expert_age),
                       returns=MappingProxyType(hard_tag_returns(injuries, actual, weeks)),
                       box=MappingProxyType(box), rules=rules, adp_format=adp_format, scores=MappingProxyType(scores),
+                      scoring_adp=MappingProxyType(scoring_adp),
                       defense_prior=MappingProxyType(replay_defense.load_prior(session, season, rescored))))
 
 

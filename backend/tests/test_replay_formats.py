@@ -4,7 +4,10 @@ from collections import Counter
 
 import pytest
 
-from services import replay_adp_format as af, replay_chart, replay_draft as rd, replay_season, replay_slots, replay_state as rs
+from services import (
+    replay_adp_format as af, replay_chart, replay_draft as rd, replay_season, replay_slots, replay_state as rs,
+    replay_superflex,
+)
 from services import replay_values as rv
 from tests import replay_fakes as fakes
 from tests.test_replay_draft import play_out
@@ -146,12 +149,17 @@ def test_cpus_draft_two_quarterbacks_early_in_superflex(seed):
     assert qbs_by_round_6 >= SUPERFLEX.teams
 
 
-def test_the_superflex_view_scales_only_quarterback_adp():
+def test_without_a_2qb_list_quarterbacks_go_at_the_fitted_non_qb_slots():
+    # the old stopgap (every QB's ADP x 0.4) is gone: QB n takes the pick of the average 2-QB list's slot n
     view = replay_chart.superflex_view(DATA)
-    qb, wr = fakes.player_id("QB", 1), fakes.player_id("WR", 1)
+    others = sorted(p.adp for p in DATA.players.values() if p.position != "QB" and p.adp is not None)
+    qbs = sorted((p.adp, pid) for pid, p in DATA.players.items() if p.position == "QB" and p.adp is not None)
+    slots = replay_superflex.fitted()["2qb"]
 
-    assert view.players[qb].adp == pytest.approx(DATA.players[qb].adp * replay_chart.SUPERFLEX_QB_ADP)
-    assert view.players[wr] == DATA.players[wr]
+    for (_, qb), slot in zip(qbs, slots):
+        assert view.players[qb].adp == pytest.approx(replay_superflex.pick_of_slot(others, slot))
+    assert all(view.players[pid] == p for pid, p in DATA.players.items() if p.position != "QB")
+    assert view.players[qbs[0][1]].adp < 5                                  # the top QB goes in the first round
     assert replay_chart.superflex_view(DATA) is view                        # cached: curves on it are too
 
 
@@ -163,7 +171,7 @@ def test_superflex_values_quarterbacks_higher_on_the_chart_and_over_replacement(
     assert superflex.by_id[qb].chart > standard.by_id[qb].chart * 1.5
     assert superflex.replacement["QB"] < standard.replacement["QB"]
     assert superflex.by_id[qb].trade_value > standard.by_id[qb].trade_value
-    assert superflex.by_id[wr].chart == pytest.approx(standard.by_id[wr].chart, rel=0.01)
+    assert superflex.by_id[wr].chart == standard.by_id[wr].chart          # non-QBs: exactly the regular league's
 
 
 def test_superflex_values_see_no_hindsight():

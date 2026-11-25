@@ -44,6 +44,7 @@ def _rich(data: SeasonData) -> SeasonData:
     some = next(iter(data.players))
     return replace(data, known_before=None, rules=ScoringRules(reception=1.0, te_premium=0.5, pass_td=6.0),
                    adp_format="2qb", notes=MappingProxyType({(some, 3): "Named the starter", (some, 4): "Limited"}),
+                   scoring_adp=MappingProxyType({some: 12.5, some + 1: np.float64(40.25)}),
                    defense_prior=MappingProxyType({("BUF", "QB"): 0.93, ("NYJ", "RB"): np.float64(1.07)}),
                    projected=MappingProxyType({**data.projected, (some, 99): np.float64(4.25)}))
 
@@ -62,7 +63,7 @@ def test_every_field_round_trips_exactly():
 
 def test_an_old_save_reads_with_defaults_and_a_newer_one_is_refused():
     payload = json.loads(zlib.decompress(replay_blob.dumps(_rich(DATA))))
-    for name in ("notes", "rules", "scores"):
+    for name in ("notes", "rules", "scores", "scoring_adp"):
         del payload[name]                              # saved before these fields existed
     del payload["box"]["v"]["rec_td"]                  # ... and before this column did
     payload["players"]["v"]["retired_field"] = [0] * len(payload["players"]["k"])     # since removed
@@ -71,6 +72,7 @@ def test_an_old_save_reads_with_defaults_and_a_newer_one_is_refused():
     old = replay_blob.loads(zlib.compress(json.dumps(payload).encode()))
 
     assert old.notes == {} and old.rules is None and old.scores == {} and old.actual == DATA.actual and old.usage == DATA.usage
+    assert old.scoring_adp == {} and old.adp_format == "2qb"          # replay_superflex converts its 2-QB list
     assert {key: replace(box, rec_td=0) for key, box in DATA.box.items()} == old.box
     with pytest.raises(TypeError):                     # Usage.target_share has no default: an unreadable save...
         replay_blob._records({"snap_pct": [1.0]}, fakes.Usage, 1)
@@ -184,6 +186,20 @@ def test_a_new_league_on_a_reused_id_never_sees_the_old_leagues_season(db):
     new = _league(db, replace(DATA, season=DATA.season + 1))
 
     assert new == old and replay_blob.load(db, new).season == DATA.season + 1
+
+
+def test_an_old_save_is_upgraded_once_when_it_is_decoded(db):
+    league = _league(db, DATA)
+    replay_pool.clear_cache()                                      # as after a restart: decoded from the store
+    calls: list[SeasonData] = []
+
+    def fill(data: SeasonData) -> SeasonData:
+        calls.append(data)
+        return replace(data, scoring_adp=MappingProxyType({1: 2.0}))
+
+    first, again = replay_blob.load(db, league, fill), replay_blob.load(db, league, fill)
+
+    assert len(calls) == 1 and first is again and first.scoring_adp == {1: 2.0}
 
 
 def test_a_league_gets_one_season_object_until_the_cache_is_cleared(db):

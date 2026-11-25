@@ -68,8 +68,10 @@ def errors() -> Iterator[None]:
 def _season_data(session: Session, settings: Settings, league_id: int) -> SeasonData:
     """The season as this league sees it: a simulated league's frozen season (replay_blob), else the past season
     with its scoring and its ADP list (replay_adp_format)."""
-    if settings.sim_from is not None:
-        return replay_blob.load(session, league_id)
+    if settings.sim_from is not None:          # a live league drafted in August read the real lists: a save from
+        real_lists = settings.sim_from > 1 and settings.start_week == 1        # before scoring_adp gets them
+        return replay_blob.load(session, league_id,
+                                (lambda data: replay_pool.with_scoring_adp(session, data)) if real_lists else None)
     return replay_pool.load_season_data(session, settings.season, settings.scoring, settings.scoring_rules,
                                         settings.adp_format)
 

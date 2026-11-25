@@ -2,6 +2,7 @@
 league reads (no network)."""
 import json
 from dataclasses import replace
+from types import MappingProxyType
 
 import pytest
 from sqlalchemy import create_engine, insert, select
@@ -12,7 +13,7 @@ from database.models import Base, ReplayAdp
 from integrations import adp_history
 from integrations.adp_history import HistoryClient, HistoryError
 from services import replay_adp_format as af
-from services import replay_chart, replay_data, replay_pool, replay_state as rs
+from services import replay_chart, replay_data, replay_pool, replay_state as rs, replay_superflex
 from services.replay_scoring import ScoringRules
 from tests import replay_fakes as fakes
 from tests.test_replay_data import FFC_PAYLOAD, SEASON, Sites, adp_by_gsis, db  # noqa: F401  (db is a fixture)
@@ -170,11 +171,13 @@ def test_the_2qb_list_borrows_a_qb_from_a_1qb_list_at_superflex_prices():
     two_qb = [(adp_history.AdpEntry("ffc", "A", "QB", 1.5, 0.5), 1)]
     ppr = [(adp_history.AdpEntry("ffc", "Q", "QB", 60.0, 5.0), 2), (adp_history.AdpEntry("ffc", "W", "WR", 30.0, 2.0), 3)]
 
-    rows = replay_data.adp_rows(SEASON, two_qb, [], [ppr], replay_chart.SUPERFLEX_QB_ADP)
+    rows = replay_data.adp_rows(SEASON, two_qb, [], [ppr], replay_superflex.borrowed_qb_adp)
+    moved = replay_superflex.borrowed_qb_adp(60.0)
 
     assert [(r["player_id"], r["adp"], r["stdev"], r["source"]) for r in rows] == [
-        (1, 1.5, 0.5, "ffc"), (2, 60.0 * replay_chart.SUPERFLEX_QB_ADP, 5.0 * replay_chart.SUPERFLEX_QB_ADP,
-                               "ffc_borrowed"), (3, 30.0, 2.0, "ffc_borrowed")]
+        (1, 1.5, 0.5, "ffc"), (2, pytest.approx(moved), pytest.approx(5.0 * moved / 60.0), "ffc_borrowed"),
+        (3, 30.0, 2.0, "ffc_borrowed")]
+    assert 10 < moved < 30                     # QB5 or so of a 1-QB list goes in the 2-QB list's second round
 
 
 def test_a_list_missing_a_player_borrows_the_ppr_lists_adp_first(db):
@@ -276,9 +279,11 @@ def test_a_ppr_only_season_loads_exactly_as_before_for_every_league(seeded):
         assert loaded.adp_format == "ppr" and adps(loaded) == adps(data)
 
     superflex = replay_pool.load_season_data(session, data.season, "half", None, af.wanted("half", None, SUPERFLEX))
-    qb = next(pid for pid, p in data.players.items() if p.position == "QB" and p.adp is not None)
-    assert replay_chart.superflex_view(superflex).players[qb].adp == pytest.approx(
-        data.players[qb].adp * replay_chart.SUPERFLEX_QB_ADP)                 # no 2-QB list: the stopgap applies
+    qb = min((p.adp, pid) for pid, p in data.players.items() if p.position == "QB" and p.adp is not None)[1]
+    others = sorted(p.adp for p in data.players.values() if p.position != "QB" and p.adp is not None)
+    assert not superflex.scoring_adp                                           # players already carry the 1-QB list
+    assert replay_chart.superflex_view(superflex).players[qb].adp == pytest.approx(replay_superflex.pick_of_slot(
+        others, replay_superflex.fitted()["2qb"][0]))                          # no 2-QB list: the fitted slots
 
 
 def test_each_league_reads_its_own_list_and_the_2qb_list_replaces_the_qb_boost(seeded):
@@ -298,7 +303,11 @@ def test_each_league_reads_its_own_list_and_the_2qb_list_replaces_the_qb_boost(s
 
     assert (superflex.adp_format, two_qb.adp_format, half.adp_format) == ("2qb", "2qb", "half")
     assert superflex.players[qb].adp == pytest.approx(data.players[qb].adp * 0.3)
-    assert replay_chart.superflex_view(superflex) is superflex                  # the 2-QB list already prices QBs
+    assert superflex.scoring_adp[back] == pytest.approx(data.players[back].adp * 0.9)   # and the half list
+    assert superflex.as_of(3).scoring_adp == superflex.scoring_adp                       # preseason: every week
+    view = replay_chart.superflex_view(superflex)                                # non-QBs on the half list
+    assert view.players[back].adp == half.players[back].adp
+    assert replay_superflex.one_qb(two_qb).players[back].adp == pytest.approx(data.players[back].adp * 0.9)  # std: half
     assert half.players[back].adp == pytest.approx(data.players[back].adp * 0.9)
     assert (custom.adp_format, full.adp_format) == ("ppr", "ppr") and adps(full) == adps(data)
     assert superflex.as_of(3).adp_format == "2qb"                              # ADP is preseason: every week
@@ -357,3 +366,22 @@ def test_stored_donor_lists_carry_the_players_position(db):
     stored = replay_data._stored_ffc(db, SEASON, set())
     positions = {entry.position for rows in stored.values() for entry, _ in rows}
     assert positions and "" not in positions and "RB" in positions
+
+
+def test_an_old_live_save_on_the_2qb_list_gets_its_scoring_list_and_the_fit_reads_both_lists(seeded):
+    session, data = seeded
+    add_format(session, data, "2qb", {"QB": 0.3})
+    loaded = replay_pool.load_season_data(session, data.season, "ppr", None, af.wanted("ppr", None, SUPERFLEX))
+    old = replace(loaded, scoring_adp=MappingProxyType({}))          # saved before scoring_adp existed
+
+    assert replay_pool.with_scoring_adp(session, old).scoring_adp == loaded.scoring_adp == adps(data)
+    assert replay_pool.with_scoring_adp(session, loaded) is loaded
+    regular = replay_pool.load_season_data(session, data.season, "ppr")
+    assert replay_pool.with_scoring_adp(session, regular) is regular                # a 1-QB list: as is
+
+    fit = replay_superflex.fit(session)
+    board = [(p.position, p.adp) for p in data.players.values() if p.adp is not None]
+    assert fit["seasons"] == [data.season]
+    assert fit["ppr"] == [round(s, 2) for s in replay_superflex.qb_slots(board)]
+    assert fit["2qb"] == [round(s, 2) for s in replay_superflex.qb_slots(
+        (position, adp * 0.3 if position == "QB" else adp) for position, adp in board)]

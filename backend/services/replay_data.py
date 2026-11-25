@@ -38,7 +38,7 @@ from integrations import adp_history, espn_history, sleeper_projections
 from integrations.adp_history import PAUSE_SECONDS, AdpEntry, HistoryClient, HistoryError, SeasonMatcher, name_key
 from integrations.espn_history import WeekProjection
 from integrations.weekly_sources import normalize_team
-from services import replay_adp_format, replay_chart, replay_experts, replay_live, replay_pool, system_status
+from services import replay_adp_format, replay_experts, replay_live, replay_pool, replay_superflex, system_status
 from services.replay_experts import load_expert_ranks
 from services.replay_injuries import load_injuries
 
@@ -208,17 +208,21 @@ def adp_player(matcher: SeasonMatcher, entry: AdpEntry, crosswalk: dict[str, str
 
 
 def adp_rows(season: int, ffc: Sequence[tuple[AdpEntry, int | None]], mfl: Sequence[tuple[AdpEntry, int | None]],
-             others: Sequence[Sequence[tuple[AdpEntry, int | None]]] = (), borrowed_qb: float = 1.0) -> list[dict]:
+             others: Sequence[Sequence[tuple[AdpEntry, int | None]]] = (),
+             borrowed_qb: Callable[[float], float] | None = None) -> list[dict]:
     """FFC's ADP as published; a player it leaves out but another FFC list of the season has (`others`, the one to
     trust most first) at his ADP and spread there, the same site's 12-team scale (a thin list, like 2026's half-PPR,
     drops top players); then the players in no FFC list, one pick apart after the last pick, in MFL's order (MFL's
     picks are not on FFC's scale: its real drafts include dynasty and keeper leagues).
-    Borrowed rows are stored as FFC_BORROWED (never read back as a donor); a borrowed QB's ADP and spread are
-    x `borrowed_qb` (the 2-QB list borrowing from 1-QB lists: replay_chart.SUPERFLEX_QB_ADP, as superflex_view)."""
+    Borrowed rows are stored as FFC_BORROWED (never read back as a donor); a borrowed QB's ADP becomes
+    `borrowed_qb(adp)` and his spread moves in proportion (the 2-QB list borrowing from 1-QB lists:
+    replay_superflex.borrowed_qb_adp, where the average 2-QB list takes a QB the 1-QB lists take there)."""
     rows: list[dict] = []
     seen: set[int] = set()
     own = [(pair, adp_history.FFC, 1.0) for pair in ffc]
-    lent = [(pair, FFC_BORROWED, borrowed_qb if pair[0].position == "QB" else 1.0) for other in others for pair in other]
+    lent = [(pair, FFC_BORROWED, borrowed_qb(pair[0].adp) / pair[0].adp
+             if borrowed_qb is not None and pair[0].position == "QB" and pair[0].adp > 0 else 1.0)
+            for other in others for pair in other]
     for (entry, player_id), source, scale in (*own, *lent):
         if player_id is not None and player_id not in seen:
             seen.add(player_id)
@@ -328,7 +332,7 @@ def load_adp(session: Session, season: int, client: HistoryClient, force: bool =
     pairs = {fmt: [(e, adp_player(matcher, e, crosswalk, via_mfl)) for e in entries] for fmt, entries in lists.items()}
     donors = {**_stored_ffc(session, season, set(pairs)), **pairs}
     by_format = {fmt: adp_rows(season, fmt_pairs, mfl_pairs, [donors[d] for d in _donor_formats(fmt) if d in donors],
-                               replay_chart.SUPERFLEX_QB_ADP if fmt == replay_adp_format.TWO_QB else 1.0)
+                               replay_superflex.borrowed_qb_adp if fmt == replay_adp_format.TWO_QB else None)
                  for fmt, fmt_pairs in pairs.items()}
     session.execute(delete(ReplayAdp).where(ReplayAdp.season == season, ReplayAdp.format.in_(list(by_format))))
     rows = [{**row, "format": fmt} for fmt, fmt_rows in by_format.items() for row in fmt_rows]

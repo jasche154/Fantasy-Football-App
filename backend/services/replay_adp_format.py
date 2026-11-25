@@ -1,11 +1,12 @@
 """Replay League: which preseason ADP list (replay_adp.format) a league drafts from.
 
-- `wanted`: a superflex league (replay_slots.two_qb: a SUPERFLEX slot, or 2+ QB slots) drafts from the 2-QB list; any other
+- `wanted`: a superflex league (replay_slots.two_qb: a SUPERFLEX slot, or 2+ QB slots) reads the 2-QB list (and,
+  in SeasonData.scoring_adp, its scoring's list: replay_superflex places its QBs among those non-QBs); any other
   league from its scoring's list: ppr / half / std, and custom rules from the preset nearest their points
   per reception (a tie goes to the bigger one: 0.75 -> ppr, 0.25 -> half).
 - `choose`: the wanted list if that season has it, else the nearest one it has (2qb -> the scoring's list,
   then the nearest; ppr <-> half <-> std). SeasonData.adp_format records the list actually used, so a
-  superflex league without a 2-QB list still gets replay_chart.superflex_view's QB boost.
+  superflex league without a 2-QB list still gets replay_superflex's fitted QB placement.
 
 ADP is preseason data: the same list serves every week, no hindsight.
 """
