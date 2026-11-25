@@ -1,7 +1,8 @@
 """Simulated seasons: the offseason before a simulated season, from a hand-editable file.
 
-backend/sim_data/offseason_<season>.json holds the incoming rookies (name, position, landing team, projected
-overall pick, college; from current mock drafts) and a short list of moves (retirements: team null, and big
+backend/sim_data/offseason_<season>.json holds the incoming rookies (name, position, mock landing team, projected
+overall pick, college, optional `lock`; from current mock drafts: each league's seeded draft places the unlocked
+ones, services/sim_rookie_draft.py) and a short list of moves (retirements: team null, and big
 free agents with their most reported destination). Everyone else stays on his current team. `load` validates
 the file and raises ValueError naming the bad entry; a season with no file has no rookies and no moves.
 `match` finds each move's player in a pool by the name key the replay imports already match on
@@ -26,8 +27,9 @@ class Rookie:
     name: str
     position: str
     team: str                           # schedule team code
-    pick: int                           # projected overall pick
+    pick: int                           # projected overall pick (the prospect's rank in the seeded draft)
     college: str
+    lock: bool = False                  # True: he goes to `team` at `pick` in every league (sim_rookie_draft)
 
 
 @dataclass(frozen=True)
@@ -69,7 +71,11 @@ def _rookie(row: Mapping, where: str) -> Rookie:
     pick = row.get("pick")
     if not isinstance(pick, int) or isinstance(pick, bool) or not 1 <= pick <= MAX_PICK:
         raise ValueError(f"{where} ({name}): pick {pick!r} must be a whole number from 1 to {MAX_PICK}.")
-    return Rookie(name, position, _team(row.get("team"), f"{where} ({name})"), pick, _text(row, "college", where))
+    lock = row.get("lock", False)
+    if not isinstance(lock, bool):
+        raise ValueError(f"{where} ({name}): lock {lock!r} must be true or false.")
+    return Rookie(name, position, _team(row.get("team"), f"{where} ({name})"), pick, _text(row, "college", where),
+                  lock=lock)
 
 
 def _move(row: Mapping, where: str) -> Move:

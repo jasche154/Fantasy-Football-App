@@ -1,0 +1,34 @@
+{
+ "seasons": [
+  2018,
+  2019,
+  2020,
+  2021,
+  2022,
+  2023,
+  2024,
+  2025
+ ],
+ "committee_rate": 0.2734,
+ "resolved": 0.4857,
+ "leader": 0.7353,
+ "weeks": {
+  "5": 0.3235,
+  "6": 0.1471,
+  "8": 0.1471,
+  "9": 0.0882,
+  "10": 0.0588,
+  "12": 0.0882,
+  "13": 0.0588,
+  "14": 0.0588,
+  "16": 0.0294
+ },
+ "post_ratio": 0.3768,
+ "resolve_rate": 0.5,
+ "resolve_rate_tuning": "sim_eval --mode full 2021-2025, 3 seeds: RB committees won % real 41.1; sim 27.6 at 0, 41.3 at 0.5",
+ "counts": {
+  "committees": 70,
+  "won": 34,
+  "team_seasons": 256
+ }
+}

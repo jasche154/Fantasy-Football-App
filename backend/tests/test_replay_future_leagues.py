@@ -67,7 +67,7 @@ def test_the_future_season_is_built_from_the_season_in_progress(app):
     _, engine = app
     with Session(engine) as session:
         assert sim_setup.source(session) == (LIVE, THROUGH)
-        base, belief = sim_setup._future_base(session, FUTURE, _settings())
+        base, belief, _ = sim_setup._future_base(session, FUTURE, _settings())
     _check_future(base, belief, 18)
     assert len(base.schedule.games) == 272                       # generated: no 2027 schedule is stored
     assert {g.week for g in base.schedule.games} == set(range(1, 19))
@@ -83,7 +83,7 @@ def test_a_stored_schedule_is_used_and_a_finished_season_still_builds(app):
         try:
             assert sim_setup.source(session) == (LIVE, None)
             assert sim_setup.future_problem(session, FUTURE) is None
-            base, belief = sim_setup._future_base(session, FUTURE, _settings())
+            base, belief, _ = sim_setup._future_base(session, FUTURE, _settings())
         finally:
             session.rollback()
             replay_pool.clear_cache()

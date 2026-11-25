@@ -1388,11 +1388,46 @@ read the belief, so, as in a real season, the public learns the truth only from 
   x1.05 for a tight end, none for a quarterback (rookie QBs already go where real ones do).
 - **The offseason file** `backend/sim_data/offseason_2027.json` is meant to be edited by hand. `rookies`:
   one entry per player with `name`, `position` (QB/RB/WR/TE/K), `team` (schedule code, e.g. MIA, LA, LV,
-  WAS), `pick` (projected overall pick, 1-262) and `college`. `moves`: `name` (as the app spells him),
+  WAS), `pick` (projected overall pick, 1-262: the prospect's rank on the consensus board), `college`, and
+  optionally `lock` (default `false`; `true` pins him to that `team` and `pick` in every league). `moves`: `name` (as the app spells him),
   `position`, `team` (the new team, or `null` for retired / out of the league) and a `note`. Names must be
   unique across both lists; everyone else stays on his team. A bad entry greys out the 2027 card with the
   file name and the problem; a move whose name matches nobody is skipped (logged as a warning). Saved
   leagues keep the offseason they were built with.
+- **A seeded draft** (`services/sim_rookie_draft.py`): unless `lock`ed, where a rookie lands depends on the
+  league's seed, decided once when the league is created (same seed, same draft). The 2026 standings are
+  finished from the real results so far, each game left won with a probability from the two teams' points
+  differential a game; the draft order is fewest wins first. Each prospect's board spot is his `pick` x a
+  random ~30% miss, and the team on the clock takes the best prospect whose spot has come up and that it
+  needs: a QB unless it has an established starter (a full season's evidence, average-ish passing), an
+  RB/WR/TE when its room is below the league's median. A consensus top pick goes near the top regardless;
+  a QB slides past teams that don't need one through round 2. The drafted pick then sets his rookie role,
+  his market premium and his place on his new team's depth chart. Shortcut: playoffs, strength-of-schedule
+  tiebreaks and traded picks are not modeled.
+- **Starters and split backfields:** each team's starters come from the belief (role weights fitted on
+  2025-2026 games, a QB's starts and passing quality), so a veteran with a track record keeps his job and a
+  rookie is next in line unless his draft capital says otherwise; when a starter is hurt his backup plays,
+  and the backup's card says why ("Expected to start while Justin Herbert is out (IR, Knee).").
+  A team whose RB2 has 60%+ of its RB1's work opens with a **committee** (`services/sim_depth.py`); in
+  2018-2025 about a quarter of teams did, about half of those committees were won during the season, the
+  early leader won about three in four, mostly in weeks 5-9, and the loser kept about 0.38 of the winner's
+  work (`python -m services.sim_depth --fit --seasons 2018-2025` -> `sim_depth.json`). In a simulated
+  season the winner and the week are seeded; the public learns it only from the games (and the usual
+  60%-true buzz).
+- **Injuries carried over** (`services/sim_carryover.py`): a player still on the injury report at the
+  newest 2026 week starts 2027 healing. His injury (the live status's detail when there is one, e.g.
+  "Knee - ACL" + "Surgery", else the report's body part) gives a typical return time (ACL and a repaired
+  Achilles about 48 weeks, a pectoral or PCL 20, a Lisfranc 26, a hamstring 4, ...; a generic knee, foot or
+  ankle operation doubles its entry), counted from the week he was hurt to 2027's week 1. The market prices
+  the expected games missed (his teammates gain meanwhile), his card's news says when he is expected back,
+  and the truth draws his real recovery around it (lognormal, a quarter of the time), so in some leagues he
+  is ready for week 1 and in others he opens on IR with the usual noisy "expected back week N" reports.
+  `python -m services.sim_carryover --check --seasons 2018-2024` compares the model with real cross-season
+  returns: of the 493 players still tagged at the end of a 2018-2024 season who played the next one,
+  34.9% missed its week 1 against 25.4% of healthy players (box scores also miss depth players, so only
+  the ~10-point gap means anything). The old reports carry only coarse body parts ("Knee"), which this
+  table reads as short injuries, so the check cannot validate the detailed entries (the table rests on the
+  published return times) and that ~10-point excess for generic injuries is not modeled.
 - **Schedule:** until the real 2027 schedule is in the database, it is built by the NFL's rotation
   formula (`services/sim_schedule.py`: 6 division games, a division of each conference, two same-place
   games and the 17th game), seeded by the season so every 2027 league shares it; the same-place games use
@@ -1410,6 +1445,8 @@ read the belief, so, as in a real season, the public learns the truth only from 
 - The live season's preseason ADP is MyFantasyLeague's PPR list for every format until Fantasy Football
   Calculator has one. MyFantasyLeague's ADP request can't be limited to drafts held before week 1, so a list
   first fetched in-season also counts a few late drafts (a little hindsight in a **Full season** draft).
+- The seeded draft ignores playoffs, tiebreaks and traded picks, and its board noise and need rules are set
+  by hand, not fitted on past drafts.
 - The rookies and moves in the 2027 file are a snapshot of mock drafts and reports (dated in the file), not
   facts.
 
@@ -1425,6 +1462,8 @@ python -m services.sim_eval --set talent.role_sd=0.4 --save-tuned   # try a valu
 python -m services.sim_eval --fit [--seasons 2021-2025]             # refit the game model (sim_params.json)
 python -m services.sim_injuries --fit --seasons 2018-2025 [--check] # refit injuries (sim_injuries.json)
 python -m services.sim_next_year_fit --fit [--seasons 2019-2025]    # refit the offseason + rookie premium (sim_next_year.json)
+python -m services.sim_depth --fit --seasons 2018-2025              # refit split backfields (sim_depth.json)
+python -m services.sim_carryover --check --seasons 2018-2024        # carried injuries vs real cross-season returns
 ```
 
 `sim_eval`'s **mid** mode takes a real season as known before week 12, simulates the rest and compares it
