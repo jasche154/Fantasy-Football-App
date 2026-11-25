@@ -33,10 +33,11 @@ seasons 2019-2025 by services/sim_next_year_fit.py and lives in sim_next_year.js
   in log(pick), not extrapolated above ROOKIE_PICK_FLOOR for non-QBs: the fit has almost none there),
   position-norm efficiency at his team's passer scale, and no games of evidence, so sim_talent.truth draws
   them the widest. A rookie QB is named the starter when his team has no starter
-  (nobody with STARTER_ROLE starts), when his pick makes week 1 very likely (week-1 chance ROOKIE_QB_FRANCHISE
-  or more), or likely (ROOKIE_QB_NAMED) and the incumbent is a below-average passer; otherwise his starts
-  weight is his week-1 chance, which
-  puts him next in line (sim_talent's rookie takeover). A rookie with `hype` (offseason file) gets his role x
+  (nobody with STARTER_ROLE starts), or, when the incumbent is not an established starter (sim_qb.established
+  of his rank by last season's market value, sim_market.position_ranks: the user's choice, a rookie takes over
+  from weak starters only), when his pick makes week 1 very likely (week-1 chance ROOKIE_QB_FRANCHISE or more),
+  or likely (ROOKIE_QB_NAMED) and the incumbent is a below-average passer; otherwise his starts weight is his
+  week-1 chance, which puts him next in line when the holder is hurt or benched (sim_qb_jobs). A rookie with `hype` (offseason file) gets his role x
   hype ^ HYPE_ROLE (1: the coaches buy the hype; tuned so Jeremiah Smith, hype 1.2, finishes a top-12 WR
   in about 35% of league seeds, top-24 55%, outside the top 36 20%); the market's premium is x hype as well.
 - Teams: volume and defenses regress toward the league (`team_keep`); the passer scale and the "other"
@@ -53,7 +54,7 @@ Only the price moves: his role and talent draw are as above. Rookie ids: ROOKIE_
 """
 import math
 from collections import defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import replace
 from functools import lru_cache
 from pathlib import Path
@@ -91,7 +92,7 @@ def stored() -> dict:
     """The fitted offseason model (sim_next_year.json)."""
     return fitted_json(PATH, "python -m services.sim_next_year_fit --fit",
                        ("age", "keep", "center", "efficiency_keep", "efficiency_sd", "rookies", "team_keep",
-                        "rookie_premium", "efficiency_scale", "bench", "rookie_growth"))
+                        "rookie_premium", "efficiency_scale", "rookie_growth"))
 
 
 def rookie_ids(season: int, rookies: Sequence[Rookie]) -> dict[int, Rookie]:
@@ -208,17 +209,25 @@ def rookie_player(pid: int, rookie: Rookie, team: Team) -> Player:
                   int_rate=league["int_rate"] if rookie.position == "QB" else 0.0, games=0.0)
 
 
-def _qb_competition(players: dict[int, Player], rookie: Player) -> None:
-    """Name the rookie QB the starter when his team has no starter, when his week-1 chance is very high, or high
-    and the incumbent is a below-average passer (see the module docstring). Mutates `players` (local to
-    next_year)."""
+def _qb_competition(players: dict[int, Player], rookie: Player, secure: Collection[int] = ()) -> None:
+    """Name the rookie QB the starter when his team has no starter, or, unless the incumbent is in `secure` (the
+    established starters), when his week-1 chance is very high, or high and the incumbent is a below-average
+    passer (see the module docstring). Mutates `players` (local to next_year)."""
     others = [p for p in players.values() if p.team == rookie.team and p.position == "QB" and p.player_id != rookie.player_id]
     incumbent = max(others, key=lambda p: (p.starts, -p.player_id), default=None)
-    if incumbent is None or incumbent.starts < STARTER_ROLE or rookie.starts >= ROOKIE_QB_FRANCHISE or (
-            rookie.starts >= ROOKIE_QB_NAMED and incumbent.quality < AVERAGE_PASSER):
+    if incumbent is None or incumbent.starts < STARTER_ROLE or incumbent.player_id not in secure and (
+            rookie.starts >= ROOKIE_QB_FRANCHISE or (rookie.starts >= ROOKIE_QB_NAMED and incumbent.quality < AVERAGE_PASSER)):
         players[rookie.player_id] = replace(rookie, starts=1.0)
         if incumbent is not None:
             players[incumbent.player_id] = replace(incumbent, starts=min(incumbent.starts, VETERAN_BACKUP_STARTS))
+
+
+def _established(world: World) -> set[int]:
+    """The QBs whose job is secure (sim_qb.established) by their rank in last season's market value."""
+    from services import sim_qb
+
+    return {pid for pid, rank in sim_market.position_ranks(world).items()
+            if world.players[pid].position == "QB" and sim_qb.established(rank)}
 
 
 def starts_by_team(data: SeasonData) -> dict[int, list[tuple[int, str | None]]]:
@@ -320,9 +329,10 @@ def next_year(world: World, players: Mapping[int, PoolPlayer], experience: Mappi
     for pid, rookie in sorted(rookies.items()):
         if rookie.team in teams and pid not in new:
             new[pid] = rookie_player(pid, rookie, replace(teams[rookie.team], passer=AVERAGE_PASSER))
+    secure = _established(world) if any(r.position == "QB" for r in rookies.values()) else set()
     for pid in sorted(rookies):
         if pid in new and new[pid].position == "QB":
-            _qb_competition(new, new[pid])
+            _qb_competition(new, new[pid], secure)
     teams = _with_passers(new, teams)
     belief = World(MappingProxyType(new), MappingProxyType(teams))
     pool = {}

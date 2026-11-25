@@ -22,6 +22,9 @@ week's, from what is known through from_week - 1 (a half-published mid-week inju
    - tags known before W: sitting players get sim_injuries.tag (byes included), a player's first game back
      may carry return_tag's Q, and healthy regulars (PHANTOM_MIN_SNAP in the latest public belief, never the
      truth) may be listed Q/D (phantom) and play;
+   - each team's QB job holder is decided (sim_qb_jobs.decide: a hurt one sits, one back from injury may find
+     his fill-in keeping the job, a healthy one may be benched by sim_qb's weekly hazard) and starts whenever he
+     dresses, in the truth and in the public belief (sim_qb_jobs.apply: a benching is announced);
    - the public belief estimate(data so far, W) gives W's projections (hard-tagged players out), expert ranks
      (when the week has none; the preseason ones, week 0, follow base's ADP: sim_market.expert_ranks) and buzz
      notes (sim_market; false ones only in the weeks a true one can land, sim_talent.change_weeks);
@@ -37,7 +40,7 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass, replace
 from types import MappingProxyType
 
-from services import replay_pool, replay_state, sim_depth, sim_injuries, sim_market, sim_talent
+from services import replay_pool, replay_state, sim_depth, sim_injuries, sim_market, sim_qb_jobs, sim_talent
 from services.replay_pool import Injury, SeasonData, hard_tag_returns
 from services.sim_game import on_field, play
 from services.sim_world import World, estimate, scoring_of
@@ -181,7 +184,7 @@ def _hurt(world: World, team: str, out: set[int], dice) -> dict[int, sim_injurie
 
 
 def _market(tables: _Tables, base: SeasonData, belief: World, truth: World, seed: int, week: int, out: set[int],
-            false_rate: float, ranks: Mapping[int, int]) -> None:
+            false_rate: float, ranks: Mapping[int, int], benched: tuple = (), bench: Mapping[int, float] | None = None) -> None:
     scoring, last = scoring_of(base), base.last_week
     known = _known(base, tables, week)
     snapshot = sorted(pid for pid, w in tables.projected if w == week)      # the snapshot's own (from_week only)
@@ -205,8 +208,8 @@ def _market(tables: _Tables, base: SeasonData, belief: World, truth: World, seed
                 belief, ids, rank_week, replay_state.rng(seed, "sim", "experts", rank_week), scoring,
                 last - max(1, rank_week) + 1, market))
             tables.expert_age[rank_week] = sim_market.EXPERT_AGE["ros" if rank_week else "pre"]
-    tables.notes.update(sim_market.buzz(truth.changes, belief, week, replay_state.rng(seed, "sim", "buzz", week),
-                                        false_rate, out, sim_talent.rumors(belief, ranks) if false_rate else None))
+    tables.notes.update(sim_market.buzz((*truth.changes, *benched), belief, week, replay_state.rng(seed, "sim", "buzz", week),
+                                        false_rate, out, sim_talent.rumors(belief, ranks, bench) if false_rate else None))
     tags = {pid: injury for (pid, w), injury in tables.injuries.items() if w == week}
     tables.notes.update(sim_depth.fill_ins(belief, out, tags, base.players, week))
 
@@ -229,7 +232,9 @@ def simulate(base: SeasonData, seed: int, from_week: int, prior: World | None = 
     returning: dict[int, sim_injuries.Spell] = {}
     buzz_weeks = sim_talent.change_weeks(from_week, last)          # false buzz only where true buzz can land
     ranks = sim_talent.public_ranks(belief)                        # the public's ranks the rumours lean on
-    false_rate = sim_market.expected_hints(sim_talent.expected_changes(belief, ranks, from_week, last),
+    jobs = sim_qb_jobs.start(base, belief, from_week)              # who holds each QB job (sim_qb_jobs)
+    expected = sim_talent.expected_changes(belief, ranks, from_week, last)
+    false_rate = sim_market.expected_hints(expected + sim_qb_jobs.expected_benchings(jobs, buzz_weeks[1] - buzz_weeks[0] + 1),
                                            buzz_weeks[1] - buzz_weeks[0] + 1)
     public = belief                                  # the latest public belief (last week's, for this week's tags)
     for week in range(from_week, last + 1):
@@ -237,10 +242,12 @@ def simulate(base: SeasonData, seed: int, from_week: int, prior: World | None = 
         tables.injuries.update({(pid, week): injury for pid, injury in tags.items()})
         public_out = {pid for pid, injury in tags.items() if injury.hard}
         sitting = public_out | {pid for pid, a in absences.items() if a.left > 0}
-        public = estimate(_known(base, tables, week), week, prior)
+        known = _known(base, tables, week)
+        benched, bench = sim_qb_jobs.decide(jobs, truth.at(week), known, week, sitting, tags, seed)
+        public = sim_qb_jobs.apply(estimate(known, week, prior), jobs)
         _market(tables, base, public, truth, seed, week, public_out,
-                false_rate if buzz_weeks[0] <= week <= buzz_weeks[1] else 0.0, ranks)
-        world = truth.at(week)
+                false_rate if buzz_weeks[0] <= week <= buzz_weeks[1] else 0.0, ranks, tuple(benched), bench)
+        world = sim_qb_jobs.apply(truth.at(week), jobs)
         played_teams, fresh = set(), set()
         for game in sorted((g for g in base.schedule.games if g.week == week), key=lambda g: g.home_team):
             if game.home_team not in world.teams or game.away_team not in world.teams:

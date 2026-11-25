@@ -374,26 +374,22 @@ def main(argv: list[str] | None = None) -> None:
             premium = _premium_fit(premium_cases(session, seasons))
     PATH.write_text(json.dumps({**fitted, "rookie_premium": premium}, indent=1) + "\n")    # once, every step done
     sim_next_year.stored.cache_clear()
-    log.info("wrote %s (scale %s, bench %s, growth %s, rookie premium %s)", PATH.name, fitted.get("efficiency_scale"),
-             fitted.get("bench"), fitted.get("rookie_growth"), premium)
+    log.info("wrote %s (scale %s, growth %s, rookie premium %s)", PATH.name, fitted.get("efficiency_scale"),
+             fitted.get("rookie_growth"), premium)
 
 
 def whole_season_fits(session, seasons: list[int], fitted: Mapping) -> dict:
-    """{"efficiency_scale", "bench"} (services/sim_next_year_calib.py) on the model just fitted."""
+    """{"efficiency_scale", "rookie_growth"} (services/sim_next_year_calib.py) on the model just fitted."""
     from services import sim_next_year_calib as calib
 
     offseason = {"picks": draft_picks(range(DRAFT_HISTORY_FROM, max(seasons) + 1)), "first": first_seasons(session)}
     reals = calib.load(session, seasons)
-    no_bench = {"logit": [0.0, 0.0]}
     by_scale = {}
     for scale in calib.SCALE_GRID:
-        with _in_use({**fitted, "efficiency_scale": dict.fromkeys(POSITIONS, scale), "bench": no_bench,
-                      "rookie_premium": {}}):
+        with _in_use({**fitted, "efficiency_scale": dict.fromkeys(POSITIONS, scale), "rookie_premium": {}}):
             by_scale[scale] = calib.errors(session, reals, offseason)
         log.info("efficiency scale %s: %s", scale, by_scale[scale])
     out = {"efficiency_scale": calib.best_scale(by_scale, seasons)}
-    with _in_use({**fitted, **out, "bench": no_bench, "rookie_premium": {}}):
-        out["bench"] = calib.logistic(calib.lost_jobs(session, reals, offseason))
     growth = []
     for real in reals:
         rookies = set(draft_class(session, real.season, offseason["picks"]))

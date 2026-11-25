@@ -134,7 +134,9 @@ def test_the_market_and_the_experts_price_a_starter_on_ir_alike(belief, monkeypa
 
     assert board[backup.player_id] < healthy_board[backup.player_id]
     assert healthy_board[lead.player_id] < board[lead.player_id] < len(board)       # discounted, still drafted
-    assert {pid: experts[(pid, 10)] for pid in board} == board
+    worth = sim_market.values(hurt, HALF, games_left)
+    differ = [pid for pid in board if experts[(pid, 10)] != board[pid]]
+    assert all(sum(1 for other in board if worth[other] == worth[pid]) > 1 for pid in differ)    # only exact ties swap
 
 
 def test_a_preseason_market_leans_on_last_seasons_record(data, belief):

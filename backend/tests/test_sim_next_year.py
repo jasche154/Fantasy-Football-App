@@ -91,12 +91,13 @@ def test_rookie_roles_fall_with_the_pick_and_are_not_extrapolated_above_the_floo
     assert receiver.ypc == pytest.approx(params()["positions"]["WR"]["ypc"] * team.passer)
 
 
-def test_a_rookie_qb_starts_only_where_the_job_is_open_or_he_went_very_high():
+def test_a_rookie_qb_starts_only_where_the_job_is_open_or_he_went_very_high(monkeypatch):
+    monkeypatch.setattr(ny, "_established", lambda world: set())           # a weak (not established) incumbent
     rookie = Rookie("First Round Passer", "QB", "PIT", 10, "Penn State")
     rid = ny.ROOKIE_ID_BASE + 2027 * ny.ROOKIE_ID_SEASON + 10
     assert ny.ROOKIE_QB_NAMED <= ny._line("QB", "week1", 10) < ny.ROOKIE_QB_FRANCHISE
     behind, _ = _next(rookies=(rookie,))                                   # above-average incumbent keeps it
-    assert behind.players[pid("PIT", "QB1")].starts > behind.players[rid].starts >= sim_talent.ROOKIE_HOPEFUL
+    assert behind.players[pid("PIT", "QB1")].starts > behind.players[rid].starts > ny.VETERAN_BACKUP_STARTS
     open_job, _ = _next(moves={pid("PIT", "QB1"): None}, rookies=(rookie,))
     assert open_job.players[rid].starts == 1.0
     weak = _world((_player("PIT", "QB1", 0.92),))                          # a below-average incumbent
@@ -105,6 +106,19 @@ def test_a_rookie_qb_starts_only_where_the_job_is_open_or_he_went_very_high():
     first_pick = Rookie("Franchise Passer", "QB", "PIT", 1, "Ohio State")
     franchise, _ = _next(rookies=(first_pick,))                            # the top picks start anyway
     assert franchise.players[ny.ROOKIE_ID_BASE + 2027 * ny.ROOKIE_ID_SEASON + 1].starts == 1.0
+
+
+def test_an_established_incumbent_is_never_beaten_by_a_rookie_in_august():
+    """The user's choice: a rookie takes over from weak starters only, so the top pick sits behind an
+    established starter (sim_qb.established by last season's market rank) and plays only when he is hurt or
+    benched (sim_qb_jobs)."""
+    first_pick = Rookie("Franchise Passer", "QB", "PIT", 1, "Ohio State")
+    weak = _world((_player("PIT", "QB1", 0.92),))
+    assert pid("PIT", "QB1") in ny._established(weak)                      # a two-team world: every starter ranks high
+    for world in (None, weak):
+        belief, _ = _next(world, rookies=(first_pick,))
+        assert belief.players[pid("PIT", "QB1")].starts == 1.0
+        assert belief.players[ny.ROOKIE_ID_BASE + 2027 * ny.ROOKIE_ID_SEASON + 1].starts < 1.0
 
 
 def test_the_healthy_incumbent_gets_his_job_back():
@@ -215,25 +229,9 @@ def test_the_season_base_holds_every_player_who_dresses_before_anything_happened
     assert all(base.team_at(i, 1) == belief.players[i].team for i in known)
 
 
-def test_rookies_are_the_least_certain_and_prospects_take_over_at_the_rookie_rate():
+def test_rookies_are_the_least_certain():
     knobs = sim_talent.settings()
     assert sim_talent._spread(knobs["role_sd"], 0, knobs) > sim_talent._spread(knobs["role_sd"], 4.25, knobs)
-    starter, prospect, veteran = (Player(1, "QB", "MIA", starts=1.0, games=17), Player(2, "QB", "MIA", starts=0.4),
-                                  Player(3, "QB", "MIA", starts=0.05, games=17))
-
-    def benched(backup: Player, whole: bool, rank: int = 20, share: float = 1.0) -> float:
-        dice = np.random.default_rng(5)
-        return np.mean([any(c.kind == "bench" for c in sim_talent._changes([starter, backup], dice, (2, 15), knobs, whole,
-                                                                          {1: rank}, share))
-                        for _ in range(2000)])
-
-    usual = sim_talent.bench_chance(20)
-    assert benched(prospect, True) == pytest.approx(knobs["rookie_bench_rate"], abs=0.04)
-    assert benched(veteran, True) == pytest.approx(usual, abs=0.03)
-    assert benched(prospect, False) == pytest.approx(usual, abs=0.03)       # mid-season: the usual rate
-    assert benched(veteran, True, rank=1) < benched(veteran, True, rank=32)   # a top-rated starter keeps his job
-    assert benched(veteran, False, share=0.4) == pytest.approx(0.4 * usual, abs=0.03)    # fewer weeks left
-
 
 def test_the_market_pays_a_rookie_premium_on_his_price_only():
     """Real drafters pay for a rookie's upside: his ADP rises with the premium, every position's veterans keep

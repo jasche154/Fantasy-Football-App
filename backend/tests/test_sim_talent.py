@@ -24,9 +24,8 @@ def test_changes_are_dated_inside_the_season_and_name_real_players(belief):
     changes = [c for seed in range(20) for c in sim_talent.truth(belief, seed, 8, 17).changes]
     assert changes and all(9 <= c.week <= 17 - sim_talent.CHANGE_LAST_WEEKS for c in changes)
     assert all(c.player_id in belief.players for c in changes)
-    assert {c.kind for c in changes} <= {"breakout", "bust", "bench"} and {"breakout", "bust"} <= {c.kind for c in changes}
-    benched = [c for c in changes if c.kind == "bench"]
-    assert all(belief.players[c.player_id].position == "QB" for c in benched)
+    # who starts at QB is decided week by week (sim_qb_jobs), never pre-rolled here
+    assert {c.kind for c in changes} == {"breakout", "bust"}
 
 
 def test_less_known_players_move_further_from_their_reputation(belief):
@@ -67,12 +66,6 @@ def test_a_whole_season_draws_the_talent_its_regressed_belief_cannot_know(belief
     assert all(p.catch <= sim_talent.MAX_CATCH for p in truths[1][0].players.values())
 
 
-def test_a_starting_qb_the_public_rates_highly_is_almost_never_benched():
-    """bench_chance is the fitted logistic in the starter's public rank: rising with the rank, tiny at the top."""
-    chances = [sim_talent.bench_chance(rank) for rank in range(1, 33)]
-    assert chances == sorted(chances) and chances[0] < 0.03 < chances[-1]
-
-
 def test_stars_never_bust_and_rumours_spare_them(belief):
     ranks = sim_talent.public_ranks(belief)
     stars = {pid for pid, rank in ranks.items() if rank <= sim_talent.STAR_RANK}
@@ -80,8 +73,8 @@ def test_stars_never_bust_and_rumours_spare_them(belief):
     assert busted and not busted & stars
     rumors = sim_talent.rumors(belief, ranks)
     assert rumors["bust"] and not set(rumors["bust"]) & stars
-    assert not set(rumors["bench"]) & stars
-    assert all(belief.players[pid].position == "QB" for pid in rumors["bench"])
+    assert rumors["bench"] == {}                         # job-in-danger rumours come from sim_qb_jobs only
+    assert sim_talent.rumors(belief, ranks, {7: 0.3})["bench"] == {7: 0.3}
 
 
 def test_the_starters_are_ranked_among_the_starters(belief):
