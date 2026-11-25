@@ -11,9 +11,9 @@ from tests.test_injury_model import aaa_schedule
 SEASON = 2026
 
 
-def line(week, points, xp=None):
+def line(week, points, xp=None, yards=0):
     return GameLine(week=week, season_type="REG", opponent="OPP", fantasy_points=points, expected_points=xp,
-                    expected_tds=None, passing_yards=0, passing_tds=0, interceptions=0, carries=10,
+                    expected_tds=None, passing_yards=yards, passing_tds=0, interceptions=0, carries=10,
                     rushing_yards=50, rushing_tds=0, targets=3, receptions=2, receiving_yards=20,
                     receiving_tds=0, target_share=None, snap_pct=None)
 
@@ -65,9 +65,10 @@ def test_questionable_teammate_keeps_the_outside_share_and_trims_the_models():
 
 def test_a_backup_qb_sitting_gives_the_starter_nothing():
     # The backup only played in blowouts (weeks 2 and 5), when the starter was pulled early.
-    starter = season(1, "Starter", "QB", [line(w, 12 if w in (2, 5) else 22, xp=12 if w in (2, 5) else 22)
+    starter = season(1, "Starter", "QB", [line(w, 12 if w in (2, 5) else 22, xp=12 if w in (2, 5) else 22,
+                                               yards=150 if w in (2, 5) else 260)
                                           for w in range(1, 7)])
-    backup = season(2, "Backup", "QB", [line(w, 5, xp=5) for w in (2, 5)])
+    backup = season(2, "Backup", "QB", [line(w, 5, xp=5, yards=40) for w in (2, 5)])
     sits = {2: Availability(2, 0.02, "Backup QB (QB2)", None, None, "depth chart")}
     assert 1 not in injuries.vacated_boosts([starter, backup], {1: 20.0, 2: 5.0}, sits, {}, aaa_schedule(), 7)
 
@@ -78,3 +79,26 @@ def test_a_starting_qb_out_still_moves_work_to_his_backup():
     out = {1: Availability(1, 0.0, "Out", None, "Ankle", "report")}
     boosts = injuries.vacated_boosts([starter, backup], {1: 20.0, 2: 8.0}, out, {}, aaa_schedule(), 7)
     assert boosts[2][0].from_name == "Starter"
+
+
+def test_a_starter_hurt_early_is_not_the_backup_to_the_qb_who_started_since():
+    # The starter played weeks 1-4 and is out; the backup mopped up in weeks 2-3 and started weeks 5-9: more
+    # games than the starter, but he is still the one who takes the starter's work.
+    starter = season(1, "Starter", "QB", [line(w, 22, xp=22, yards=260) for w in (1, 2, 3, 4)])
+    backup = season(2, "Backup", "QB", [line(w, 16 if w > 4 else 2, xp=16 if w > 4 else 2, yards=230 if w > 4 else 30)
+                                        for w in (2, 3, 5, 6, 7, 8, 9)])
+    out = {1: Availability(1, 0.0, "Out", None, "Ankle", "report")}
+    boosts = injuries.vacated_boosts([starter, backup], {1: 20.0, 2: 14.0}, out, {}, aaa_schedule(range(1, 11)), 10)
+    assert boosts[2][0].from_name == "Starter"
+
+
+def test_the_depth_chart_decides_the_backup_qb_when_it_has_both():
+    starter = season(1, "Starter", "QB", [line(w, 22, xp=22, yards=100) for w in (1, 2, 3, 4)])
+    backup = season(2, "Backup", "QB", [line(w, 16 if w > 4 else 2, xp=16 if w > 4 else 2, yards=300)
+                                        for w in (2, 3, 5, 6)])
+    out = {1: Availability(1, 0.0, "Out", None, "Ankle", "report")}
+    depth = {1: ("QB", 1), 2: ("QB", 2)}
+    boosts = injuries.vacated_boosts([starter, backup], {1: 20.0, 2: 8.0}, out, depth, aaa_schedule(), 7)
+    assert boosts[2][0].from_name == "Starter"
+    sits = {2: Availability(2, 0.02, "Backup QB (QB2)", None, None, "depth chart")}
+    assert 1 not in injuries.vacated_boosts([starter, backup], {1: 20.0, 2: 8.0}, sits, depth, aaa_schedule(), 7)

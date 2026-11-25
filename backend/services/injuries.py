@@ -131,6 +131,20 @@ def _heuristic_shares(absent: PlayerSeason, teammates: list[tuple[PlayerSeason, 
     return shares
 
 
+def _behind(qb: PlayerSeason, other: PlayerSeason, team: str, schedule: Schedule,
+            depth: Mapping[int, tuple[str, int]]) -> bool:
+    """Is `qb` the backup to `other`? By the depth chart when it has both, else by passing yards per game
+    with the team: a starter hurt in week 5 still out-passes the backup who started since, whose mop-up
+    games pull his average down (games played would call the starter the backup)."""
+    if qb.player_id in depth and other.player_id in depth:
+        return depth[qb.player_id][1] > depth[other.player_id][1]
+
+    def per_game(p: PlayerSeason) -> float:
+        games = team_games(p, team, schedule).values()
+        return sum(g.passing_yards for g in games) / len(games) if games else 0.0
+    return per_game(qb) < per_game(other)
+
+
 def vacated_boosts(seasons: Iterable[PlayerSeason], rates: Mapping[int, float],
                    availability: Mapping[int, Availability], depth: Mapping[int, tuple[str, int]],
                    schedule: Schedule, week: int,
@@ -161,7 +175,7 @@ def vacated_boosts(seasons: Iterable[PlayerSeason], rates: Mapping[int, float],
             played = team_weeks(schedule, team, week)
             for player, _ in teammates:
                 mine = team_games(player, team, schedule)
-                if absent.position == "QB" and player.position == "QB" and len(absent_weeks) < len(mine):
+                if absent.position == player.position == "QB" and _behind(absent, player, team, schedule, depth):
                     continue                                 # a backup QB sitting leaves the starter nothing
                 heuristic = vacated_rate * shares.get(player.player_id, 0.0)
                 measured = with_without(player, absent, team, schedule, week)
