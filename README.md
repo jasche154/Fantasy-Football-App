@@ -1380,34 +1380,40 @@ read the belief, so, as in a real season, the public learns the truth only from 
   simulated season reshuffles like a real one (preseason rank against final rank, breakouts, busts).
 - **Who starts at quarterback** (`services/sim_qb.py`, `sim_qb_jobs.py`): each team has a **job holder**.
   He starts whenever he is healthy; when he is hurt the next quarterback in line fills in, and when he is
-  healthy again he gets the job back. Only a holder who is not an **established starter** can lose it, at a
-  weekly chance that depends on how the market rates him (his preseason ADP rank among the season's
-  quarterbacks), how he has played in his starts so far against his projections, and his team's record.
-  All of it is fitted on real weeks 2019-2025 (`python -m services.sim_qb_fit --fit` -> `sim_qb.json`):
-  a healthy starter lost his job in 31 of 2,503 weeks at risk, and a fill-in kept the job from a starter back
-  from injury 14 times in 93 returns. The established range is every quarterback rated at least as highly as
-  the most secure one who really lost a job healthy: Carson Wentz in 2020, the 12th quarterback by ADP, benched
-  for rookie Jalen Hurts in week 14 of a 3-8-1 season; so the top 12 by ADP never lose their job while healthy
-  and always get it back from a fill-in. Outside that range the fitted chance is **halved** (the user's choice:
-  benchings rarer than in real life): about 0.14% a week for the 13th-ranked starter playing to his projections
-  on a .500 team, about 2.5% a week for an unranked one, more when he plays badly on a losing team. Starts
-  over the last three seasons, production, draft pick, years since the draft, expert ranks, the backup's
-  record and a drafted rookie behind him were also tried; leave-season-out they add nothing the market has
-  not priced in (or point the wrong way: given his ADP, a veteran with many starts goes sooner, not later).
-  A drafted rookie takes over only from a weak starter: in August he is never named the starter over an
-  established one, and in season he plays when the holder is hurt or benched and he is next in line (a
-  higher pick is ahead of a veteran backup). In the live season the first simulated week's starter is the
-  holder of the real weeks (a starter who missed games hurt is still the holder) unless today's injury
-  status sits him. `python -m services.sim_qb_fit --check --season 2027 --seeds 200` simulates leagues the
-  way they are built and reports the job losses.
+  healthy again he gets the job back. An **established starter** never loses the job while healthy and always
+  gets it back (the user's choice): his preseason quarterback rank this season is 12th or better on a price that
+  ignores the games he is expected to miss (a real season: its ADP; a simulated next season: the per-game value,
+  as its ADP is discounted for an injury carried into it), or his real preseason ADP was a top-8 quarterback's
+  in one of the two seasons before. So Patrick Mahomes, 15th by real 2026 ADP after his knee injury, is
+  established in 2026 and 2027 through his earlier ADPs. Of the real quarterbacks who lost a job healthy in
+  2019-2025, four would have been protected: Carson Wentz 2020 (12th by ADP), Matt Ryan 2022, Justin Fields 2024
+  (a fill-in kept the job on his return) and 2025. Everyone else can lose the job, at weekly chances fitted on
+  real weeks 2019-2025 (`python -m services.sim_qb_fit --fit` -> `sim_qb.json`, every holder who was not
+  established): a **benching** depends on his preseason ADP rank, how he has played in his starts so far against
+  his projections and his team's record (21 job losses in 1,231 healthy weeks without a drafted rookie behind
+  him), and is **halved** (the user's choice: veterans benched for veterans rarer than in real life): about
+  0.13% a week for the 20th-ranked starter playing to his projections, about 4.6% for an unranked one, more when
+  he plays badly. A **drafted rookie** (pick 64 or better) behind a starter who is not established takes over at
+  the real, unhalved chance, sooner with a higher pick, a losing team and a struggling starter (7 takeovers in 87
+  weeks): about 5% a week for the 5th pick on a .500 team, about 16% a week on a team that has lost three games
+  in four; behind an established starter he sits all year unless the starter is hurt (and in August he is never
+  named over one). A **fill-in keeps the job** from a starter back from injury at the real chance in his ADP
+  rank, halved (13 of 57 returns). Starts over the last three seasons, production, draft pick, years since
+  the draft and expert ranks were also tried on the benchings; leave-season-out they add little or nothing the
+  market has not priced in (and starts points the wrong way: given his ADP, a veteran with many starts goes
+  sooner). In the live season the first simulated week's holder is an established quarterback of the team if it
+  has one (out if he did not play the last real game), else the last real starter, unless he only filled in
+  for a holder who was tagged hurt; today's injury status then sits whoever is hurt. Nothing is decided in a
+  team's bye week. `python -m services.sim_qb_fit --check --season 2027 --seeds 200` simulates leagues the way
+  they are built and reports the job losses.
 - **Buzz:** before the week a breakout, bust or benching starts, a news line is published for 60% of
   them ("Beat reporters say his role is growing; expect more work.", "Reports say his snaps and touches are
   shrinking.", "Reports say his starting job is in danger."), and false lines are added so only about 60% of
   all lines are true, in the same weeks a change can start (never the first simulated week or the last two).
   A false line is only about a change that could plausibly happen to him, as often as it really does: a
   backup's role growing, a lead player who is not a top-12 star losing work, or a starting quarterback whose
-  job really is in danger (outside the established range, with a weekly chance at least the real average
-  outside it; weighted by his chance to lose it), so an established starter never reads "his starting job is
+  job really is in danger (not established, with a weekly chance at least the real average
+  for such starters; weighted by his chance to lose it), so an established starter never reads "his starting job is
   in danger". It shows as a small **Buzz** chip (named "Buzz: ..." for screen readers and voice control, tooltip "Buzz (a rumor): ...") on player rows
   and the draft board (press it to open his card), and under **News** on his card. It is the only way the truth reaches the screen
   before the games, and it is right only some of the time.
