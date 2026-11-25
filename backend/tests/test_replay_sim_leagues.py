@@ -5,7 +5,7 @@ real engine runs end to end in test_replay_future_leagues.py."""
 import json
 from collections.abc import Iterator
 from dataclasses import replace
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from types import MappingProxyType, SimpleNamespace
 
 import pytest
@@ -19,7 +19,7 @@ import services
 from config import get_settings
 from database import populate_stats
 from database.db import get_session
-from database.models import Base, NflGame, PlayerStatsWeekly, ReplaySeasonData
+from database.models import Base, NflGame, PlayerStatsWeekly, PlayerStatus, ReplaySeasonData
 from api import replay_routes
 from services import replay_blob, replay_live, replay_pool, sim_next_year, sim_setup
 from services.replay_pool import SeasonData
@@ -209,6 +209,61 @@ def test_a_league_that_starts_now_drafts_on_todays_market(app):
     market = fake_market(data.as_of(THROUGH + 1))
     assert {pid: (p.adp, p.adp_stdev) for pid, p in data.players.items() if p.adp is not None} == {
         pid: market[pid] for pid in data.players if pid in market}
+
+
+def _sleeper(session: Session, statuses: dict[int, tuple[str, str | None]], hours_old: float = 0.0) -> None:
+    now = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=hours_old)
+    session.add_all(PlayerStatus(player_id=pid, injury_status=status, injury_body_part=body, fetched_at=now)
+                    for pid, (status, body) in statuses.items())
+    session.commit()
+
+
+def _played_last_week(count: int) -> list[int]:
+    """Skill players with a game in the last real week and no tag in it."""
+    return sorted(pid for pid, week in FULL.actual if week == THROUGH and (pid, THROUGH) not in FULL.injuries
+                  and FULL.players[pid].position in ("QB", "RB", "WR", "TE"))[:count]
+
+
+def test_todays_sleeper_status_seeds_the_first_simulated_week_and_no_real_one(app):
+    """Hurt in the last real game (Drake Maye, 2026 week 10): Out today, so out when the simulation starts."""
+    _, engine = app
+    out, doubtful, questionable, suspended, stale, ir = _played_last_week(6)
+    week = THROUGH + 1
+    with Session(engine) as session:
+        _sleeper(session, {out: ("Out", "Ankle"), doubtful: ("Doubtful", None), questionable: ("Questionable", "Knee"),
+                           suspended: ("Sus", None), ir: ("IR", "Knee - ACL")})
+        _sleeper(session, {stale: ("Out", "Hip")}, hours_old=48)          # last week's news, not this week's
+        base = replay_pool.load_season_data(session, LIVE, "half", through=THROUGH)
+        hard = replace(base, injuries=MappingProxyType({**base.injuries, (ir, THROUGH): replay_pool.Injury("O")}))
+        seeded = sim_setup.with_status_now(session, hard, week)
+        session.query(PlayerStatus).delete()
+        session.commit()
+
+    added = {key: injury for key, injury in seeded.injuries.items() if key not in hard.injuries}
+    assert added == {(out, week): replay_pool.Injury("O", None, "Ankle"), (doubtful, week): replay_pool.Injury("O"),
+                     (suspended, week): replay_pool.Injury("SUS")}       # ir: his real O streak carries on its own
+    assert all(seeded.injuries[key] == injury for key, injury in hard.injuries.items())
+    assert seeded.actual == base.actual
+
+
+def test_a_live_league_starts_its_simulation_from_todays_sleeper_status(app, monkeypatch):
+    client, engine = app
+    (out,) = _played_last_week(1)
+    seen: list[SeasonData] = []
+    monkeypatch.setattr(services, "sim_season", SimpleNamespace(
+        simulate=lambda base, *args, **kwargs: seen.append(base) or fake_simulate(base, *args, **kwargs)), raising=False)
+    with Session(engine) as session:
+        _sleeper(session, {out: ("Out", "Ankle")})
+    try:
+        _create(client, seed=9)
+    finally:
+        with Session(engine) as session:
+            session.query(PlayerStatus).delete()
+            session.commit()
+
+    (base,) = seen
+    assert base.injuries[(out, THROUGH + 1)] == replay_pool.Injury("O", None, "Ankle")
+    assert max(week for _, week in base.actual) == THROUGH
 
 
 def test_what_a_simulated_league_cannot_be(client, monkeypatch):
