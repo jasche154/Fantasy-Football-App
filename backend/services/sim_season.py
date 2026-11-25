@@ -26,7 +26,7 @@ week's, from what is known through from_week - 1 (a half-published mid-week inju
      (when the week has none; the preseason ones, week 0, follow base's ADP: sim_market.expert_ranks) and buzz
      notes (sim_market; false ones only in the weeks a true one can land, sim_talent.change_weeks);
    - the pregame line of every game (sim_lines.week_lines, from the same public belief and the games so far;
-     a `posted` real line instead where the caller passes one) centres both the projections and the game: the
+     a `posted` real line instead in the first simulated week) centres both the projections and the game: the
      game's target is each side's line points + what the truth knows that the belief doesn't (the truth's mean
      points minus the belief's, carried on the line: talent, in-game injuries, role changes) + the hidden team
      strength (sim_talent.strength). The lines are stored on the schedule's games of the simulated weeks, as a
@@ -239,7 +239,7 @@ def simulate(base: SeasonData, seed: int, from_week: int, prior: World | None = 
     """A new SeasonData with weeks from_week..base.last_week simulated (see the module docstring). `carried`:
     the truth's absences running into week 1 of a whole season (sim_carryover.draw); `rookies`: the players in
     their first season (sim_talent.growth); `team_prior`: last season's team ratings (sim_lines.carry_over);
-    `posted`: {(home team, week): (spread, total)}, real lines already posted for simulated games."""
+    `posted`: {(home team, week): (spread, total)}, real lines already posted, used for from_week's games only."""
     if not 1 <= from_week <= base.last_week:
         raise ValueError(f"Week {from_week} is outside the season (1-{base.last_week}).")
     scoring, last = scoring_of(base), base.last_week
@@ -266,7 +266,8 @@ def simulate(base: SeasonData, seed: int, from_week: int, prior: World | None = 
         sitting = public_out | {pid for pid, a in absences.items() if a.left > 0}
         known = _known(base, tables, week)
         public = estimate(known, week, prior)
-        pregame = sim_lines.week_lines(known, week, public, public_out, team_prior, posted)
+        # a posted line only for the first simulated week: a later one knows nothing of the simulated games before it
+        pregame = sim_lines.week_lines(known, week, public, public_out, team_prior, posted if week == from_week else None)
         lines.update({(home, week): line for home, line in pregame.items()})
         _market(tables, base, public, truth, seed, week, public_out,
                 false_rate if buzz_weeks[0] <= week <= buzz_weeks[1] else 0.0, ranks, pregame, opinions, team_prior)

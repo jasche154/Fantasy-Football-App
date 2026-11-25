@@ -20,10 +20,14 @@ never the truth:
    `python -m services.sim_lines_fit --fit`); they live in sim_lines.json. Inputs that added nothing on
    held-out seasons were dropped (yards per play, team EPA, the past weeks' Vegas lines: see sim_lines_fit).
 
-A posted line (`posted`: {(home team, week): (spread, total)}, a live season's real lines for its remaining
-games, passed in by sim_setup) replaces the model's.
+A posted line (`posted`: {(home team, week): (spread or None, total or None)}, a live season's real lines for
+the first simulated week, passed in by sim_setup.posted_lines; sim_season uses them in that week only, since a
+later week's posted line knows nothing of the simulated games before it) replaces the model's part by part:
+a posted spread or total is used where there is one, the model's for the other; a posted total keeps MIN_TOTAL;
+a value outside POSTED_RANGE is logged and ignored.
 """
 import json
+import logging
 from collections import defaultdict
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
@@ -43,6 +47,8 @@ ITERATIONS = 8                   # alternating offense / defense solves (converg
 BYE_DAYS = 13                    # this many days since the last game: coming off a bye
 SHORT_DAYS = 5                   # this few: a short week
 MIN_TOTAL = 20.0                 # a predicted total is kept at or above this (real totals: 28.5 at the lowest)
+POSTED_RANGE = {"spread": (-35.0, 35.0), "total": (20.0, 80.0)}   # a posted value outside is a data error
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -182,7 +188,7 @@ def predict(parts: Mapping[str, tuple[float, float]], model: Mapping | None = No
 
 def week_lines(known: SeasonData, week: int, belief: World, out: Collection[int],
                prior: Mapping[str, Rating] | None = None,
-               posted: Mapping[tuple[str, int], tuple[float, float]] | None = None) -> dict[str, Line]:
+               posted: Mapping[tuple[str, int], tuple[float | None, float | None]] | None = None) -> dict[str, Line]:
     """{home team: Line} for every game of `week` (see the module docstring). Pure; of `known` it reads only the
     scores before `week` and the schedule, plus the public `belief` of that week and `out` (its hard-tagged
     players)."""
@@ -193,13 +199,24 @@ def week_lines(known: SeasonData, week: int, belief: World, out: Collection[int]
             continue
         home, away = game.home_team, game.away_team
         points, quality = summary(belief, home, away, out)
-        line = (posted or {}).get((home, week))
-        if line is None:
-            line = predict(features(rated, home, away, points, (rest_days(known, home, week), rest_days(known, away, week)),
-                                    ((quality[0], belief.teams[home].passer), (quality[1], belief.teams[away].passer))))
-        lines[home] = Line(float(line[0]) if isinstance(line, tuple) else line.margin,
-                           float(line[1]) if isinstance(line, tuple) else line.total, (points[0], points[1]))
+        model = predict(features(rated, home, away, points, (rest_days(known, home, week), rest_days(known, away, week)),
+                                 ((quality[0], belief.teams[home].passer), (quality[1], belief.teams[away].passer))))
+        spread, total = _posted((posted or {}).get((home, week)), home, week)
+        lines[home] = Line(model.margin if spread is None else spread,
+                           model.total if total is None else max(MIN_TOTAL, total), (points[0], points[1]))
     return lines
+
+
+def _posted(line: tuple | None, home: str, week: int) -> tuple[float | None, float | None]:
+    """(spread, total) of a posted line, each None when missing or outside POSTED_RANGE (logged)."""
+    out = []
+    for name, value in zip(("spread", "total"), line or (None, None)):
+        low, high = POSTED_RANGE[name]
+        if value is not None and not low <= float(value) <= high:          # NaN fails too
+            log.warning("Posted %s %s for %s in week %s is out of range: the model's is used", name, value, home, week)
+            value = None
+        out.append(None if value is None else float(value))
+    return out[0], out[1]
 
 
 def edges(known: SeasonData, week: int, belief: World, out: Collection[int],

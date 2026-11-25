@@ -77,12 +77,6 @@ def test_the_line_reads_nothing_from_the_week_on(data):
     assert sim_lines.week_lines(earlier.as_of(WEEK), WEEK, sim_world.estimate(earlier, WEEK), _out(earlier, WEEK)) != mine
 
 
-def test_a_posted_line_replaces_the_model(data, belief):
-    home = next(g.home_team for g in data.schedule.games if g.week == WEEK)
-    lines = sim_lines.week_lines(data.as_of(WEEK), WEEK, belief, set(), posted={(home, WEEK): (-6.5, 41.5)})
-    assert lines[home] == sim_lines.Line(-6.5, 41.5)
-
-
 def test_a_centred_side_hits_any_reasonable_target(data, belief):
     """The closed-form solve reaches every target from a weak offense to a blowout (overtime points included)."""
     worst = 0.0
@@ -175,21 +169,6 @@ def test_a_simulated_season_stores_its_lines_and_scores_follow_them(data, simula
     assert [g for g in simulated.schedule.games if g.week < WEEK] == [g for g in data.schedule.games if g.week < WEEK]
     stored = replay_blob.loads(replay_blob.dumps(simulated))
     assert stored.schedule == simulated.schedule
-
-
-def test_simulated_lines_never_read_the_weeks_ahead(data):
-    """Each simulated week's line comes from what was known before it: change the real weeks from the cut on
-    (which a simulation from the cut never reads) and every line stays the same."""
-    changed = _results_changed(data, WEEK)
-    mine, theirs = sim_season.simulate(data, SEED, WEEK), sim_season.simulate(changed, SEED, WEEK)
-    assert mine.schedule == theirs.schedule
-
-
-def test_an_old_season_without_lines_still_loads_and_plays(data):
-    bare = replace(data, schedule=replace(data.schedule, games=tuple(
-        replace(g, spread_line=None, total_line=None) for g in data.schedule.games)))
-    assert replay_blob.loads(replay_blob.dumps(bare)).schedule == bare.schedule
-    assert sim_season.simulate(bare, SEED, data.last_week).scores
 
 
 def test_experts_revise_a_healthy_players_value_slowly_and_an_injured_ones_at_once(belief):

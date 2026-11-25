@@ -100,11 +100,12 @@ def team_prior(session: Session, season: int) -> dict:
     return sim_lines.carry_over(scores) if scores else {}
 
 
-def posted_lines(base: SeasonData, from_week: int) -> dict[tuple[str, int], tuple[float, float]]:
-    """{(home team, week): (spread, total)} of the real lines already posted for games from `from_week` on: the
-    simulated games use them as their prediction (sim_lines)."""
+def posted_lines(base: SeasonData, from_week: int) -> dict[tuple[str, int], tuple[float | None, float | None]]:
+    """{(home team, from_week): (spread, total)} of the real lines already posted for the first simulated week
+    (either may be None): its games use them as their prediction (sim_lines). Later weeks' posted lines are not
+    passed: they know nothing of the simulated weeks before them (a starter hurt in a simulated game)."""
     return {(g.home_team, g.week): (g.spread_line, g.total_line) for g in base.schedule.games
-            if g.week >= from_week and g.spread_line is not None and g.total_line is not None}
+            if g.week == from_week and (g.spread_line is not None or g.total_line is not None)}
 
 
 def _market_adp(data: SeasonData, settings: Settings) -> SeasonData:
