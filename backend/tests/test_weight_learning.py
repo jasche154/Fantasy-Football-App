@@ -104,3 +104,20 @@ def test_weights_learned_under_the_old_five_source_blend_are_ignored(session):
                                                    "yahoo_consensus": 0.1, "espn": 0.1})))
     session.commit()
     assert wl.effective_weights(session) == (dict(DEFAULT_WEIGHTS), None)
+
+
+def test_pseudo_rows_count_as_rows_even_when_sources_agree_closely():
+    # Real sources are 0.9+ correlated: they differ by a couple of points around a ~12 point level.
+    # 1,200 rows where the experts are clearly best must move the weights, not stay at the prior.
+    import random
+
+    rng = random.Random(0)
+    samples = []
+    for _ in range(1200):
+        truth = rng.uniform(4, 24)
+        samples.append(Sample({"experts": truth + rng.gauss(0, 0.5), "espn": truth + rng.gauss(0, 3),
+                               "model": truth + rng.gauss(0, 3), "vegas_props": truth + rng.gauss(0, 3)},
+                              truth + rng.gauss(0, 6)))
+    fit = wl.fit_pooled(samples)
+    assert fit["experts"] > DEFAULT_WEIGHTS["experts"] + 0.1
+    assert fit["experts"] < wl.fit_pooled(samples, pseudo_rows=1)["experts"]   # still shrunk toward the prior
