@@ -101,7 +101,8 @@ def next_belief(session, real: SeasonData, offseason: dict) -> tuple[World, dict
     experience = fit.experience(session, real.season - 1, offseason["picks"], offseason["first"])
     belief, pool = sim_next_year.next_year(world, previous.players, experience, rookies, real_moves(world, real),
                                            sim_next_year.starts_by_team(previous),
-                                           sim_setup.qb_inputs(session, real.season, offseason["picks"]).past)
+                                           sim_setup.qb_inputs(session, real.season, offseason["picks"]).past,
+                                           sim_market.track_record(previous))
     return belief, pool, rookies
 
 

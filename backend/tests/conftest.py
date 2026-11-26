@@ -175,6 +175,10 @@ def _clear_caches() -> None:
     replay_trades.clear_cache()
     replay_styles.clear_cache()               # replay_pool.clear_cache runs it too (CLEAR_HOOKS); named here to be plain
     replay_draft._board.cache_clear()
+    from services import replay_fillin                # replay_chart.clear_cache runs these too; named here to be plain
+
+    replay_fillin.history.cache_clear()
+    replay_fillin.fill_ins.cache_clear()
 
 
 @pytest.fixture

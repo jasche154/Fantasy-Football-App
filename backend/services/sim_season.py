@@ -46,7 +46,7 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass, replace
 from types import MappingProxyType
 
-from services import (replay_pool, replay_state, sim_depth, sim_injuries, sim_lines, sim_market, sim_qb_jobs,
+from services import (replay_fillin, replay_pool, replay_state, sim_depth, sim_injuries, sim_lines, sim_market, sim_qb_jobs,
                       sim_talent)
 from services.replay_pool import Injury, SeasonData, hard_tag_returns
 from services.sim_game import on_field, play
@@ -201,7 +201,7 @@ def _market(tables: _Tables, base: SeasonData, belief: World, truth: World, seed
     sim_lines.edges, are worked out only in a week whose expert ranks are drawn here); `known`: the season as
     known before the week, when already built; `benched`: the week's QB benchings (true buzz); `bench`: each
     holder's chance to lose the job (the false buzz's weights, sim_qb_jobs.decide); `filling`: the fill-in QBs
-    (sim_market.fill_ins), ranked no better than sim_market.FILL_IN_BEST."""
+    (replay_fillin.without_news), ranked no better than sim_market.FILL_IN_BEST."""
     scoring, last = scoring_of(base), base.last_week
     known = known if known is not None else _known(base, tables, week)
     snapshot = sorted(pid for pid, w in tables.projected if w == week)      # the snapshot's own (from_week only)
@@ -236,8 +236,10 @@ def _market(tables: _Tables, base: SeasonData, belief: World, truth: World, seed
                 belief, ids, rank_week, dice, scoring, last - max(1, rank_week) + 1, market, weekly,
                 edges if rank_week else None, worth, filling if rank_week else ()))
             tables.expert_age[rank_week] = sim_market.EXPERT_AGE["ros" if rank_week else "pre"]
-    tables.notes.update(sim_market.buzz((*truth.changes, *benched), belief, week, replay_state.rng(seed, "sim", "buzz", week),
+    tables.notes.update(sim_market.buzz(truth.changes, belief, week, replay_state.rng(seed, "sim", "buzz", week),
                                         false_rate, out, sim_talent.rumors(belief, ranks, bench) if false_rate else None))
+    # the week's benchings draw from their own stream, so a benching never moves another player's hint or rumour
+    tables.notes.update(sim_market.buzz(benched, belief, week, replay_state.rng(seed, "sim", "buzz", "bench", week), 0.0, out))
     tags = {pid: injury for (pid, w), injury in tables.injuries.items() if w == week}
     tables.notes.update(sim_depth.fill_ins(belief, out, tags, base.players, week))
 
@@ -269,7 +271,6 @@ def simulate(base: SeasonData, seed: int, from_week: int, prior: World | None = 
     ranks = sim_market.position_ranks(belief)                      # the public's ranks the rumours lean on
     established = sim_qb_jobs.established_of(base, belief, from_week == 1 and prior is not None, qbs)
     jobs = sim_qb_jobs.start(base, belief, from_week, established, qbs)    # who holds each QB job (sim_qb_jobs)
-    regulars = frozenset(jobs.holders.values())          # a QB who takes a job later is priced as a fill-in
     expected = sim_talent.expected_changes(belief)
     false_rate = sim_market.expected_hints(expected + sim_qb_jobs.expected_benchings(jobs, buzz_weeks[1] - buzz_weeks[0] + 1),
                                            buzz_weeks[1] - buzz_weeks[0] + 1)
@@ -286,7 +287,7 @@ def simulate(base: SeasonData, seed: int, from_week: int, prior: World | None = 
         benched, bench = sim_qb_jobs.decide(jobs, truth.at(week), known, week, sitting, tags, seed)
         # the job holders start in the public belief too, so the line and the projections see the week's QB
         public = sim_qb_jobs.apply(estimate(known, week, prior), jobs)
-        filling = sim_market.fill_ins(public, regulars)     # fill-ins and QBs who took a job during the simulation
+        filling = replay_fillin.without_news(known, week)   # the trade chart's definition, point in time
         public = sim_market.fill_in_view(public, filling)
         # a posted line only for the first simulated week: a later one knows nothing of the simulated games before it
         pregame = sim_lines.week_lines(known, week, public, public_out, team_prior, posted if week == from_week else None)

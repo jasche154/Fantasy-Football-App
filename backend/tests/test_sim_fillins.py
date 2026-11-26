@@ -31,32 +31,15 @@ def _hurt_holder(data, quality: float, out_weeks: int = 2):
     return world, holder.player_id, backup.player_id
 
 
-def test_the_fill_in_is_the_healthy_qb_behind_a_holder_believed_out(data):
-    world, holder, backup = _hurt_holder(data, 1.0)
-    assert sim_market.fill_ins(world) == {backup}
-    healthy = replace(world, players=MappingProxyType({**world.players, holder: replace(world.players[holder], out_weeks=0)}))
-    assert not sim_market.fill_ins(healthy)
-
-
 def test_the_public_trusts_only_part_of_a_hot_fill_ins_passing_and_never_rates_a_cold_one_up(data):
     trust, backup_level = sim_market.opinion_knob("fill_in_trust"), sim_world.params()["league"]["backup_quality"]
     assert 0.0 <= trust < 1.0
     hot, _, pid = _hurt_holder(data, 1.3)
-    assert sim_market.fill_in_view(hot, sim_market.fill_ins(hot)).players[pid].quality == pytest.approx(backup_level + trust * (1.3 - backup_level))
+    assert sim_market.fill_in_view(hot, {pid}).players[pid].quality == pytest.approx(backup_level + trust * (1.3 - backup_level))
     cold, _, pid = _hurt_holder(data, 0.8)
-    assert sim_market.fill_in_view(cold, sim_market.fill_ins(cold)).players[pid].quality == 0.8
+    assert sim_market.fill_in_view(cold, {pid}).players[pid].quality == 0.8
     healthy, holder, pid = _hurt_holder(data, 1.3, out_weeks=0)
-    assert sim_market.fill_in_view(healthy, sim_market.fill_ins(healthy)) is healthy                       # no fill-in: the belief as it is
-
-
-def test_a_qb_who_took_the_job_during_the_simulation_counts_as_a_fill_in(data):
-    world, holder, backup = _hurt_holder(data, 1.0, out_weeks=0)
-    regulars = {max((p for p in world.roster(t) if p.position == "QB"), key=lambda p: p.starts).player_id
-                for t in world.teams if any(p.position == "QB" for p in world.roster(t))}
-    assert holder in regulars and not sim_market.fill_ins(world, regulars)
-    promoted = sim_qb_jobs.apply(world, sim_qb_jobs.Jobs({world.players[holder].team: backup}, {}, {}))
-    assert sim_market.fill_ins(promoted, regulars) == {backup}
-    assert not sim_market.fill_ins(promoted)                                  # no regulars given: holders only
+    assert sim_market.fill_in_view(healthy, set()) is healthy                    # no fill-in: the belief as it is
 
 
 def test_held_back_moves_only_the_chosen_down_to_the_floor():
@@ -71,7 +54,7 @@ def test_a_hot_fill_in_is_never_an_expert_top_qb_while_his_holder_is_out(data):
     world, holder, pid = _hurt_holder(data, 1.6, out_weeks=data.last_week)
     games_left = data.last_week - WEEK + 1
     ranks = sim_market.expert_ranks(world, world.players, WEEK, np.random.default_rng(0), HALF, games_left,
-                                    filling=sim_market.fill_ins(world))
+                                    filling={pid})
     worth = sim_market.values(world, HALF, games_left)
     by_value = sorted((p for p in worth if world.players[p].position == "QB"), key=lambda p: -worth[p])
     assert by_value.index(pid) + 1 < sim_market.FILL_IN_BEST                 # his value alone would rank him higher

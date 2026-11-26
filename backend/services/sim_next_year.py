@@ -317,19 +317,21 @@ def _teams(world: World) -> dict[str, Team]:
 def next_year(world: World, players: Mapping[int, PoolPlayer], experience: Mapping[int, int],
               rookies: Mapping[int, Rookie], moves: Mapping[int, str | None],
               season_starts: Mapping[int, Sequence[tuple[int, str | None]]] | None = None,
-              past: Collection[int] = ()) -> tuple[World, dict[int, PoolPlayer]]:
+              past: Collection[int] = (), record: Mapping[int, float] | None = None) -> tuple[World, dict[int, PoolPlayer]]:
     """(the belief going into next season, its player pool: names, positions and teams, no ADP yet) from the
     belief at the end of this one. `players`: names and positions of the world's players; `experience`: seasons each has played
     through this one; `rookies`: {id: rookie} (rookie_ids); `moves`: {id: new team, or None = gone};
     `season_starts`: (week, team) of each start a QB made this season (starts_by_team); `past`: the QBs established
-    by their real ADP of the seasons before (sim_qb.established_qbs, read by sim_setup.qb_inputs)."""
+    by their real ADP of the seasons before (sim_qb.established_qbs, read by sim_setup.qb_inputs); `record`: last
+    season's points a game (sim_market.track_record), so August protects whom the season's ADP rule protects."""
     teams = _teams(world)
     new = _veterans(world, experience, moves)
     restore_starters(new, season_starts or {})
     _fill_vacancies(new, teams)
     secure = frozenset()
     if any(r.position == "QB" for r in rookies.values()):     # the veterans' preseason ranks, before the rookies join
-        secure = sim_qb.established_qbs(sim_qb.preseason_ranks(World(MappingProxyType(new), MappingProxyType(teams))), past)
+        veterans = World(MappingProxyType(new), MappingProxyType(teams))
+        secure = sim_qb.established_qbs(sim_qb.preseason_ranks(veterans, record), past)
     for pid, rookie in sorted(rookies.items()):
         if rookie.team in teams and pid not in new:
             new[pid] = rookie_player(pid, rookie, replace(teams[rookie.team], passer=AVERAGE_PASSER))

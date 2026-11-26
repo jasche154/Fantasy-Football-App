@@ -21,6 +21,7 @@ import logging
 from datetime import datetime
 from dataclasses import replace
 from types import MappingProxyType
+from collections.abc import Mapping
 from typing import NamedTuple
 
 from sqlalchemy.orm import Session
@@ -325,7 +326,7 @@ class Future(NamedTuple):
     belief: object               # the prior World (sim_world.World)
     carried: dict                # {player: sim_injuries.Spell}: the truth's absences running into week 1
     qbs: object = None           # sim_qb_jobs.QbInputs: the QB jobs' inputs (the seeded draft's rookie QB picks)
-    teams: dict = {}             # {team: sim_lines.Rating}: the newest season's team ratings, carried over
+    teams: Mapping = MappingProxyType({})   # {team: sim_lines.Rating}: the newest season's team ratings, carried over
 
 
 def injury_detail(session: Session) -> dict[int, tuple[str | None, str | None]]:
@@ -371,7 +372,8 @@ def _future_base(session: Session, season: int, settings: Settings, seed: int = 
     drafted = {pid: by_name[r.name] for pid, r in sim_next_year.rookie_ids(season, rookies).items()}  # ids: file picks
     qbs = replace(qb_inputs(session, season, []), picks=MappingProxyType(
         {pid: r.pick for pid, r in drafted.items() if r.position == "QB"}))      # the seeded draft's picks
-    belief, pool = sim_next_year.next_year(world, data.players, experience, drafted, moved, starts, qbs.past)
+    record = _per_data(data, "record", lambda: sim_market.track_record(data))
+    belief, pool = sim_next_year.next_year(world, data.players, experience, drafted, moved, starts, qbs.past, record)
     schedule = _schedule(session, season, data)
     start = sim_carryover.next_week_one(data, schedule)
     carries = {pid: c for pid, c in sim_carryover.carried(data, start, injury_detail(session)).items()
@@ -379,7 +381,7 @@ def _future_base(session: Session, season: int, settings: Settings, seed: int = 
     belief = sim_carryover.with_expected(belief, carries)
     base = sim_next_year.season_base(season, belief, pool, schedule, settings.scoring,
                                      settings.scoring_rules, _per_data(data, "defense", lambda: _defense_prior(data)),
-                                     settings.adp_format, _per_data(data, "record", lambda: sim_market.track_record(data)),
+                                     settings.adp_format, record,
                                      sim_next_year.rookie_premium(drafted))
     base = replace(base, notes=MappingProxyType({(pid, 0): sim_carryover.note(c) for pid, c in carries.items()}))
     scores = [(g.week, g.home_team, g.away_team, g.home_score, g.away_score) for g in played if g.is_final]

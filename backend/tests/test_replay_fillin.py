@@ -95,7 +95,7 @@ def test_a_fill_ins_chart_is_his_share_of_a_starters_value_without_the_form_bonu
     league = rv.league_settings(fakes.fake_settings())
     rv.clear_cache()
     priced = rv.knowledge(season, league, 6, 16, 0).by_id[backup]
-    monkeypatch.setattr(replay_fillin, "fill_ins", lambda data, week: MappingProxyType({}))
+    monkeypatch.setattr(replay_fillin, "_fill_ins", lambda data, week, teams: MappingProxyType({}))
     rv.clear_cache()
     plain = rv.knowledge(season, league, 6, 16, 0).by_id[backup]
     rv.clear_cache()
@@ -106,3 +106,76 @@ def test_a_fill_ins_chart_is_his_share_of_a_starters_value_without_the_form_bonu
     expected = min(plain.chart, priced.fill_in * rank_value + (1 - priced.fill_in) * min(backup_value, rank_value))
     assert priced.chart == pytest.approx(expected, abs=0.1) and priced.form_chart == 0.0
     assert priced.chart <= plain.chart
+
+
+def _with(season, box=None, games=None, injuries=None):
+    season = replace(season, box=MappingProxyType({**season.box, **(box or {})}),
+                     team_by_week=MappingProxyType({**season.team_by_week, **(games or {})}),
+                     injuries=MappingProxyType({**season.injuries, **(injuries or {})}))
+    return replace(season, returns=MappingProxyType(hard_tag_returns(season.injuries, season.actual, season.last_week)))
+
+
+def test_a_starter_who_left_a_game_hurt_keeps_the_job_and_his_backup_fills_in(data):
+    """Review item 1: the regular played week 4 (left early: the backup led the passing), then is tagged O."""
+    played = [w for w, _ in data.team_by_week[_team_qbs(data)[1]]]
+    season, team, regular, backup = _season(data, (4, *OUT), regular_plays=[w for w in played if w not in OUT])
+    season = _with(season, box={(regular, 4): BoxLine(pass_yds=40)})
+    assert _at(season, 5) == {backup: replay_fillin.FillIn(team, regular, 1, "out")}
+
+
+def test_a_fill_in_past_probation_is_still_one_the_week_his_regular_returns(data):
+    """Review item 2: no probation in the "back" state."""
+    team, regular, _ = _team_qbs(data)
+    games = [w for w, _ in data.team_by_week[regular] if w >= 4]
+    run = games[:int(replay_fillin.stored()["probation"]) + 2]
+    season, team, regular, backup = _season(data, run, tagged=run)
+    back = games[len(run)]
+    assert _at(season, back) == {backup: replay_fillin.FillIn(team, regular, len(run), "back")}
+
+
+def test_a_regular_traded_away_hands_the_job_on_without_a_taking(data):
+    """Review item 5: the regular plays for another team from week 6; his old team's new starter is its QB."""
+    team, regular, _ = _team_qbs(data)
+    later = [w for w, _ in data.team_by_week[regular] if w >= 6]
+    season, team, regular, backup = _season(data, later, tagged=())
+    other = next(t for t, _ in season.schedule.opponents if t != team)
+    season = _with(season, games={regular: tuple((w, team) for w, _ in data.team_by_week[regular] if w < 6)
+                                   + tuple((w, other) for w in later)},
+                   box={(regular, w): BoxLine(pass_yds=260) for w in later},
+                   injuries={(regular, later[2]): fakes.Injury("O")})
+    for week in later[1:4]:
+        assert backup not in _at(season, week) and regular not in _at(season, week)
+
+
+def test_on_the_teams_bye_the_fill_in_keeps_last_weeks_state(data):
+    """Review item 6: no tag on the bye must not read "back" for a week."""
+    team, regular, _ = _team_qbs(data)
+    bye = next(w for w in range(2, data.last_week) if data.schedule.opponent(team, w) is None)
+    before = [w for w, _ in data.team_by_week[regular] if w < bye][-2:]
+    after = next(w for w, _ in data.team_by_week[regular] if w > bye)
+    season, team, regular, backup = _season(data, (*before, after), tagged=(*before, after))
+    assert _at(season, bye)[backup].state == "out" == _at(season, after)[backup].state
+
+
+def test_a_franchise_qb_on_preseason_ir_is_the_regular_and_his_week_one_starter_fills_in(data):
+    """Review item 7: back from a preseason IR he holds the job; he never took it."""
+    team, regular, _ = _team_qbs(data)
+    opening = [w for w, _ in data.team_by_week[regular] if w <= 4]
+    season, team, regular, backup = _season(data, opening, tagged=())
+    season = _with(season, injuries={(regular, w): fakes.Injury("IR") for w in opening})
+    assert _at(season, opening[-1])[backup] == replay_fillin.FillIn(team, regular, len(opening) - 1, "out")
+    later = [w for w, _ in data.team_by_week[regular] if w > opening[-1]]
+    assert _at(season, later[0])[backup].state == "back" and regular not in _at(season, later[1])
+
+
+def test_a_fill_ins_chart_reads_nothing_from_the_week_on(data):
+    """Review item 11: the fill-in's chart at week W is the same whatever happens from W on (later games, tags)."""
+    season, team, regular, backup = _season(data, OUT)
+    league = rv.league_settings(fakes.fake_settings())
+    for week in (5, 6):
+        rv.clear_cache()
+        now = rv.knowledge(season, league, week, 16, 3).by_id[backup]
+        rv.clear_cache()
+        changed = rv.knowledge(fakes.future_changed(season, week), league, week, 16, 3).by_id[backup]
+        assert now.fill_in is not None and (now.chart, now.fill_in) == (changed.chart, changed.fill_in)
+    rv.clear_cache()

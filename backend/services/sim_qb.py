@@ -91,13 +91,21 @@ def market_ranks(data: SeasonData) -> dict[int, int]:
             if data.players[pid].position == "QB"}
 
 
-def preseason_ranks(belief: World) -> dict[int, int]:
+def preseason_ranks(belief: World, record: Mapping[int, float] | None = None) -> dict[int, int]:
     """{QB: his rank among QBs by the market's per-game value (sim_market.values, half PPR) in a preseason
-    belief, nobody believed out}: a price that ignores the games an injury is expected to cost him."""
+    belief, nobody believed out}: a price that ignores the games an injury is expected to cost him. With last
+    season's `record` (sim_market.track_record), the better of that and his rank on the market's value
+    (sim_market.market_values: the order a 1-QB board takes QBs in, so the August rule and the season's agree)."""
     from services import sim_market      # imported here: sim_market imports sim_game, which imports sim_world
+    from services.scoring import scoring_for
 
     healthy = World(MappingProxyType({pid: replace(p, out_weeks=0) for pid, p in belief.players.items()}), belief.teams)
-    return {pid: rank for pid, rank in sim_market.position_ranks(healthy).items() if belief.players[pid].position == "QB"}
+    ranks = {pid: rank for pid, rank in sim_market.position_ranks(healthy).items() if belief.players[pid].position == "QB"}
+    if record:
+        worth = sim_market.market_values(healthy, scoring_for("half"), record=record)
+        order = sorted(ranks, key=lambda pid: (-worth.get(pid, 0.0), pid))
+        ranks = {pid: min(ranks[pid], rank) for rank, pid in enumerate(order, start=1)}
+    return ranks
 
 
 def established_qbs(preseason: Mapping[int, int], past: Collection[int]) -> frozenset[int]:

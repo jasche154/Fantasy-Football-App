@@ -18,8 +18,7 @@ truth's dated role changes into a noisy hint.
   moves only `market.worth_step` of the way to this week's (`held`: experts revise slowly), except on injury
   news: a player believed out now, or whose own or a same-position teammate's status (out or not) changed since
   last week, is valued afresh at once (a backup whose starter just went on IR, a star back from injury). A
-  fill-in QB (`fill_ins`: the healthy QB starting while his team's job holder is believed out, or one who took
-  the job during the simulation) is ranked no better than FILL_IN_BEST, the best rank real experts gave a fill-in after 2-4 starts (`held_back`; his value
+  fill-in QB (replay_fillin.without_news: the trade chart's one point-in-time definition) is ranked no better than FILL_IN_BEST, the best rank real experts gave a fill-in after 2-4 starts (`held_back`; his value
   already counts only the games he is expected to start, until the holder's believed absence ends). The
   three knobs live in sim_params.json's tuned `market` section (`sim_eval --set market.worth_step=...`); they
   were set by hand against the real weeks' rank churn and expert-vs-projection agreement in sim_eval's report
@@ -125,27 +124,8 @@ def values(belief: World, scoring: ScoringSettings, games_left: int = SEASON_GAM
     return dict(found)
 
 
-def fill_ins(belief: World, regulars: Collection[int] = ()) -> set[int]:
-    """The QBs filling in: on a team whose job holder (the most starts weight, sim_qb_jobs.apply) is believed out,
-    the healthy QB with the most starts weight; and a healthy holder who is not one of `regulars` (the holders the
-    simulation started from: a QB who took the job during it, by a benching, a takeover or keeping it from a
-    holder back from injury)."""
-    found, regulars = set(), set(regulars)
-    for team in belief.teams:
-        qbs = sorted((p for p in belief.roster(team) if p.position == "QB"), key=lambda p: (-p.starts, p.player_id))
-        if not qbs:
-            continue
-        if qbs[0].out_weeks > 0:
-            healthy = [p for p in qbs[1:] if p.out_weeks == 0]
-            if healthy:
-                found.add(healthy[0].player_id)
-        elif regulars and qbs[0].player_id not in regulars:
-            found.add(qbs[0].player_id)
-    return found
-
-
 def fill_in_view(belief: World, chosen: Collection[int]) -> World:
-    """The public belief with each of `chosen` (`fill_ins`) keeping only, of his passing quality above a backup's,
+    """The public belief with each of `chosen` (replay_fillin.without_news) keeping only, of his passing quality above a backup's,
     `market.fill_in_trust` of its lead: a few games behind another QB's job do not make him a starter's passer
     in the public's eyes (see the module docstring). Never applied to the truth."""
     trust, backup = float(opinion_knob("fill_in_trust")), params()["league"]["backup_quality"]
@@ -205,7 +185,7 @@ def expert_ranks(belief: World, known: Iterable[int], week: int, dice: np.random
     ADP} of a preseason market the experts share (see the module docstring), else they rank on the belief.
     `opinions`: {player: z} carried from last week (`opinion`); None: fresh ones. `edges`: each team's scoring
     edge (`values`), as experts know which offenses score. `worth`: the values to rank on (`held`), else `values`.
-    `filling`: the fill-in QBs (`fill_ins`), ranked no better than FILL_IN_BEST."""
+    `filling`: the fill-in QBs (replay_fillin.without_news), ranked no better than FILL_IN_BEST."""
     worth = worth if worth is not None else values(belief, scoring, games_left, edges)
     ids = sorted(pid for pid in set(known) if pid in belief.players)
     if market:

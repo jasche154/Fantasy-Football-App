@@ -57,9 +57,9 @@ def runs(data: SeasonData, from_week: int = 1) -> list[Run]:
     replay_fillin.history (the trade chart's definition of who is filling in)."""
     found = []
     for team, rows in sorted(replay_fillin.history(data).items()):
-        weeks = {week: starter for week, starter, _, _ in rows}
+        weeks = {row[0]: row[1] for row in rows}
         stint, holder = [], rows[0][2]
-        for week, starter, regular, filling in rows[1:]:
+        for week, starter, regular, filling, _, _ in rows:
             if filling and stint and weeks[stint[-1]] == starter:
                 stint.append(week)
                 continue

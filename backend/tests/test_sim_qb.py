@@ -222,7 +222,7 @@ def test_a_starters_claim_counts_the_games_he_missed_hurt(data):
 def test_august_uses_the_same_established_rule(monkeypatch):
     """sim_next_year names a rookie over an incumbent only when sim_qb.established_qbs says he is not established
     (one definition: here every QB ranks 30th, so the incumbent is protected only by a top-8 ADP before)."""
-    monkeypatch.setattr(sim_qb, "preseason_ranks", lambda world: {p: 30 for p, pl in world.players.items()
+    monkeypatch.setattr(sim_qb, "preseason_ranks", lambda world, record=None: {p: 30 for p, pl in world.players.items()
                                                                   if pl.position == "QB"})
     first_pick = Rookie("Franchise Passer", "QB", "PIT", 1, "Ohio State")
     rookie = sim_next_year.ROOKIE_ID_BASE + 2027 * sim_next_year.ROOKIE_ID_SEASON + 1

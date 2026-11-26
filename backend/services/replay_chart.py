@@ -87,6 +87,8 @@ def clear_cache() -> None:
     _by_week.cache_clear()
     replay_news.clear_cache()
     replay_shocks.clear_cache()
+    replay_fillin.history.cache_clear()
+    replay_fillin.fill_ins.cache_clear()
 
 
 replay_pool.EVICT_HOOKS.append(clear_cache)
@@ -311,11 +313,11 @@ def with_news(data: SeasonData, rows: Mapping[int, dict], fields: Mapping[int, d
         chart, extra = _injured(data, rows[pid], news, week, end_week, expert, model_part)
         out[pid] = {**fields[pid], **extra, "chart": round(chart, 1), "news": news}
     shocked = {**out, **_shocked(data, rows, fields, out, week)}
-    return {**shocked, **_filling(data, rows, {**fields, **shocked}, week, end_week)}
+    return {**shocked, **_filling(data, rows, {**fields, **shocked}, week, end_week, seed)}
 
 
 def _filling(data: SeasonData, rows: Mapping[int, dict], fields: Mapping[int, dict], week: int,
-             end_week: int) -> dict[int, dict]:
+             end_week: int, seed: int) -> dict[int, dict]:
     """{id: fields} of the fill-in QBs (replay_fillin): share x the value of his rank without the form bonus +
     (1 - share) x a backup's (the QB ranked just past one per team), never above his own chart. `share` reads
     the regular starter's news, so it is the same report his injured chart is priced on."""
@@ -329,7 +331,7 @@ def _filling(data: SeasonData, rows: Mapping[int, dict], fields: Mapping[int, di
         if pid not in fields or pid not in rows:
             continue
         now = fields[pid]
-        news = fields.get(fill.regular, {}).get("news")
+        news = replay_fillin.regular_news(data, fill, week, seed)       # the report his injured chart reads
         played = replay_fillin.share(fill, news, _game_weeks(data, rows[pid]["team"], week, end_week))
         if played is None:                              # past probation, his regular not expected back: the team's QB
             continue
