@@ -5,13 +5,14 @@ import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from api import (agent_routes, data_routes, integration_routes, legacy_routes, market_routes, model_routes,
                  odds_routes, player_extra_routes, replay_action_routes, replay_routes, system_routes, team_routes,
-                 weekly_routes)
+                 validation, weekly_routes)
 from config import get_settings
 from database.db import SessionLocal
 from services import auto_update
@@ -98,6 +99,7 @@ def create_app(warm_cache: bool = True) -> FastAPI:
             return JSONResponse({"detail": "Set API_TOKEN to allow access from other machines."}, status_code=403)
         return await call_next(request)
 
+    app.add_exception_handler(RequestValidationError, validation.validation_error)   # NaN / Infinity: 422, not 500
     for module in (data_routes, market_routes, weekly_routes, team_routes, model_routes, integration_routes, agent_routes,
                    system_routes, player_extra_routes, odds_routes, legacy_routes, replay_routes,
                    replay_action_routes):

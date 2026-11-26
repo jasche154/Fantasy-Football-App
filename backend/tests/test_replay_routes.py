@@ -842,3 +842,14 @@ def test_a_proposal_for_a_player_in_a_cpus_ir_slot_is_answered_like_any_other(cl
     answer = post(client, f"/games/{game}/trades/propose",
                   {"to_team": held[0], "give": [scrub], "get": [held[1]], "week": get(client, f"/games/{game}")["week"]})
     assert answer["executed"] is False and answer["verdict"]["reasons"]
+
+
+@pytest.mark.parametrize("raw", ['{"season": 2024, "teams": NaN}', '{"season": Infinity}', '{"season": 2024, "seed": 1e400}',
+                                 '{"season": 2024, "scoring_rules": {"reception": "NaN", "te_premium": 0, '
+                                 '"pass_td": 4, "turnover": -2}}'])
+def test_a_nan_or_infinity_in_a_body_is_a_422_that_says_so(client, raw):
+    """Breaker: the default validation handler echoed the value back and could not encode it (a 500)."""
+    response = client.post(API + "/games", content=raw, headers={"content-type": "application/json"})
+
+    assert response.status_code == 422
+    assert any(error["msg"] == "Input should be a finite number" for error in response.json()["detail"])
