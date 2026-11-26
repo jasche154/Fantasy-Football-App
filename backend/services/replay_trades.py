@@ -283,10 +283,10 @@ def evaluate(state: State, settings: Settings, know: Knowledge, from_team: int, 
 
 
 def record_offer(state: State, from_team: int, to_team: int, give: Sequence[int], get: Sequence[int],
-                 status: str, counter_to: int | None = None) -> State:
-    """The state with a new Offer for this week (`give` is what from_team sends)."""
+                 status: str, counter_to: int | None = None, kind: str = "") -> State:
+    """The state with a new Offer for this week (`give` is what from_team sends; `kind`: Offer.kind)."""
     offer = Offer(id=state.next_id, week=state.week, from_team=from_team, to_team=to_team, give=tuple(give),
-                  get=tuple(get), status=status, counter_to=counter_to)
+                  get=tuple(get), status=status, counter_to=counter_to, kind=kind)
     return replace(state, offers=(*state.offers, offer), next_id=state.next_id + 1)
 
 
@@ -360,6 +360,17 @@ def offers_for_user(state: State) -> tuple[Offer, ...]:
     return tuple(o for o in state.offers if o.to_team == user.id and o.status == "pending")
 
 
+def accept_verdict(state: State, settings: Settings, know: Knowledge, offer: Offer,
+                   user_drops: Sequence[int] = ()) -> Verdict:
+    """The CPU's test of its own pending offer to the user, as accepting it (and its preview) runs it: judged as its
+    own offer (`offered`), and never at a stricter bar than it was made at. Only a haggler's opening offer ("want")
+    keeps his lowball edge; a shop, a counter and his own counter take his normal edge (`counter`), which for every
+    style is at least as loose as the plain bar a shop or a counter is built at. ValueError like `evaluate`."""
+    relaxed = offer.kind != "want" if offer.kind else offer.counter_to is not None     # old saves: as judged then
+    return evaluate(state, settings, know, rs.user_team(state).id, offer.from_team, offer.get, offer.give, user_drops,
+                    offered=True, counter=relaxed)
+
+
 def respond(state: State, settings: Settings, know: Knowledge, offer_id: int, accept: bool,
             user_drops: Sequence[int] = ()) -> State:
     """The user answers a pending CPU offer. Accepting re-runs the CPU's test: if the offer no longer stands,
@@ -382,7 +393,7 @@ def respond(state: State, settings: Settings, know: Knowledge, offer_id: int, ac
         _check(state, settings, know, *deal)
     except ValueError as exc:
         raise OfferExpired(f"That offer no longer stands. {exc}", expired) from exc
-    verdict = evaluate(state, settings, know, *deal, user_drops, offered=True, counter=offer.counter_to is not None)
+    verdict = accept_verdict(state, settings, know, offer, user_drops)
     if not verdict.accepted:
         raise OfferExpired(f"That offer no longer stands. {' '.join(verdict.reasons)}", expired, verdict)
     return _apply(state, settings, know, *deal, verdict, offer_id)

@@ -66,10 +66,11 @@ def test_old_saves_keep_their_styles_and_load_without_the_new_fields():
     state = league()[0]
     text = rs.to_json(state).replace(',"fan_of":null', "")
     offer = rs.Offer(1, 1, USER, CPU, (1,), (2,), "declined")
-    old = rs.state_from_json(rs.to_json(replace(state, offers=(offer,))).replace(',"reply":null', ""))
+    old = rs.state_from_json(rs.to_json(replace(state, offers=(offer,))).replace(',"reply":null', "")
+                             .replace(',"kind":""', ""))
 
     assert '"fan_of"' not in text and rs.state_from_json(text).teams == state.teams
-    assert old.offers[0].reply is None and [t.persona for t in old.teams] == [t.persona for t in state.teams]
+    assert old.offers[0].kind == "" and old.offers[0].reply is None and [t.persona for t in old.teams] == [t.persona for t in state.teams]
 
 
 # ---------------- fan ----------------
@@ -734,3 +735,86 @@ def test_needs_prices_and_decline_reasons_never_see_the_future(week):
         for get in theirs:
             assert rt.evaluate(state, SETTINGS, know, USER, CPU, [give], [get]) == rt.evaluate(
                 state, SETTINGS, shaken, USER, CPU, [give], [get])
+
+
+# ---------------- a CPU's own offer stands when the user accepts it ----------------
+
+def _offers_built_like_the_game(persona: str, settings, week: int, monkeypatch) -> tuple[rs.State, object, list]:
+    """CPU 9 in `persona` (every other CPU steady, or balanced when it is steady): its want-offer, a shop offer for
+    each of its three best skill players, its counter to a declined proposal and, for a haggler, his counter to his
+    declined opening offer, each recorded the way the game records it. Returns (state, know, offers)."""
+    other = "balanced" if persona == "steady" else "steady"
+    state, know = league(week=week, settings=settings)
+    for team in state.teams:
+        if not team.is_user:
+            state = with_team(state, team.id, persona=persona if team.id == CPU else other)
+    monkeypatch.setattr(rp, "offer_rate", lambda style, losses=0: 1.0 if style == persona else 0.0)
+    monkeypatch.setattr(replay_counter.replay_personas, "counter_rate", lambda style: 1.0)
+    built = []
+    wanted = ai._user_offer(state, settings, know, rs.rng(week, "offer", week))
+    built += [o for o in wanted.offers if o.status == "pending" and o.from_team == CPU]
+    if persona == "haggler" and built:
+        declined = rt.respond(wanted, settings, know, built[0].id, accept=False)
+        hagg = replay_counter.haggle_counter(declined, settings, know, next(o for o in declined.offers if o.id == built[0].id))
+        built += [o for o in hagg.offers if o.kind == "haggle"]
+    best = sorted((p for p in rs.team(state, CPU).roster if know.by_id[p].position in SKILL), key=lambda p: -chart(know, p))
+    monkeypatch.setattr(rp, "offer_rate", lambda style, losses=0: 0.0)
+    for pid in best[:3]:
+        shopped = replace(state, shops=(rs.Shop(CPU, pid, week, 0.1, opened=week),))
+        built += [o for o in ai._user_offer(shopped, settings, know, rs.rng(week, "offer", week)).offers if o.kind == "shop"]
+    user = rs.user_team(state)
+    for theirs in best[:4]:                       # a little short of fair for one of his best: he may counter
+        near = [p for p in user.roster if know.by_id[p].position in SKILL and chart(know, p) < 0.97 * chart(know, theirs)]
+        if not near:
+            continue
+        after, verdict = rt.propose(state, settings, know, CPU, (max(near, key=lambda p: chart(know, p)),), (theirs,))
+        if verdict.accepted:
+            continue
+        countered = replay_counter.counter_offer(after, settings, know, after.offers[-1], week)
+        built += [o for o in countered.offers if o.kind == "counter"]
+        if len(countered.offers) > len(after.offers):
+            break
+    return state, know, built
+
+
+@pytest.mark.parametrize("difficulty", ["normal", "hard"])
+@pytest.mark.parametrize("persona", rp.PERSONAS)
+def test_every_kind_of_cpu_offer_stands_when_accepted_and_its_preview_says_so(persona, difficulty, monkeypatch):
+    """A haggler's shop offer was built at the plain bar but re-checked at his lowball edge on accept, so it could
+    expire; his counter's preview judged it at the lowball edge too. The accept check never is stricter now."""
+    from tests import replay_fakes as fakes
+    settings = fakes.fake_settings(difficulty=difficulty)
+    kinds = Counter()
+    for week in (1, 3, 5):
+        state, know, built = _offers_built_like_the_game(persona, settings, week, monkeypatch)
+        for offer in built:
+            owned = replace(state, offers=(*state.offers, offer), next_id=offer.id + 1)
+            if offer.kind == "haggle":                  # its opening offer must be in the state it answers
+                owned = replace(owned, offers=(*state.offers, replace(offer, id=offer.counter_to, kind="want",
+                                                                      status="declined", counter_to=None), offer))
+            assert rt.accept_verdict(owned, settings, know, offer).accepted, (persona, difficulty, week, offer)
+            assert rt.respond(owned, settings, know, offer.id, accept=True).offers[-1].status == "accepted"
+            kinds[offer.kind] += 1
+    assert kinds["shop"] and kinds["counter"], kinds
+    if persona == "haggler":
+        assert kinds["haggle"], kinds
+
+
+def test_the_trade_screen_shows_a_hagglers_counter_as_accepted_and_accepting_it_works():
+    """Its preview used to judge it at his opening lowball edge, so Accept stayed disabled."""
+    from services import replay_game as rg, replay_views as views, replay_views_league as league_views
+    from tests.test_replay_views import DATA, SETTINGS as VIEW_SETTINGS, SEED, at
+    state, haggler = at(3), 2                       # CPU 2 has a counter at his normal edge in this league
+    state = rs.with_team(state, replace(rs.team(state, haggler), persona="haggler"))
+    know = rg.knowledge(state, VIEW_SETTINGS, DATA, seed=SEED)
+    deal = ai._best_deal(state, VIEW_SETTINGS, know, rs.user_team(state), rs.team(state, haggler), want=True)
+    assert deal is not None
+    state = rt.record_offer(state, haggler, rs.user_team(state).id, deal[1], deal[0], "pending", kind="want")
+    declined = rg.respond_offer(state, VIEW_SETTINGS, DATA, state.offers[-1].id, False, seed=SEED)
+    counter = next(o for o in declined.offers if o.kind == "haggle")
+
+    shown = league_views.trades(views.Game(1, "t", VIEW_SETTINGS, declined, DATA, None, SEED))
+    row = next(o for o in shown["offers"] if o["id"] == counter.id)
+    assert row["verdict"]["accepted"] is True
+    done = rg.respond_offer(declined, VIEW_SETTINGS, DATA, counter.id, True, seed=SEED)
+    assert next(o for o in done.offers if o.id == counter.id).status == "accepted"
