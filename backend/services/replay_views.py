@@ -376,7 +376,7 @@ def buzz(game: Game, player_id: int, week: int) -> str | None:
 def news(value: ReplayValue) -> dict | None:
     """The injury report on a player who is out: when he is said to be back (None = the season) and the text."""
     report = value.news
-    return {"back": report.back, "text": report.text} if report else None
+    return {"back": None if report.vague else report.back, "text": report.text} if report else None
 
 
 def event_row(game: Game, event: Event) -> dict:

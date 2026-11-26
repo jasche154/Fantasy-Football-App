@@ -680,8 +680,10 @@ def test_the_ir_kicker_who_never_returns_is_reported_out_for_the_season():
         tagged, plain = know_at(week).by_id[kicker], know_at(week, untagged).by_id[kicker]
         assert tagged.news.since == fakes.IR_KICKER_WEEK and plain.news is None
         frozen = know_at(fakes.IR_KICKER_WEEK - 1, untagged).by_id[kicker].healthy_chart
-        assert tagged.availability == 0.0                  # his value before the absence (and a bye bump since)
-        assert tagged.healthy_chart in (frozen, pytest.approx(frozen * rv.replay_chart.BYE_BUMP, abs=0.1))
+        assert tagged.availability == 0.0                  # his value before the absence (and a bye bump since),
+        missed = sum(data.schedule.opponent(tagged.team, w) is not None for w in range(fakes.IR_KICKER_WEEK, week))
+        back = frozen * rv.replay_chart_injury.return_factor(missed)    # x what such a long absence comes back worth
+        assert tagged.healthy_chart in (pytest.approx(back, abs=0.1), pytest.approx(back * rv.replay_chart.BYE_BUMP, abs=0.1))
         ignored = {"availability": 0, "expected_missed": 0, "chart": 0, "rank": 0, "pos_rank": "",
                    "news": None, "trade_value": 0, "healthy_chart": 0}
         assert replace(tagged, injury=None, **ignored) == replace(plain, **ignored)

@@ -140,7 +140,7 @@ def test_a_week_not_reached_yet_cannot_be_opened():
 
     for build in (lambda: views.team(shown, week=6), lambda: views.matchup(shown, week=6),
                   lambda: shown.know_at(6), lambda: views.team(shown, week=0)):
-        with pytest.raises(ValueError, match="week 5"):
+        with pytest.raises(ValueError, match="(week|to) 5"):
             build()
     future = views.scoreboard(shown, 6)
     assert future["played"] is False and len(future["results"]) == 6

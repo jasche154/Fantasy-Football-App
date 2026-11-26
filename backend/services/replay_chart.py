@@ -210,6 +210,11 @@ def _bye_done(data: SeasonData, team: str | None, week: int) -> bool:
     return team is not None and any(data.schedule.opponent(team, w) is None for w in range(1, week))
 
 
+def _games_missed(data: SeasonData, team: str | None, since: int, week: int) -> int:
+    """His team's games from the first week of his absence to the week before `week`."""
+    return sum(data.schedule.opponent(team, w) is not None for w in range(max(1, since), week)) if team else 0
+
+
 def _game_weeks(data: SeasonData, team: str | None, week: int, end_week: int) -> list[int]:
     return [w for w in range(max(1, week), end_week + 1) if data.schedule.opponent(team, w) is not None]
 
@@ -231,7 +236,8 @@ def _injured(data: SeasonData, row: dict, news: "replay_news.Report | None", wee
     return (expert + model) * (1 - replay_chart_injury.discount(len(games) * (1 - share), len(games))), extra
 
 
-Parts = Mapping[int, tuple[float, float, tuple[int, int, str]]]    # {id: (expert part, model part, open streak)}
+# {id: (expert part, model part, open streak, team games already missed in a frozen absence or None)}
+Parts = Mapping[int, tuple[float, float, tuple[int, int, str], int | None]]
 
 
 def charts(data: SeasonData, rows: Sequence[dict], priors: Mapping[int, float], week: int, end_week: int,
@@ -248,14 +254,15 @@ def charts(data: SeasonData, rows: Sequence[dict], priors: Mapping[int, float], 
 def base_charts(data: SeasonData, rows: Sequence[dict], priors: Mapping[int, float], week: int,
                 end_week: int, drafted: int = 0, regular: SeasonData | None = None,
                 frozen: Mapping[int, float] | None = None, live: dict[int, float] | None = None,
-                ) -> tuple[dict[int, dict], Parts, str]:
+                since: Mapping[int, int] | None = None) -> tuple[dict[int, dict], Parts, str]:
     """`charts` without the seeded news: (fields with news None, the parts `with_news` needs for players
     with an open hard-tag streak, rank_source). `drafted`: the league's draft week (see `pre_picks`).
     `regular`: a superflex league's season on the 1-QB list (replay_superflex.one_qb), whose overall ranks
     set a non-QB's `star`, so the SUPERFLEX slot changes only the QBs. `frozen`: {id: healthy chart} for the
     players in an injury absence (replay_values), standing in for the expert and model parts; their live
-    healthy chart goes into `live` when given."""
-    frozen = frozen or {}
+    healthy chart goes into `live` when given; `since`: the first week of each frozen absence, so the frozen value
+    is scaled by `replay_chart_injury.return_factor` of the games missed (`with_news` uses the reported length)."""
+    frozen, since = frozen or {}, since or {}
     curve, picks = slot_curve(data), pre_picks(data, drafted)
     overall = pre_ranks(picks)
     star_ranks = overall if regular is None else {
@@ -290,13 +297,17 @@ def base_charts(data: SeasonData, rows: Sequence[dict], priors: Mapping[int, flo
             model_part = (1 - w) * model_value * bump
             if expert + model_part > CHART_MAX:         # the bye bump never lifts anyone past the top of the scale
                 expert, model_part = (part * CHART_MAX / (expert + model_part) for part in (expert, model_part))
+            missed = None
             if pid in frozen:                           # out: his value before the absence (replay_values._frozen)
                 if live is not None:
                     live[pid] = expert + model_part
                 expert, model_part = min(CHART_MAX, frozen[pid] * bump), 0.0
+                missed = _games_missed(data, row["team"], since.get(pid, week), week)
             streak = replay_news.open_streak(data, pid, week)
             if streak is not None:
-                parts[pid] = (expert, model_part, streak)
+                parts[pid] = (expert, model_part, streak, missed)
+            if missed is not None:                      # what he comes back worth (the length known so far)
+                expert *= replay_chart_injury.return_factor(missed)
             chart, _ = _injured(data, row, None, week, end_week, expert, model_part)
             fields[pid] = {
                 "chart": round(chart, 1), "healthy_chart": round(expert + model_part, 1),
@@ -313,8 +324,13 @@ def with_news(data: SeasonData, rows: Mapping[int, dict], fields: Mapping[int, d
     """{id: fields} for the players in `parts` (their seeded news report and the chart it gives) and the
     players an opportunity shock moves (replay_shocks: the market's reaction, which reads that news)."""
     out: dict[int, dict] = {}
-    for pid, (expert, model_part, (since, back, tag)) in parts.items():
+    for pid, (expert, model_part, (since, back, tag), missed) in parts.items():
         news = replay_news.report(seed, pid, since, back, week, tag, data.last_week)
+        if missed is not None:                          # frozen: what he comes back worth after the reported absence
+            games = _game_weeks(data, rows[pid]["team"], week, end_week)
+            left = len(games) * (1 - replay_news.share_played(news, games)) if news.back else len(games)
+            factor = replay_chart_injury.return_factor(missed + left)
+            expert, model_part = expert * factor, model_part * factor
         chart, extra = _injured(data, rows[pid], news, week, end_week, expert, model_part)
         out[pid] = {**fields[pid], **extra, "chart": round(chart, 1), "news": news}
     return {**out, **_shocked(data, rows, fields, out, week)}

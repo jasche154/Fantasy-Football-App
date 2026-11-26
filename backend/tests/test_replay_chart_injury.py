@@ -50,11 +50,16 @@ def test_the_users_mid_season_targets_stand():
     assert [round(injury.discount(missed, LEFT), 2) for missed in (1, 3, 8)] == [0.06, 0.10, 0.45]
 
 
-def test_missing_most_of_what_is_left_costs_the_share_to_the_power_1_8():
-    """Testers: Kenneth Walker back for the final 2 of 6 games was RB7, Puka Nacua (3 of 6 missed) WR3."""
-    found = [round(injury.discount(missed, left), 2) for missed, left in ((3, 6), (4, 6), (5, 6), (1, 2))]
+def test_missing_most_of_what_is_left_costs_the_share_to_the_power_1_8_while_trades_are_open():
+    """Testers: Kenneth Walker back for the final 2 of 6 games was RB7, Puka Nacua (3 of 6 missed) WR3. Only weeks
+    a league can still trade in matter: a default league's deadline week 11 has 7 games left (of a week-17 season),
+    a week-12 jump-in trades in weeks 12-13 (6 and 5 left)."""
+    deadline = [round(injury.discount(missed, 7), 2) for missed in (4, 5, 6)]
+    jump_in = [round(injury.discount(missed, left), 2) for missed, left in ((3, 6), (4, 6), (5, 6), (4, 5))]
 
-    assert found == [0.29, 0.48, 0.72, 0.29]
+    assert deadline == [0.37, 0.55, 0.76]
+    assert jump_in == [0.29, 0.48, 0.72, 0.67]
+    assert round(injury.discount(1, 2), 2) == 0.29          # after any deadline: priced the same way
 
 
 def test_a_season_ending_report_keeps_what_such_reports_were_worth():

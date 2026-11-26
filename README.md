@@ -1052,7 +1052,10 @@ that week's games on; only scoring a week reads its real points.
   prices a player who misses most of what is left: 1 of the last 2 games 29%, 3 of 6 29%, 4 of 6 48%, 5 of 6
   72% (testers saw Kenneth Walker, back for the last 2 of 6, still RB7). More games missed never cost less,
   and a fixed return week never costs more the next week. So the value falls once when he goes out and climbs back each week, reaching
-  his old value the week he returns: before this the experts' and the model's ranks fell while he was out and
+  his old value the week he returns, times a return factor after a long absence (`replay_chart_injury.return_factor`:
+  1 for up to 4 games missed, 0.80 from 6, measured: players back from 6-9 games out scored 0.80 of their old
+  rate against healthy players of the same form; Christian McCaffrey 2024 returns at 800, RB4, not 1000; after
+  his first game back he is valued live): before this the experts' and the model's ranks fell while he was out and
   the discount came on top (2026 superflex QA league: Aaron Rodgers missing one game 474 -> 129, now 446;
   2027: Jonathan Taylor out weeks 7-14 789 -> 209, now 454 climbing to 741; real 2024: Puka Nacua worth least,
   214, the week he returned, now 714). The games missed come from the news report. An "out for the season"
@@ -1130,9 +1133,10 @@ that week's games on; only scoring a week reads its real points.
   rows show, with the public reason ("Hype: role jumped after Puka Nacua went out for the season", "... he
   won the backfield").
 - **Injury news:** a player who is out carries a report of when he is due back (`services/replay_news.py`).
-  It is built from the week he really returned, blurred by seeded noise (off by up to two weeks, a few
-  false "out for the season" calls, season-ending injuries first reported as a return weeks out) that
-  shrinks as the return nears; it never names a week already reached. Only an IR or PUP tag is ever
+  It is built from the week he really returned, blurred by seeded noise (off by up to two weeks until a
+  week before the return, a few false "out for the season" calls, season-ending injuries first reported as a
+  return weeks out); a long IR or PUP absence (4+ weeks) reads "no timetable yet" until three weeks before
+  the return, valued on a wider guess; it never names a week already reached. Only an IR or PUP tag is ever
   called "out for the season": a plain O tag is week-to-week news (Cam Newton 2019: O from week 3, IR in
   week 10), so it names a return, the next week once the first guess has passed, until he goes to IR. A
   suspension is reported exactly. The commissioner's exempt list reads "out indefinitely" and never names a

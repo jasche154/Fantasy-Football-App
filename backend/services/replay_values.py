@@ -272,9 +272,10 @@ def _base(data: SeasonData, league: LeagueSettings, week: int, end_week: int, dr
     two_qb = replay_slots.two_qb(league.starters)
     chart_data = replay_chart.superflex_view(data) if two_qb else regular        # QBs go where 2-QB drafts take them
     frozen = _frozen(data, league, week, end_week, drafted)
+    since = {pid: before + 1 for pid, before in _absences(data, week).items() if pid in frozen}
     live: dict[int, float] = {}
     charts, parts, source = replay_chart.base_charts(chart_data, rows, priors, week, end_week, drafted,
-                                                     regular if two_qb else None, frozen, live)
+                                                     regular if two_qb else None, frozen, live, since)
     rows = [{**row, **charts[row["player_id"]]} for row in rows]
     replacement = replacement_levels(((r["position"], r["ros_ppg"]) for r in rows if r["position"] in SKILL), league)
     return _Base(MappingProxyType({r["player_id"]: _valued(r, replacement) for r in rows}), chart_data, parts,

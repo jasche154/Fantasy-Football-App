@@ -8,8 +8,13 @@ Pure: no database, no Knowledge.
 - The commissioner's exempt list (EXE) is indefinite: the text never names a week, and the week valuations read
   (`back`) is a guess made without the real return (FAKE_RETURN_WEEKS after he went on the list, then always
   the next week).
-- Otherwise the first report misses the real week by -2..+2 (ERRORS / ERROR_ODDS), and the miss shrinks to
-  zero as the real return nears. A report never names a week he has already missed (<= the current week).
+- Otherwise the report misses the real week by -2..+2 (ERRORS / ERROR_ODDS) until EXACT_LEAD week before it (real
+  reports stay "week to week" until then). A long IR or PUP absence (LONG_ABSENCE+ weeks) reads "no timetable
+  yet" until TIMETABLE_LEAD weeks before the return, its valuation week a guess off by the error x one week per
+  LONG_ABSENCE weeks of absence (Christian McCaffrey 2024 read "back week 10" from week 2). A report never names
+  a week he has already missed (<= the current week). Measured over 2021-25 hard-tag absences of 3+ games, 20 news
+  draws each (share of reports naming the exact week 1 / 2 / 3 / 4+ weeks out): 1.00 / 0.37 / 0.35 / 0.12 (was
+  0.98 / 0.71 / 0.50 / 0.40 when the miss shrank to zero as the return neared).
 - A return after the season's last week reads "out for the season".
 - A real absence of FALSE_SEASON_GAP or more weeks: FALSE_SEASON_ODDS of first reading "out for the season",
   corrected CORRECTION_LEAD weeks before he really returns.
@@ -36,20 +41,26 @@ FAKE_RETURN_ODDS = 0.35
 FAKE_RETURN_WEEKS = (4, 8)                 # inclusive: how far out a wrong first report puts the return
 FAKE_REVISED_AFTER = (1, 3)                # inclusive: weeks until that is revised to out for the season
 SEASON_TAGS = ("IR", "PUP")                # the only tags a report calls season-ending
+EXACT_LEAD = 1                             # weeks before the return when the report names the real week
+LONG_ABSENCE = 4                           # a long IR / PUP absence: "no timetable yet" ...
+TIMETABLE_LEAD = 3                         # ... until this many weeks before the return
 
 
 @dataclass(frozen=True)
 class Report:
     since: int                 # first week of the hard-tag streak
-    back: int | None           # the week he is reported to return; None = out for the season
+    back: int | None           # the week he is reported to return (a guess when `vague`); None = out for the season
     text: str
+    vague: bool = False        # "no timetable yet": views show no week, valuations read the guessed `back`
 
 
-def _text(tag: str, since: int, back: int | None) -> str:
+def _text(tag: str, since: int, back: int | None, vague: bool = False) -> str:
     if tag == "EXE":
         return f"On the commissioner's exempt list since week {since}; out indefinitely."
     if back is None:
         return f"Out for the season ({tag} since week {since})."
+    if vague:
+        return f"Out ({tag}) since week {since}; no timetable yet."
     verb = "Suspended" if tag == "SUS" else f"Out ({tag})"
     return f"{verb} since week {since}; expected back week {back}."
 
@@ -79,8 +90,14 @@ def report(seed: int, player_id: int, since: int, true_return: int, week: int, t
           and week < true_return - CORRECTION_LEAD):
         back = None
     else:
-        left = max(0, true_return - week) / max(1, true_return - since)
-        back = true_return + round(error * min(1.0, left))
+        length = true_return - since
+        vague = long_tag and length >= LONG_ABSENCE and true_return - week > TIMETABLE_LEAD
+        spread = max(1, length // LONG_ABSENCE) if vague else 1
+        back = true_return + (error * spread if true_return - week > EXACT_LEAD else 0)
+        back = max(back, week + 1)
+        if last_week is not None and back > last_week:
+            return Report(since=since, back=None, text=_text(tag, since, None))
+        return Report(since=since, back=back, text=_text(tag, since, back, vague), vague=vague)
     if back is not None:
         back = max(back, week + 1)
     if back is not None and last_week is not None and back > last_week:

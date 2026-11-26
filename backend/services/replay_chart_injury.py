@@ -35,6 +35,16 @@ left 84% (never all: some play after all). A plain O tag's first week, for compa
 3.0, 7% never back (604 player-weeks); it always has a news report, so a star newly out on an O tag reported
 back in a week or two loses 6-8%.
 
+`return_factor(games)`: the share of his pre-absence value a player comes back worth after missing `games` of his
+team's games (replay_chart: frozen value x this while he is out and the week he returns; live once he plays).
+Measured (`.scratch`-style one-off, 2018-25 real hard-tag absences, PPR): his points per game over his first 2-4
+games back against his last 2-4 before, for players at or above replacement before, divided by the same ratio for
+healthy players with the same recent rate (regression to the mean, 0.869): 1-2 games missed 0.885 (n=114), 3-5
+0.862 (n=60), 6-9 0.80 (n=13, 90% interval 0.68-0.93); no in-season absence of 10+ games came back with two games
+to measure. The user's short-absence targets stay exact (out 1-4 games: factor 1, the anchors already price it),
+then the factor falls to RETURN_LONG at 6 games and holds there. A long absence's first report so costs
+1 - 0.80 x (1 - 0.45) = 56% in all.
+
 Pure: no database.
 """
 from bisect import bisect_right
@@ -48,6 +58,17 @@ NO_REPORT_ODDS = ((0, 0.1565), (1, 0.2321), (2, 0.1303), (3, 0.0812), (4, 0.0559
 IR_OUT_SHARE = 0.80            # tagged IR or PUP: at least this share of the remaining games (replay_values)
 # chart kept on an "out for the season" report, by the games left // 4 (0-3, 4-7, 8-11, 12+): measured (module docstring)
 SEASON_REPORT_KEEP = (0.003, 0.018, 0.065, 0.167)
+
+
+RETURN_SHORT, RETURN_LONG, RETURN_LONG_GAMES = 4, 0.80, 6     # factor 1 up to 4 games missed, 0.80 from 6 (measured)
+
+
+def return_factor(games: float) -> float:
+    """The share of his pre-absence value he comes back worth after missing `games` team games (module docstring)."""
+    if games <= RETURN_SHORT:
+        return 1.0
+    reach = min(1.0, (games - RETURN_SHORT) / (RETURN_LONG_GAMES - RETURN_SHORT))
+    return 1.0 - (1.0 - RETURN_LONG) * reach
 
 
 def _anchored(missed: float) -> float:

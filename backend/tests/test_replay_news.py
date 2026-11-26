@@ -122,3 +122,15 @@ def test_a_report_never_names_a_week_after_the_season(since, true_return, week, 
 
         assert report.back is None or week < report.back <= END
         assert report.back is not None or report.text.startswith("Out for the season")
+
+
+def test_a_long_ir_absence_has_no_timetable_until_three_weeks_out_and_the_week_is_exact_only_one_week_out():
+    """Oracle 2024: Christian McCaffrey read "back week 10" from week 2 on, and he was."""
+    since, back = 2, 10
+    reports = {week: [news.report(seed, 1, since, back, week, "IR", 18) for seed in range(40)] for week in range(2, 10)}
+
+    assert all(r.vague and "no timetable" in r.text for w in range(2, 7) for r in reports[w] if r.back is not None)
+    assert all(not r.vague for w in (7, 8, 9) for r in reports[w])
+    assert all(r.back == back for r in reports[9])                           # a week out: the real week
+    assert any(r.back != back for r in reports[7])                           # three weeks out: still a guess
+    assert all(r.back is None or r.back > w for w, rs in reports.items() for r in rs)   # never a week already missed
