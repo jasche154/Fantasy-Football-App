@@ -60,7 +60,9 @@ PLACEHOLDERS = MappingProxyType({
     "offer_haggle": ("me", "you", "player"), "offer_haggle_counter": ("me", "you", "player"),
     "decline_rival": ("me", "you", "player", "team"), "decline_room": ("me", "you"),
     "decline_attached": ("me", "you", "player"), "decline_need": ("me", "you", "position"),
-    "decline_value": ("me", "you", "player"),
+    "decline_value": ("me", "you", "player"), "decline_close": ("me", "you", "player"),
+    "decline_rule_traded": ("me", "you", "player"), "decline_rule_cap": ("me", "you"), "decline_rule_ir": ("me", "you"),
+    "decline_rule_lineup": ("me", "you", "position"),
 })
 KINDS = tuple(PLACEHOLDERS)
 VOICES = ("balanced", "panicky", "shark", "steady", "gambler",

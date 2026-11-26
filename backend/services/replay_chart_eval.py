@@ -43,13 +43,15 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 
 
-from services import replay_adp_format, replay_state as rs, replay_values as rv
+from services import replay_adp_format, replay_chart_injury, replay_news, replay_state as rs, replay_values as rv
 from services.league import replacement_levels
 from services.replay_chart_eval_stats import (  # noqa: F401 (re-exported)
     BANDS, MIN_CHART, TIERS, Row, band, calibration, evaluate, held_out_error, realised_share, spearman,
     tier,
 )
+from services.replay_data import parse_seasons
 from services.replay_pool import SKILL, SeasonData
+from services.replay_value_eval import DEFAULT_DB
 
 log = logging.getLogger(__name__)
 
@@ -58,13 +60,6 @@ WEEKS = (1, 4, 7, 10, 13)
 SEED = 0                       # the injury news noise (replay_news): one fixed draw
 REGULAR = dict(rs.DEFAULT_STARTERS)
 LINEUPS = {"regular": REGULAR, "superflex": {**REGULAR, "SUPERFLEX": 1}}
-
-
-def _seasons(text: str) -> list[int]:
-    if "-" in text:
-        first, last = text.split("-")
-        return list(range(int(first), int(last) + 1))
-    return [int(s) for s in text.split(",")]
 
 
 def settings_for(season: int, lineup: str, scoring: str, teams: int, bench: int = 6) -> rs.Settings:
@@ -192,14 +187,44 @@ def absences_unreported(data: SeasonData) -> Counter:
     return found
 
 
+REPORT_SEEDS = 20              # season_reports: news noise draws per absence
+
+
+def season_reports(data: SeasonData, end_week: int) -> dict[int, list[float]]:
+    """{games left // 4 (capped at 3): [season-ending reports, chart the real return was worth]} over every IR
+    or PUP absence and REPORT_SEEDS news draws: the market price of an "out for the season" report
+    (replay_chart_injury.SEASON_REPORT_KEEP = worth / reports)."""
+    found: dict[int, list[float]] = defaultdict(lambda: [0, 0.0])
+    for (pid, since), back in data.returns.items():
+        tag = data.injuries[(pid, since)].tag
+        if tag not in replay_news.SEASON_TAGS or data.players[pid].position not in SKILL:
+            continue
+        for week in range(since, min(back or end_week + 1, end_week + 1)):
+            games = [w for w in range(week, end_week + 1) if _team_game(data, pid, w)]
+            for seed in range(REPORT_SEEDS) if games else ():
+                if replay_news.report(seed, pid, since, back, week, tag, data.last_week).back is not None:
+                    continue
+                cell = found[min(len(games) // 4, 3)]
+                cell[0] += 1
+                if back and back <= end_week:
+                    cell[1] += 1 - replay_chart_injury.discount(sum(w < back for w in games), len(games))
+    return found
+
+
+def _session(db: Path):
+    """A read-only in-memory copy of the database (replay_value_eval.read_only_copy): the check never writes."""
+    from services.replay_value_eval import read_only_copy
+    return read_only_copy(db)
+
+
 def run(seasons: Sequence[int], weeks: Sequence[int], scoring: str, teams: int,
-        lineups: Sequence[str], bench: int = 6) -> dict:
-    from database.db import SessionLocal
+        lineups: Sequence[str], bench: int = 6, db: Path | None = None) -> dict:
     from services import replay_pool
+    from services.replay_value_eval import DEFAULT_DB
 
     rows: dict[str, list[Row]] = defaultdict(list)
     counts: dict[str, Counter] = defaultdict(Counter)
-    with SessionLocal() as session:
+    with _session(db or DEFAULT_DB) as session:
         for season in seasons:
             for lineup in lineups:
                 settings = settings_for(season, lineup, scoring, teams, bench)
@@ -250,17 +275,31 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--lineups", default="regular,superflex")
     parser.add_argument("--bench", type=int, default=6, help="bench spots (0: value over the last starter)")
     parser.add_argument("--out", help="write the report (rows included) as JSON here")
+    parser.add_argument("--db", type=Path, default=DEFAULT_DB, help="the database, read through a read-only copy")
+    parser.add_argument("--season-reports", action="store_true",
+                        help="measure what an 'out for the season' report was worth (SEASON_REPORT_KEEP)")
     parser.add_argument("--absences", action="store_true",
                         help="measure games missed by unreported absences (replay_chart_injury.NO_REPORT_ODDS)")
     parser.add_argument("--compare", nargs=2, metavar=("BEFORE", "AFTER"),
                         help="score two saved reports on their common player-weeks (nothing is rebuilt)")
     args = parser.parse_args(argv)
+    if args.season_reports:
+        from services import replay_pool
+        totals: dict[int, list[float]] = defaultdict(lambda: [0, 0.0])
+        with _session(args.db) as session:
+            for season in parse_seasons(args.seasons):
+                data = replay_pool.load_season_data(session, season, args.scoring)
+                for bucket, (n, worth) in season_reports(data, settings_for(season, "regular", args.scoring, 12).end_week).items():
+                    totals[bucket][0] += n
+                    totals[bucket][1] += worth
+        log.info("Season-ending reports, chart kept by games left // 4: %s",
+                 {b: (n, round(w / n, 4)) for b, (n, w) in sorted(totals.items())})
+        return
     if args.absences:
-        from database.db import SessionLocal
         from services import replay_pool
         found: Counter = Counter()
-        with SessionLocal() as session:
-            for season in _seasons(args.seasons):
+        with _session(args.db) as session:
+            for season in parse_seasons(args.seasons):
                 found.update(absences_unreported(replay_pool.load_season_data(session, season, args.scoring)))
         total = sum(found.values())
         log.info("Unreported absences, %d player-weeks: %s", total,
@@ -273,8 +312,8 @@ def main(argv: list[str] | None = None) -> None:
                 log.info("#### %s: %s", lineup, name)
                 _log_report({lineup: result})
         return
-    report = run(_seasons(args.seasons), [int(w) for w in args.weeks.split(",")], args.scoring, args.teams,
-                 args.lineups.split(","), args.bench)
+    report = run(parse_seasons(args.seasons), [int(w) for w in args.weeks.split(",")], args.scoring, args.teams,
+                 args.lineups.split(","), args.bench, args.db)
     _log_report(report)
     if args.out:
         Path(args.out).write_text(json.dumps(report, indent=1))

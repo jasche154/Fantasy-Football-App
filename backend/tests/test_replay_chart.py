@@ -126,20 +126,18 @@ def test_pre_ranks_interleave_expert_ranks_on_the_adp_curve():
 
 
 @pytest.mark.parametrize("week", fakes.INJURED_WEEKS)
-def test_the_first_week_out_discounts_the_whole_chart_and_later_weeks_only_the_model_part(week):
+def test_every_week_out_discounts_the_value_he_had_before_the_absence(week):
     data, settings = fakes.fake_season(), fakes.fake_settings()
     star, know = fakes.INJURED_STAR_ID, fakes.fake_knowledge(week)
-    base = replay_values._base(data.as_of(week), replay_values.league_settings(settings), week, settings.end_week)
-    expert, model, _ = base.parts[star]
+    before = fakes.fake_knowledge(fakes.INJURED_WEEKS[0] - 1).by_id[star]
     value = know.by_id[star]
     games = [w for w in range(week, settings.end_week + 1) if data.schedule.opponent(value.team, w)]
     missed = len(games) * (1 - replay_news.share_played(value.news, games))
-    discount = 1 - replay_chart_injury.discount(missed, len(games))          # the share of his chart he keeps
+    keep = 1 - replay_chart_injury.discount(missed, len(games))
 
-    assert expert > 0 and model > 0 and 0 < discount < 1 and value.news.since == fakes.INJURED_WEEKS[0]
-    whole = round((expert + model) * discount, 1)
-    assert value.chart == (whole if week == value.news.since else round(expert + model * discount, 1))
-    assert week == value.news.since or value.chart > whole
+    assert value.news.since == fakes.INJURED_WEEKS[0] and 0 < keep < 1
+    assert value.healthy_chart == before.healthy_chart                       # frozen at the week before
+    assert value.chart == pytest.approx(before.healthy_chart * keep, abs=0.1)
 
 
 def early_dst_season():

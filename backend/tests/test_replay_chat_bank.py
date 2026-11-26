@@ -12,7 +12,8 @@ BANNED = re.compile(
 BUCKETS = [(kind, voice) for kind in chat.KINDS for voice in chat.VOICES if voice not in chat.QUIET.get(kind, ())]
 NEW_VOICES = ("fan", "stasher", "haggler", "contender", "dealer", "tilted")
 NEW_KINDS = ("offer_buy_low", "offer_haggle", "offer_haggle_counter", "decline_rival", "decline_room",
-             "decline_attached", "decline_need", "decline_value")
+             "decline_attached", "decline_need", "decline_value", "decline_close", "decline_rule_traded",
+             "decline_rule_cap", "decline_rule_ir", "decline_rule_lineup")
 NEW_LINES = 5           # the newer styles and kinds have five lines a bucket (the user's choice)
 
 
@@ -46,7 +47,8 @@ def test_every_bucket_has_enough_distinct_clean_lines(kind, voice):
 
 
 @pytest.mark.parametrize("kind", ["boom", "bust", "shop", "offer_worried", "offer_high", "offer_buy_low",
-                                  "offer_haggle", "offer_haggle_counter", "decline_attached", "decline_rival"])
+                                  "offer_haggle", "offer_haggle_counter", "decline_attached", "decline_rival",
+                                  "decline_close", "decline_value", "decline_rule_traded"])
 def test_a_line_about_one_player_names_him(kind):
     # The chat shows only the text: "5.2. A bad game is one game." leaves the league guessing who.
     unnamed = [line for lines in chat.bank()[kind].values() for line in lines if "{player}" not in line]
@@ -74,8 +76,16 @@ def test_a_haggler_says_his_first_offer_is_an_opening_one():
     assert all(re.search(r"open|first|start", line, re.IGNORECASE) for line in chat.bank()["offer_haggle"]["haggler"])
 
 
-def test_a_decline_need_line_names_the_position():
-    assert all("{position}" in line for lines in chat.bank()["decline_need"].values() for line in lines)
+@pytest.mark.parametrize("kind", ["decline_need", "decline_rule_lineup"])
+def test_a_line_about_a_position_names_it(kind):
+    assert all("{position}" in line for lines in chat.bank()[kind].values() for line in lines)
+
+
+def test_a_close_value_reply_never_calls_it_a_lowball_and_a_far_one_never_calls_it_close():
+    close = re.compile(r"\b(almost|nearly|a little|a bit|slightly|a touch|so close|in range|we.re near)\b", re.IGNORECASE)
+    far = re.compile(r"\b(lowball|nowhere|far|miles|joke|long way|not even)\b", re.IGNORECASE)
+    assert not [line for lines in chat.bank()["decline_value"].values() for line in lines if close.search(line)]
+    assert not [line for lines in chat.bank()["decline_close"].values() for line in lines if far.search(line)]
 
 
 def test_the_bank_is_big():

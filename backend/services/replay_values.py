@@ -215,7 +215,33 @@ class _Base:
     source: str
 
 
-@lru_cache(maxsize=64)
+def _absences(data: SeasonData, week: int) -> dict[int, int]:
+    """{player: the last week before his open injury absence} for every player hard-tagged at some week up to
+    `week` since his last real game (0 = preseason: hurt before week 1); `data` is as of `week`."""
+    last: dict[int, int] = defaultdict(int)
+    for pid, played in data.actual:
+        last[pid] = max(last[pid], played)
+    starts: dict[int, int] = {}
+    for (pid, tagged), tag in data.injuries.items():
+        if tag.hard and last[pid] < tagged <= week:
+            starts[pid] = min(tagged, starts.get(pid, tagged))
+    return {pid: start - 1 for pid, start in starts.items()}
+
+
+def _frozen(data: SeasonData, league: LeagueSettings, week: int, end_week: int, drafted: int) -> dict[int, float]:
+    """{player: healthy chart} frozen at the last week before his open injury absence, until he has played a
+    game since: the expert and model ranks of a hurt player fall while he is out (the experts price the
+    injury), and the chart's discount (replay_chart_injury) is the one price of it. Point in time: the frozen
+    week's values are built from data.as_of(that week). A player listed nowhere that week keeps his live value."""
+    found: dict[int, float] = {}
+    for pid, before in _absences(data, week).items():
+        row = _base(data.as_of(before), league, before, end_week, min(drafted, before)).rows.get(pid)
+        if row is not None:
+            found[pid] = row["healthy_chart"]
+    return found
+
+
+@lru_cache(maxsize=128)
 def _base(data: SeasonData, league: LeagueSettings, week: int, end_week: int, drafted: int = 0) -> _Base:
     regular = replay_superflex.one_qb(data)                     # superflex: non-QBs as in a 1-QB league
     priors = _priors(regular)
@@ -232,8 +258,9 @@ def _base(data: SeasonData, league: LeagueSettings, week: int, end_week: int, dr
             for pid, player in data.players.items()]
     two_qb = replay_slots.two_qb(league.starters)
     chart_data = replay_chart.superflex_view(data) if two_qb else regular        # QBs go where 2-QB drafts take them
+    frozen = _frozen(data, league, week, end_week, drafted)
     charts, parts, source = replay_chart.base_charts(chart_data, rows, priors, week, end_week, drafted,
-                                                     regular if two_qb else None)
+                                                     regular if two_qb else None, frozen)
     rows = [{**row, **charts[row["player_id"]]} for row in rows]
     replacement = replacement_levels(((r["position"], r["ros_ppg"]) for r in rows if r["position"] in SKILL), league)
     return _Base(MappingProxyType({r["player_id"]: _valued(r, replacement) for r in rows}), chart_data, parts,
@@ -361,6 +388,11 @@ def best_lineup(know: Knowledge, player_ids: Iterable[int], settings) -> dict[st
     with `.starters` (replay Settings or LeagueSettings)."""
     players = sorted(_values(know, player_ids), key=lambda v: (-v.projection, -v.ros_ppg, v.player_id))
     return mt.best_lineup(players, SimpleNamespace(starters=settings.starters, superflex=False))
+
+
+def starters(know: Knowledge, player_ids: Iterable[int], settings) -> frozenset[int]:
+    """Who starts in `best_lineup`, as a set."""
+    return frozenset(pid for ids in best_lineup(know, player_ids, settings).values() for pid in ids)
 
 
 def idle_slots(know: Knowledge, player_ids: Iterable[int], settings) -> list[str]:
