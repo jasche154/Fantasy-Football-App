@@ -202,7 +202,7 @@ def test_games_and_points_per_game_count_only_weeks_already_played():
     assert later.games == 3 and later.ppg == pytest.approx(sum(played) / 3, abs=0.006)
 
 
-def test_recent_points_are_his_last_three_games_before_this_week_newest_first():
+def test_recent_points_are_his_last_five_games_before_this_week_newest_first():
     data = fakes.fake_season()
     pid = fakes.INJURED_STAR_ID                              # no game in INJURED_WEEKS (6-9)
     games = [w for w in range(1, 6) if (pid, w) in data.actual]
@@ -211,8 +211,8 @@ def test_recent_points_are_his_last_three_games_before_this_week_newest_first():
     boosted = know_at(10, fakes.patched(data, actual={(pid, 10): 99.0, (pid, 11): 99.0})).by_id[pid]
 
     assert (early.recent_points, early.last_game_week) == ((), 0)
-    assert during.last_game_week == later.last_game_week == games[-1] and rv.RECENT_GAMES == 3
-    assert during.recent_points == tuple(data.actual[(pid, w)] for w in games[::-1][:3]) == later.recent_points
+    assert during.last_game_week == later.last_game_week == games[-1] and rv.RECENT_GAMES == 5
+    assert during.recent_points == tuple(data.actual[(pid, w)] for w in games[::-1][:rv.RECENT_GAMES]) == later.recent_points
     assert boosted == later                                  # this week's and later games are never seen
 
 
@@ -804,3 +804,18 @@ def test_the_bye_bump_lands_once_his_bye_is_behind_him():
     on, after = know_at(bye, flat).by_id[pid], know_at(bye + 1, flat).by_id[pid]
 
     assert after.healthy_chart > on.healthy_chart * 1.01
+
+
+def test_the_charts_form_reads_his_last_five_games_not_three():
+    """Review: recent_points was cut to 3 games, so raising the chart's FORM_GAMES to 5 only lowered the weight."""
+    from services import replay_chart
+    data, week = fakes.fake_season(), 10
+    pid = fakes.player_id("WR", 5)
+    played = [w for w in range(1, week) if (pid, w) in data.actual]
+    fifth = played[-5]                                         # his fifth-last game: outside a 3-game window
+    hot = fakes.patched(data, actual={(pid, fifth): 60.0})
+
+    plain, boosted = know_at(week).by_id[pid], know_at(week, hot).by_id[pid]
+
+    assert replay_chart.FORM_GAMES == rv.RECENT_GAMES == 5 and len(plain.recent_points) == 5
+    assert boosted.recent_points[4] == 60.0 and boosted.form_chart > plain.form_chart

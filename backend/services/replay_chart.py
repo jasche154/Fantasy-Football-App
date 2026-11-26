@@ -18,10 +18,11 @@ bye is behind him.
 - model_ppg: ros_ppg + k x (mean of his last <= FORM_GAMES real games - ros_ppg), k = n / FORM_GAMES x
   FORM_WEIGHT, x (1 - FORM_STAR_DOWN x star) for a dip, x (1 + FORM_STAR_UP x star) for a rise while ros_ppg
   is below his prior. FORM_GAMES = 5 is the user's choice ("values should swing a little less"), informed by real
-  2020-25 weeks: 36% of healthy top-24 players moved more than 25% in a week, 1,618 of 2,432 such moves had no news
-  behind them (no tag, opportunity shock or 5+ place expert move), and after those the old value was closer to his
-  next four weeks 71% of the time. Five games instead of three cut those no-news moves by 12% and lift the
-  held-out rank order (0.556 -> 0.558 on common player-weeks) at a small cost on out players (RMSE 3.156 -> 3.175).
+  2020-25 weeks: after a big (25%+) one-week move with no news behind it the old value was closer to his next four
+  weeks 71% of the time. Against the old chart (3 games at FORM_WEIGHT 0.5), a real 5-game window (recent_points
+  carries replay_values.RECENT_GAMES = 5) cuts those no-news moves from 1,617 to 1,335 (-17%; 3 games at weight
+  0.3 cut them only 12%), at held-out RMSE 4.030 -> 4.037 regular (out players 3.160 -> 3.164) and 5.020 -> 5.019
+  superflex (out players 3.857 -> 3.842) on the same player-weeks.
 
 - healthy_chart = w x value_at(expert rank) + (1 - w) x value_at(model rank), x BYE_BUMP once the bye is
   past, never above CHART_MAX (nor after an opportunity shock). The model rank is his fractional position
