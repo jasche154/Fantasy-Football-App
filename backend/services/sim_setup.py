@@ -425,7 +425,7 @@ def _future_base(session: Session, season: int, settings: Settings, seed: int = 
     drawn = sim_carryover.draw(carries, seed)
     base = replace(base, notes=MappingProxyType({**{(pid, 0): sim_carryover.note(c) for pid, c in carries.items()},
                                                  **sim_carryover.cleared(carries, drawn)}))
-    base = sim_depth.with_real_qbs(base, qb_rooms(session), 1, moved)
+    base = sim_depth.with_real_qbs(base, qb_rooms(session), 1, moved, rookies=set(inputs.picks))
     scores = [(g.week, g.home_team, g.away_team, g.home_score, g.away_score) for g in played if g.is_final]
     return Future(base, belief, drawn, qbs,
                   sim_lines.carry_over(scores) if scores else {})

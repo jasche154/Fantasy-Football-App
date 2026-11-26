@@ -169,6 +169,13 @@ def test_a_teams_real_qbs_join_the_pool_and_only_a_short_team_gets_a_generic():
         900001: ("Real Backup", teams[0]), 900003: ("Moved Backup", teams[0])}
     assert added.projected[(900001, 5)] > 0                                     # on the board: a manager can add him
     pooled = sim_depth.with_backup_qbs(added, 5)
+    # review item 1: a rookie of the seeded draft (synthetic id) listed on today's depth chart, and the coming
+    # season's real draftee, never join a second time
+    rookie = replace(one.players[qbs[teams[3]][0]], player_id=1_000_000_123, name="Arch Manning Jr.")
+    with_rookie = replace(one, players=MappingProxyType({**one.players, rookie.player_id: rookie}))
+    twice = sim_depth.with_real_qbs(with_rookie, {teams[4]: [(900004, "arch manning"), (900005, "Real Draftee")]}, 5,
+                                    rookies={900005})
+    assert not {900004, 900005} & set(twice.players)
     generic = {p.adp_team for pid, p in pooled.players.items() if pid >= sim_depth.BACKUP_QB_ID_BASE}
     assert teams[0] not in generic and set(teams[1:]) <= generic
 
