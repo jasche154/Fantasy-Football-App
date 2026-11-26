@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from database.models import DepthChartEntry, Player, PlayerStatus
-from services import replay_fillin, sim_draw, sim_game, sim_qb, sim_setup, sim_world
+from services import replay_fillin, sim_draw, sim_game, sim_market, sim_qb, sim_setup, sim_world
 from services.replay_pool import Injury
 from tests import replay_fakes as fakes
 from tests import test_replay_fillin as fillin_tests
@@ -111,3 +111,21 @@ def test_a_failed_simulation_still_empties_the_side_cache(monkeypatch):
     with pytest.raises(RuntimeError):
         sim_season.simulate(fakes.fake_season(), 1, 9)
     assert not sim_game._sides
+
+
+def test_a_holder_marked_in_danger_gets_the_job_danger_note_that_week(monkeypatch):
+    """Review round 4, item 2: sim_season turns Jobs.in_danger into the true bench hint (at HINT_RATE, here 1)."""
+    from services import sim_qb_jobs, sim_season
+    real_decide, marked = sim_qb_jobs.decide, {}
+    def decide(jobs, world, known, week, sitting, tags, seed):
+        changes, rumors = real_decide(jobs, world, known, week, sitting, tags, seed)
+        if week == 11:
+            moved = {change.player_id for change in changes}
+            holder = next(pid for team, pid in sorted(jobs.holders.items()) if pid not in moved and pid not in sitting)
+            jobs.in_danger = {holder}
+            marked[week] = holder
+        return changes, rumors
+    monkeypatch.setattr(sim_qb_jobs, "decide", decide)
+    monkeypatch.setattr(sim_market, "HINT_RATE", 1.0)
+    data = sim_season.simulate(fakes.fake_season(), 1, 10)
+    assert data.notes[(marked[11], 11)] == sim_market.BUZZ["bench"]
