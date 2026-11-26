@@ -372,7 +372,7 @@ def test_no_line_inviting_a_deal_once_trades_are_closed():
     values = {key: 7 for key in chat.PLACEHOLDERS["blowout_loss"]}
 
     open_line = chat._render(lines, [0, 1], "blowout_loss", values, [0, 1])
-    closed_line = chat._render(lines, [0, 1], "blowout_loss", values, [0, 1], quiet_trades=True)
+    closed_line = chat._render(lines, [0, 1], "blowout_loss", values, [0, 1], avoid=chat.TRADE_TALK)
 
     assert open_line[0] == 0 and closed_line == (1, "Down 7. Ouch.")
 
@@ -380,3 +380,21 @@ def test_no_line_inviting_a_deal_once_trades_are_closed():
 def test_a_sentence_ending_on_a_name_with_a_full_stop_keeps_one():
     assert rs.tidy("Worried about Deebo Samuel Sr..") == "Worried about Deebo Samuel Sr."
     assert rs.tidy("1.6 points from Deebo Samuel Sr.. Wait...") == "1.6 points from Deebo Samuel Sr. Wait..."
+
+
+@pytest.mark.parametrize("seed", range(6))
+def test_an_offer_that_does_not_favour_the_user_never_promises_a_good_deal(seed):
+    """Breaker: "This is a good deal, I promise." on an offer that cost the user 44 points of value."""
+    state = start()
+    user = rs.user_team(state)
+    cpu = replace(next(t for t in state.teams if not t.is_user), persona="panicky")
+    state = rs.with_team(state, cpu)
+    know = knowledge(state)
+    cheap = min(cpu.roster, key=lambda pid: know.by_id[pid].chart)
+    dear = max(user.roster, key=lambda pid: know.by_id[pid].chart)
+    offer = rs.Offer(61, state.week, cpu.id, user.id, (cheap,), (dear,), "pending")      # the user gives far more
+
+    after = chat.label_offers(replace(state, offers=(offer,)), know, seed=seed, played=DATA.as_of(state.week),
+                              settings=SETTINGS)
+
+    assert after.offers[0].message and not chat.PROMISE.search(after.offers[0].message)

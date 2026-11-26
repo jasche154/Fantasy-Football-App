@@ -61,6 +61,12 @@ OFFER_EDGE = {                 # (least, most) extra value a CPU gives in its ow
     "fan": (0.06, 0.08), "stasher": (0.06, 0.08), "contender": (0.06, 0.08), "dealer": (0.05, 0.07),
     "tilted": (0.06, 0.08), "haggler": (-0.15, -0.10),     # the haggler's opening lowball: 10-15% less
 }
+# A CPU's own offer to the user (want or shop) favours him on the chart with this chance, seeded per offer; else it
+# is close: CLOSE_EDGE (up to 4% short). The user's choice: "something like 50/50", generous styles more, sharks less.
+FAVOUR_SHARE = {"panicky": 0.65, "gambler": 0.6, "tilted": 0.6, "shark": 0.35}
+FAVOUR_DEFAULT = 0.5
+CLOSE_EDGE = (-0.04, 0.0)
+SHOP_EDGE = (0.0, 0.10)                 # a shop offer that favours the user: up to 10% more back
 HAGGLE_COUNTER_EDGE = (0.05, 0.07)      # the haggler's counter (and any counter of his): his normal edge
 COUNTER_RATE = {"balanced": 0.5, "panicky": 0.4, "shark": 0.8, "steady": 0.3, "gambler": 0.6,
                 "fan": 0.5, "stasher": 0.5, "haggler": 0.9, "contender": 0.5, "dealer": 0.9, "tilted": 0.4}
@@ -151,6 +157,11 @@ def offer_edge(persona: str, losses: int = 0, counter: bool = False) -> tuple[fl
 def edge(state: State, team: Team, counter: bool = False) -> tuple[float, float]:
     """`offer_edge` for a team in this state."""
     return offer_edge(team.persona, rs.losses_in_a_row(state, team.id), counter)
+
+
+def favours(seed: int, week: int, team: Team) -> bool:
+    """Does this week's offer from `team` favour the user (FAVOUR_SHARE by persona), or only come close?"""
+    return rs.rng(seed, "offer-lean", week, team.id).random() < FAVOUR_SHARE.get(team.persona, FAVOUR_DEFAULT)
 
 
 def counter_rate(persona: str) -> float:

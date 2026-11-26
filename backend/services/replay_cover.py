@@ -1,4 +1,5 @@
-"""Replay League: a CPU filling the starting slots a trade left it unable to fill (`cpu_cover`).
+"""Replay League: a CPU filling the starting slots a trade left it unable to fill, then any roster spot a trade's
+forced cut left open (`cpu_cover`).
 
 Called by replay_game after an accepted trade (and by `start_week` for every CPU once waivers clear). Only
 unlocked free agents who are not out (a fan skips his rival's players unless nobody else can play the slot); no dice
@@ -30,7 +31,22 @@ def cpu_cover(state: State, settings: Settings, know: Knowledge, team_ids: Itera
             if move is None:
                 break
             state = replay_waivers.execute_move(state, settings, know, team_id, *move)
+        while (add := _open_spot_add(state, settings, know, team_id)) is not None:   # a trade's forced cut
+            state = replay_waivers.execute_move(state, settings, know, team_id, add, None)
     return state
+
+
+def _open_spot_add(state: State, settings: Settings, know: Knowledge, team_id: int) -> int | None:
+    """With an open roster spot (a trade cut someone to stay within a position limit): the most valuable unlocked
+    free agent who isn't out and keeps it within its limits (a fan skips his rival's players), else None."""
+    team = rs.team(state, team_id)
+    if len(team.roster) >= settings.roster_size:
+        return None
+    kept = [know.by_id[pid] for pid in rs.held(team)]
+    taken = rs.rostered(state) | set(state.locked)
+    fits = [v for v in know.values if v.player_id not in taken and not v.out and v.position in SKILL
+            and not replay_fans.banned(team, v.team) and not rv.crowded(kept, [v], v.position, settings)]
+    return max(fits, key=_by_chart).player_id if fits else None
 
 
 def _by_chart(value: ReplayValue) -> tuple[float, float, int]:

@@ -27,6 +27,11 @@ pairs that include him. Offer rates and edges come from the state (`replay_perso
 skid offers more often and gives more; a haggler's opening offer is a lowball, `haggle_deal` his counter).
 Package sums count a player his team picked up this week at his trade discount (`replay_trade_value.fresh`).
 
+How an offer to the user leans (the user's "50/50"): with chance `replay_personas.favours` (FAVOUR_SHARE by persona,
+seeded per offer) it favours him on the chart (a want offer by the persona's edge, a shop offer by SHOP_EDGE); else it
+is close (CLOSE_EDGE, up to 4% short). When nothing fits the lean drawn, the usual rule decides. A haggler's opening
+is always his lowball.
+
 A CPU shopping a player to the user (`State.shops`, replay_mood) offers first: the best deal that includes
 that player, at his shop discount (no roll), once per shop: a player he has offered the user since the shop
 opened (`Shop.opened`; an offer of his to the user with him in `give`) is not offered again while it stays
@@ -142,13 +147,13 @@ def _candidates(state: State, settings: Settings, know: Knowledge, sender: Team,
 
 def _best_deal(state: State, settings: Settings, know: Knowledge, sender: Team, receiver: Team,
                scored: int = MAX_SCORED, need: int | None = None, want: bool = False, counter: bool = False,
-               wanted: int | None = None) -> Deal | None:
+               wanted: int | None = None, lean: Edge | None = None) -> Deal | None:
     """The accepted deal with the best score among the `scored` candidates closest to the gap wanted (only
     those where the receiver sends `need`, and where the sender sends `wanted`, when given). `want`: the
     receiver's own offer for the user's player, judged as one and generous to him (`counter`: one that answers
     another, at that edge)."""
     best: tuple[float, Deal] | None = None
-    edge = replay_personas.edge(state, receiver, counter) if want else None
+    edge = lean or (replay_personas.edge(state, receiver, counter) if want else None)
     found = _candidates(state, settings, know, sender, receiver, edge)
     for give, get in [deal for deal in found if (need is None or need in deal[1])
                       and (wanted is None or wanted in deal[0])][:scored]:
@@ -190,7 +195,7 @@ def _offered_since(state: State, team_id: int, user_id: int, player_id: int, wee
                and player_id in offer.give for offer in state.offers)
 
 
-def _user_offer(state: State, settings: Settings, know: Knowledge, dice: np.random.Generator) -> State:
+def _user_offer(state: State, settings: Settings, know: Knowledge, dice: np.random.Generator, seed: int = 0) -> State:
     """At most one new offer to the user a week, from the first free CPU whose offer rate hits."""
     user, free = next((team for team in state.teams if team.is_user), None), _free_cpus(state)
     if user is None or any(offer.week == state.week and offer.to_team == user.id for offer in state.offers):
@@ -199,7 +204,9 @@ def _user_offer(state: State, settings: Settings, know: Knowledge, dice: np.rand
         live = rs.markdowns(state, team.id)
         for pid in [shop.player_id for shop in state.shops if shop.team_id == team.id and shop.player_id in live
                     and not _offered_since(state, team.id, user.id, shop.player_id, shop.opened)]:
-            deal = _best_deal(state, settings, know, user, team, need=pid)
+            lean = replay_personas.SHOP_EDGE if replay_personas.favours(seed, state.week, team) else replay_personas.CLOSE_EDGE
+            deal = (_best_deal(state, settings, know, user, team, need=pid, lean=lean)
+                    or _best_deal(state, settings, know, user, team, need=pid))
             if deal is not None:
                 return rt.record_offer(state, team.id, user.id, deal[1], deal[0], "pending", kind="shop")
     rolls = dice.random(len(free))
@@ -211,7 +218,9 @@ def _user_offer(state: State, settings: Settings, know: Knowledge, dice: np.rand
     partner = next((free[int(i)] for i in order if rolls[int(i)] < rate(free[int(i)])), None)
     if partner is None:
         return state
-    deal = _best_deal(state, settings, know, user, partner, want=True)
+    close = partner.persona != "haggler" and not replay_personas.favours(seed, state.week, partner)
+    deal = ((close and _best_deal(state, settings, know, user, partner, want=True, lean=replay_personas.CLOSE_EDGE))
+            or _best_deal(state, settings, know, user, partner, want=True))
     return state if deal is None else rt.record_offer(state, partner.id, user.id, deal[1], deal[0], "pending",
                                                      kind="want")
 
@@ -231,7 +240,7 @@ def cpu_trades(state: State, settings: Settings, know: Knowledge, seed: int) -> 
             dice = rs.rng(seed, "dealer-trades", state.week, dealer, attempt)
             if dice.random() < EXTRA_ATTEMPT_CHANCE:
                 state = _cpu_attempt(state, settings, know, dice, dealer)
-    return _user_offer(state, settings, know, rs.rng(seed, "offer", state.week))
+    return _user_offer(state, settings, know, rs.rng(seed, "offer", state.week), seed)
 
 
 def haggle_deal(state: State, settings: Settings, know: Knowledge, offer_from: Team, user_sends: tuple[int, ...]) -> Deal | None:

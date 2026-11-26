@@ -232,7 +232,8 @@ def test_the_user_gets_at_most_one_offer_a_week_and_each_passes_the_cpus_own_tes
             assert verdict.accepted and verdict.your_drops == (), (week.week, offer, verdict.reasons)
             assert not set(offer.get) & set(verdict.their_drops)          # never asks for a player it would cut
             edge = replay_personas.edge(week.after, rs.team(week.after, offer.from_team))
-            assert ai.generous(edge, verdict.value_give, verdict.value_get), (persona, verdict)
+            assert (ai.generous(edge, verdict.value_give, verdict.value_get)       # it favours him, or comes close
+                    or ai.generous(replay_personas.CLOSE_EDGE, verdict.value_give, verdict.value_get)), (persona, verdict)
             assert persona == "haggler" or not verdict.fair_label.endswith("loss")     # his opening is a lowball
     assert sum(len(offers(season)) for season in seasons.values()) >= len(SEEDS)
 
@@ -316,9 +317,10 @@ def test_on_hard_an_offer_is_still_generous_and_stands_as_the_cpus_own_but_not_a
         deal = (week.after, hard, know, USER, offer.from_team, offer.get, offer.give)
         verdict = rt.evaluate(*deal, offered=True)
         assert verdict.accepted and verdict.score >= 0
-        assert ai.generous(replay_personas.edge(week.after, rs.team(week.after, offer.from_team)), verdict.value_give,
-                           verdict.value_get)
-        if rs.team(week.after, offer.from_team).persona != "haggler":     # his opening lowball suits him either way
+        favoured = ai.generous(replay_personas.edge(week.after, rs.team(week.after, offer.from_team)),
+                               verdict.value_give, verdict.value_get)
+        assert favoured or ai.generous(replay_personas.CLOSE_EDGE, verdict.value_give, verdict.value_get)
+        if favoured and rs.team(week.after, offer.from_team).persona != "haggler":   # his lowball suits him either way
             assert not rt.evaluate(*deal).accepted      # the same deal proposed by the user pays the hard premium
 
 
@@ -492,3 +494,17 @@ def test_a_stasher_never_offers_away_an_injured_star_he_collects():
 
     assert not tradable & set(hurt)
     assert set(hurt) & {v.player_id for v in ai._tradable(state, know, replace(team, persona="balanced"))}
+
+
+def test_about_half_of_the_cpus_offers_favour_the_user_and_the_rest_come_close(seasons):
+    """The user's "something like 50/50": favoured on the numbers the preview shows, else within CLOSE_EDGE."""
+    found = [(week, offer) for season in seasons.values() for week, offer in offers(season)
+             if rs.team(week.after, offer.from_team).persona != "haggler"]
+    shown = [rt.accept_verdict(week.after, SETTINGS, knowledge(week.week), offer) for week, offer in found]
+    favoured = [v.value_get > v.value_give for v in shown]
+
+    assert len(found) >= 6
+    assert 0.25 <= sum(favoured) / len(favoured) <= 0.85
+    assert all(v.value_get >= (1 + replay_personas.CLOSE_EDGE[0] - ai.EDGE_SLACK) * v.value_give for v in shown)
+
+
