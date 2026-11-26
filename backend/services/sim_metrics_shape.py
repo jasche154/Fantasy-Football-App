@@ -26,7 +26,7 @@ def _totals(data: SeasonData) -> tuple[dict, dict]:
     for (pid, week), line in data.box.items():
         for name in ("pass_yds", "targets", "rec", "rec_yds", "carries", "rush_yds"):
             totals[pid][name] += getattr(line, name)
-        team = data.team_at(pid, week)
+        team = data.team_at(pid, week + 1)          # the team he played that week for, as in passing()
         if team:
             work[pid][team] += line.targets + line.carries + 1
     return totals, {pid: max(teams, key=teams.get) for pid, teams in work.items()}
