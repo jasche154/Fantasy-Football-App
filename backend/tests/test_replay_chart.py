@@ -134,10 +134,12 @@ def test_every_week_out_discounts_the_value_he_had_before_the_absence(week):
     games = [w for w in range(week, settings.end_week + 1) if data.schedule.opponent(value.team, w)]
     missed = len(games) * (1 - replay_news.share_played(value.news, games))
     keep = 1 - replay_chart_injury.discount(missed, len(games))
+    so_far = sum(bool(data.schedule.opponent(value.team, w)) for w in range(value.news.since, week))
+    factor = replay_chart_injury.return_factor(so_far + missed)            # what such an absence comes back worth
 
     assert value.news.since == fakes.INJURED_WEEKS[0] and 0 < keep < 1
-    assert value.healthy_chart == before.healthy_chart                       # frozen at the week before
-    assert value.chart == pytest.approx(before.healthy_chart * keep, abs=0.1)
+    assert value.healthy_chart == pytest.approx(before.healthy_chart * replay_chart_injury.return_factor(so_far), abs=0.1)
+    assert value.chart == pytest.approx(before.healthy_chart * factor * keep, abs=0.1)
 
 
 def early_dst_season():

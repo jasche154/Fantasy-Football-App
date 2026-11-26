@@ -1138,8 +1138,9 @@ that week's games on; only scoring a week reads its real points.
 - **Injury news:** a player who is out carries a report of when he is due back (`services/replay_news.py`).
   It is built from the week he really returned, blurred by seeded noise (off by up to two weeks until a
   week before the return, a few false "out for the season" calls, season-ending injuries first reported as a
-  return weeks out); a long IR or PUP absence (4+ weeks) reads "no timetable yet" until three weeks before
-  the return, valued on a wider guess; it never names a week already reached. Only an IR or PUP tag is ever
+  return weeks out); an IR or PUP report reads "no timetable yet" until a seeded 1-7 weeks before the return
+  (so the week the text firms up says nothing exact), valued on the same guess, which moves on by 2-4 weeks once
+  it has passed; it never names a week already reached. Only an IR or PUP tag is ever
   called "out for the season": a plain O tag is week-to-week news (Cam Newton 2019: O from week 3, IR in
   week 10), so it names a return, the next week once the first guess has passed, until he goes to IR. A
   suspension is reported exactly. The commissioner's exempt list reads "out indefinitely" and never names a

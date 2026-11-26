@@ -9,10 +9,11 @@ Pure: no database, no Knowledge.
   (`back`) is a guess made without the real return (FAKE_RETURN_WEEKS after he went on the list, then always
   the next week).
 - Otherwise the report misses the real week by -2..+2 (ERRORS / ERROR_ODDS) until EXACT_LEAD week before it (real
-  reports stay "week to week" until then). A long IR or PUP absence (LONG_ABSENCE+ weeks) reads "no timetable
-  yet" until TIMETABLE_LEAD weeks before the return, its valuation week a guess off by the error x one week per
-  LONG_ABSENCE weeks of absence (Christian McCaffrey 2024 read "back week 10" from week 2). A report never names
-  a week he has already missed (<= the current week). Measured over 2021-25 hard-tag absences of 3+ games, 20 news
+  reports stay "week to week" until then). An IR or PUP report reads "no timetable yet" until a seeded
+  VAGUE_LEAD (1-7) weeks before the real return (never, when that is at least the absence), so the week the text
+  firms up tells nothing exact (Christian McCaffrey 2024 read "back week 10" from week 2); its valuation week is
+  the same guess, and a guess that has passed moves on by a seeded GUESS_HOP (2-4) weeks, so a long absence stays
+  priced as long. A report never names a week he has already missed (<= the current week). Measured over 2021-25 hard-tag absences of 3+ games, 20 news
   draws each (share of reports naming the exact week 1 / 2 / 3 / 4+ weeks out): 1.00 / 0.37 / 0.35 / 0.12 (was
   0.98 / 0.71 / 0.50 / 0.40 when the miss shrank to zero as the return neared).
 - A return after the season's last week reads "out for the season".
@@ -42,8 +43,9 @@ FAKE_RETURN_WEEKS = (4, 8)                 # inclusive: how far out a wrong firs
 FAKE_REVISED_AFTER = (1, 3)                # inclusive: weeks until that is revised to out for the season
 SEASON_TAGS = ("IR", "PUP")                # the only tags a report calls season-ending
 EXACT_LEAD = 1                             # weeks before the return when the report names the real week
-LONG_ABSENCE = 4                           # a long IR / PUP absence: "no timetable yet" ...
-TIMETABLE_LEAD = 3                         # ... until this many weeks before the return
+VAGUE_LEAD = (1, 7)                        # inclusive: an IR / PUP report reads "no timetable yet" until this many
+                                           # weeks before the real return, seeded (>= the absence: never vague)
+GUESS_HOP = (2, 4)                         # inclusive: weeks a passed guess moves on by while vague
 
 
 @dataclass(frozen=True)
@@ -77,8 +79,10 @@ def report(seed: int, player_id: int, since: int, true_return: int, week: int, t
     fake_return = rng.random() < FAKE_RETURN_ODDS
     fake_weeks = int(rng.integers(FAKE_RETURN_WEEKS[0], FAKE_RETURN_WEEKS[1] + 1))
     revised_after = int(rng.integers(FAKE_REVISED_AFTER[0], FAKE_REVISED_AFTER[1] + 1))
+    vague_lead = int(rng.integers(VAGUE_LEAD[0], VAGUE_LEAD[1] + 1))
+    hop = int(rng.integers(GUESS_HOP[0], GUESS_HOP[1] + 1))
 
-    long_tag = tag in SEASON_TAGS
+    long_tag, vague = tag in SEASON_TAGS, False
     if tag == "SUS":
         back = true_return or None
     elif tag == "EXE":
@@ -90,19 +94,16 @@ def report(seed: int, player_id: int, since: int, true_return: int, week: int, t
           and week < true_return - CORRECTION_LEAD):
         back = None
     else:
-        length = true_return - since
-        vague = long_tag and length >= LONG_ABSENCE and true_return - week > TIMETABLE_LEAD
-        spread = max(1, length // LONG_ABSENCE) if vague else 1
-        back = true_return + (error * spread if true_return - week > EXACT_LEAD else 0)
-        back = max(back, week + 1)
-        if last_week is not None and back > last_week:
-            return Report(since=since, back=None, text=_text(tag, since, None))
-        return Report(since=since, back=back, text=_text(tag, since, back, vague), vague=vague)
+        vague = long_tag and week < true_return - vague_lead      # the switch week itself is seeded
+        back = true_return + (error if true_return - week > EXACT_LEAD else 0)
+        if back <= week:                                        # a passed guess moves on by seeded weeks, never
+            back += hop * -(-(week + 1 - back) // hop)          # "back next week" week after week
     if back is not None:
         back = max(back, week + 1)
     if back is not None and last_week is not None and back > last_week:
         back = None
-    return Report(since=since, back=back, text=_text(tag, since, back))
+    vague = vague and back is not None
+    return Report(since=since, back=back, text=_text(tag, since, back, vague), vague=vague)
 
 
 def share_played(report: Report, team_game_weeks: Sequence[int]) -> float:

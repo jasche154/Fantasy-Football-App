@@ -45,7 +45,7 @@ def test_a_long_absence_is_sometimes_first_called_season_ending_then_corrected()
     for seed in called_off:
         assert news.report(seed, 7, 3, 11, 8, "IR").back is None              # still wrong 3 weeks out
         corrected = news.report(seed, 7, 3, 11, 9, "IR")                       # 2 weeks before he returns
-        assert corrected.back is not None and corrected.back >= 10 and "expected back" in corrected.text
+        assert corrected.back is not None and corrected.back >= 10 and ("expected back" in corrected.text or corrected.vague)
 
 
 def test_a_short_absence_is_never_called_season_ending():
@@ -124,13 +124,31 @@ def test_a_report_never_names_a_week_after_the_season(since, true_return, week, 
         assert report.back is not None or report.text.startswith("Out for the season")
 
 
-def test_a_long_ir_absence_has_no_timetable_until_three_weeks_out_and_the_week_is_exact_only_one_week_out():
-    """Oracle 2024: Christian McCaffrey read "back week 10" from week 2 on, and he was."""
-    since, back = 2, 10
-    reports = {week: [news.report(seed, 1, since, back, week, "IR", 18) for seed in range(40)] for week in range(2, 10)}
+def test_when_no_timetable_ends_says_nothing_exact_about_the_return():
+    """Reviewer: the text firmed up exactly 3 weeks before the real return, every time."""
+    gaps = set()
+    for seed in range(300):
+        for back in range(8, 17):
+            vague = [news.report(seed, 7, 2, back, week, "IR", 18).vague for week in range(2, back)]
+            switch = next((week for week, (was, now) in enumerate(zip(vague, vague[1:]), start=3) if was and not now), None)
+            if switch is not None:
+                gaps.add(back - switch)
 
-    assert all(r.vague and "no timetable" in r.text for w in range(2, 7) for r in reports[w] if r.back is not None)
-    assert all(not r.vague for w in (7, 8, 9) for r in reports[w])
-    assert all(r.back == back for r in reports[9])                           # a week out: the real week
-    assert any(r.back != back for r in reports[7])                           # three weeks out: still a guess
-    assert all(r.back is None or r.back > w for w, rs in reports.items() for r in rs)   # never a week already missed
+    assert len(gaps) >= 5                                   # spread over several weeks, not one constant lead
+
+
+def test_a_long_vague_absence_never_reads_back_next_week_week_after_week():
+    """Reviewer's seed-3 case: a 16-week IR absence read "back next week" from week 8 to 13."""
+    for seed in range(200):
+        rows = [news.report(seed, 5, 1, 17, week, "IR", 18) for week in range(1, 17)]
+        next_week = [week for week, r in enumerate(rows, start=1) if r.back == week + 1 and week + 1 != 17]
+        runs = sum(1 for a, b in zip(next_week, next_week[1:]) if b == a + 1)
+        assert runs == 0, (seed, next_week)
+
+
+def test_a_vague_report_shows_no_week_and_never_one_already_missed():
+    reports = [news.report(seed, 1, 2, 10, week, "IR", 18) for seed in range(60) for week in range(2, 10)]
+
+    assert any(r.vague and "no timetable" in r.text for r in reports)
+    assert all(r.back is None or r.back > week for r, week in zip(reports, [w for _ in range(60) for w in range(2, 10)]))
+    assert all(r.back == 10 for r in (news.report(seed, 1, 2, 10, 9, "IR", 18) for seed in range(60)))  # a week out
