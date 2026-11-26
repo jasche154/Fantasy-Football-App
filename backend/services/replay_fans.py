@@ -44,9 +44,14 @@ def banned(team: Team, nfl_team: str | None) -> bool:
     return hated is not None and club(nfl_team) == hated
 
 
+def is_club(fan_of: str | None, nfl_team: str | None) -> bool:
+    """Is that NFL team the favourite `fan_of`? (None: not a fan.)"""
+    return fan_of is not None and club(nfl_team) == fan_of
+
+
 def cheers_for(team: Team, nfl_team: str | None) -> bool:
-    """Does this manager (a fan) cheer for that NFL team? He never sells its players with a worried line."""
-    return team.fan_of is not None and club(nfl_team) == team.fan_of
+    """Does this manager (a fan) cheer for that NFL team? He never worries out loud about its players."""
+    return is_club(team.fan_of, nfl_team)
 
 
 def nickname(code: str | None) -> str:
