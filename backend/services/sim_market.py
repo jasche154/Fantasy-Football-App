@@ -17,7 +17,10 @@ truth's dated role changes into a noisy hint.
   `market.opinion_keep` of the last and a fresh draw for the rest), and the value they rank a healthy player on
   moves only `market.worth_step` of the way to this week's (`held`: experts revise slowly), except on injury
   news: a player believed out now, or whose own or a same-position teammate's status (out or not) changed since
-  last week, is valued afresh at once (a backup whose starter just went on IR, a star back from injury). The
+  last week, is valued afresh at once (a backup whose starter just went on IR, a star back from injury). A
+  fill-in QB (`fill_ins`: the healthy QB starting while his team's job holder is believed out) is ranked no
+  better than FILL_IN_BEST, the best rank real experts gave a fill-in after 2-4 starts (`held_back`; his value
+  already counts only the games he is expected to start, until the holder's believed absence ends). The
   three knobs live in sim_params.json's tuned `market` section (`sim_eval --set market.worth_step=...`); they
   were set by hand against the real weeks' rank churn and expert-vs-projection agreement in sim_eval's report
   (healthy top-16 QB churn: real 1.05-1.15 places a week; QB noise at a third of the others' because QB
@@ -46,6 +49,8 @@ truth's dated role changes into a noisy hint.
 """
 from collections import defaultdict
 from collections.abc import Collection, Iterable, Mapping
+from dataclasses import replace
+from types import MappingProxyType
 
 import numpy as np
 
@@ -57,12 +62,14 @@ from services.sim_world import RoleChange, World, params
 
 MIN_PROJECTION = 0.1
 EXPERT_NOISE = 0.08              # expert opinion vs the belief (lognormal sigma; preseason: vs the ADP)
+FILL_IN_BEST = 16                # the best weekly expert rank of a fill-in QB: real 2020-2025 runs of 3+ starts, after
+                                 # 2-4 starts, never ranked better (Flacco 2023, Dobbs 2023: QB16; median 29-32)
 OPINION_DEFAULTS = {"opinion_spread": {"QB": 0.35, "RB": 1.0, "WR": 1.0, "TE": 1.0, "K": 1.0, "DST": 1.0},
-                    "opinion_keep": 0.9, "worth_step": 0.4}     # defaults of the tuned `market` knobs (see above)
+                    "opinion_keep": 0.9, "worth_step": 0.4, "fill_in_trust": 1.0}   # defaults of the tuned `market` knobs
 
 
 def opinion_knob(name: str):
-    """A tuned `market` knob of the weekly experts (opinion_spread, opinion_keep, worth_step)."""
+    """A tuned `market` knob (opinion_spread, opinion_keep, worth_step, fill_in_trust)."""
     return params()["market"].get(name, OPINION_DEFAULTS[name])
 EXPERT_AGE = {"pre": 6, "ros": 2}     # days before the Sunday, as the real snapshots are (week 0 / later weeks)
 SEASON_GAMES = 17
@@ -118,6 +125,43 @@ def values(belief: World, scoring: ScoringSettings, games_left: int = SEASON_GAM
     return dict(found)
 
 
+def fill_ins(belief: World) -> set[int]:
+    """The QBs filling in: on a team whose job holder (the most starts weight, sim_qb_jobs.apply) is believed out,
+    the healthy QB with the most starts weight."""
+    found = set()
+    for team in belief.teams:
+        qbs = sorted((p for p in belief.roster(team) if p.position == "QB"), key=lambda p: (-p.starts, p.player_id))
+        if qbs and qbs[0].out_weeks > 0:
+            healthy = [p for p in qbs[1:] if p.out_weeks == 0]
+            if healthy:
+                found.add(healthy[0].player_id)
+    return found
+
+
+def fill_in_view(belief: World) -> World:
+    """The public belief with each fill-in's (`fill_ins`) passing quality above a backup's keeping only
+    `market.fill_in_trust` of its lead: a few games behind another QB's job do not make him a starter's passer
+    in the public's eyes (see the module docstring). Never applied to the truth."""
+    trust, backup = float(opinion_knob("fill_in_trust")), params()["league"]["backup_quality"]
+    chosen = fill_ins(belief)
+    if not chosen or trust >= 1.0:
+        return belief
+    players = dict(belief.players)
+    for pid in chosen:
+        quality = players[pid].quality
+        players[pid] = replace(players[pid], quality=min(quality, backup + trust * (quality - backup)))
+    return World(MappingProxyType(players), belief.teams, belief.changes)
+
+
+def held_back(order: list[int], chosen: set[int], best: int) -> list[int]:
+    """`order` (best first) with each of `chosen` ranked no better than `best`, the others in their order."""
+    early = [pid for pid in order[:best - 1] if pid in chosen]
+    if not early:
+        return order
+    others = [pid for pid in order if pid not in early]
+    return others[:best - 1] + early + others[best - 1:]
+
+
 def opinion(previous: Mapping[int, float], ids: Iterable[int], dice: np.random.Generator) -> dict[int, float]:
     """{player: this week's opinion z (standard normal)}: opinion_keep of last week's plus a fresh draw (a player
     with none yet starts from a fresh one). Always one draw per player, in id order."""
@@ -170,9 +214,12 @@ def expert_ranks(belief: World, known: Iterable[int], week: int, dice: np.random
     def view(pid: int) -> tuple:              # sorts best first: the listed by noisy pick, then the rest by value
         return (False, market[pid] * noise[pid]) if pid in market else (True, -worth.get(pid, 0.0) * noise[pid])
 
+    filling = fill_ins(belief) if not market else set()
     ranks = {}
     for position in ("QB", "RB", "WR", "TE", "K", "DST"):
         order = sorted((pid for pid in ids if belief.players[pid].position == position), key=lambda pid: (view(pid), pid))
+        if position == "QB":
+            order = held_back(order, filling, FILL_IN_BEST)
         ranks.update({(pid, week): rank for rank, pid in enumerate(order, start=1)})
     return ranks
 

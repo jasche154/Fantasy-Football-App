@@ -1265,7 +1265,8 @@
     "DST": 1.0
    },
    "opinion_keep": 0.9,
-   "worth_step": 0.4
+   "worth_step": 0.4,
+   "fill_in_trust": 0.15
   }
  }
 }

@@ -283,7 +283,7 @@ def simulate(base: SeasonData, seed: int, from_week: int, prior: World | None = 
         known = _known(base, tables, week)
         benched, bench = sim_qb_jobs.decide(jobs, truth.at(week), known, week, sitting, tags, seed)
         # the job holders start in the public belief too, so the line and the projections see the week's QB
-        public = sim_qb_jobs.apply(estimate(known, week, prior), jobs)
+        public = sim_market.fill_in_view(sim_qb_jobs.apply(estimate(known, week, prior), jobs))
         # a posted line only for the first simulated week: a later one knows nothing of the simulated games before it
         pregame = sim_lines.week_lines(known, week, public, public_out, team_prior, posted if week == from_week else None)
         lines.update({(home, week): line for home, line in pregame.items()})
