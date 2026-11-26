@@ -153,10 +153,12 @@ export interface ReplayPlayerRow {
   defense: ReplayDefenseRating | null;
 }
 
-/** An injury report: back = the week he is said to return (null = out for the season). */
+/** An injury report: back = the week he is said to return (null = out for the season, or no timetable yet). */
 export interface ReplayNews {
   back: number | null;
   text: string;
+  /** "No timetable yet": no week is named; back is null and the player counts as out every week to come. */
+  vague?: boolean;
 }
 
 export interface ReplayRecord {

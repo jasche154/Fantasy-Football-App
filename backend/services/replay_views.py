@@ -39,7 +39,7 @@ Shared pieces
                     else null (a jump-in league's draft room shows its start week's tags).
                     O, IR, PUP, SUS and EXE (exempt list) mean he does not play; O, IR and PUP may go on IR.
   PlayerRow  {player: PlayerRef, opponent, bye, out, projection, points, ros_ppg, value, rank, pos_rank, adp,
-              pre_rank, expert_rank, news: {back, text} | null, buzz: string | null, games, ppg, trade_locked,
+              pre_rank, expert_rank, news: {back, text, vague} | null, buzz: string | null, games, ppg, trade_locked,
               defense}
       opponent      NFL team code, "BYE" or null (unknown team, or draft time)
       projection    that week's pre-game projection (0 on a bye or when out; at a preseason draft the preseason rate)
@@ -374,9 +374,10 @@ def buzz(game: Game, player_id: int, week: int) -> str | None:
 
 
 def news(value: ReplayValue) -> dict | None:
-    """The injury report on a player who is out: when he is said to be back (None = the season) and the text."""
+    """The injury report on a player who is out: when he is said to be back (None = the season, or no timetable yet),
+    the text, and `vague` ("no timetable yet": no week is named)."""
     report = value.news
-    return {"back": None if report.vague else report.back, "text": report.text} if report else None
+    return {"back": None if report.vague else report.back, "text": report.text, "vague": report.vague} if report else None
 
 
 def event_row(game: Game, event: Event) -> dict:

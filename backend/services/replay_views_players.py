@@ -254,7 +254,7 @@ def _upcoming(game: Game, value: ReplayValue) -> list[dict]:
     for week in range(game.state.week + 1, game.settings.end_week + 1):
         opponent = schedule.opponent(value.team, week)
         bye = value.team is not None and opponent is None
-        out = report is not None and (report.back is None or report.back > week)
+        out = report is not None and (report.vague or report.back is None or report.back > week)   # vague: no week
         defense = ratings.rating(opponent, value.position)
         estimate = None if bye or out else round(value.ros_ppg * (defense["factor"] if defense else 1.0), 1)
         rows.append({"week": week, "opponent": "BYE" if bye else opponent, "away": _away(game, value.team, week),

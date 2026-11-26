@@ -205,8 +205,12 @@ def test_a_player_row_carries_his_injury_news_only_while_a_report_exists():
     out = replace(healthy, news=Report(since=2, back=6, text="Expected back in week 6."))
     gone = replace(healthy, news=Report(since=2, back=None, text="Out for the season."))
 
-    assert views.news(healthy) is None and views.news(out) == {"back": 6, "text": "Expected back in week 6."}
-    assert views.news(gone) == {"back": None, "text": "Out for the season."}
+    vague = replace(healthy, news=Report(since=2, back=9, text="Out (IR) since week 2; no timetable yet.", vague=True))
+
+    assert views.news(healthy) is None
+    assert views.news(out) == {"back": 6, "text": "Expected back in week 6.", "vague": False}
+    assert views.news(gone) == {"back": None, "text": "Out for the season.", "vague": False}
+    assert views.news(vague) == {"back": None, "text": "Out (IR) since week 2; no timetable yet.", "vague": True}
 
 
 def test_draft_board_lists_who_is_left_in_rank_order_with_filters_and_paging():

@@ -264,3 +264,25 @@ def test_players_and_player_pages_ignore_everything_not_played_yet(week):
     ours, theirs = screens(DATA), screens(hidden)
 
     assert len(ours) == len(theirs) and all(a == b for a, b in zip(ours, theirs, strict=True))
+
+
+def test_a_vague_report_keeps_him_out_every_week_to_come_and_never_reads_the_real_return(monkeypatch):
+    """Review: the upcoming schedule switched from Out to points at a definite week while the news said no timetable."""
+    from dataclasses import replace
+    from types import MappingProxyType
+
+    from services import replay_news
+    star = fakes.INJURED_STAR_ID
+    since = next(s for (pid, s) in DATA.returns if pid == star)
+
+    def vague(seed, pid, since, back, week, tag, last=None):
+        return replay_news.Report(since, 9, f"Out ({tag}) since week {since}; no timetable yet.", vague=True)
+
+    monkeypatch.setattr(replay_news, "report", vague)
+    later = replace(DATA, returns=MappingProxyType({**DATA.returns, (star, since): DATA.last_week}))
+    state = at(6)
+
+    upcoming = [wire.player(game(state, data), star)["upcoming"] for data in (DATA, later)]
+
+    assert all(row["out_expected"] and row["estimate"] is None for row in upcoming[0])
+    assert upcoming[0] == upcoming[1]
