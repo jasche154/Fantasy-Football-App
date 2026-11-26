@@ -1036,14 +1036,19 @@ that week's games on; only scoring a week reads its real points.
   superflex league values them as its regular twin does; "Super" itself was saved before, so its non-QBs keep
   the 2-QB list's order on the 1-QB scale.
 - **Injured players' charts** (`services/replay_chart_injury.py`, `replay_values._frozen`): while a player is
-  out with an injury or suspension (a hard tag since his last game), and until he has played a game again, his
-  healthy value is the one he had the week before the absence began (built from what was known that week; a
-  player hurt before week 1 keeps his draft-time value; one listed nowhere that week keeps his live value), and
+  out with an injury or suspension (from a hard tag until the first game he is available for: he plays, or his
+  team plays and he carries no hard tag, so a healthy scratch, a backup without a stat line or a released
+  player is valued live again from the week after), his healthy value is the one he had the week before the
+  absence began (built from what was known that week, with today's bye bump like anyone's; a player hurt before
+  week 1 keeps his draft-time value; one listed nowhere that week keeps his live value; a second absence right
+  after a return freezes at his live value of the return week), and
   the chart is that value less a share that follows the user's targets: out 1-4 weeks about 5-12% (one game
   6% at any point of the season), 6+ weeks 35-45% when first reported and less each week as the return nears,
-  out for the season the whole chart. At 13 games left: 1 game missed 6%, 3 10%, 4 12%, 6 40%, 8 45%, 10 45%,
-  12 75% (past 4 games never less than (share of the remaining games missed)^3.6, so the 45% cap holds until
-  he misses 80% of what is left). So the value falls once when he goes out and climbs back each week, reaching
+  out for the season (or a return after the league's last week) the whole chart. At 13 games left: 1 game
+  missed 6%, 3 10%, 4 12%, 6 40%, 8 45%, 12 45%; never less than 0.6 x (share of the remaining games missed -
+  0.35), a ramp that matters once he misses most of what is left (2 of the last 3 games 19%, 4 of the last 5
+  27%) and is as steep as the targets allow: one more game missed or left never moves it by more than 15
+  points, and a fixed return week never costs more the next week. So the value falls once when he goes out and climbs back each week, reaching
   his old value the week he returns: before this the experts' and the model's ranks fell while he was out and
   the discount came on top (2026 superflex QA league: Aaron Rodgers missing one game 474 -> 129, now 446;
   2027: Jonathan Taylor out weeks 7-14 789 -> 209, now 454 climbing to 741; real 2024: Puka Nacua worth least,
@@ -1082,7 +1087,8 @@ that week's games on; only scoring a week reads its real points.
   held-out error 4.008 -> 4.023, out players 3.006 -> 3.159; superflex 0.561 -> 0.553, 5.040 -> 5.046; over the
   last starter (`--bench 0`) 0.533 -> 0.532 and 4.118 -> 4.114. The frozen value of injured players: regular
   0.552 -> 0.538, 4.028 -> 4.072, out players 3.185 -> 3.516; superflex 0.575 -> 0.560, 5.007 -> 5.069, out
-  players 3.732 -> 4.162. On the full population, which now keeps the non-QBs that used to slide below 50,
+  players 3.732 -> 4.162; ending an absence at the first game he is available for, the continuous discount
+  and the bye bump: regular out players 3.325 -> 3.305, superflex 4.048 -> 4.023. On the full population, which now keeps the non-QBs that used to slide below 50,
   superflex Spearman 0.561 -> 0.579 and held-out error 5.043 -> 4.998 for the QB mapping.
   What it found and left alone: superflex QBs at every tier produce more per game over a bench-deep
   replacement than equal-chart non-QBs (QB1-6 +4.8, 7-12 +5.3, 13-24 +5.7, 25-36 +3.3 points a game), and

@@ -18,7 +18,7 @@ included) out of his team's `left` remaining games takes off:
   8-11, 16.7% with 12+ (he came back 0.3%, 2.3%, 9.5% and 27% of the time).
 The chart discounts the value he had before the absence (replay_values._frozen), so it falls once by this
 curve and climbs back as the return nears; the experts' and the model's ranks, which drop while he is out,
-are not read until he plays again.
+are not read until he is available for a game again (replay_values._absences).
 At 13 games left: 1 missed 6%, 2 8%, 3 10%, 4 12%, 6 40%, 8 45%, 10 45%, 12 45%.
 Real results (services.replay_chart_eval, 2018-25, regular lineup) say a known absence costs at least its share
 of games and players come back worse (out players realised 0.40 of their pre-injury value; the chart keeps 0.63),
