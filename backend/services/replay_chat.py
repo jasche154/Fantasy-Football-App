@@ -30,6 +30,7 @@ When lines are posted (replay_game calls these; each reads only what is known wh
 Text is built from team names, player names and numbers only. Pure.
 """
 import json
+import re
 import statistics
 import textwrap
 from collections.abc import Mapping, Sequence
@@ -108,11 +109,15 @@ def _voice(team: Team, kind: str) -> str:
     return team.persona if team.persona in bank()[kind] else "balanced"
 
 
+TRADE_TALK = re.compile(r"phone|shop|trade|what you'd take", re.IGNORECASE)   # lines that invite a deal
+
+
 def _render(lines: Sequence[str], used: Sequence[int], kind: str, values: Mapping[str, object],
-            order: Sequence[int]) -> tuple[int, str]:
+            order: Sequence[int], quiet_trades: bool = False) -> tuple[int, str]:
     """(line index, text): the least-used line, in seeded `order`, whose text fits MAX_CHARS; when none fits,
-    the shortest, cut at a word."""
-    ranked = sorted(range(len(lines)), key=lambda n: (used[n], order[n]))
+    the shortest, cut at a word. `quiet_trades`: trades are closed, so no line that invites a deal (TRADE_TALK)."""
+    allowed = [n for n in range(len(lines)) if not (quiet_trades and TRADE_TALK.search(lines[n]))] or range(len(lines))
+    ranked = sorted(allowed, key=lambda n: (used[n], order[n]))
     texts = [(n, lines[n].format_map({key: values[key] for key in PLACEHOLDERS[kind]})) for n in ranked]
     fits = next(((n, text) for n, text in texts if len(text) <= MAX_CHARS), None)
     if fits is not None:
@@ -122,9 +127,9 @@ def _render(lines: Sequence[str], used: Sequence[int], kind: str, values: Mappin
 
 
 def post(state: State, team: Team, kind: str, values: Mapping[str, object], seed: int, *, to_team: int | None = None,
-         player_ids: Sequence[int] = (), week: int | None = None) -> State:
+         player_ids: Sequence[int] = (), week: int | None = None, quiet_trades: bool = False) -> State:
     """The state with one line from `team` added (dated `week`, default the current one): the least-used line
-    of its (kind, voice) bucket, seeded, that fits MAX_CHARS."""
+    of its (kind, voice) bucket, seeded, that fits MAX_CHARS (`quiet_trades`: none inviting a deal)."""
     voice = _voice(team, kind)
     lines, voices = bank()[kind][voice], {t.id: _voice(t, kind) for t in state.teams}
     used = [0] * len(lines)
@@ -132,7 +137,7 @@ def post(state: State, team: Team, kind: str, values: Mapping[str, object], seed
         if chat.kind == kind and voices.get(chat.team_id) == voice and 0 <= chat.line < len(lines):
             used[chat.line] += 1
     order = rs.rng(seed, "chat-line", len(state.chat), team.id, kind).permutation(len(lines))
-    line, text = _render(lines, used, kind, values, order)
+    line, text = _render(lines, used, kind, values, order, quiet_trades)
     text = rs.tidy(text)
     chat = Chat(id=len(state.chat) + 1, week=state.week if week is None else week, team_id=team.id, to_team=to_team,
                 kind=kind, text=text, player_ids=tuple(player_ids), line=line)
@@ -288,10 +293,12 @@ def after_week(state: State, settings: Settings, know: Knowledge, seed: int, pla
     before = replace(state, results=state.results[:-1])
     user = rs.user_team(state)
     lines = _game_lines(state, settings, know, played, before, result, seed)
+    quiet = not rs.trades_open(state, settings)          # no "my phone is on" once nobody can trade
     for _, team, kind, values, players in lines[:MAX_WEEK_LINES]:
         opponent = next((p for p in result.matchups if team.id in p and user.id in p), None)
         to_team = user.id if opponent and kind in TO_OPPONENT else None
-        state = post(state, team, kind, values, seed, to_team=to_team, player_ids=players, week=result.week)
+        state = post(state, team, kind, values, seed, to_team=to_team, player_ids=players, week=result.week,
+                     quiet_trades=quiet)
     return state
 
 

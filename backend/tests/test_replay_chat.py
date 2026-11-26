@@ -364,3 +364,19 @@ def test_margins_and_booms_scale_with_the_leagues_scores():
     assert chat.thresholds(doubled) == pytest.approx(tuple(2 * x for x in chat.thresholds(state)))
     close, blowout, boom = chat.thresholds(state)
     assert 8 < close < 12 and 20 < blowout < 30 and 20 < boom < 30         # a half-PPR league: about 10, 25, 25
+
+
+def test_no_line_inviting_a_deal_once_trades_are_closed():
+    """Tester: "my phone is on" after the final week, with trades closed."""
+    lines = ["Down {margin}. My phone is on.", "Down {margin}. Ouch."]
+    values = {key: 7 for key in chat.PLACEHOLDERS["blowout_loss"]}
+
+    open_line = chat._render(lines, [0, 1], "blowout_loss", values, [0, 1])
+    closed_line = chat._render(lines, [0, 1], "blowout_loss", values, [0, 1], quiet_trades=True)
+
+    assert open_line[0] == 0 and closed_line == (1, "Down 7. Ouch.")
+
+
+def test_a_sentence_ending_on_a_name_with_a_full_stop_keeps_one():
+    assert rs.tidy("Worried about Deebo Samuel Sr..") == "Worried about Deebo Samuel Sr."
+    assert rs.tidy("1.6 points from Deebo Samuel Sr.. Wait...") == "1.6 points from Deebo Samuel Sr. Wait..."

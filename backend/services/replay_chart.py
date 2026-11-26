@@ -61,6 +61,8 @@ EXPERT_FRESH_DAYS = 10
 UNLISTED_GAP = 10              # missing from an existing snapshot: last listed + this
 BYE_BUMP = 1.03                # once his bye is behind him
 DAYS_PER_WEEK = 7
+HYPE_ESTABLISHED = 24          # a role shock's "he won the backfield" never for a player already this high at his
+                               # position (James Cook, Derrick Henry), nor for one who is out
 STAND_IN_EXPERTS = True        # a season with no expert ranks at all: ros_ppg ranks stand in at EXPERT_WEIGHT
 
 
@@ -337,7 +339,8 @@ def _shocked(data: SeasonData, rows: Mapping[int, dict], fields: Mapping[int, di
     healthy = {pid: f["healthy_chart"] for pid, f in fields.items()}
     curve = slot_curve(data)
     out: dict[int, dict] = {}
-    found = replay_shocks.moves(data, week, availability, healthy, healthy_ranks(rows, healthy),
+    ranks = healthy_ranks(rows, healthy)
+    found = replay_shocks.moves(data, week, availability, healthy, ranks,
                                 lambda position, rank: value_at(curve, position, rank))
     for pid, (delta, shock) in found.items():
         now = news.get(pid, fields[pid])
@@ -345,7 +348,9 @@ def _shocked(data: SeasonData, rows: Mapping[int, dict], fields: Mapping[int, di
         chart = now["chart"] * moved / now["healthy_chart"]          # > 0: moves() scales delta by it
         other = data.players[shock.other].name if shock.other in data.players else None
         missed = 1.0 - availability.get(shock.other, 1.0)
-        hype = replay_shocks.reason(shock, other, missed) if delta >= replay_shocks.STAR_MIN else None
+        hyped = (delta >= replay_shocks.STAR_MIN and not now.get("out", rows[pid].get("out"))
+                 and not (shock.kind == "role_won" and shock.anchor <= HYPE_ESTABLISHED))
+        hype = replay_shocks.reason(shock, other, missed) if hyped else None
         out[pid] = {**now, "healthy_chart": round(moved, 1), "chart": round(chart, 1),
                     "shock_chart": round(delta, 1), "shock": shock.kind, "hype_reason": hype}
     return out
