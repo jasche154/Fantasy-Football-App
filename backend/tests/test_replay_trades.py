@@ -7,6 +7,7 @@ chart built here from each week's healthy values, so these tests do not depend o
 """
 import itertools
 import math
+import re
 import time
 from collections.abc import Mapping
 from dataclasses import replace
@@ -188,16 +189,29 @@ def test_hard_difficulty_needs_more_back_than_normal():
     normal_verdict, hard_verdict = judge(*deal), judge(*deal, settings=hard)
 
     assert normal_verdict.accepted and not hard_verdict.accepted
-    assert said(hard_verdict, "They want 11% more than they give.")              # 1.08 x the 3% margin
+    assert said(hard_verdict, "They want 11% more than they give (")              # 1.08 x the 3% margin
 
 
 def test_a_value_decline_names_the_margin_and_a_lineup_loss():
     verdict = judge(RICH, [SCRUB], [P("RB", 2)])                         # a scrub for its starting back
 
-    assert said(verdict, "They want 3% more than they give.")
+    assert said(verdict, "They want 3% more than they give (")
     assert said(verdict, "It would weaken their starting lineup")
     assert not said(judge(8, [RB14], [P("QB", 4)], settings=fakes.fake_settings(difficulty="hard")),
                     "weaken their starting lineup")
+
+
+def test_a_value_decline_adds_up_to_the_shortfall_the_suggestion_quotes():
+    """Testers: "They want 3% more" beside a suggestion asking for 39-406 more; "add about 49" for a gap of 32."""
+    for deal in ((RICH, [SCRUB], [P("RB", 2)]), (8, [RB14], [P("QB", 4)])):
+        verdict = judge(*deal, settings=fakes.fake_settings(difficulty="hard"))
+        sentence = next(r for r in verdict.reasons if r.startswith(rt.VALUE_REASONS))
+        gives, gets = (int(re.search(rf"{word} (\d+)", sentence).group(1)) for word in ("give", "get"))
+        parts = sum(int(n) for n in re.findall(r"\((\d+)\)", sentence))       # lineup loss, the share on top
+        need = int(re.search(r"They need about (\d+) more", sentence).group(1))
+
+        assert abs(gives + parts - gets - need) <= 2 and "-" not in sentence
+        assert verdict.suggestion == f"Add about {need} points of value to make this fair." or verdict.suggestion.startswith("Add ")
 
 
 def test_asking_again_gives_the_same_verdict_and_a_declined_proposal_is_kept_once():
@@ -745,3 +759,20 @@ def test_a_suggested_player_really_makes_the_deal_go_through():
         assert after.accepted, (named, after.reasons)
         followed += 1
     assert followed >= 5
+
+
+def test_a_suggestion_never_names_the_users_only_healthy_starter_at_a_position(monkeypatch):
+    """Tester: "Add Patrick Mahomes" when Mahomes was the user's only quarterback."""
+    state, know = league()
+    user = rs.user_team(state)
+    qb, backup = sorted((p for p in user.roster if know.by_id[p].position == "QB"), key=lambda p: -know.by_id[p].chart)
+    alone = rs.with_team(state, replace(user, roster=tuple(p for p in user.roster if p != backup)))
+    deal = (5, [SCRUB], [P("RB", 27)])
+
+    with monkeypatch.context() as patched:                  # as before: any spare player could be named
+        patched.setattr(rt.rv, "can_field_lineup", lambda *args: True)
+        before = rt.evaluate(alone, SETTINGS, know, USER, *deal)
+    now = rt.evaluate(alone, SETTINGS, know, USER, *deal)
+
+    assert know.by_id[qb].name in (before.suggestion or "")
+    assert know.by_id[qb].name not in (now.suggestion or "")

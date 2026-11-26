@@ -543,7 +543,7 @@ def test_a_lineup_loss_bigger_than_the_value_gap_left_is_why_and_the_sentence_le
 
     assert reasons.lineup_led(side) and rt._decline(SETTINGS, know, side)[0] == "decline_need"
     sentence = reasons._value_reason(side, other, know, 1.03)
-    assert sentence.startswith(f"{rt.VALUE_REASON}: It would weaken their starting lineup (worth 78")
+    assert sentence.startswith(f"{rt.LINEUP_REASON} (worth 78")                    # the real reason first
     small = replace(side, tally=replace(side.tally, lineup=-3.0))
     assert not reasons.lineup_led(small) and "weaken" not in reasons._value_reason(small, other, know, 1.03).split(".")[0]
 
@@ -949,3 +949,54 @@ def test_a_fan_drafts_his_rivals_player_only_when_nobody_else_fits(fan_of_rival)
     forced, _ = rd._candidates(taken_but(rivals), known, ["QB"], 1, 1, fan)
     assert [p.player_id for p in picked] == [one_other]
     assert forced and all(p.player_id in rivals for p in forced)
+
+
+@pytest.mark.parametrize("floor_decides", [True, False])
+def test_the_out_player_floor_is_named_only_when_it_changed_the_answer(floor_decides):
+    """Oracle 2023: every declined deal with an out player said "won't let X go for less than 50%", even when
+    the floor was not what blocked it."""
+    from types import MappingProxyType
+
+    from services import replay_trade_reasons as reasons
+    know, side, theirs, mine = _stub_side("none")
+    know = replace(know, by_id=MappingProxyType({**know.by_id, theirs: replace(know.by_id[theirs], out=True)}))
+
+    def rescore(**changed):
+        return replace(side.tally, score=5.0 if floor_decides and changed.get("floor") is False else -5.0)
+
+    sentence = reasons._value_reason(replace(side, rescore=rescore), rs.user_team(league()[0]), know, 1.03)
+
+    assert ("won't let" in sentence) == floor_decides
+
+
+def test_a_deal_the_chart_calls_fair_is_never_declined_as_nowhere_near():
+    know, side, theirs, mine = _stub_side("none", score=-500.0, rest=-500.0)
+
+    assert rt._decline(SETTINGS, know, side)[0] == "decline_value"
+    assert rt._decline(SETTINGS, know, side, fair=True)[0] == "decline_close"
+
+
+def test_deep_at_a_position_is_said_only_when_he_holds_more_there_than_he_starts():
+    """Tester: "I'm deep at TE" when George Kittle was their only tight end."""
+    know, side, theirs, mine = _stub_side("deep", deep=frozenset({"WR"}))
+    starting = own_slots("WR", SETTINGS.starters)
+    receivers = [pid for pid in side.team.roster if know.by_id[pid].position == "WR"]
+    thin = replace(side, team=replace(side.team, roster=tuple(
+        pid for pid in side.team.roster if pid not in receivers[starting:])))
+
+    assert rt._decline(SETTINGS, know, side)[0] == "decline_need"
+    assert rt._decline(SETTINGS, know, thin)[0] != "decline_need"
+
+
+def test_a_value_decline_names_its_own_cuts_and_the_players_it_is_high_on(monkeypatch):
+    from services import replay_trade_reasons as reasons
+    know, side, theirs, mine = _stub_side("none")
+    own = next(pid for pid in side.team.roster if pid != theirs)
+    monkeypatch.setattr(st, "markup", lambda know, mind, pid: 0.1 if pid == theirs else 0.0)
+    cutting = replace(side, drops=(own,), tally=replace(side.tally, received=-13.0, cut=60.0))
+
+    sentence = reasons._value_reason(cutting, rs.user_team(league()[0]), know, 1.03)
+
+    assert f"They would have to cut {know.by_id[own].name} to make room, worth 60 to them." in sentence
+    assert f"They are high on {know.by_id[theirs].name}: they count him" in sentence
+    assert "get 47 back" in sentence and "-" not in sentence                 # never a negative "get back"

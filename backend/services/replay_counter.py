@@ -5,7 +5,7 @@ re-proposing can't reroll it), and searches at most once per week (`State.counte
 counter a week and repeated declines never rerun the search. Candidates: add one of the user's players, swap a
 requested player for a lesser one at his position, or drop one requested player; it picks the one it accepts
 that costs the user least (never a "big_loss" for the user, never one needing a user drop, never one asking for
-a player it would cut on arrival) and stores it as a
+a player it would cut on arrival, never one selling a starter at the position its decline said it needs) and stores it as a
 pending Offer(counter_to=declined.id). The declined deal is re-checked with the user's own drops. It never
 counters a counter of its own counter: the user can only answer a counter in the week it was made, and a CPU
 counters at most once a week.
@@ -15,7 +15,7 @@ counters at most once a week.
 from collections.abc import Iterator, Sequence
 from dataclasses import replace
 
-from services import replay_personas, replay_state as rs, replay_trade_ai, replay_trades as rt
+from services import replay_personas, replay_state as rs, replay_trade_ai, replay_trades as rt, replay_values as rv
 from services.replay_state import Offer, Settings, State, Team
 from services.replay_values import Knowledge
 
@@ -50,16 +50,20 @@ def counter_offer(state: State, settings: Settings, know: Knowledge, declined: O
         return state
     try:
         verdict = rt.evaluate(state, settings, know, declined.from_team, cpu.id, declined.give, declined.get,
-                              user_drops)
+                              user_drops, explain=True)
     except ValueError:
         return state
-    if verdict.accepted or not all(reason.startswith(rt.VALUE_REASON) for reason in verdict.reasons):
+    if verdict.accepted or not all(reason.startswith(rt.VALUE_REASONS) for reason in verdict.reasons):
         return state
     if rs.rng(seed, "counter", state.week, cpu.id).random() >= replay_personas.counter_rate(cpu.persona):
         return state
     state = replace(state, counter_searched={**state.counter_searched, cpu.id: state.week})
     best: tuple[float, Deal] | None = None
+    guarded = verdict.decline_position if verdict.decline == "decline_need" else None   # "my TE spot isn't for sale"
+    starters = rv.starters(know, cpu.roster, settings) if guarded else frozenset()
     for give, get in _candidates(state, know, cpu, declined.give, declined.get):
+        if any(pid in starters and know.by_id[pid].position == guarded for pid in get):
+            continue
         try:
             found = rt.evaluate(state, settings, know, declined.from_team, cpu.id, give, get)
         except ValueError:                       # e.g. it would need the user to drop someone

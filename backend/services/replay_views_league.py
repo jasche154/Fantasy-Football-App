@@ -130,7 +130,7 @@ def verdict(game: Game, found: Verdict) -> dict:
             "percent": found.percent, "your_gain": found.your_gain, "their_gain": found.their_gain,
             "give": priced(found.give_values), "get": priced(found.get_values),
             "your_drops": refs(game, found.your_drops), "their_drops": refs(game, found.their_drops),
-            "suggestion": found.suggestion}
+            "suggestion": found.suggestion, "premium": round(found.premium, 1)}
 
 
 def offer_row(game: Game, offer: Offer) -> dict:

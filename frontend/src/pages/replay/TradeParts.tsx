@@ -99,11 +99,25 @@ function sumValues(players: readonly { value: number }[]): number {
   return players.reduce((total, player) => total + player.value, 0);
 }
 
+/** Names what the totals add to the players' own values: the best-player premium and the drops. */
+export function totalsNote(verdict: ReplayVerdict): string | null {
+  const premium = verdict.premium ?? 0;
+  const dropped = sumValues(verdict.get) + Math.max(0, premium) - verdict.value_get;
+  const parts = [
+    premium > 0.5 && `what you get includes +${formatInteger(premium)} for the best player in the deal`,
+    premium < -0.5 && `what you give includes +${formatInteger(-premium)} for the best player in the deal`,
+    dropped > 0.5 && `what you get is less ${formatInteger(dropped)} for the players you would drop`,
+  ].filter(Boolean);
+  if (parts.length > 0) return `The totals: ${parts.join('; ')}.`;
+  const isAdjusted = Math.abs(sumValues(verdict.give) - verdict.value_give) > 0.1
+    || Math.abs(sumValues(verdict.get) - verdict.value_get) > 0.1;
+  return isAdjusted ? 'The totals count the best player in the deal a little extra and take off anyone you would drop.' : null;
+}
+
 /** A verdict from the user's side: the balance, both values, the lineup gains, drops and why a CPU says no. */
 export function TradeVerdictView({ verdict, partner, isOffer = false }: TradeVerdictViewProps) {
   const copy = VERDICT_COPY[verdict.fair_label];
-  const isAdjusted = Math.abs(sumValues(verdict.give) - verdict.value_give) > 0.1
-    || Math.abs(sumValues(verdict.get) - verdict.value_get) > 0.1;
+  const note = totalsNote(verdict);
   const noted = [...verdict.give, ...verdict.get].filter((row) => row.note);
   return (
     <div className="replay-verdict">
@@ -111,7 +125,7 @@ export function TradeVerdictView({ verdict, partner, isOffer = false }: TradeVer
       <p>
         <span className={`status-badge verdict--${copy.tone}`}><span aria-hidden="true">{copy.symbol} </span>{copy.label}</span>{' '}
         on trade value. You give {formatInteger(verdict.value_give)} value, get {formatInteger(verdict.value_get)}.
-        {isAdjusted && ' The totals count the best player in the deal a little extra and take off anyone you would drop.'}
+        {note && ` ${note}`}
       </p>
       {noted.map((row) => <p key={row.player.id} className="hint">{row.player.name}: {row.note}.</p>)}
       <p>

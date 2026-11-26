@@ -197,3 +197,23 @@ def test_a_counter_never_asks_for_a_player_the_cpu_would_cut_on_arrival(always, 
 
     assert all(added not in offer.get for offer in after.offers[len(state.offers):])
     assert rt.cuts_an_arrival(cut_him(state, SETTINGS, know, USER, CPU, plain.get, plain.give), plain.get, plain.give)
+
+
+def test_a_counter_never_sells_a_starter_at_the_position_its_decline_says_it_needs(always, monkeypatch):
+    """Tester: "My TE spot isn't for sale", then a counter that sold Trey McBride."""
+    from services import replay_values as rv
+    state, know, mine = declined()
+    cpu = rs.team(state, CPU)
+    starters = rv.starters(know, cpu.roster, SETTINGS)
+    position = know.by_id[mine.get[0]].position
+    evaluate = rt.evaluate
+
+    def needs_it(*args, **kwargs):
+        verdict = evaluate(*args, **kwargs)
+        return replace(verdict, decline="decline_need", decline_position=position) if kwargs.get("explain") else verdict
+
+    monkeypatch.setattr(rc.rt, "evaluate", needs_it)
+    after = rc.counter_offer(state, SETTINGS, know, mine, seed=0)
+
+    sold = [pid for offer in after.offers[len(state.offers):] for pid in offer.give]
+    assert not [pid for pid in sold if pid in starters and know.by_id[pid].position == position]
