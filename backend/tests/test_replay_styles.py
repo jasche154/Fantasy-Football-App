@@ -860,3 +860,92 @@ def test_a_fans_lineup_cover_skips_his_rivals_free_agents_unless_nobody_else_can
 
     assert know.by_id[first].position == "QB" and fans.club(know.by_id[second].team) != hated
     assert fans.club(know.by_id[forced].team) == hated
+
+
+# ---------------- edge cases ----------------
+
+def test_the_need_bonus_with_nothing_sent_is_the_plain_rate():
+    know = values(p1=star(400.0, position="RB"))
+    mind = replace(st.plain("balanced"), needs=frozenset({"RB"}), deep=frozenset({"WR"}), filling=frozenset({1}))
+    assert st.need_bonus(know, mind, (), {1: 400.0}, {}) == pytest.approx(st.NEED_BONUS * 400)
+
+
+def _games(team_id: int, games: list[tuple[str, bool]]) -> list[rs.WeekResult]:
+    """One result per entry, (outcome "W" | "L" | "T" | "bye", playoff week?), for team_id against team 2."""
+    played = []
+    for week, (outcome, playoff) in enumerate(games, start=1):
+        if outcome == "bye":
+            played.append(rs.WeekResult(week, ((2, 3),), {2: 100.0, 3: 90.0}, {}, {}, playoff))
+            continue
+        mine = {"W": 120.0, "L": 80.0, "T": 100.0}[outcome]
+        played.append(rs.WeekResult(week, ((team_id, 2),), {team_id: mine, 2: 100.0}, {}, {}, playoff))
+    return played
+
+
+@pytest.mark.parametrize("games, streak", [
+    ([("W", False), ("L", False), ("bye", False), ("L", False), ("L", True)], -3),    # a bye is skipped; playoffs count
+    ([("L", False), ("L", False), ("T", False), ("L", False)], -1),                     # a tie ends a run
+    ([("L", False), ("W", False), ("W", False)], 2),
+    ([], 0),
+])
+def test_a_streak_skips_byes_counts_playoff_games_and_ends_at_a_tie(games, streak):
+    """What drives the tilted style: losses in a row."""
+    state = replace(league()[0], results=tuple(_games(CPU, games)))
+
+    assert rs.streak(state, CPU) == streak and rs.losses_in_a_row(state, CPU) == max(0, -streak)
+
+
+def test_a_haggler_does_not_counter_a_stale_offer_a_counter_or_one_for_a_player_who_left():
+    state, know = _haggler_league()
+    opening = state.offers[-1]
+    declined = rt.respond(state, SETTINGS, know, opening.id, accept=False)
+    offer = next(o for o in declined.offers if o.id == opening.id)
+    user = rs.user_team(declined)
+    gone = rs.with_team(declined, replace(user, roster=tuple(p for p in user.roster if p not in offer.get)))
+
+    assert replay_counter.haggle_counter(declined, SETTINGS, know, offer) is not declined          # the normal case
+    assert replay_counter.haggle_counter(replace(declined, week=declined.week + 1), SETTINGS, know, offer).offers == \
+        declined.offers                                                                           # made last week
+    countered = replace(offer, counter_to=99)
+    assert replay_counter.haggle_counter(declined, SETTINGS, know, countered) is declined          # a counter itself
+    assert replay_counter.haggle_counter(gone, SETTINGS, know, offer) is gone                     # his player left
+
+
+def test_a_fan_adds_his_rivals_quarterback_only_when_no_other_can_fill_the_slot(fan_of_rival):
+    from services import replay_waiver_ai as wai
+    state, know = league()
+    team = rs.team(state, CPU)
+    without = tuple(p for p in team.roster if know.by_id[p].position != "QB")
+    state = with_team(state, CPU, roster=without)
+    free_qbs = [v for v in know.values if v.position == "QB" and v.player_id not in rs.rostered(state)]
+    hated = fans.club(max(free_qbs, key=lambda v: v.chart).team)
+    others = tuple(v.player_id for v in free_qbs if fans.club(v.team) != hated)
+    state = with_team(replace(state, phase="open", locked=others), CPU, roster=without, persona="fan",
+                      fan_of=fan_of_rival(hated))
+
+    after = wai.cpu_free_agency(state, SETTINGS, know, 0)
+    qbs = [p for p in rs.team(after, CPU).roster if know.by_id[p].position == "QB"]
+    assert qbs and all(fans.club(know.by_id[p].team) == hated for p in qbs)
+
+
+def test_a_fan_drafts_his_rivals_player_only_when_nobody_else_fits(fan_of_rival):
+    from services import replay_draft as rd
+    from tests import replay_fakes as fakes
+    data = fakes.fake_season()
+    known = data.as_of(0)
+    state = rd.new_game(SETTINGS, 1)
+    qbs = [p for p in known.players.values() if p.position == "QB"]          # with an ADP or not
+    hated = fans.club(known.team_at(next(p for p in qbs if p.adp is not None).player_id, 0))
+    fan = replace(rs.team(state, CPU), persona="fan", fan_of=fan_of_rival(hated))
+    state = rs.with_team(state, fan)
+    rivals = [p.player_id for p in qbs if fans.club(known.team_at(p.player_id, 0)) == hated]
+
+    def taken_but(keep: list[int]) -> rs.State:
+        stash = tuple(p.player_id for p in qbs if p.player_id not in keep)
+        return rs.with_team(state, replace(rs.team(state, 2), roster=stash))
+
+    one_other = next(p.player_id for p in qbs if p.player_id not in rivals)
+    picked, _ = rd._candidates(taken_but(rivals + [one_other]), known, ["QB"], 1, 1, fan)
+    forced, _ = rd._candidates(taken_but(rivals), known, ["QB"], 1, 1, fan)
+    assert [p.player_id for p in picked] == [one_other]
+    assert forced and all(p.player_id in rivals for p in forced)
