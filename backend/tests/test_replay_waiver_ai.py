@@ -855,3 +855,23 @@ def test_covering_a_slot_never_cuts_a_better_player_who_is_only_on_a_bye():
     move = ai._cover(hole, free, ctx)
 
     assert move is None or move[1] != bye.player_id
+
+
+def test_a_cpus_stash_and_free_agency_choices_about_an_injured_player_move_only_through_the_news(monkeypatch):
+    """No hindsight: his real return week reaches CPU IR and free-agency choices only through replay_news.report."""
+    from types import MappingProxyType
+
+    from services import replay_news
+    week, data = 6, fakes.fake_season()
+    since = next(s for (pid, s) in data.returns if pid == STAR)
+    later = replace(data, returns=MappingProxyType({**data.returns, (STAR, since): data.last_week}))
+    monkeypatch.setattr(replay_news, "report", lambda seed, pid, since, back, w, tag, last=None:
+                        replay_news.Report(since, since + 4, "Out; expected back."))
+
+    def moves(season):
+        knowledge = fakes.fake_knowledge(week, SETTINGS, season)
+        state = ai.cpu_ir(league(week, phase="open"), SETTINGS, knowledge, SEED)
+        return ai.cpu_free_agency(state, SETTINGS, knowledge, SEED)
+
+    assert moves(data) == moves(later)
+    assert any(STAR in team.ir for team in moves(data).teams)
