@@ -156,8 +156,9 @@ def test_saves_from_before_either_feature_and_from_each_one_load():
     assert rs.settings_from_json(json.dumps(settings)) == K8
     assert (chat_branch.start_week, chat_branch.sim_from) == (1, None)
     assert rs.state_from_json(json.dumps(saved)) == state
-    played = rg.advance(sim_branch, K8, MARKET8, SEED, rg.WEDNESDAY if sim_branch.phase == "waivers" else rg.PLAY)
-    assert played.chat or played.phase == "waivers"
+    played = rg.advance(sim_branch, K8, MARKET8, SEED, rg.WEDNESDAY) if sim_branch.phase == "waivers" else sim_branch
+    played = rg.advance(played, K8, MARKET8, SEED, rg.PLAY)               # the week's games always bring chat lines
+    assert played.chat
 
 
 # ---------------- a simulated league over HTTP ----------------

@@ -17,7 +17,12 @@ bye is behind him.
   latest expert snapshot by week K instead: its "preseason" is its draft.
 - model_ppg: ros_ppg + k x (mean of his last <= FORM_GAMES real games - ros_ppg), k = n / FORM_GAMES x
   FORM_WEIGHT, x (1 - FORM_STAR_DOWN x star) for a dip, x (1 + FORM_STAR_UP x star) for a rise while ros_ppg
-  is below his prior.
+  is below his prior. FORM_GAMES = 5 is the user's choice ("values should swing a little less"), informed by real
+  2020-25 weeks: after a big (25%+) one-week move with no news behind it the old value was closer to his next four
+  weeks 71% of the time. Against the old chart (3 games at FORM_WEIGHT 0.5), a real 5-game window (recent_points
+  carries replay_values.RECENT_GAMES = 5) cuts those no-news moves from 1,617 to 1,335 (-17%; 3 games at weight
+  0.3 cut them only 12%), at held-out RMSE 4.030 -> 4.037 regular (out players 3.160 -> 3.164) and 5.020 -> 5.019
+  superflex (out players 3.857 -> 3.842) on the same player-weeks.
 
 - healthy_chart = w x value_at(expert rank) + (1 - w) x value_at(model rank), x BYE_BUMP once the bye is
   past, never above CHART_MAX (nor after an opportunity shock). The model rank is his fractional position
@@ -52,7 +57,7 @@ EMPTY_CURVE_START = 200.0      # a position nobody drafted starts here
 KDST = ("K", "DST")
 KDST_FIRST_PICK = 150.0        # K/DST slot curve starts no earlier than this pick (FFC ADP drafts them too early)
 STAR_TOP, STAR_SPAN = 60, 48   # star = clamp((STAR_TOP - pre_rank) / STAR_SPAN, 0, 1)
-FORM_GAMES = 3                 # model_ppg: his last real games
+FORM_GAMES = 5                 # model_ppg: his last real games (the user's choice, module docstring)
 FORM_WEIGHT = 0.50
 FORM_STAR_DOWN = 0.6           # a star's dip counts less
 FORM_STAR_UP = 0.3             # a breakout below his prior counts more for a star
@@ -61,6 +66,8 @@ EXPERT_FRESH_DAYS = 10
 UNLISTED_GAP = 10              # missing from an existing snapshot: last listed + this
 BYE_BUMP = 1.03                # once his bye is behind him
 DAYS_PER_WEEK = 7
+HYPE_ESTABLISHED = 24          # a role shock's "he won the backfield" never for a player already this high at his
+                               # position (James Cook, Derrick Henry), nor for one who is out
 STAND_IN_EXPERTS = True        # a season with no expert ranks at all: ros_ppg ranks stand in at EXPERT_WEIGHT
 
 
@@ -95,6 +102,11 @@ replay_pool.EVICT_HOOKS.append(clear_cache)
 def pick_value(pick: float) -> float:
     """Chart points for a draft pick: CHART_MAX at pick 1, decaying by TAU."""
     return CHART_MAX * math.exp(-(max(1.0, pick) - 1) / TAU)
+
+
+def chart_pick(value: float) -> float | None:
+    """The draft pick `pick_value` gives this many chart points (None for 0: undraftable)."""
+    return 1.0 + TAU * math.log(CHART_MAX / value) if value > 0 else None
 
 
 def pick_at(curve: Mapping[str, Sequence[float]], position: str, rank: float) -> float:
@@ -203,6 +215,11 @@ def _bye_done(data: SeasonData, team: str | None, week: int) -> bool:
     return team is not None and any(data.schedule.opponent(team, w) is None for w in range(1, week))
 
 
+def _games_missed(data: SeasonData, team: str | None, since: int, week: int) -> int:
+    """His team's games from the first week of his absence to the week before `week`."""
+    return sum(data.schedule.opponent(team, w) is not None for w in range(max(1, since), week)) if team else 0
+
+
 def _game_weeks(data: SeasonData, team: str | None, week: int, end_week: int) -> list[int]:
     return [w for w in range(max(1, week), end_week + 1) if data.schedule.opponent(team, w) is not None]
 
@@ -224,7 +241,8 @@ def _injured(data: SeasonData, row: dict, news: "replay_news.Report | None", wee
     return (expert + model) * (1 - replay_chart_injury.discount(len(games) * (1 - share), len(games))), extra
 
 
-Parts = Mapping[int, tuple[float, float, tuple[int, int, str]]]    # {id: (expert part, model part, open streak)}
+# {id: (expert part, model part, open streak, team games already missed in a frozen absence or None)}
+Parts = Mapping[int, tuple[float, float, tuple[int, int, str], int | None]]
 
 
 def charts(data: SeasonData, rows: Sequence[dict], priors: Mapping[int, float], week: int, end_week: int,
@@ -241,14 +259,15 @@ def charts(data: SeasonData, rows: Sequence[dict], priors: Mapping[int, float], 
 def base_charts(data: SeasonData, rows: Sequence[dict], priors: Mapping[int, float], week: int,
                 end_week: int, drafted: int = 0, regular: SeasonData | None = None,
                 frozen: Mapping[int, float] | None = None, live: dict[int, float] | None = None,
-                ) -> tuple[dict[int, dict], Parts, str]:
+                since: Mapping[int, int] | None = None) -> tuple[dict[int, dict], Parts, str]:
     """`charts` without the seeded news: (fields with news None, the parts `with_news` needs for players
     with an open hard-tag streak, rank_source). `drafted`: the league's draft week (see `pre_picks`).
     `regular`: a superflex league's season on the 1-QB list (replay_superflex.one_qb), whose overall ranks
     set a non-QB's `star`, so the SUPERFLEX slot changes only the QBs. `frozen`: {id: healthy chart} for the
     players in an injury absence (replay_values), standing in for the expert and model parts; their live
-    healthy chart goes into `live` when given."""
-    frozen = frozen or {}
+    healthy chart goes into `live` when given; `since`: the first week of each frozen absence, so the frozen value
+    is scaled by `replay_chart_injury.return_factor` of the games missed (`with_news` uses the reported length)."""
+    frozen, since = frozen or {}, since or {}
     curve, picks = slot_curve(data), pre_picks(data, drafted)
     overall = pre_ranks(picks)
     star_ranks = overall if regular is None else {
@@ -283,13 +302,17 @@ def base_charts(data: SeasonData, rows: Sequence[dict], priors: Mapping[int, flo
             model_part = (1 - w) * model_value * bump
             if expert + model_part > CHART_MAX:         # the bye bump never lifts anyone past the top of the scale
                 expert, model_part = (part * CHART_MAX / (expert + model_part) for part in (expert, model_part))
+            missed = None
             if pid in frozen:                           # out: his value before the absence (replay_values._frozen)
                 if live is not None:
                     live[pid] = expert + model_part
                 expert, model_part = min(CHART_MAX, frozen[pid] * bump), 0.0
+                missed = _games_missed(data, row["team"], since.get(pid, week), week)
             streak = replay_news.open_streak(data, pid, week)
             if streak is not None:
-                parts[pid] = (expert, model_part, streak)
+                parts[pid] = (expert, model_part, streak, missed)
+            if missed is not None:                      # what he comes back worth (the length known so far)
+                expert *= replay_chart_injury.return_factor(missed)
             chart, _ = _injured(data, row, None, week, end_week, expert, model_part)
             fields[pid] = {
                 "chart": round(chart, 1), "healthy_chart": round(expert + model_part, 1),
@@ -306,11 +329,37 @@ def with_news(data: SeasonData, rows: Mapping[int, dict], fields: Mapping[int, d
     """{id: fields} for the players in `parts` (their seeded news report and the chart it gives) and the
     players an opportunity shock moves (replay_shocks: the market's reaction, which reads that news)."""
     out: dict[int, dict] = {}
-    for pid, (expert, model_part, (since, back, tag)) in parts.items():
-        news = replay_news.report(seed, pid, since, back, week, tag, data.last_week)
+    for pid, (expert, model_part, (since, back, tag), missed) in parts.items():
+        started = data.injuries.get((pid, since))          # the streak's first tag sets its news group
+        first = started.tag if started is not None else tag
+        news = replay_news.report(seed, pid, since, back, week, tag, data.last_week, first)
+        if news.vague:                                  # "no timetable yet": the market prices the whole spread
+            _, extra = _injured(data, rows[pid], news, week, end_week, expert, model_part)
+            chart = (expert + model_part) * _vague_keep(data, rows[pid], news, first, week, end_week, missed)
+            out[pid] = {**fields[pid], **extra, "chart": round(chart, 1), "news": news}
+            continue
+        if missed is not None:                          # frozen: what he comes back worth after the reported absence
+            games = _game_weeks(data, rows[pid]["team"], week, end_week)
+            left = len(games) * (1 - replay_news.share_played(news, games)) if news.back else len(games)
+            factor = replay_chart_injury.return_factor(missed + left)
+            expert, model_part = expert * factor, model_part * factor
         chart, extra = _injured(data, rows[pid], news, week, end_week, expert, model_part)
         out[pid] = {**fields[pid], **extra, "chart": round(chart, 1), "news": news}
     return {**out, **_shocked(data, rows, fields, out, week)}
+
+
+def _vague_keep(data: SeasonData, row: dict, news: "replay_news.Report", tag: str, week: int, end_week: int,
+                missed: int | None) -> float:
+    """The expected share of his (frozen) value kept over the public spread of return weeks (replay_news.vague_odds):
+    the return factor of the whole absence (frozen players only) x (1 - the discount of the games he misses)."""
+    games = _game_weeks(data, row["team"], week, end_week)
+    expected = 0.0
+    for back, chance in replay_news.vague_odds(news.since, week, tag):
+        left = sum(w < back for w in games)
+        keep = 1 - replay_chart_injury.discount(left, len(games)) if games else 1.0
+        factor = replay_chart_injury.return_factor(missed + left) if missed is not None else 1.0
+        expected += chance * factor * keep
+    return expected
 
 
 def healthy_ranks(rows: Mapping[int, dict], healthy: Mapping[int, float]) -> dict[int, float]:
@@ -332,7 +381,8 @@ def _shocked(data: SeasonData, rows: Mapping[int, dict], fields: Mapping[int, di
     healthy = {pid: f["healthy_chart"] for pid, f in fields.items()}
     curve = slot_curve(data)
     out: dict[int, dict] = {}
-    found = replay_shocks.moves(data, week, availability, healthy, healthy_ranks(rows, healthy),
+    ranks = healthy_ranks(rows, healthy)
+    found = replay_shocks.moves(data, week, availability, healthy, ranks,
                                 lambda position, rank: value_at(curve, position, rank))
     for pid, (delta, shock) in found.items():
         now = news.get(pid, fields[pid])
@@ -340,7 +390,9 @@ def _shocked(data: SeasonData, rows: Mapping[int, dict], fields: Mapping[int, di
         chart = now["chart"] * moved / now["healthy_chart"]          # > 0: moves() scales delta by it
         other = data.players[shock.other].name if shock.other in data.players else None
         missed = 1.0 - availability.get(shock.other, 1.0)
-        hype = replay_shocks.reason(shock, other, missed) if delta >= replay_shocks.STAR_MIN else None
+        hyped = (delta >= replay_shocks.STAR_MIN and not now.get("out", rows[pid].get("out"))
+                 and not (shock.kind == "role_won" and shock.anchor <= HYPE_ESTABLISHED))
+        hype = replay_shocks.reason(shock, other, missed) if hyped else None
         out[pid] = {**now, "healthy_chart": round(moved, 1), "chart": round(chart, 1),
                     "shock_chart": round(delta, 1), "shock": shock.kind, "hype_reason": hype}
     return out

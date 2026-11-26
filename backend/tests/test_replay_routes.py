@@ -607,7 +607,7 @@ def test_a_faab_league_takes_bids_on_claims(client):
     missing = refused(client, game + "/claims", {"add": add, "drop": cut})
     claimed = post(client, game + "/claims", {"add": add, "drop": cut, "bid": 10})
     claim_id = get(client, game + "/claims")["results"][0]["id"]
-    rebid = post(client, f"{game}/claims/{claim_id}/bid", {"bid": 25})
+    rebid = post(client, f"{game}/claims/{claim_id}/bid", {"bid": 100})       # all in: no CPU outbids it
     bad_rebid = [refused(client, f"{game}/claims/{claim_id}/bid", {"bid": bid})[0] for bid in (-1, 101)]
     after = post(client, game + "/advance", {"step": "wednesday", "week": 2})
     too_late = refused(client, f"{game}/claims/{claim_id}/bid", {"bid": 5})
@@ -616,7 +616,7 @@ def test_a_faab_league_takes_bids_on_claims(client):
     assert missing == (422, "Enter a bid: $0 to $100 (your budget left).")
     assert set(claimed) >= {"game", "events"} and set(rebid) >= {"game", "events"}
     mine = [e["text"] for e in after["events"] if e["kind"] == "claim" and e["team"]["is_user"]]
-    assert len(mine) == 1 and " for $25, dropping " in mine[0]                     # the rebid is what was paid
+    assert len(mine) == 1 and " for $100, dropping " in mine[0]                    # the rebid is what was paid
     assert too_late == (422, "Bids can only be changed before the weekly waiver run.")
     wednesday = "/games/%d" % post(client, "/games", {"season": SEASON, "seed": 6})["game"]["id"]
     post(client, wednesday + "/draft/auto", whole_draft="true")
@@ -842,3 +842,124 @@ def test_a_proposal_for_a_player_in_a_cpus_ir_slot_is_answered_like_any_other(cl
     answer = post(client, f"/games/{game}/trades/propose",
                   {"to_team": held[0], "give": [scrub], "get": [held[1]], "week": get(client, f"/games/{game}")["week"]})
     assert answer["executed"] is False and answer["verdict"]["reasons"]
+
+
+@pytest.mark.parametrize("raw", ['{"season": 2024, "teams": NaN}', '{"season": Infinity}', '{"season": 2024, "seed": 1e400}',
+                                 '{"season": 2024, "scoring_rules": {"reception": "NaN", "te_premium": 0, '
+                                 '"pass_td": 4, "turnover": -2}}'])
+def test_a_nan_or_infinity_in_a_body_is_a_422_that_says_so(client, raw):
+    """Breaker: the default validation handler echoed the value back and could not encode it (a 500)."""
+    response = client.post(API + "/games", content=raw, headers={"content-type": "application/json"})
+
+    assert response.status_code == 422
+    assert any(error["msg"] == "Input should be a finite number" for error in response.json()["detail"])
+
+
+def test_a_league_name_loses_control_bidi_and_zero_width_characters(client):
+    name = "Bad\x00 Bell\x07 ‮Kings​"
+
+    created = post(client, "/games", {"season": SEASON, "seed": 3, "name": name})
+
+    assert created["game"]["name"] == "Bad Bell Kings"
+
+
+def test_roster_moves_and_weeks_out_of_range_say_what_is_wrong(client):
+    game = "/games/%d" % post(client, "/games", {"season": SEASON, "seed": 3})["game"]["id"]
+    one = get(client, game + "/players", limit=1)["results"][0]["player"]["id"]
+
+    claim = refused(client, game + "/claims", {"add": one})
+    add = refused(client, game + "/add-drop", {"add": one})
+
+    assert claim == add == (422, "Waiver claims and free-agent adds open once the draft is over.")
+
+
+def test_a_matchup_for_week_zero_names_the_weeks_that_can_be_shown(client):
+    game = "/games/%d" % post(client, "/games", {"season": SEASON, "seed": 3})["game"]["id"]
+    post(client, game + "/draft/auto", whole_draft="true")
+    post(client, game + "/advance", {"step": "play", "week": 1})
+
+    assert refused(client, game + "/matchup", method="GET", week=0) == (422, "Week 0 can't be shown: pick a week from 1 to 2.")
+
+
+def test_inf_sent_to_a_choice_field_lists_the_choices_not_a_number_rule(client):
+    response = client.post(API + "/games", json={"season": 2024, "scoring": "inf"})
+
+    assert response.status_code == 422
+    assert all(error["msg"] != "Input should be a finite number" for error in response.json()["detail"])
+
+
+@pytest.mark.parametrize("raw", ['{"season": ' + "[" * 600 + "]" * 600 + "}",
+                                 '{"season": "' + chr(92) + 'ud800"}',          # JSON's escaped lone surrogate
+                                 '{"season": "' + "x" * 200_000 + '"}'])
+def test_a_deep_odd_or_huge_rejected_input_is_a_small_422(client, raw):
+    """Security review: 600 levels deep raised RecursionError (500), a lone surrogate could not be encoded (500),
+    and a huge string came back whole."""
+    response = client.post(API + "/games", content=raw, headers={"content-type": "application/json"})
+
+    assert response.status_code == 422 and len(response.content) < 5_000
+
+
+def test_a_league_name_loses_separators_and_blank_letters_but_keeps_joined_emoji():
+    from api.replay_routes import clean_name
+    family = "\U0001F468‍\U0001F469‍\U0001F467"
+
+    assert clean_name("A B C") == "ABC"
+    assert clean_name("ㅤ⠀ ㅤ") == ""                  # blank: the create route falls back to the default
+    assert clean_name(f"Team {family}") == f"Team {family}"
+    assert clean_name("a‍b") == "ab"
+
+
+def test_a_league_name_that_is_blank_after_cleaning_gets_the_default(client):
+    created = post(client, "/games", {"season": SEASON, "seed": 3, "name": "ㅤ⠀"})
+
+    assert created["game"]["name"] == f"{SEASON} Replay"
+
+
+def test_a_league_name_keeps_an_emoji_newer_than_the_runtimes_unicode_data():
+    import unicodedata
+
+    from api.replay_routes import clean_name
+    newest = next(chr(cp) for cp in range(0x1FAE8, 0x1FAFF) if unicodedata.category(chr(cp)) == "Cn")
+
+    assert clean_name(f"Shakers {newest}") == f"Shakers {newest}"
+
+
+def test_a_nan_nested_in_a_list_is_echoed_as_text_in_a_422(client):
+    from api.validation import _safe
+
+    response = client.post(API + "/games", content='{"season": [1, [NaN, Infinity]]}',
+                           headers={"content-type": "application/json"})
+
+    assert response.status_code == 422
+    assert _safe([1, [float("nan"), float("inf")]]) == [1, ["nan", "inf"]]
+
+
+@pytest.mark.parametrize("raw, cleaned", [
+    ("‍‍‍", ""),                                               # joiners only: blank
+    ("\U0001F468‍‍\U0001F469", "\U0001F468\U0001F469"),             # a double joiner breaks the pair
+    ("️︎͏឴", ""),                                         # selectors and blank marks only
+    ("Team \U0001F468‍\U0001F469‍\U0001F467", "Team \U0001F468‍\U0001F469‍\U0001F467"),
+    ("\U0001F3F3️‍\U0001F308 Flags", "\U0001F3F3️‍\U0001F308 Flags"),   # selector then joiner
+    ("一‍二", "一二"),                                   # no joiner between CJK
+    ("Café", "Café"),                                             # a real combining accent stays
+])
+def test_a_league_name_keeps_joiners_and_selectors_only_inside_emoji(raw, cleaned):
+    from api.replay_routes import clean_name
+
+    assert clean_name(raw) == cleaned
+
+
+def test_the_echo_limits_cut_text_lists_dicts_and_depth():
+    from api.validation import MAX_DEPTH, _safe
+
+    deep: list = []
+    for _ in range(25):
+        deep = [deep]
+    flat = _safe(deep)
+    for _ in range(MAX_DEPTH):
+        flat = flat[0]
+
+    assert len(_safe("x" * 300)) == 203 and _safe("x" * 300).endswith("...")
+    assert _safe(list(range(9))) == [0, 1, 2, 3, 4, "..."]
+    assert _safe({str(n): n for n in range(7)})["..."] == "2 more"
+    assert flat == ["..."]

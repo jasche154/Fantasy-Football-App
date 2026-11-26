@@ -130,6 +130,7 @@ def submit_claim(state: State, settings: Settings, know: Knowledge, add: int, dr
     `drop` may be None only while the roster has room. Several claims may name the same drop: the first one
     that is awarded uses him, the others are then skipped. In "faab" leagues `bid` is required; claims may
     together bid more than the budget left (blind bids): the run skips one the team can no longer pay."""
+    _in_season(state)
     if state.phase != "waivers":
         raise ValueError("Waiver claims can only be made before the weekly waiver run. "
                          "Once it has run, add free agents directly.")
@@ -141,6 +142,14 @@ def submit_claim(state: State, settings: Settings, know: Knowledge, add: int, dr
         raise ValueError(f"You already have a claim in for {_name(know, add)}.")
     claim = Claim(id=state.next_id, team_id=user.id, add=add, drop=drop, bid=_checked_bid(state, settings, bid))
     return replace(state, claims=(*state.claims, claim), next_id=state.next_id + 1)
+
+
+def _in_season(state: State) -> None:
+    """ValueError for a roster move outside the season, saying when moves open (or that they are over)."""
+    if state.phase == "draft":
+        raise ValueError("Waiver claims and free-agent adds open once the draft is over.")
+    if state.phase == "complete":
+        raise ValueError("The season is over: no more roster moves.")
 
 
 def set_claim_bid(state: State, settings: Settings, claim_id: int, bid: int) -> State:
@@ -264,6 +273,7 @@ def add_drop(state: State, settings: Settings, know: Knowledge, team_id: int, ad
 
     The dropped player goes on waivers. The move is not checked for lineup sense: a team may leave itself
     without a kicker."""
+    _in_season(state)
     if state.phase != "open":
         raise ValueError("Free agents can be added once this week's waivers have run. "
                          "Until then, put in a waiver claim.")

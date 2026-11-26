@@ -31,8 +31,7 @@ def test_the_discount_shrinks_every_week_as_the_return_nears():
 def test_out_for_the_season_is_the_whole_chart_and_a_long_late_absence_still_costs():
     assert injury.discount(LEFT, LEFT) == injury.discount(LEFT + 2, LEFT) == 1.0
     assert injury.discount(0, LEFT) == 0.0
-    assert injury.discount(1, 3) == injury.discount(1, LEFT) == 0.06       # one of several games: the user's 6%
-    assert 0.05 <= injury.discount(1, 3) <= 0.08 and injury.discount(1, 1) == 1.0
+    assert injury.discount(1, LEFT) == 0.06 and injury.discount(1, 1) == 1.0  # one of many games: the user's 6%
     assert injury.discount(4, 5) > 0.25 and injury.discount(2, 3) > 0.15    # most of what is left costs more
 
 
@@ -47,11 +46,20 @@ def test_more_games_missed_never_cost_less():
     assert all(injury.discount(m, left) <= injury.discount(m + 1, left) for m, left in CELLS)
 
 
-def test_no_jump_between_neighbouring_absences():
-    steps = [abs(injury.discount(m2, l2) - injury.discount(m, left)) for m, left in CELLS
-             for m2, l2 in ((m + 1, left), (m, left + 1)) if m2 < l2]
+def test_the_users_mid_season_targets_stand():
+    assert [round(injury.discount(missed, LEFT), 2) for missed in (1, 3, 8)] == [0.06, 0.10, 0.45]
 
-    assert max(steps) <= 0.15 + 1e-9
+
+def test_missing_most_of_what_is_left_costs_the_share_to_the_power_1_8_while_trades_are_open():
+    """Testers: Kenneth Walker back for the final 2 of 6 games was RB7, Puka Nacua (3 of 6 missed) WR3. Only weeks
+    a league can still trade in matter: a default league's deadline week 11 has 7 games left (of a week-17 season),
+    a week-12 jump-in trades in weeks 12-13 (6 and 5 left)."""
+    deadline = [round(injury.discount(missed, 7), 2) for missed in (4, 5, 6)]
+    jump_in = [round(injury.discount(missed, left), 2) for missed, left in ((3, 6), (4, 6), (5, 6), (4, 5))]
+
+    assert deadline == [0.37, 0.55, 0.76]
+    assert jump_in == [0.29, 0.48, 0.72, 0.67]
+    assert round(injury.discount(1, 2), 2) == 0.29          # after any deadline: priced the same way
 
 
 def test_a_season_ending_report_keeps_what_such_reports_were_worth():

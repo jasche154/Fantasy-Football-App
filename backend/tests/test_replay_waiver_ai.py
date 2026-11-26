@@ -4,13 +4,14 @@
 module; the behaviour tests read that log, the unit tests use one week of a freshly drafted league.
 """
 import time
+from unittest import mock
 from dataclasses import dataclass, replace
 from types import MappingProxyType
 
 import pytest
 
 from services import lineup_gain, replay_slots, replay_state as rs, replay_values as rv, replay_waiver_ai as ai
-from services import replay_waivers
+from services import replay_ir, replay_waivers
 from services.replay_pool import SKILL
 from services.replay_state import Claim, Event, State
 from services.replay_values import Knowledge, ReplayValue
@@ -67,7 +68,14 @@ def top_hundred(knowledge: Knowledge) -> set[int]:
 
 @pytest.fixture(scope="module")
 def season() -> tuple[Week, ...]:
+    """The claim and free-agency rules over 12 weeks, without `_upgrade` (tested on its own below): its trade-value
+    adds would take the breakout back in free agency the week the market notices him, before any claim."""
     state, weeks = fakes.drafted_state(SETTINGS), []
+    with mock.patch.object(ai, "_upgrade", lambda *args: None):
+        return _season(state, weeks)
+
+
+def _season(state: State, weeks: list) -> tuple[Week, ...]:
     for week in range(1, SIM_WEEKS + 1):            # the order replay_game uses: IR, claims, IR, free agency
         before = replace(state, week=week, phase="waivers", locked=())
         knowledge = know(week)
@@ -297,7 +305,8 @@ def test_a_cpu_covers_every_slot_nobody_plays_in_however_many_there_are(phase):
     week, team_id = 7, CPUS[3]
     resting = [pid for position in ("QB", "TE", "K", "DST") for pid in at(league(week), team_id, position, week)]
     data = fakes.patched(fakes.fake_season(), projected={(pid, week): None for pid in resting})
-    knowledge = fakes.fake_knowledge(week, SETTINGS, data)
+    data = fakes.tagged(data, {(pid, week): fakes.Injury("O") for pid in resting})      # out (a K with no projection
+    knowledge = fakes.fake_knowledge(week, SETTINGS, data)                              # whose team plays still starts)
     state = league(week, phase)
 
     after = ai.cpu_free_agency(state, SETTINGS, knowledge, SEED)
@@ -771,3 +780,143 @@ def test_free_agency_gives_streamers_their_smaller_edge(monkeypatch, streams):
 
     added = [e.team_id for e in after.events if e.kind == "add" and e.player_ids[0] == free]
     assert added == ([CPUS[0]] if streams else [])
+
+
+# ---------------- stashing and trade-value adds ----------------
+
+def test_a_cpu_stashes_its_most_valuable_eligible_player_even_a_bench_one():
+    week, state = 6, league(6)
+    team_id = next(t.id for t in state.teams if not t.is_user and not any(replay_ir.eligible(know(week), pid)
+                                                                           for pid in t.roster))
+    top = top_hundred(know(week))
+    bench = sorted((v for v in values(state, team_id, week) if v.position in SKILL and v.chart > 0
+                    and v.player_id not in top), key=lambda v: v.chart)
+    low, higher = bench[0], bench[1]
+    tags = {(low.player_id, week): fakes.Injury("O"), (higher.player_id, week): fakes.Injury("O")}
+    # nobody is above replacement: the old rule stashed only top players or those above it
+    hurt = replace(tagged_know(week, tags), replacement=MappingProxyType({p: 1e9 for p in SKILL}))
+
+    after = ai.cpu_ir(state, SETTINGS, hurt, SEED)
+
+    assert rs.team(after, team_id).ir == (higher.player_id,)     # a bench player, not a star, still frees his spot
+
+
+def test_free_agency_adds_a_free_agent_worth_far_more_than_its_worst_player_and_stashes_him_when_out():
+    week = 6
+    state = league(week, phase="open")
+    assert fakes.BREAKOUT_ID not in rs.rostered(state) and know(week).by_id[fakes.BREAKOUT_ID].chart > 300
+
+    after = ai.cpu_free_agency(state, SETTINGS, know(week), SEED)
+    hurt = tagged_know(week, {(fakes.BREAKOUT_ID, week): fakes.Injury("O")})
+    stashed = ai.cpu_free_agency(state, SETTINGS, hurt, SEED)
+
+    owner = next(t for t in after.teams if fakes.BREAKOUT_ID in t.roster)
+    added = next(e for e in after.events if e.kind == "add" and e.player_ids[0] == fakes.BREAKOUT_ID)
+    dropped = know(week).by_id[added.player_ids[1]]
+    assert not owner.is_user and dropped.chart * ai.UPGRADE_SHARE <= know(week).by_id[fakes.BREAKOUT_ID].chart
+    assert any(fakes.BREAKOUT_ID in t.ir for t in stashed.teams)
+
+
+def test_free_agency_never_adds_by_trade_value_for_a_small_gap():
+    week = 6
+    state = league(week, phase="open")
+    roster = values(state, 3, week)
+    free = [v for v in ai._unrostered(state, know(week)) if v.position in SKILL]
+    ctx = ai._for_team(ai._context(know(week), SETTINGS, state), rs.team(state, 3))
+    worst = min(ai.droppable(roster, know(week), ctx.protected), key=lambda v: v.chart)
+    close = [v for v in free if v.chart < worst.chart + ai.UPGRADE_GAP]
+
+    assert ai._upgrade(roster, close, ctx) is None
+
+
+def test_a_cpu_drops_a_player_it_just_added_only_after_every_other_spare_one():
+    week, team_id = 6, CPUS[0]
+    state = league(week, phase="open")
+    roster = values(state, team_id, week)
+    worst = ai._spare(roster, know(week), frozenset())[0]
+    added = rs.add_event(state, "add", team_id, "added", (worst.player_id,))
+
+    ctx = ai._for_team(ai._context(know(week), SETTINGS, added), rs.team(added, team_id))
+
+    assert worst.player_id in ctx.keep
+    assert ai.droppable(roster, know(week), ctx.protected, ctx.keep)[0] != worst
+
+
+def test_covering_a_slot_never_cuts_a_better_player_who_is_only_on_a_bye():
+    week, team_id = 6, CPUS[0]
+    state = league(week, phase="open")
+    roster = values(state, team_id, week)
+    resting = max((v for v in roster if v.position == "WR"), key=lambda v: v.healthy_value)
+    bye = replace(resting, projection=0.0, out=False)
+    others = [v if v is not resting else bye for v in roster]
+    ctx = ai._for_team(ai._context(know(week), SETTINGS, state), rs.team(state, team_id))
+    free = [v for v in ai._unrostered(state, know(week)) if v.position == "TE" and v.projection > 0]
+    hole = [v for v in others if v.position != "TE"]        # nobody plays TE: the cover must find a drop
+
+    move = ai._cover(hole, free, ctx)
+
+    assert move is None or move[1] != bye.player_id
+
+
+def test_a_cpus_stash_and_free_agency_choices_about_an_injured_player_move_only_through_the_news(monkeypatch):
+    """No hindsight: his real return week reaches CPU IR and free-agency choices only through replay_news.report."""
+    from types import MappingProxyType
+
+    from services import replay_news
+    week, data = 6, fakes.fake_season()
+    since = next(s for (pid, s) in data.returns if pid == STAR)
+    later = replace(data, returns=MappingProxyType({**data.returns, (STAR, since): data.last_week}))
+    monkeypatch.setattr(replay_news, "report", lambda seed, pid, since, back, w, tag, last=None, first_tag=None:
+                        replay_news.Report(since, since + 4, "Out; expected back."))
+
+    def moves(season):
+        knowledge = fakes.fake_knowledge(week, SETTINGS, season)
+        state = ai.cpu_ir(league(week, phase="open"), SETTINGS, knowledge, SEED)
+        return ai.cpu_free_agency(state, SETTINGS, knowledge, SEED)
+
+    assert moves(data) == moves(later)
+    assert any(STAR in team.ir for team in moves(data).teams)
+
+
+def test_with_the_ir_slot_taken_an_out_free_agent_is_added_only_to_swap_with_a_lesser_ir_player():
+    week, team_id = 6, CPUS[0]
+    hurt = tagged_know(week, {(fakes.BREAKOUT_ID, week): fakes.Injury("O")})
+    state = league(week, phase="open")
+    team = rs.team(state, team_id)
+    roster = [hurt.by_id[pid] for pid in team.roster]
+    add = hurt.by_id[fakes.BREAKOUT_ID]
+    base = ai._for_team(ai._context(hurt, SETTINGS, state), team)
+
+    better_on_ir = replace(base, stash=(replace(add, player_id=-1, chart=add.chart + 1),))
+    worse_on_ir = replace(base, stash=(replace(add, player_id=-1, chart=add.chart / 4),))
+
+    assert add.out and ai._upgrade(roster, [add], better_on_ir) is None          # he would sit on the bench
+    assert ai._upgrade(roster, [add], worse_on_ir) is not None
+
+
+def test_an_out_player_added_with_a_lesser_player_on_ir_swaps_places_with_him():
+    week, team_id = 6, CPUS[0]
+    team = rs.team(league(week, phase="open"), team_id)
+    low = min((pid for pid in team.roster if know(week).by_id[pid].position in SKILL), key=lambda p: know(week).by_id[p].chart)
+    hurt = tagged_know(week, {(fakes.BREAKOUT_ID, week): fakes.Injury("O"), (low, week): fakes.Injury("O")})
+    roster = tuple(pid for pid in team.roster if pid != low)
+    state = edited(league(week, phase="open"), team_id, roster=(*roster, fakes.BREAKOUT_ID), ir=(low,))
+
+    after = ai._stash_added(state, SETTINGS, hurt, team_id, fakes.BREAKOUT_ID)
+
+    assert rs.team(after, team_id).ir == (fakes.BREAKOUT_ID,) and low in rs.team(after, team_id).roster
+
+
+def test_free_agency_never_adds_a_suspended_player_who_could_only_sit_on_the_bench():
+    """Review: a suspended player is out but can't go on IR, so a CPU would drop someone for a bench seat."""
+    week, team_id = 6, CPUS[0]
+    suspended = tagged_know(week, {(fakes.BREAKOUT_ID, week): fakes.Injury("SUS")})
+    hurt = tagged_know(week, {(fakes.BREAKOUT_ID, week): fakes.Injury("O")})
+    state = league(week, phase="open")
+    team = rs.team(state, team_id)
+    ctx = {k: ai._for_team(ai._context(k, SETTINGS, state), team) for k in (suspended, hurt)}
+
+    assert suspended.by_id[fakes.BREAKOUT_ID].out and not replay_ir.eligible(suspended, fakes.BREAKOUT_ID)
+    assert ai._upgrade([suspended.by_id[p] for p in team.roster], [suspended.by_id[fakes.BREAKOUT_ID]],
+                       ctx[suspended]) is None
+    assert ai._upgrade([hurt.by_id[p] for p in team.roster], [hurt.by_id[fakes.BREAKOUT_ID]], ctx[hurt]) is not None

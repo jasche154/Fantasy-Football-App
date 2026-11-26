@@ -14,7 +14,7 @@ from types import MappingProxyType
 import pytest
 
 from services import (
-    replay_draft, replay_game as rg, replay_season, replay_state as rs, replay_values as rv, replay_views as views,
+    replay_chart, replay_draft, replay_game as rg, replay_season, replay_state as rs, replay_values as rv, replay_views as views,
     replay_views_league as league,
 )
 from tests import replay_fakes as fakes
@@ -138,9 +138,12 @@ def test_the_draft_is_held_in_the_start_week_on_what_was_known_before_it():
 def test_a_jump_in_draft_follows_the_current_market_not_the_preseason_adp():
     preseason, current = drafted(K8, HURT), drafted(K8)
 
-    assert overall(preseason, fakes.BREAKOUT_ID) > 100 and overall(current, fakes.BREAKOUT_ID) <= 12
+    assert overall(preseason, fakes.BREAKOUT_ID) > 100 and overall(current, fakes.BREAKOUT_ID) <= 16   # 5-game form: a little slower
     assert overall(current, fakes.BUST_ID) > 60
-    assert overall(current, HURT_ID) is None                 # out for the season: nobody drafts him
+    # On IR with no news: drafted at his chart (45% off his healthy value), not skipped as the market's ADP would
+    know = views.Game(1, "x", K8, rg.create_game(K8, MARKET8, SEED), MARKET8, None, SEED).know
+    pick = replay_chart.chart_pick(know.by_id[HURT_ID].chart)
+    assert 12 < overall(current, HURT_ID) <= pick + replay_draft.REACH_LIMIT
 
 
 def test_a_player_without_an_adp_who_is_ruled_out_sorts_after_every_healthy_one():

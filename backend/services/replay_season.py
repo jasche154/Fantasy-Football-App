@@ -104,7 +104,14 @@ def starters_for(state: State, settings: Settings, know: rv.Knowledge, team_id: 
     if team.is_user and state.lineup is not None:
         return _repaired(state.lineup, team.roster, settings, know)
     best = rv.best_lineup(know, team.roster, settings)
-    return {slot: tuple(best.get(slot, ())) for slot in _slots(settings)}
+    return {slot: tuple(pid for pid in best.get(slot, ()) if slot not in ("K", "DST") or not _on_bye(know, pid))
+            for slot in _slots(settings)}      # a lone K or DST on a bye sits: the slot stays empty, and the screen says so
+
+
+def _on_bye(know: rv.Knowledge, player_id: int) -> bool:
+    """Has his team no game this week (not merely no projection: a late signing still scores)?"""
+    team = know.by_id[player_id].team
+    return team is not None and know.schedule.opponent(team, know.week) is None
 
 
 # ---------------- matchups ----------------

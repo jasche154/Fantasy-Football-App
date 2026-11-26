@@ -10,8 +10,12 @@ Its pick is the lowest `(adp + noise) x need x lean` among the best available pl
 - need: below 1 pulls a position earlier (an open starting spot), above 1 pushes it back (depth, backups);
 - lean: the team's fixed taste for each position.
 
-At a preseason draft a player a week-1 IR, PUP or suspension already rules out (known then: replay_pool's
-PRESEASON_TAGS) counts OUT_PUSH x his ADP, so a CPU waits on him (2021: Gus Edwards' ACL, ADP 57).
+A player a hard tag rules out of the draft's first week (at a preseason draft week 1's IR, PUP or suspension,
+known then: replay_pool's PRESEASON_TAGS; at a jump-in draft this week's tags) is drafted at his chart value
+like anyone else: his ADP is the pick his chart (which carries the injury discount) is worth
+(`replay_chart.chart_pick`), so a CPU waits on him as long as the trade market would (2021: Gus Edwards' ACL,
+ADP 57), and a jump-in draft no longer skips injured players, whom the current market's ADP leaves out (a
+superflex jump-in left Malik Willis, worth 674, on the wire).
 
 Hard rules sit on top: a roster must always be able to end legal (every starting slot filled, K and DST
 included), position caps, kickers and defenses only in the last rounds, no backup QB or TE before round
@@ -29,13 +33,14 @@ Every function takes a `State` and returns a new one. Randomness: `rng(seed, "te
 """
 import logging
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from functools import lru_cache
 
 from services import replay_chart, replay_fans, replay_personas, replay_pool, replay_slots, replay_state as rs
 from services.replay_pool import ALL_POSITIONS, PoolPlayer, SeasonData
 from services.replay_state import Pick, Settings, State, Team
+from services import replay_values as rv
 from services.replay_values import lineup_holes, missing_slots, position_cap
 
 log = logging.getLogger(__name__)
@@ -61,7 +66,6 @@ OPEN_STARTER_NEED = (0.95, 0.85, 0.75)  # RB/WR with a starting spot still open,
 STARTER_NEED_LATE = 0.7                 # QB1/TE1 still missing: 1.0 in round 1 down to this ...
 STARTER_NEED_BY_ROUND = 9               # ... by this round
 DEPTH_SLACK = 3                         # a team with this many bench RB (or WR) is deep there (tuned: 2 left
-OUT_PUSH = 2.0                          # a preseason IR/PUP/SUS player's ADP x this at a week-0 draft (Kupp 7 -> 14)
 DEEP_NEED = 1.15                        # two teams in three with the minimum four backs)
 BACKUP_NEED = 1.5                       # QB2/TE2 once the gate is open (tuned: about half the teams take each)
 
@@ -222,12 +226,15 @@ def _need(position: str, counts: Counter, round_: int, settings: Settings) -> fl
 
 
 def _candidates(state: State, known: SeasonData, allowed: Sequence[str], round_: int,
-                overall: int, team: Team | None = None) -> tuple[list[PoolPlayer], bool]:
+                overall: int, team: Team | None = None,
+                priced: Mapping[int, PoolPlayer] | None = None) -> tuple[list[PoolPlayer], bool]:
     """(players to choose from, whether they have an ADP). Within reach when anyone is; with no ADP player
     left at an allowed position, the one with the best preseason projection. A fan (`team`) skips his rival's
-    players while anyone else fits (replay_fans)."""
+    players while anyone else fits (replay_fans). `priced`: players whose ADP is their chart's pick (`_out_priced`)."""
     taken = rs.rostered(state)
-    pool = [p for p in _board(known) if p.position in allowed and p.player_id not in taken]
+    pool = [(priced or {}).get(p.player_id, p) for p in _board(known) if p.position in allowed and p.player_id not in taken]
+    if priced:
+        pool.sort(key=lambda p: (p.adp is None, p.adp or 0.0))       # stable: the board's order otherwise
     if team is not None and team.fan_of:
         pool = [p for p in pool if not replay_fans.banned(team, known.team_at(p.player_id, state.week))] or pool
     if not pool:
@@ -241,22 +248,26 @@ def _candidates(state: State, known: SeasonData, allowed: Sequence[str], round_:
 
 
 def _scores(team: Team, players: Sequence[PoolPlayer], counts: Counter, round_: int, settings: Settings,
-            noise: Sequence[float], out: frozenset[int] = frozenset()) -> list[float]:
-    """`out`: players a preseason IR, PUP or suspension rules out of week 1, pushed back OUT_PUSH x."""
+            noise: Sequence[float]) -> list[float]:
     chaos = 0.0 if team.is_user else team.chaos * rs.DRAFT_CHAOS_SCALE[settings.difficulty]
     scores = []
     for player, luck in zip(players, noise):
         sigma = player.adp_stdev or SIGMA_BASE + SIGMA_PER_PICK * player.adp
         draw = max(MIN_DRAW, player.adp + float(luck) * sigma * chaos)
-        scores.append(draw * _need(player.position, counts, round_, settings)
-                      * team.lean.get(player.position, 1.0) * (OUT_PUSH if player.player_id in out else 1.0))
+        scores.append(draw * _need(player.position, counts, round_, settings) * team.lean.get(player.position, 1.0))
     return scores
 
 
-def _preseason_out(known: SeasonData, player_id: int) -> bool:
-    """A week-1 tag known at a preseason draft (replay_pool.PRESEASON_TAGS: IR, PUP, SUS)."""
-    tag = known.injuries.get((player_id, 1))
-    return tag is not None and tag.hard
+def _out_priced(state: State, settings: Settings, known: SeasonData, seed: int) -> dict[int, PoolPlayer]:
+    """{id: him with his chart's pick as ADP} for every player a hard tag rules out of the draft's first week."""
+    week = max(1, state.week)
+    out = [p for p in known.players.values() if (tag := known.injuries.get((p.player_id, week))) is not None and tag.hard]
+    if not out:
+        return {}
+    know = rv.knowledge(known, rv.league_settings(settings), state.week, settings.end_week, seed,
+                        drafted=state.week)
+    return {p.player_id: replace(p, adp=replay_chart.chart_pick(know.by_id[p.player_id].chart), adp_stdev=None)
+            for p in out if p.player_id in know.by_id}
 
 
 def cpu_pick(state: State, settings: Settings, data: SeasonData, seed: int) -> int:
@@ -266,16 +277,16 @@ def cpu_pick(state: State, settings: Settings, data: SeasonData, seed: int) -> i
     if team_id is None:
         raise ValueError("The draft is over.")
     team, known, overall = rs.team(state, team_id), data.as_of(state.week), len(state.picks) + 1
+    priced = _out_priced(state, settings, known, seed)
     if replay_slots.two_qb(settings.starters):
         known = replay_chart.superflex_view(known)
     round_ = _slot(state, overall)[0]
     mine = [known.players[pid].position for pid in team.roster]
-    players, ranked = _candidates(state, known, _positions(mine, round_, settings), round_, overall, team)
+    players, ranked = _candidates(state, known, _positions(mine, round_, settings), round_, overall, team, priced)
     if not ranked:
         return players[0].player_id
     noise = rs.rng(seed, "draft", overall).standard_normal(len(players))
-    out = frozenset(p.player_id for p in players if state.week == 0 and _preseason_out(known, p.player_id))
-    scores = _scores(team, players, Counter(mine), round_, settings, noise, out)
+    scores = _scores(team, players, Counter(mine), round_, settings, noise)
     return players[min(range(len(players)), key=lambda i: (scores[i], i))].player_id
 
 

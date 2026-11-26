@@ -14,8 +14,8 @@ Feelings are read with the persona his prices follow now (`replay_personas.now`)
 """
 from dataclasses import replace
 
-from services import replay_fans, replay_mood, replay_personas, replay_state as rs, replay_styles
-from services.replay_chat import post
+from services import replay_fans, replay_mood, replay_personas, replay_state as rs, replay_styles, replay_trades
+from services.replay_chat import PROMISE, post
 from services.replay_mood import might_be_hurt
 from services.replay_pool import SeasonData
 from services.replay_state import Offer, Settings, State
@@ -71,10 +71,16 @@ def label_offers(state: State, know: Knowledge, seed: int, played: SeasonData, s
             continue
         cpu = rs.team(state, offer.from_team)
         kind, pid = _offer_kind(state, settings, know, played, offer)
+        try:                                           # "a good deal, I promise" only on one that favours the user
+            shown = replay_trades.accept_verdict(state, settings, know, offer)
+            honest = None if shown.value_get > shown.value_give else PROMISE
+        except ValueError:
+            honest = PROMISE
         named = know.by_id[pid] if pid is not None else None
         values = {"me": cpu.name, "you": user.name, "player": named.name if named else "",
                   "position": named.position if named else ""}
-        posted = post(state, cpu, kind, values, seed, to_team=user.id, player_ids=() if pid is None else (pid,))
+        posted = post(state, cpu, kind, values, seed, to_team=user.id, player_ids=() if pid is None else (pid,),
+                      avoid=honest)
         text = posted.chat[-1].text
         # the line is used up in the bucket (kept in chat history as kind offer_*) so offers don't repeat either
         state = replace(posted, offers=tuple(replace(o, message=text) if o.id == offer.id else o for o in posted.offers))

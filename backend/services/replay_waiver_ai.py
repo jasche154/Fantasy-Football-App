@@ -9,10 +9,14 @@ numbers for the current week), so no CPU ever sees a result or a projection from
 - `cpu_free_agency` (after the run), free agents only: first cover every starting slot (kicker and
   defense included) that nobody on the roster can fill with a projection this week (bye or out), whatever
   that costs later. Then, up to MAX_FREE_AGENT_MOVES moves in all: fill an empty roster spot, get back
-  under a positional limit, and swap a kicker or defense who does play only for STREAM_EDGE projected points
+  under a positional limit, add a free agent whose trade value clearly beats a player it can drop at a position
+  it can use (`_upgrade`: UPGRADE_SHARE x and UPGRADE_GAP more; to IR at once when he is out), and swap a kicker or defense who does play only for STREAM_EDGE projected points
   (a streamer, about STREAMER_SHARE of CPUs picked once from the game's seed by `streamers`, for
   STREAMER_EDGE: it chases a matchup most weeks).
 - A fan never claims or adds his rival's players (replay_fans), unless one is the only way to field his lineup.
+- A CPU drops a player it added this week, one it is "high on" (replay_mood) or one at a position it needs
+  (replay_styles.position_needs) only after every other player it can spare, and never, to cover a slot, a better
+  player who is only on a bye.
 - A CPU never drops a top-PROTECTED_RANK player (by HEALTHY value; per 12 teams, scaled by league size), one
   of the league's picks from rounds 1-EARLY_ROUNDS in its first EARLY_WEEKS weeks (unless the news has him out
   for the season), or an injured player who was above replacement or still has trade value (healthy chart
@@ -24,18 +28,19 @@ numbers for the current week), so no CPU ever sees a result or a projection from
   7 WR) unless nobody it has there plays this week, and it lets the extra one go again afterwards.
 - `cpu_ir` (before claims and free agency): a CPU brings back an IR player who lost his tag (into an open
   spot, swapping in an eligible player worth keeping, or cutting one it can spare, maybe him), then puts its
-  best eligible player worth keeping on IR. Size and this week's lineup read the active roster only; season
+  most valuable eligible player (by trade value) on IR. Size and this week's lineup read the active roster only; season
   points and positional limits also count the IR player (`_Context.stash`): he is coming back.
 
 The only dice roll is `streamers`, once per game; ties go to the better-ranked player, so the same state
 gives the same moves.
 """
 from collections import Counter
-from collections.abc import Iterable, Sequence
-from dataclasses import dataclass, replace
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, field, replace
+from types import MappingProxyType
 
-from services import (lineup_gain, replay_claim_ai as claim_ai, replay_fans, replay_ir, replay_state as rs,
-                      replay_values as rv)
+from services import (lineup_gain, replay_claim_ai as claim_ai, replay_fans, replay_ir, replay_mood, replay_state as rs,
+                      replay_styles, replay_values as rv)
 from services import replay_waivers
 from services.replay_cover import cpu_cover  # noqa: F401  (re-exported: replay_game and tests call it here)
 from services.replay_pool import SKILL
@@ -64,6 +69,8 @@ STREAM_EDGE = 4.0                 # projected points a free-agent K / DST must b
                                   # all of them defenses chasing a matchup, 28 at 3.0 and 12 at 4.0)
 STREAMER_EDGE = 1.5               # a streamer's edge: it plays the matchup at K and DST
 STREAMER_SHARE = 0.4              # about this share of CPU managers stream
+UPGRADE_SHARE = 1.5               # a free agent worth this x the trade value of the player he replaces ...
+UPGRADE_GAP = 100.0               # ... and this many chart points more (100: about the top 100) is added for him
 STREAMED = ("K", "DST")
 LONG_TAGS = ("IR", "PUP")         # out for most of what is left (replay_values.IR_OUT_SHARE)
 
@@ -82,10 +89,20 @@ class _Context:
     hot: frozenset[int] = frozenset()       # claims only: hot players, who need just `hot_gain`
     hot_gain: float = 0.0
     stream_edge: float = STREAM_EDGE        # free agency only: this team's K / DST swap edge
+    fresh: frozenset[int] = frozenset()     # players their team added this week (replay_state.pickups)
+    needs: Mapping[int, frozenset[str]] = field(default_factory=dict)   # {team id: positions it needs}
+    keep: frozenset[int] = frozenset()      # the team's players it drops only after every other spare one
 
 
 def _for_team(ctx: _Context, team: rs.Team) -> _Context:
-    return replace(ctx, stash=tuple(ctx.know.by_id[pid] for pid in team.ir))
+    """`ctx` for one team: its IR player, and the players it drops only after every other one it can spare: one it
+    just added, is high on, or holds at a position it needs (testers saw a CPU cut a player it had just claimed,
+    one it was "High on", and a QB it needed)."""
+    needed = ctx.needs.get(team.id, frozenset())
+    keep = frozenset(pid for pid in team.roster if pid in ctx.fresh or ctx.know.by_id[pid].position in needed
+                     or ((felt := replay_mood.feeling(ctx.know.by_id[pid], team.persona, team.hype)) is not None
+                         and felt.kind == "high"))
+    return replace(ctx, stash=tuple(ctx.know.by_id[pid] for pid in team.ir), keep=keep)
 
 
 def protected_rank(settings: Settings) -> int:
@@ -114,9 +131,12 @@ def _context(know: Knowledge, settings: Settings, state: State | None = None) ->
     horizon = rv.horizon(know, settings)
     valued = sorted((v for v in know.values if v.healthy_value > 0), key=lambda v: (-v.healthy_value, v.player_id))
     top = frozenset(v.player_id for v in valued[:protected_rank(settings)])
+    needs = (MappingProxyType({tid: found[0] for tid, found in replay_styles.position_needs(state, settings, know).items()})
+             if state is not None else MappingProxyType({}))
     return _Context(know, settings, horizon, rv.projector(know),
                     top | (early_picks(state, settings, know) if state is not None else frozenset()),
-                    CLAIM_GAIN_PER_WEEK * sum(horizon.weights.values()))
+                    CLAIM_GAIN_PER_WEEK * sum(horizon.weights.values()),
+                    fresh=rs.pickups(state) if state is not None else frozenset(), needs=needs)
 
 
 def candidates(know: Knowledge, available: Iterable[ReplayValue]) -> list[ReplayValue]:
@@ -138,7 +158,8 @@ def _unrostered(state: State, know: Knowledge, also_taken: Iterable[int] = ()) -
     return [v for v in know.values if v.player_id not in taken]
 
 
-def _spare(roster: Sequence[ReplayValue], know: Knowledge, protected: frozenset[int]) -> list[ReplayValue]:
+def _spare(roster: Sequence[ReplayValue], know: Knowledge, protected: frozenset[int],
+           keep: frozenset[int] = frozenset()) -> list[ReplayValue]:
     """Every skill player a CPU could bear to lose, least valuable first (by healthy value, so an injury
     alone never makes a good player droppable; nor one out a while who still has trade value)."""
     def safe(value: ReplayValue) -> bool:
@@ -147,12 +168,14 @@ def _spare(roster: Sequence[ReplayValue], know: Knowledge, protected: frozenset[
         return not (value.out and (value.last_projection > know.replacement[value.position]
                                    or (value.healthy_chart >= KEEP_OUT_CHART and _coming_back(value))))
 
-    return sorted((v for v in roster if safe(v)), key=lambda v: (v.healthy_value, v.ros_ppg, -v.player_id))
+    return sorted((v for v in roster if safe(v)), key=lambda v: (v.player_id in keep, v.healthy_value, v.ros_ppg,
+                                                                -v.player_id))
 
 
-def droppable(roster: Sequence[ReplayValue], know: Knowledge, protected: frozenset[int]) -> list[ReplayValue]:
-    """The DROPPABLE_COUNT skill players a CPU is willing to drop for an add, least valuable first."""
-    return _spare(roster, know, protected)[:DROPPABLE_COUNT]
+def droppable(roster: Sequence[ReplayValue], know: Knowledge, protected: frozenset[int],
+              keep: frozenset[int] = frozenset()) -> list[ReplayValue]:
+    """The DROPPABLE_COUNT skill players a CPU is willing to drop for an add, least valuable first (`keep` last)."""
+    return _spare(roster, know, protected, keep)[:DROPPABLE_COUNT]
 
 
 def _legal_drops(roster: Sequence[ReplayValue], add: ReplayValue, drops: Sequence[ReplayValue],
@@ -206,7 +229,7 @@ def _best_add(roster: Sequence[ReplayValue], pool: Sequence[ReplayValue], ctx: _
     """(gain, add, drop) for the candidate that adds most to this roster's season, or None when no
     candidate is worth more than `needed`. With an open roster spot nobody is dropped."""
     full = len(roster) >= ctx.settings.roster_size
-    drops = droppable(roster, ctx.know, ctx.protected) if full else []
+    drops = droppable(roster, ctx.know, ctx.protected, ctx.keep) if full else []
     if full and not drops:
         return None
     league, owned = ctx.know.league, [*roster, *ctx.stash]      # value and limits count the IR player
@@ -321,7 +344,7 @@ def _cover(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: _Con
     LONG_TAGS outside the top players may go too, after those it can spare."""
     ids = [v.player_id for v in roster]
     idle = rv.idle_slots(ctx.know, ids, ctx.settings)
-    spare = _spare(roster, ctx.know, ctx.protected)
+    spare = _spare(roster, ctx.know, ctx.protected, ctx.keep)
     gone = sorted((v for v in roster if ctx.stash and v.position in SKILL and v.player_id not in ctx.protected
                    and v not in spare and v.injury is not None and v.injury.tag in LONG_TAGS),
                   key=lambda v: (v.healthy_value, v.ros_ppg, -v.player_id))
@@ -340,6 +363,8 @@ def _cover(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: _Con
                     continue
                 return add.player_id, None
             for out in _legal_drops(roster, add, [*spare, *gone], bare):
+                if not out.out and out.projection == 0 and out.healthy_value >= add.healthy_value:
+                    continue                          # a bye is no reason to cut a better player
                 after = [pid for pid in ids if pid != out.player_id] + [add.player_id]
                 if len(rv.idle_slots(ctx.know, after, ctx.settings)) < len(idle):
                     return add.player_id, out.player_id
@@ -368,7 +393,7 @@ def _trim(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: _Cont
     open spot best, as long as that is no step down in value."""
     idle = len(rv.idle_slots(ctx.know, [v.player_id for v in roster], ctx.settings))
     held = Counter(v.position for v in (*roster, *ctx.stash))
-    for out in _close_by_chart(_spare(roster, ctx.know, ctx.protected)):
+    for out in _close_by_chart(_spare(roster, ctx.know, ctx.protected, ctx.keep)):
         left = [v for v in roster if v is not out]
         if (held[out.position] > rv.position_cap(out.position, ctx.settings)
                 and len(rv.idle_slots(ctx.know, [v.player_id for v in left], ctx.settings)) <= idle):
@@ -388,6 +413,30 @@ def _close_by_chart(spare: Sequence[ReplayValue]) -> list[ReplayValue]:
         else:
             runs.append([value])
     return [v for run in runs for v in sorted(run, key=lambda v: (v.healthy_chart, v.player_id))]
+
+
+def _upgrade(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: _Context) -> Move | None:
+    """The free agent with the most trade value who clearly beats (UPGRADE_SHARE x and UPGRADE_GAP more) the least
+    valuable player it can drop for him (one of its DROPPABLE_COUNT least valuable, or any it can spare at his
+    position) at a position it can use: a manager doesn't leave a 300-point player on
+    the wire (testers added and flipped them for 75-85% of chart). He goes to IR after the move when he is out; with the
+    IR slot taken an out player is added only when he is worth more than the one on IR (they swap, `_stash_added`), and
+    never one who is out but can't go on IR (a suspension)."""
+    spare = _spare(roster, ctx.know, ctx.protected, ctx.keep) if len(roster) >= ctx.settings.roster_size else []
+    if not spare:
+        return None
+    stashed = max((v.chart for v in ctx.stash), default=None)   # IR taken: an out add must beat its player
+    for add in sorted((v for v in free if v.position in SKILL), key=lambda v: (-v.chart, v.player_id)):
+        if add.out and (not replay_ir.eligible(ctx.know, add.player_id) or (stashed is not None and add.chart <= stashed)):
+            continue                                              # he would sit on the bench (suspended: no IR)
+        drops = [*spare[:DROPPABLE_COUNT], *(v for v in spare[DROPPABLE_COUNT:] if v.position == add.position)]
+        legal = [out for out in _legal_drops(roster, add, drops, ctx)
+                 if add.chart >= max(UPGRADE_SHARE * out.chart, out.chart + UPGRADE_GAP)]
+        if legal:
+            return add.player_id, min(legal, key=lambda v: (v.chart, v.healthy_value, -v.player_id)).player_id
+        if add.chart < UPGRADE_GAP:
+            return None                               # sorted: nobody further down can clear the gap
+    return None
 
 
 def _stream(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: _Context) -> Move | None:
@@ -415,7 +464,7 @@ def _next_move(state: State, team_id: int, ctx: _Context, made: int) -> Move | N
     roster, ctx = [ctx.know.by_id[pid] for pid in team.roster], _for_team(ctx, team)
     free = _unrostered(state, ctx.know, state.locked)
     allowed = [v for v in free if not replay_fans.banned(team, v.team)]
-    steps = (_cover, _fill_spot, _trim, _stream) if made < MAX_FREE_AGENT_MOVES else (_cover,)
+    steps = (_cover, _fill_spot, _trim, _upgrade, _stream) if made < MAX_FREE_AGENT_MOVES else (_cover,)
     found = next((move for step in steps if (move := step(roster, allowed, ctx)) is not None), None)
     return found if found is not None or len(allowed) == len(free) else _cover(roster, free, ctx)
 
@@ -437,18 +486,32 @@ def cpu_free_agency(state: State, settings: Settings, know: Knowledge, seed: int
             if move is None:
                 break
             state = replay_waivers.execute_move(state, settings, know, team_id, *move)
+            state = _stash_added(state, settings, know, team_id, move[0])
+    return state
+
+
+def _stash_added(state: State, settings: Settings, know: Knowledge, team_id: int, added: int) -> State:
+    """An out player just added goes to IR at once: into an empty slot, or swapped with a less valuable IR player."""
+    if not replay_ir.eligible(know, added):
+        return state
+    team = rs.team(state, team_id)
+    if not team.ir:
+        return replay_ir.place(state, know, team_id, added)
+    held = team.ir[0]
+    if replay_ir.eligible(know, held) and know.by_id[added].chart > know.by_id[held].chart:
+        return replay_ir.activate(state, settings, know, team_id, held, swap=added)
     return state
 
 
 # ---------------- the IR slot ----------------
 
 def _stash_pick(group: Sequence[ReplayValue], ctx: _Context) -> ReplayValue | None:
-    """The best eligible skill player the team would never spare (top player, or above replacement), and only
-    one the rest of `group` can field a lineup without (a QB-heavy superflex roster may lack a spare back)."""
+    """The most valuable (by trade value) eligible skill player, and only one the rest of `group` can field a
+    lineup without (a QB-heavy superflex roster may lack a spare back). Any eligible player is better on IR
+    than on the bench: it frees his spot (testers saw season-ending injuries on benches beside an empty slot)."""
     keep = [v for v in group if v.position in SKILL and replay_ir.eligible(ctx.know, v.player_id)
-            and (v.player_id in ctx.protected or v.last_projection > ctx.know.replacement[v.position])
             and rv.can_field_lineup([o.position for o in group if o is not v], ctx.settings)]
-    return max(keep, key=lambda v: (v.healthy_value, v.ros_ppg, -v.player_id), default=None)
+    return max(keep, key=lambda v: (v.chart, v.healthy_value, -v.player_id), default=None)
 
 
 def _bring_back(state: State, ctx: _Context, team: rs.Team, player_id: int) -> State:
@@ -461,7 +524,7 @@ def _bring_back(state: State, ctx: _Context, team: rs.Team, player_id: int) -> S
     pick = _stash_pick(group, ctx)                  # never him: he lost his tag
     if pick is not None:
         return replay_ir.activate(state, settings, know, team.id, player_id, swap=pick.player_id)
-    for cut in _spare(group, know, ctx.protected):
+    for cut in _spare(group, know, ctx.protected, ctx.keep):
         if rv.can_field_lineup([v.position for v in group if v is not cut], settings):
             if cut.player_id == player_id:
                 return rs.release(state, settings, team.id, player_id, cut.name)

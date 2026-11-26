@@ -457,3 +457,21 @@ def test_each_cpu_gets_a_seeded_persona_once_and_the_user_none():
     assert set(cpus) <= set(replay_personas.PERSONAS) and teams == rd.new_game(settings, 4).teams
     assert all(t.hype == replay_personas.hype_for(t.persona) for t in teams)     # panicky and gambler: emotional
     assert [t.hype for t in teams if t.is_user] == [1.0] and max(t.hype for t in teams) == replay_personas.HYPE
+
+
+def test_an_injured_players_draft_price_moves_only_through_the_news(monkeypatch):
+    """No hindsight: his real return week reaches a jump-in draft only through replay_news.report."""
+    from dataclasses import replace as copy
+    from types import MappingProxyType
+
+    from services import replay_game as rg, replay_news
+    settings, star = fakes.fake_settings(start_week=7, draft_slot=4), fakes.INJURED_STAR_ID
+    data = fakes.fake_season()
+    since = next(s for (pid, s) in data.returns if pid == star)
+    later = copy(data, returns=MappingProxyType({**data.returns, (star, since): data.last_week}))
+    monkeypatch.setattr(replay_news, "report", lambda seed, pid, since, back, week, tag, last=None, first_tag=None:
+                        replay_news.Report(since, since + 4, "Out; expected back."))
+
+    picks = [rg.auto_draft(rg.create_game(settings, season, 5), settings, season, 5).picks for season in (data, later)]
+
+    assert picks[0] == picks[1] and any(p.player_id == star for p in picks[0])

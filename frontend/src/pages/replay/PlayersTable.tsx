@@ -15,7 +15,8 @@ export function addKey(playerId: number): string {
 
 function StatusCell({ row }: { row: ReplayWireRow }) {
   if (row.owner) return <>{row.owner.name}</>;
-  return row.status === 'waivers' ? <abbr title="On waivers">W</abbr> : <abbr title="Free agent">FA</abbr>;
+  if (row.status !== 'waivers') return <abbr title="Free agent">FA</abbr>;
+  return <abbr title={row.after_games ? 'On waivers: claimable after this week’s games' : 'On waivers'}>W</abbr>;
 }
 
 interface RowActionProps {

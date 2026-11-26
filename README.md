@@ -965,8 +965,11 @@ that week's games on; only scoring a week reads its real points.
   still count an IR player for their positional limits and their view of the rest of the season. A
   week's final report and roster status are shown from the start of that week (before its waiver run),
   like its projection. The draft shows only week 1's IR, PUP, suspension and exempt-list tags (`replay_pool.PRESEASON_TAGS`):
-  those are preseason moves (2021: Gus Edwards' and J.K. Dobbins' ACLs), and a CPU counts such a player at
-  twice his ADP (`replay_draft.OUT_PUSH`), so it waits on him. A week-1 O or Q is game-week news and
+  those are preseason moves (2021: Gus Edwards' and J.K. Dobbins' ACLs), and a CPU drafts such a player at
+  his chart value (the pick his discounted chart is worth, `replay_chart.chart_pick`), so it waits on him as
+  long as the trade market would. A jump-in draft does the same for anyone a hard tag rules out of its first
+  week, whom the current market's ADP leaves out altogether (a superflex jump-in used to leave QBs worth
+  400-700 on IR on the wire). A week-1 O or Q is game-week news and
   appears when the draft ends, and the CPUs make their week-1 moves first, as they do every week.
 - **Draft:** a snake draft, 15 rounds by default (QB, 2 RB, 2 WR, TE, FLEX, K, DST, 6 bench). CPUs follow
   ADP: each takes the lowest `(ADP + noise) x need x taste` among the best players left, with position
@@ -980,7 +983,10 @@ that week's games on; only scoring a week reads its real points.
   player (100 in a 12-team league, scaled to the league size: 66 with 8 teams, 116 with 14), nor in the
   league's first 4 weeks one of the league's picks from rounds 1-8 (`replay_waiver_ai.EARLY_ROUNDS` /
   `EARLY_WEEKS`: about three games before a manager gives up on a mid-round pick) unless the news has him out
-  for the season. It keeps an injured player who was above replacement, or who has a healthy chart of 50 or
+  for the season. A player it added this week, one it is "high on" and one at a position it needs go only after
+  every other player it can spare, and a better player who is only on a bye is never cut to cover a slot. After
+  a trade forces a cut, the CPU refills the open roster spot. A stasher never offers away the injured stars he
+  collects. It keeps an injured player who was above replacement, or who has a healthy chart of 50 or
   more (`KEEP_OUT_CHART`) and a return date in the news; when it trims back to a positional limit, players
   whose season values are within 5 points (`TRIM_CLOSE`, often all 0) are cut cheapest on the chart first. It
   drops an injured player it would otherwise keep only in one case: a starting slot has nobody who plays, its IR
@@ -1001,7 +1007,9 @@ that week's games on; only scoring a week reads its real points.
   Rank, and `star`) is the overall order of these preseason picks: the slot of his preseason expert rank,
   else of his ADP at his position. The rank blends this
   week's expert rank (weight 0.65 for a fresh snapshot, less as it ages) with the app's model rank
-  (`ros_ppg` nudged by his last three real games). Two extras keep the model rank from trailing the news
+  (`ros_ppg` nudged by his last five real games, at weight 0.5: the user chose five over three so values swing a
+  little less; after a big move with no news the old value was closer to the next four weeks 71% of the time,
+  2020-25, and five games cut such moves by 17%). Two extras keep the model rank from trailing the news
   (`services/replay_role.py`): from week 2 his newest projection counts half its gap to `ros_ppg` (a back
   the site re-rates after he wins the job moves now, not a quarter at a time), and when a teammate at his
   position is expected to miss games, a player with no projection since then (out or on a bye himself,
@@ -1042,14 +1050,17 @@ that week's games on; only scoring a week reads its real points.
   absence began (built from what was known that week, with today's bye bump like anyone's; a player hurt before
   week 1 keeps his draft-time value; one listed nowhere that week keeps his live value; a second absence right
   after a return freezes at his live value of the return week), and
-  the chart is that value less a share that follows the user's targets: out 1-4 weeks about 5-12% (one game
-  6% at any point of the season), 6+ weeks 35-45% when first reported and less each week as the return nears,
-  out for the season (or a return after the league's last week) the whole chart. At 13 games left: 1 game
-  missed 6%, 3 10%, 4 12%, 6 40%, 8 45%, 12 45%; never less than 0.6 x (share of the remaining games missed -
-  0.35), a ramp that matters once he misses most of what is left (2 of the last 3 games 19%, 4 of the last 5
-  27%) and is as steep as the targets allow: one more game missed or left never moves it by more than 15
-  points, and a fixed return week never costs more the next week. So the value falls once when he goes out and climbs back each week, reaching
-  his old value the week he returns: before this the experts' and the model's ranks fell while he was out and
+  the chart is that value less a share that follows the user's targets: out 1-4 weeks about 5-12%, 6+ weeks
+  35-45% when first reported and less each week as the return nears, out for the season (or a return after
+  the league's last week) the whole chart. At 13 games left: 1 game missed 6%, 3 10%, 4 12%, 6 40%, 8 45%,
+  12 45%; never less than (share of the remaining games missed)^1.8 (`SHARE_POWER`, the user's choice), which
+  prices a player who misses most of what is left: 1 of the last 2 games 29%, 3 of 6 29%, 4 of 6 48%, 5 of 6
+  72% (testers saw Kenneth Walker, back for the last 2 of 6, still RB7). More games missed never cost less,
+  and a fixed return week never costs more the next week. So the value falls once when he goes out and climbs back each week, reaching
+  his old value the week he returns, times a return factor after a long absence (`replay_chart_injury.return_factor`:
+  1 for up to 4 games missed, 0.80 from 6, measured: players back from 6-9 games out scored 0.80 of their old
+  rate against healthy players of the same form; Christian McCaffrey 2024 returns at 800, RB4, not 1000; after
+  his first game back he is valued live): before this the experts' and the model's ranks fell while he was out and
   the discount came on top (2026 superflex QA league: Aaron Rodgers missing one game 474 -> 129, now 446;
   2027: Jonathan Taylor out weeks 7-14 789 -> 209, now 454 climbing to 741; real 2024: Puka Nacua worth least,
   214, the week he returned, now 714). The games missed come from the news report. An "out for the season"
@@ -1127,9 +1138,16 @@ that week's games on; only scoring a week reads its real points.
   rows show, with the public reason ("Hype: role jumped after Puka Nacua went out for the season", "... he
   won the backfield").
 - **Injury news:** a player who is out carries a report of when he is due back (`services/replay_news.py`).
-  It is built from the week he really returned, blurred by seeded noise (off by up to two weeks, a few
-  false "out for the season" calls, season-ending injuries first reported as a return weeks out) that
-  shrinks as the return nears; it never names a week already reached. Only an IR or PUP tag is ever
+  Until a seeded 1-7 weeks before his real return it reads "no timetable yet", and his value is the average over
+  what the public can know (how much longer real 2018-25 absences with that tag lasted once he had been out this
+  long, `replay_news_lengths.json`, fitted by `python -m services.replay_chart_eval --news-lengths`): the expected
+  return factor x share kept, the same for every league seed and smooth week to week, never from his return (the
+  report's own week, for lineups, is that spread's median); from then on it names his real week plus an error drawn afresh each week (one week out it is right
+  about four times in five; 2 weeks out 59%, 3 weeks 41%, 4+ 37%), and a few long in-season IR absences first
+  read "out for the season". A preseason IR or PUP move reads "no timetable yet" at the draft (valued on the
+  preseason prior), a suspension shows its length. It never names a week already reached, a returning player's
+  week stays inside the season, and a plain O tag never reads "out for the season". Old saves keep loading; their
+  past weeks' news text (and the values built on it) is recomputed with these rules. Only an IR or PUP tag is ever
   called "out for the season": a plain O tag is week-to-week news (Cam Newton 2019: O from week 3, IR in
   week 10), so it names a return, the next week once the first guess has passed, until he goes to IR. A
   suspension is reported exactly. The commissioner's exempt list reads "out indefinitely" and never names a
@@ -1137,7 +1155,10 @@ that week's games on; only scoring a week reads its real points.
   later data (a beat report would know as much). Shown under a tagged player on the Players and Trades
   screens.
 - **The week:** Wednesday waivers by rolling priority (CPUs claim when a player adds about a lineup point
-  a week), then free agency, then the games: every team's best lineup by projection (yours can be set
+  a week), then free agency, then the games. In free agency a CPU also adds a free agent whose trade value
+  clearly beats a player it can drop at a position it can use (1.5 x his value and 100 more,
+  `replay_waiver_ai._upgrade`), straight to IR when he is out, and every CPU keeps its most valuable eligible
+  player in its IR slot, so a valuable player rarely sits on the wire: every team's best lineup by projection (yours can be set
   by hand), scored with real points. With waivers off, every unrostered player is a free agent.
 - **FAAB:** the same week, but each claim carries a blind bid from a $100 season budget (whole dollars, $0
   allowed). At the waiver run the highest bid wins, ties go to the team earlier in the rolling waiver order,
@@ -1186,7 +1207,13 @@ that week's games on; only scoring a week reads its real points.
   than it gets, by persona (`replay_personas.OFFER_EDGE`: steady 5-6%, shark and dealer 5-7%, balanced, fan, stasher,
   contender and a calm tilted manager 6-8%, panicky and gambler 8-10%; the haggler's opening offer is the
   exception, see below), judged as its own offer (`replay_trades.offer_multiple`) both when made and when you accept
-  it; a shop's offer is priced as before, at the shop discount. After a deal each starting slot
+  it; a shop's offer is priced as before, at the shop discount. How a CPU's own offer leans is drawn per offer
+  (`replay_personas.favours`, the user's "about 50/50"): with FAVOUR_SHARE (panicky, gambler and tilted 65%,
+  shark 40%, everyone else 55%) it favours you on the numbers the preview shows (a want offer by the edge
+  above, a shop offer by 0-10%, judged at the same own-offer bar accepting it uses), otherwise it comes close
+  (up to 4% short); "a good deal, I promise" lines only go with an offer that favours you. Measured over 3
+  seasons x 6 seeds (135 non-haggler offers): 51% favour you (shops 56%, want offers 45%) and 98% of all offers
+  are within 5% (before this round: 35%; every want offer favoured you, shop offers rarely did). After a deal each starting slot
   the CPU can no longer fill needs a player it can add (unrostered, not out, not on waivers; in the waiver
   phase, when everyone unrostered is on waivers, anyone you haven't claimed), and it adds him
   (`replay_cover.cpu_cover`): right away, or in the waiver phase once waivers clear. Each CPU has a hidden **persona**
@@ -1256,18 +1283,24 @@ that week's games on; only scoring a week reads its real points.
   steady ones a slump only 0.3x (and stay high on a slumping star, cooler on one who outran draft day).
   Strength is that signal over his chart (at least 250): worried at -0.08 or below, high at +0.08 or above,
   and only on the side of the chart his own price is on (worried only when he values the player at or below
-  the chart, high only at or above it), so a mood line or message never points the other way from his price. Once 3 NFL weeks of results are known (week 4 on; a league
+  the chart, high only at or above it), so a mood line or message never points the other way from his price.
+  Worry also needs his last two games below his rate (never one bad game, never a player scoring at or above
+  it), and nobody is worried about a player he got this week. Once 3 NFL weeks of results are known (week 4 on; a league
   that jumped in at week 4 or later has them from its first week, since the real weeks before it are known) each CPU shows a **mood
   line** in the trade builder ("Worried about X. High on Y."). When a CPU is worried at -0.15 or worse about
-  one of his 6 most valuable skill players whose last game fell short of his rate (and who nobody could think
+  one of his 6 most valuable skill players whose last two games fell short of his rate (and who nobody could think
   was hurt: the same test as the chat's dud lines below), he may **shop him to you** at the start of a week,
   after the CPUs' IR and free-agency moves
   (chance by persona: panicky 75%, gambler 35%, balanced 25%, steady and shark never; one shop per CPU, at
   most 2 in the league): he sends you a message, the player shows under **Shopping to you** on the Trades
   tab, and for you only he asks a seeded 5-15% less for that player (panicky 9%, gambler 7%, balanced 6%,
-  plus more the more worried he is). The discount is applied once, in the CPU's value test
+  plus more the more worried he is). His own shop offer is judged at the bar he uses for his own offers, so the
+  discount stacks with his persona's offer edge: a shopped player can go for about 0.79 of his price, not only
+  5-15% off (still inside the 80% market guard). The discount is applied once, in the CPU's value test
   (`replay_trade_value.tally` via `replay_state.markdowns`), so evaluate, propose, counters and his own offer
-  all see it; it never moves the chart, and the re-trade lock stops you flipping the player. While the shop is
+  all see it; it never moves the chart, and the re-trade lock stops you flipping the player. A manager who
+  shops a starter has chosen to lose him, so a deal for him carries no lineup-loss cost for the CPU: an
+  equal-value one-for-one at a position he can use goes through. While the shop is
   open the player is yours to buy: no other CPU can trade for him, and the shopping CPU sends you his offer
   first, once per shop (decline it or let it expire and he doesn't send it again while that shop stays open,
   though you can still propose at the discount; other CPUs' offers come through as usual; if the shop closes
@@ -1311,7 +1344,9 @@ that week's games on; only scoring a week reads its real points.
   points in pool weeks, then seed, and pairs them off (1 v 2, 3 v 4); in an odd pool the team idle least
   so far sits out (then the lowest in the table), so the bye rotates, and a pool
   of two plays twice (the team that won both places higher; a split goes to more points, then the higher
-  seed). Games are labelled Quarter-final, Semi-final, Championship, Third place or Consolation; a bye
+  seed). A pool's final places are its table after its last week, not head-to-head: a team that won one
+  consolation game can finish behind the team it beat if it lost its others (the Playoffs page says so).
+  Games are labelled Quarter-final, Semi-final, Championship, Third place or Consolation; a bye
   shows as an idle week on the schedule ("Bye / no game"), and the Matchup tab then shows the week's
   first game. With 5 playoff teams round one is a single wild-card game. Leagues saved before playoff
   sizes existed keep their title games. Their consolation games may pair differently (by the pool table rather than

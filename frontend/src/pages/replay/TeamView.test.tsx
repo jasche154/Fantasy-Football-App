@@ -433,8 +433,8 @@ describe('TeamView injuries and IR', () => {
     const blocked = summary({ ir_blocked: [MOSTERT], has_injuries: false });
     renderTeam(team({ ir: [irRow(MOSTERT)] }), { game: blocked });
     await table();
-    expect(screen.getByText('Raheem Mostert is on IR but no longer has an O, IR or PUP tag. Activate or drop him before you add, '
-      + 'claim or trade for players.')).toHaveAttribute('role', 'status');
+    expect(screen.getByText('Activate Raheem Mostert from IR to add, claim or trade: he no longer has an O, IR or PUP tag (or drop him).'))
+      .toHaveAttribute('role', 'status');
     expect(screen.getByText(/Injury reports are not loaded for the 2023 season, so no tags are shown and the IR slot can.t be used\./))
       .toHaveAttribute('role', 'status');
   });
@@ -462,7 +462,7 @@ describe('TeamView injuries and IR', () => {
   it('keeps the IR warning off another team\'s roster', async () => {
     renderTeam(team({ team: teamRef(OPPONENT_TEAM_ID) }), { game: summary({ ir_blocked: [MOSTERT] }) });
     await screen.findByRole('table', { name: 'Sunday Scaries roster, week 5' });
-    expect(screen.queryByText(/is on IR but no longer has/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/from IR to add, claim or trade/)).not.toBeInTheDocument();
   });
 
   it('keeps the no-injury-reports notice to the current week', async () => {

@@ -10,7 +10,8 @@ contradicts what he accepts:
 - strength = signal / max(chart, CHART_FLOOR): worried at <= -WORRY, high at >= HIGH, and only on the side of
   the chart his own price is on (`private_value - chart`: worried only at or below it, high only at or above),
   so the feeling and the price can never point different ways. Only his own healthy skill players worth
-  FEEL_MIN_CHART or more: an injured player is never something to be "worried" about.
+  FEEL_MIN_CHART or more: an injured player is never something to be "worried" about, nor one who has not had
+  SLUMP_GAMES games in a row below his rate, nor one his team got this week (`acquired`).
 - `mood_line`: "Worried about X. High on Y." from his strongest feeling each way (None without one). Views
   show it once `moods_known` (MOOD_WEEKS NFL weeks of results before the current week: week 4 on, so a league
   that jumped in at week 4 or later has it from its first week: its earlier real weeks are known);
@@ -18,12 +19,14 @@ contradicts what he accepts:
   still waits for league weeks.
 
 Shopping (`refresh_shops`, once a week at its start, after the CPUs' IR and free-agency moves): a CPU worried
-at >= SHOP_WORRY about one of his SHOP_TOP most valuable skill players, whose last game fell short of his rate
+at >= SHOP_WORRY about one of his SHOP_TOP most valuable skill players, whose last SLUMP_GAMES games fell short of his rate
 and who nobody could think was hurt (`might_be_hurt`, on last week's game), shops him to the user with
 probability SHOP_RATE (panicky most; steady and shark never). At most one shop per CPU and MAX_SHOPS in the
 league. A shop holds a seeded `discount` (DISCOUNT_BASE by persona + worry, +- jitter, within
 DISCOUNT_RANGE) that `replay_trade_value.tally` takes off his price for the user only, via
-`replay_state.markdowns`. While it is open the player is the user's to buy: no other CPU may trade for him
+`replay_state.markdowns`. The shop's own offer is judged at the CPU's own-offer bar (replay_trade_ai, as accepting it
+is), so the discount stacks with the persona's edge: a shopped player can go for about 0.79 of the CPU's own price
+(still inside the 80% market guard on chart values). While it is open the player is the user's to buy: no other CPU may trade for him
 (replay_trade_ai). It stays open week to week while he stays that worried and the player is on his active
 roster and doesn't look hurt; a good game or the deadline closes it, and a trade, drop or IR move removes it
 at once (`replay_state.with_team`). He sends the user his shop offer for a player once per shop (`Shop.opened`,
@@ -32,7 +35,7 @@ Nothing here posts chat: replay_game does, with replay_chat (which also uses `mi
 Pure: a Knowledge and the state in, new data out.
 """
 import statistics
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, replace
 
 from services import replay_fans, replay_personas, replay_state as rs
@@ -54,6 +57,7 @@ EMOTION = {                     # persona -> (multiple on a bad signal, on a goo
     "fan": (1.0, 1.0), "stasher": (1.0, 1.0), "haggler": (1.0, 1.0), "contender": (1.0, 1.0),
     "dealer": (1.0, 1.0), "tilted": (1.0, 1.0),
 }
+SLUMP_GAMES = 2                 # a worried feeling or a shop needs this many games in a row below his rate
 SHOP_WORRY = 0.15               # worry that makes him shop a player
 SHOP_TOP = 6                    # only one of his SHOP_TOP most valuable skill players
 SHOP_RATE = {"balanced": 0.25, "panicky": 0.75, "gambler": 0.35, "steady": 0.0, "shark": 0.0,     # the user's
@@ -91,27 +95,35 @@ def feeling(value: ReplayValue, persona: str, hype: float = 1.0) -> Feeling | No
         return None
     felt = strength(value, persona, hype)
     lean = replay_personas.private_value(value, persona, hype) - value.chart     # the side of the chart he prices on
-    kind = "worried" if felt <= -WORRY and lean <= 0 else "high" if felt >= HIGH and lean >= 0 else None
+    kind = ("worried" if felt <= -WORRY and lean <= 0 and _slumping(value)
+            else "high" if felt >= HIGH and lean >= 0 else None)
     return None if kind is None else Feeling(value.player_id, kind, round(felt, 3))
 
 
-def feelings(know: Knowledge, team: Team, persona: str | None = None) -> tuple[Feeling, ...]:
+def feelings(know: Knowledge, team: Team, persona: str | None = None,
+             fresh: Collection[int] = ()) -> tuple[Feeling, ...]:
     """A CPU's feelings about his own roster, strongest first. `persona`: the one his prices follow now
-    (replay_personas.now: a tilted manager on a skid feels like panicky), default his own."""
+    (replay_personas.now: a tilted manager on a skid feels like panicky), default his own. Never worried about
+    his own club's player or one in `fresh` (just acquired: `acquired`)."""
     found = [felt for pid in team.roster if pid in know.by_id
              if (felt := feeling(know.by_id[pid], persona or team.persona, team.hype)) is not None
-             and not (felt.kind == "worried" and replay_fans.cheers_for(team, know.by_id[pid].team))]   # not his own club
+             and not (felt.kind == "worried" and (replay_fans.cheers_for(team, know.by_id[pid].team) or pid in fresh))]
     return tuple(sorted(found, key=lambda f: (-abs(f.strength), f.player_id)))
 
 
-def mood_line(know: Knowledge, team: Team, persona: str | None = None) -> str | None:
+def acquired(state: State) -> frozenset[int]:
+    """Players their team traded for or added this week: nobody is worried about a player he just got."""
+    return frozenset(pid for pid, week in state.traded.items() if week == state.week) | rs.pickups(state)
+
+
+def mood_line(know: Knowledge, team: Team, persona: str | None = None, fresh: Collection[int] = ()) -> str | None:
     """"Worried about X. High on Y." from his strongest feeling each way; None when he has none."""
-    felt = feelings(know, team, persona)
+    felt = feelings(know, team, persona, fresh)
     worried = next((f for f in felt if f.kind == "worried"), None)
     high = next((f for f in felt if f.kind == "high"), None)
     parts = [f"{label} {know.by_id[f.player_id].name}." for label, f in (("Worried about", worried),
                                                                          ("High on", high)) if f is not None]
-    return " ".join(parts) or None
+    return rs.tidy(" ".join(parts)) or None
 
 
 def moods_known(week: int) -> bool:
@@ -141,8 +153,11 @@ def might_be_hurt(know: Knowledge, played: SeasonData, player_id: int, week: int
 # ---------------- shopping a player to the user ----------------
 
 def _slumping(value: ReplayValue) -> bool:
-    """His last game fell short of his expected rate (a good game closes a shop)."""
-    return bool(value.recent_points) and value.recent_points[0] < value.ros_ppg
+    """His last SLUMP_GAMES games all fell short of his expected rate: a real slump, never one game (Justin
+    Jefferson scoring 16-23 a week was shopped as "I age a year every time I check his stats"; a good game
+    closes a shop)."""
+    last = value.recent_points[:SLUMP_GAMES]
+    return len(last) == SLUMP_GAMES and all(points < value.ros_ppg for points in last)
 
 
 def _worry(state: State, value: ReplayValue, team: Team, hurt: Callable[[int], bool]) -> float | None:

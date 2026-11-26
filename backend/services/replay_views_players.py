@@ -4,7 +4,8 @@ same no-hindsight rule holds (`Game.data` and `Game.know_at` only).
 
 GET  .../players?position=&search=&status=&sort=&dir=&stats=&stat_week=&limit=&offset=
       Page of WireRow + {week, stats, stat_week}      (player.hype: the PlayerRef hype star, as of the current week)
-      WireRow = PlayerRow + {status: rostered | waivers | free_agent, owner: TeamRef | null, season_points,
+      WireRow = PlayerRow + {status: rostered | waivers | free_agent, after_games: bool (on waivers in the open
+                phase: dropped this week, claimable only after this week's games), owner: TeamRef | null, season_points,
                 last_points, usage: Usage | null, line: StatLine}
                 season_points / last_points: real points in weeks already played
       usage         his last 3 games BEFORE the current week (games 1-3); null for K, DST or before his first game
@@ -143,7 +144,8 @@ def _wire_row(game: Game, player_id: int, owners: dict[int, Team], totals: dict[
               usage: dict[int, dict], line: dict) -> dict:
     owner = owners.get(player_id)
     return {**player_row(game, game.know, player_id),
-            "status": replay_waivers.player_status(game.state, player_id),
+            "status": (status := replay_waivers.player_status(game.state, player_id)),
+            "after_games": status == "waivers" and game.state.phase == "open",     # dropped now: claim after the games
             "owner": team_ref(game, owner) if owner else None, "season_points": round(totals.get(player_id, 0.0), 2),
             "last_points": game.data.actual.get((player_id, game.played)), "usage": usage.get(player_id),
             "line": line}
@@ -252,7 +254,7 @@ def _upcoming(game: Game, value: ReplayValue) -> list[dict]:
     for week in range(game.state.week + 1, game.settings.end_week + 1):
         opponent = schedule.opponent(value.team, week)
         bye = value.team is not None and opponent is None
-        out = report is not None and (report.back is None or report.back > week)
+        out = report is not None and (report.vague or report.back is None or report.back > week)   # vague: no week
         defense = ratings.rating(opponent, value.position)
         estimate = None if bye or out else round(value.ros_ppg * (defense["factor"] if defense else 1.0), 1)
         rows.append({"week": week, "opponent": "BYE" if bye else opponent, "away": _away(game, value.team, week),

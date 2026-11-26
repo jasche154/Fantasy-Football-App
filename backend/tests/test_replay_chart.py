@@ -54,21 +54,24 @@ def test_model_ppg_without_games_is_the_rate():
 
 
 def test_a_stars_dip_counts_less_than_anyone_elses():
-    star, other = chart.model_ppg(20.0, 20.0, (8, 10, 12), 1.0), chart.model_ppg(20.0, 20.0, (8, 10, 12), 0.0)
+    games = (8, 10, 12, 9, 11)                                          # FORM_GAMES = 5, mean 10
+    star, other = chart.model_ppg(20.0, 20.0, games, 1.0), chart.model_ppg(20.0, 20.0, games, 0.0)
 
     assert other == pytest.approx(20 - 0.5 * 10) and star == pytest.approx(20 - 0.5 * 0.4 * 10)
 
 
 def test_a_star_below_his_prior_bounces_back_faster():
-    star, other = chart.model_ppg(12.0, 20.0, (20, 20, 20), 1.0), chart.model_ppg(12.0, 20.0, (20, 20, 20), 0.0)
-    above_prior = chart.model_ppg(12.0, 10.0, (20, 20, 20), 1.0)
+    games = (20,) * chart.FORM_GAMES
+    star, other = chart.model_ppg(12.0, 20.0, games, 1.0), chart.model_ppg(12.0, 20.0, games, 0.0)
+    above_prior = chart.model_ppg(12.0, 10.0, games, 1.0)
 
     assert other == pytest.approx(16.0) and star == pytest.approx(12 + 0.65 * 8) and above_prior == other
 
 
-def test_fewer_games_move_the_rate_less_and_only_the_last_three_count():
-    assert chart.model_ppg(10.0, 10.0, (16,), 0.0) == pytest.approx(10 + 0.5 / 3 * 6)
-    assert chart.model_ppg(10.0, 10.0, (13, 13, 13, 100), 0.0) == pytest.approx(11.5)
+def test_fewer_games_move_the_rate_less_and_only_the_last_five_count():
+    assert chart.FORM_GAMES == 5
+    assert chart.model_ppg(10.0, 10.0, (16,), 0.0) == pytest.approx(10 + 0.5 / 5 * 6)       # one game: a tenth of it
+    assert chart.model_ppg(10.0, 10.0, (13,) * 5 + (100,), 0.0) == pytest.approx(11.5)
 
 
 def test_evenly_spaced_scores_get_whole_ranks():
@@ -134,10 +137,12 @@ def test_every_week_out_discounts_the_value_he_had_before_the_absence(week):
     games = [w for w in range(week, settings.end_week + 1) if data.schedule.opponent(value.team, w)]
     missed = len(games) * (1 - replay_news.share_played(value.news, games))
     keep = 1 - replay_chart_injury.discount(missed, len(games))
+    so_far = sum(bool(data.schedule.opponent(value.team, w)) for w in range(value.news.since, week))
+    factor = replay_chart_injury.return_factor(so_far + missed)            # what such an absence comes back worth
 
     assert value.news.since == fakes.INJURED_WEEKS[0] and 0 < keep < 1
-    assert value.healthy_chart == before.healthy_chart                       # frozen at the week before
-    assert value.chart == pytest.approx(before.healthy_chart * keep, abs=0.1)
+    assert value.healthy_chart == pytest.approx(before.healthy_chart * replay_chart_injury.return_factor(so_far), abs=0.1)
+    assert value.chart == pytest.approx(before.healthy_chart * factor * keep, abs=0.1)
 
 
 def early_dst_season():
@@ -202,3 +207,20 @@ def test_without_any_expert_ranks_the_sites_consensus_stands_in_and_damps_a_hot_
 def test_a_season_with_expert_ranks_never_uses_the_stand_in(monkeypatch):
     data = fakes.fake_season()
     assert _hot_streak_rise(data, monkeypatch, True) == _hot_streak_rise(data, monkeypatch, False)
+
+
+@pytest.mark.parametrize("missed", [7, None])
+def test_the_vague_keep_carries_the_return_factor_for_a_frozen_player_only(monkeypatch, missed):
+    from services import replay_chart_injury as injury, replay_news
+    data, week, end, back = fakes.fake_season(), 5, 17, 11
+    pid = fakes.player_id("WR", 3)
+    row = {"team": data.team_at(pid, week)}
+    monkeypatch.setattr(replay_news, "vague_odds", lambda since, w, tag: ((back, 1.0),))
+    games = chart._game_weeks(data, row["team"], week, end)
+    left = sum(w < back for w in games)
+
+    keep = chart._vague_keep(data, row, replay_news.Report(2, back, "", vague=True), "IR", week, end, missed)
+
+    factor = injury.return_factor(missed + left) if missed is not None else 1.0
+    assert keep == pytest.approx((1 - injury.discount(left, len(games))) * factor)
+    assert missed is None or factor < 1

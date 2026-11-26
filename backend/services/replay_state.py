@@ -11,6 +11,7 @@ was known before it (`draft_week`), schedules weeks K..regular_season_weeks only
 K on; the NFL weeks before K are history, not league weeks.
 """
 import json
+import re
 import types
 import typing
 import zlib
@@ -379,8 +380,16 @@ def with_team(state: State, team: Team) -> State:
     return replace(state, teams=tuple(team if t.id == team.id else t for t in state.teams), shops=shops)
 
 
+_DOUBLE_STOP = re.compile(r"(?<!\.)\.\.(?!\.)")
+
+
+def tidy(text: str) -> str:
+    """One full stop where a sentence ends on a name that has one ("Deebo Samuel Sr.."); an ellipsis stays."""
+    return _DOUBLE_STOP.sub(".", text)
+
+
 def add_event(state: State, kind: str, team_id: int | None, text: str, player_ids: Sequence[int] = ()) -> State:
-    event = Event(id=state.next_id, week=state.week, kind=kind, team_id=team_id, text=text,
+    event = Event(id=state.next_id, week=state.week, kind=kind, team_id=team_id, text=tidy(text),
                   player_ids=tuple(player_ids))
     return replace(state, events=(*state.events, event), next_id=state.next_id + 1)
 

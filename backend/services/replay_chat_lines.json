@@ -118,7 +118,7 @@
    "Big win! Same feeling as a home opener. Pure joy."
   ],
   "stasher": [
-   "Patience pays. Won by {margin} with a roster everyone laughed at in September.",
+   "Patience pays. Won by {margin} with a roster nobody rated.",
    "{my_score} points. Told you the guys I waited on would come through.",
    "A {margin} point win. The long game is starting to look short, {you}.",
    "Week {week}: the stash is paying out. Funny how that works.",
@@ -588,7 +588,7 @@
   ],
   "haggler": [
    "Lost by {margin}. Ouch. Somebody's going to sell me some points this week.",
-   "{their_score} to {my_score}. That was a bad deal for me. I don't make many.",
+   "{their_score} to {my_score}. That one stung. I don't lose many like that.",
    "Week {week}: I overpaid for that lineup. Lesson learned.",
    "{you}, impressive. Want to tell me what you'd take for your best guy?",
    "Down {margin}. Time to shop for bargains."
@@ -742,10 +742,10 @@
   ],
   "haggler": [
    "{player} with {points}! Got him for a song, too.",
-   "{points} from {player}. Best bargain in the league, and it isn't close.",
+   "{points} from {player}. That's what value looks like.",
    "Week {week}: {player} scored {points}. His price just went up. A lot.",
    "{player}, {points}. You want him now? It'll cost you.",
-   "{points} points for {player}. Paid pennies. Love it."
+   "{points} points for {player}. Love it."
   ],
   "contender": [
    "{player} with {points}. That's a championship player.",
@@ -1573,7 +1573,7 @@
   ],
   "stasher": [
    "Champion. The guys I waited on all year won it. Patience is a title strategy.",
-   "Title by {margin}. Everybody laughed at my IR slot in October.",
+   "Title by {margin}. Everybody laughed at my IR slot, and look now.",
    "We won it all. Slow and steady, then very fast.",
    "{you}, good final. I've been building for this game since week 1.",
    "Champion. The long game is the only game."
