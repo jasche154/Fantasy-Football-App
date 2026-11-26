@@ -162,3 +162,37 @@ def test_without_the_draft_cache_an_unseen_qb_on_a_team_with_a_seeded_rookie_is_
     added = sim_depth.with_real_qbs(one, rooms, 5, seen={900022}, rookie_teams={teams[0], teams[2]})
     assert 900020 not in added.players                   # unseen, his team drafted a rookie QB: that rookie
     assert 900021 in added.players and 900022 in added.players
+
+
+def test_season_totals_credit_a_trade_weeks_work_to_the_team_he_played_for():
+    """Review round 4, item 5: team_at(pid, week + 1), the team of that week's game."""
+    from types import SimpleNamespace
+
+    from services import sim_metrics_shape
+    from services.replay_box import BoxLine
+    games = {1: "AAA", 2: "BBB", 3: "BBB"}                 # traded after week 1
+    def team_at(pid, week):                               # the team of his last game before `week`
+        before = [w for w in games if w < week]
+        return games[max(before)] if before else games[1]
+    box = {(7, 1): BoxLine(targets=2), (7, 2): BoxLine(targets=6)}
+    totals, team_of = sim_metrics_shape._totals(SimpleNamespace(box=box, team_at=team_at))
+    assert totals[7]["targets"] == 8 and team_of[7] == "BBB"     # week 2's six targets were for BBB
+
+
+def test_the_qb_jobs_check_plays_the_live_season_with_todays_real_rooms(monkeypatch):
+    """Review round 4, item 5: sim_qb_fit._league adds the real QB rooms as sim_setup.build does."""
+    from services import replay_pool, sim_qb_fit, sim_qb_jobs, sim_season
+    data = fakes.fake_season()
+    team = sorted({t for t, _ in data.schedule.opponents})[0]
+    captured = {}
+    monkeypatch.setattr(sim_setup, "kind_of", lambda session, season: ("live", 8))
+    monkeypatch.setattr(replay_pool, "load_season_data", lambda *a, **k: data)
+    monkeypatch.setattr(sim_setup, "qb_rooms", lambda session: {team: [(900030, "Room Passer")]})
+    monkeypatch.setattr(sim_setup, "with_status_now", lambda session, base, week: base)
+    monkeypatch.setattr(sim_setup, "first_seasons", lambda session: {})
+    monkeypatch.setattr(sim_setup, "qb_inputs", lambda session, season: sim_qb_jobs.QbInputs())
+    monkeypatch.setattr(sim_setup, "team_prior", lambda session, season: {})
+    monkeypatch.setattr(sim_setup, "posted_lines", lambda base, week: {})
+    monkeypatch.setattr(sim_season, "simulate", lambda base, *a, **k: captured.setdefault("base", base))
+    sim_qb_fit._league(None, data.season, 1)
+    assert captured["base"].players[900030].adp_team == team
