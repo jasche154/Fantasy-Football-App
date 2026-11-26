@@ -204,7 +204,7 @@ def respond_offer(game_id: GameId, offer_id: DbId, body: RespondBody, session: S
         except rg.OfferExpired as exc:
             found = exc.verdict
             return t.done(exc.state, accepted=False, expired=True, message=str(exc),
-                          verdict=(lambda game: league_views.verdict(game, found)) if found else None)
+                          verdict=(lambda game: league_views.verdict(game, found)) if found else None, counter=None)
         counter = next((o for o in state.offers if o.counter_to == offer_id and o.status == "pending"), None)
         return t.done(state, accepted=body.accept, expired=False, message=None, verdict=None,
                       counter=(lambda game: league_views.offer_row(game, counter)) if counter and not body.accept else None)

@@ -176,7 +176,7 @@ def _side(state: State, settings: Settings, know: Knowledge, team: Team, other: 
     else:
         cut = _cpu_drops(settings, know, after, ir, rs.held(team))
     roster = tuple(pid for pid in after if pid not in (cut or ()))
-    filled = cover(know, settings, roster, pool, used)
+    filled = cover(know, settings, roster, pool, used, team)
     gain = round(_season(settings, know, (*roster, *(filled or ()), *ir))
                  - _season(settings, know, rs.held(team)), 2)
     kept = tuple(pid for pid in receives if pid in roster or pid in ir)   # a throw-in it cuts is worth nothing
@@ -245,10 +245,11 @@ def _suggestion(state: State, settings: Settings, know: Knowledge, mine: _Side, 
 
 def evaluate(state: State, settings: Settings, know: Knowledge, from_team: int, to_team: int,
              give: Sequence[int], get: Sequence[int], proposer_drops: Sequence[int] = (),
-             offered: bool = False, counter: bool = False) -> Verdict:
+             offered: bool = False, counter: bool = False, explain: bool = False) -> Verdict:
     """Would this deal go through? from_team sends `give` and receives `get`; to_team is a CPU.
     `offered`: the deal is to_team's own offer to the user (mirrored), judged at `offer_multiple`; `counter`:
-    that offer answers another (a haggler's counter gives his normal edge).
+    that offer answers another (a haggler's counter gives his normal edge); `explain`: work out the CPU's reason
+    for saying no (`Verdict.decline`: more tally passes and a lineup solve), only for a user's proposal.
 
     ValueError for input that cannot be a trade (wrong roster, too many players, past the deadline, the
     user's drops not covering the overflow). Otherwise a Verdict, the same one every time it is asked."""
@@ -265,7 +266,7 @@ def evaluate(state: State, settings: Settings, know: Knowledge, from_team: int, 
                *side_reasons(mine, receiver, settings, know, _bar(state, settings, mine, receiver))]
     moved = (*give, *get)
     decline = ((rule_decline(state, settings, know, receiver, moved, mine) or _decline(settings, know, theirs))
-               if reasons else (None, None, None))
+               if reasons and explain else (None, None, None))
     bonus = tv.premium(know, "balanced", give, mine.kept, just_added)
     value_give = round(_chart(know, give, just_added) + max(0.0, -bonus), 2)
     value_get = round(_chart(know, mine.kept, just_added) - _chart(know, mine.drops or (), just_added)
@@ -283,10 +284,10 @@ def evaluate(state: State, settings: Settings, know: Knowledge, from_team: int, 
 
 
 def record_offer(state: State, from_team: int, to_team: int, give: Sequence[int], get: Sequence[int],
-                 status: str, counter_to: int | None = None) -> State:
-    """The state with a new Offer for this week (`give` is what from_team sends)."""
+                 status: str, counter_to: int | None = None, kind: str = "") -> State:
+    """The state with a new Offer for this week (`give` is what from_team sends; `kind`: Offer.kind)."""
     offer = Offer(id=state.next_id, week=state.week, from_team=from_team, to_team=to_team, give=tuple(give),
-                  get=tuple(get), status=status, counter_to=counter_to)
+                  get=tuple(get), status=status, counter_to=counter_to, kind=kind)
     return replace(state, offers=(*state.offers, offer), next_id=state.next_id + 1)
 
 
@@ -343,7 +344,7 @@ def propose(state: State, settings: Settings, know: Knowledge, to_team: int, giv
     to_team) it is a counter: that offer becomes "countered" and the new Offer carries counter_to."""
     user, give, get = rs.user_team(state), tuple(give), tuple(get)
     replay_ir.require_unblocked(state, know, user.id)
-    verdict = evaluate(state, settings, know, user.id, to_team, give, get, user_drops)
+    verdict = evaluate(state, settings, know, user.id, to_team, give, get, user_drops, explain=True)
     if counter_to is not None:
         state = _countered(state, to_team, counter_to)
     if verdict.accepted:
@@ -358,6 +359,17 @@ def offers_for_user(state: State) -> tuple[Offer, ...]:
     """CPU offers the user can still answer."""
     user = rs.user_team(state)
     return tuple(o for o in state.offers if o.to_team == user.id and o.status == "pending")
+
+
+def accept_verdict(state: State, settings: Settings, know: Knowledge, offer: Offer,
+                   user_drops: Sequence[int] = ()) -> Verdict:
+    """The CPU's test of its own pending offer to the user, as accepting it (and its preview) runs it: judged as its
+    own offer (`offered`), and never at a stricter bar than it was made at. Only a haggler's opening offer ("want")
+    keeps his lowball edge; a shop, a counter and his own counter take his normal edge (`counter`), which for every
+    style is at least as loose as the plain bar a shop or a counter is built at. ValueError like `evaluate`."""
+    relaxed = offer.kind != "want" if offer.kind else offer.counter_to is not None     # old saves: as judged then
+    return evaluate(state, settings, know, rs.user_team(state).id, offer.from_team, offer.get, offer.give, user_drops,
+                    offered=True, counter=relaxed)
 
 
 def respond(state: State, settings: Settings, know: Knowledge, offer_id: int, accept: bool,
@@ -382,7 +394,7 @@ def respond(state: State, settings: Settings, know: Knowledge, offer_id: int, ac
         _check(state, settings, know, *deal)
     except ValueError as exc:
         raise OfferExpired(f"That offer no longer stands. {exc}", expired) from exc
-    verdict = evaluate(state, settings, know, *deal, user_drops, offered=True, counter=offer.counter_to is not None)
+    verdict = accept_verdict(state, settings, know, offer, user_drops)
     if not verdict.accepted:
         raise OfferExpired(f"That offer no longer stands. {' '.join(verdict.reasons)}", expired, verdict)
     return _apply(state, settings, know, *deal, verdict, offer_id)

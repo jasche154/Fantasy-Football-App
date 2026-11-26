@@ -7,7 +7,7 @@ cuts with `cpu_drops` and the user names his own (`user_drops`), and `cover` fin
 from collections import Counter
 from collections.abc import Sequence
 
-from services import replay_ir, replay_state as rs, replay_values as rv
+from services import replay_fans, replay_ir, replay_state as rs, replay_values as rv
 from services.replay_pool import SKILL
 from services.replay_state import Settings, State, Team
 from services.replay_values import Knowledge
@@ -78,14 +78,16 @@ def free_agents(state: State, know: Knowledge) -> list[int]:
 
 
 def cover(know: Knowledge, settings: Settings, roster: Sequence[int], pool: Sequence[int],
-          used: frozenset[int] = frozenset()) -> tuple[int, ...] | None:
+          used: frozenset[int] = frozenset(), team: Team | None = None) -> tuple[int, ...] | None:
     """One free agent from `pool` (best first) per starting slot `roster` cannot fill, none in `used`; None
-    when a slot has nobody eligible. () for a legal roster."""
+    when a slot has nobody eligible. () for a legal roster. A fan (`team`) takes his rival's player only when
+    nobody else can play the slot, as replay_cover does."""
     picked: list[int] = []
     for slot in rv.missing_slots(positions(know, roster), settings):
-        eligible = rv.eligible(slot)
-        found = next((pid for pid in pool if pid not in used and pid not in picked
-                      and know.by_id[pid].position in eligible), None)
+        eligible = [pid for pid in pool if pid not in used and pid not in picked
+                    and know.by_id[pid].position in rv.eligible(slot)]
+        welcome = [pid for pid in eligible if team is None or not replay_fans.banned(team, know.by_id[pid].team)]
+        found = next(iter(welcome or eligible), None)
         if found is None:
             return None
         picked.append(found)

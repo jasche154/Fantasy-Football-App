@@ -71,7 +71,7 @@ def counter_offer(state: State, settings: Settings, know: Knowledge, declined: O
     if best is None:
         return state
     give, get = best[1]
-    return rt.record_offer(state, cpu.id, declined.from_team, get, give, "pending", declined.id)
+    return rt.record_offer(state, cpu.id, declined.from_team, get, give, "pending", declined.id, kind="counter")
 
 
 def haggle_counter(state: State, settings: Settings, know: Knowledge, declined: Offer) -> State:
@@ -86,4 +86,4 @@ def haggle_counter(state: State, settings: Settings, know: Knowledge, declined: 
     deal = replay_trade_ai.haggle_deal(state, settings, know, cpu, declined.get)
     if deal is None:
         return state
-    return rt.record_offer(state, cpu.id, user.id, deal[1], deal[0], "pending", declined.id)
+    return rt.record_offer(state, cpu.id, user.id, deal[1], deal[0], "pending", declined.id, kind="haggle")

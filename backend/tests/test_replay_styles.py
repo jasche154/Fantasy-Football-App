@@ -66,10 +66,11 @@ def test_old_saves_keep_their_styles_and_load_without_the_new_fields():
     state = league()[0]
     text = rs.to_json(state).replace(',"fan_of":null', "")
     offer = rs.Offer(1, 1, USER, CPU, (1,), (2,), "declined")
-    old = rs.state_from_json(rs.to_json(replace(state, offers=(offer,))).replace(',"reply":null', ""))
+    old = rs.state_from_json(rs.to_json(replace(state, offers=(offer,))).replace(',"reply":null', "")
+                             .replace(',"kind":""', ""))
 
     assert '"fan_of"' not in text and rs.state_from_json(text).teams == state.teams
-    assert old.offers[0].reply is None and [t.persona for t in old.teams] == [t.persona for t in state.teams]
+    assert old.offers[0].kind == "" and old.offers[0].reply is None and [t.persona for t in old.teams] == [t.persona for t in state.teams]
 
 
 # ---------------- fan ----------------
@@ -127,7 +128,7 @@ def test_a_fan_turns_down_any_trade_that_brings_him_a_rivals_player(fan_of_rival
     fan = with_team(state, to_team, persona="fan", fan_of=favourite)
 
     assert rt.evaluate(state, SETTINGS, know, USER, to_team, give, get).accepted
-    verdict = rt.evaluate(fan, SETTINGS, know, USER, to_team, give, get)
+    verdict = rt.evaluate(fan, SETTINGS, know, USER, to_team, give, get, explain=True)
     assert not verdict.accepted and (verdict.decline, verdict.decline_player) == ("decline_rival", give[0])
     assert any(fans.nickname(fans.RIVALS[favourite]) in reason for reason in verdict.reasons)
 
@@ -431,7 +432,7 @@ def test_a_cpu_with_no_lineup_room_says_so():
     state, know = league(changes={only_te: star(500.0), back: star(900.0, star=1.0)})
     locked = lock_free_agents(state, know, "TE")
 
-    verdict = rt.evaluate(locked, SETTINGS, know, USER, DEEP_AT_WR, [back], [only_te])
+    verdict = rt.evaluate(locked, SETTINGS, know, USER, DEEP_AT_WR, [back], [only_te], explain=True)
     assert not verdict.accepted and verdict.decline == "decline_room"
 
 
@@ -442,7 +443,7 @@ def test_a_lowball_gets_a_value_reply_naming_the_player_asked_for():
     best = max(cpu.roster, key=lambda pid: chart(know, pid))
     worst = min((pid for pid in user.roster if know.by_id[pid].position in SKILL), key=lambda pid: chart(know, pid))
 
-    verdict = rt.evaluate(state, SETTINGS, know, USER, CPU, [worst], [best])
+    verdict = rt.evaluate(state, SETTINGS, know, USER, CPU, [worst], [best], explain=True)
     assert not verdict.accepted and (verdict.decline, verdict.decline_player) == ("decline_value", best)
     assert not chart(know, worst) > (1 - 0.15) * chart(know, best)          # a real lowball
 
@@ -464,7 +465,7 @@ def test_a_cpu_high_on_the_player_asked_for_turns_down_what_it_would_take_withou
     loved = {theirs: {"form_chart": 0.3 * chart(know, theirs)}}
     state, know = league(changes=loved)
 
-    verdict = rt.evaluate(state, SETTINGS, know, USER, CPU, [mine], [theirs])
+    verdict = rt.evaluate(state, SETTINGS, know, USER, CPU, [mine], [theirs], explain=True)
     assert replay_mood.feeling(know.by_id[theirs], "balanced").kind == "high"
     assert not verdict.accepted and (verdict.decline, verdict.decline_player) == ("decline_attached", theirs)
 
@@ -576,7 +577,7 @@ def test_a_league_rule_that_blocks_the_deal_is_the_reply_before_any_persona_reas
     hated = fans.club(know.by_id[give[0]].team)
     state = with_team(state, CPU, persona="fan", fan_of=fan_of_rival(hated))     # a rival player in the deal too
 
-    verdict = rt.evaluate(state, SETTINGS, know, USER, CPU, give, get)
+    verdict = rt.evaluate(state, SETTINGS, know, USER, CPU, give, get, explain=True)
     assert not verdict.accepted and verdict.decline == f"decline_rule_{rule}"
     after = rt.record_offer(state, USER, CPU, give, get, "declined")
     replied = replay_chat.decline_reply(after, know, 1, after.offers[-1].id, verdict)
@@ -591,7 +592,7 @@ def test_every_declined_proposal_gets_a_reply_reason():
     for cpu in (t for t in state.teams if not t.is_user):
         for theirs in [p for p in cpu.roster if know.by_id[p].position in SKILL][:4]:
             for give in mine:
-                verdict = rt.evaluate(state, SETTINGS, know, USER, cpu.id, (give,), (theirs,))
+                verdict = rt.evaluate(state, SETTINGS, know, USER, cpu.id, (give,), (theirs,), explain=True)
                 if not verdict.accepted:
                     declined += 1
                     assert verdict.decline in rt.DECLINE_KINDS, (give, theirs, verdict.reasons)
@@ -734,3 +735,217 @@ def test_needs_prices_and_decline_reasons_never_see_the_future(week):
         for get in theirs:
             assert rt.evaluate(state, SETTINGS, know, USER, CPU, [give], [get]) == rt.evaluate(
                 state, SETTINGS, shaken, USER, CPU, [give], [get])
+
+
+# ---------------- a CPU's own offer stands when the user accepts it ----------------
+
+def _offers_built_like_the_game(persona: str, settings, week: int, monkeypatch) -> tuple[rs.State, object, list]:
+    """CPU 9 in `persona` (every other CPU steady, or balanced when it is steady): its want-offer, a shop offer for
+    each of its three best skill players, its counter to a declined proposal and, for a haggler, his counter to his
+    declined opening offer, each recorded the way the game records it. Returns (state, know, offers)."""
+    other = "balanced" if persona == "steady" else "steady"
+    state, know = league(week=week, settings=settings)
+    for team in state.teams:
+        if not team.is_user:
+            state = with_team(state, team.id, persona=persona if team.id == CPU else other)
+    monkeypatch.setattr(rp, "offer_rate", lambda style, losses=0: 1.0 if style == persona else 0.0)
+    monkeypatch.setattr(replay_counter.replay_personas, "counter_rate", lambda style: 1.0)
+    built = []
+    wanted = ai._user_offer(state, settings, know, rs.rng(week, "offer", week))
+    built += [o for o in wanted.offers if o.status == "pending" and o.from_team == CPU]
+    if persona == "haggler" and built:
+        declined = rt.respond(wanted, settings, know, built[0].id, accept=False)
+        hagg = replay_counter.haggle_counter(declined, settings, know, next(o for o in declined.offers if o.id == built[0].id))
+        built += [o for o in hagg.offers if o.kind == "haggle"]
+    best = sorted((p for p in rs.team(state, CPU).roster if know.by_id[p].position in SKILL), key=lambda p: -chart(know, p))
+    monkeypatch.setattr(rp, "offer_rate", lambda style, losses=0: 0.0)
+    for pid in best[:3]:
+        shopped = replace(state, shops=(rs.Shop(CPU, pid, week, 0.1, opened=week),))
+        built += [o for o in ai._user_offer(shopped, settings, know, rs.rng(week, "offer", week)).offers if o.kind == "shop"]
+    user = rs.user_team(state)
+    for theirs in best[:4]:                       # a little short of fair for one of his best: he may counter
+        near = [p for p in user.roster if know.by_id[p].position in SKILL and chart(know, p) < 0.97 * chart(know, theirs)]
+        if not near:
+            continue
+        after, verdict = rt.propose(state, settings, know, CPU, (max(near, key=lambda p: chart(know, p)),), (theirs,))
+        if verdict.accepted:
+            continue
+        countered = replay_counter.counter_offer(after, settings, know, after.offers[-1], week)
+        built += [o for o in countered.offers if o.kind == "counter"]
+        if len(countered.offers) > len(after.offers):
+            break
+    return state, know, built
+
+
+@pytest.mark.parametrize("difficulty", ["normal", "hard"])
+@pytest.mark.parametrize("persona", rp.PERSONAS)
+def test_every_kind_of_cpu_offer_stands_when_accepted_and_its_preview_says_so(persona, difficulty, monkeypatch):
+    """A haggler's shop offer was built at the plain bar but re-checked at his lowball edge on accept, so it could
+    expire; his counter's preview judged it at the lowball edge too. The accept check never is stricter now."""
+    from tests import replay_fakes as fakes
+    settings = fakes.fake_settings(difficulty=difficulty)
+    kinds = Counter()
+    for week in (1, 3, 5):
+        state, know, built = _offers_built_like_the_game(persona, settings, week, monkeypatch)
+        for offer in built:
+            owned = replace(state, offers=(*state.offers, offer), next_id=offer.id + 1)
+            if offer.kind == "haggle":                  # its opening offer must be in the state it answers
+                owned = replace(owned, offers=(*state.offers, replace(offer, id=offer.counter_to, kind="want",
+                                                                      status="declined", counter_to=None), offer))
+            assert rt.accept_verdict(owned, settings, know, offer).accepted, (persona, difficulty, week, offer)
+            assert rt.respond(owned, settings, know, offer.id, accept=True).offers[-1].status == "accepted"
+            kinds[offer.kind] += 1
+    assert kinds["shop"] and kinds["counter"], kinds
+    if persona == "haggler":
+        assert kinds["haggle"], kinds
+
+
+def test_the_trade_screen_shows_a_hagglers_counter_as_accepted_and_accepting_it_works():
+    """Its preview used to judge it at his opening lowball edge, so Accept stayed disabled."""
+    from services import replay_game as rg, replay_views as views, replay_views_league as league_views
+    from tests.test_replay_views import DATA, SETTINGS as VIEW_SETTINGS, SEED, at
+    state, haggler = at(3), 2                       # CPU 2 has a counter at his normal edge in this league
+    state = rs.with_team(state, replace(rs.team(state, haggler), persona="haggler"))
+    know = rg.knowledge(state, VIEW_SETTINGS, DATA, seed=SEED)
+    deal = ai._best_deal(state, VIEW_SETTINGS, know, rs.user_team(state), rs.team(state, haggler), want=True)
+    assert deal is not None
+    state = rt.record_offer(state, haggler, rs.user_team(state).id, deal[1], deal[0], "pending", kind="want")
+    declined = rg.respond_offer(state, VIEW_SETTINGS, DATA, state.offers[-1].id, False, seed=SEED)
+    counter = next(o for o in declined.offers if o.kind == "haggle")
+
+    shown = league_views.trades(views.Game(1, "t", VIEW_SETTINGS, declined, DATA, None, SEED))
+    row = next(o for o in shown["offers"] if o["id"] == counter.id)
+    assert row["verdict"]["accepted"] is True
+    done = rg.respond_offer(declined, VIEW_SETTINGS, DATA, counter.id, True, seed=SEED)
+    assert next(o for o in done.offers if o.id == counter.id).status == "accepted"
+
+
+def test_only_a_users_proposal_works_out_why_a_cpu_said_no():
+    """The CPU trade search evaluates hundreds of deals it never explains."""
+    state, know = league()
+    cpu, user = rs.team(state, CPU), rs.user_team(state)
+    best = max(cpu.roster, key=lambda pid: chart(know, pid))
+    worst = min((pid for pid in user.roster if know.by_id[pid].position in SKILL), key=lambda pid: chart(know, pid))
+
+    assert rt.evaluate(state, SETTINGS, know, USER, CPU, [worst], [best]).decline is None
+    assert rt.propose(state, SETTINGS, know, CPU, [worst], [best])[1].decline == "decline_value"
+
+
+def test_without_the_mark_up_a_deal_is_priced_as_if_he_were_not_high_on_anyone():
+    """attach=False takes the mark-up out everywhere: what he sends, the depth threshold, his own cuts and the
+    lineup cap; so it prices the deal exactly as for the same players with no feeling."""
+    loved = values(p1=star(500.0, form_chart=0.3 * 500.0), p2=star(450.0), p3=star(300.0, form_chart=0.3 * 300.0))
+    plain = values(p1=star(500.0), p2=star(450.0), p3=star(300.0))
+
+    def score(know, attach=True):
+        return tv.tally(know, "balanced", [1], [2], [3], 5.0, 1.0, True, attach=attach)
+
+    assert score(loved).score < score(plain).score
+    assert score(loved, attach=False) == score(plain)
+
+
+def test_a_fans_lineup_cover_skips_his_rivals_free_agents_unless_nobody_else_can_play(fan_of_rival):
+    from services import replay_trade_rosters as rosters
+    state, know = league()
+    team = rs.team(state, CPU)
+    roster = tuple(p for p in team.roster if know.by_id[p].position != "QB")
+    pool = rt.free_agents(state, know)
+    first = rosters.cover(know, SETTINGS, roster, pool)[0]
+    fan = replace(team, persona="fan", fan_of=fan_of_rival(know.by_id[first].team))
+    hated = fans.club(know.by_id[first].team)
+
+    second = rosters.cover(know, SETTINGS, roster, pool, team=fan)[0]
+    only_rivals = [p for p in pool if know.by_id[p].position != "QB" or fans.club(know.by_id[p].team) == hated]
+    forced = rosters.cover(know, SETTINGS, roster, only_rivals, team=fan)[0]
+
+    assert know.by_id[first].position == "QB" and fans.club(know.by_id[second].team) != hated
+    assert fans.club(know.by_id[forced].team) == hated
+
+
+# ---------------- edge cases ----------------
+
+def test_the_need_bonus_with_nothing_sent_is_the_plain_rate():
+    know = values(p1=star(400.0, position="RB"))
+    mind = replace(st.plain("balanced"), needs=frozenset({"RB"}), deep=frozenset({"WR"}), filling=frozenset({1}))
+    assert st.need_bonus(know, mind, (), {1: 400.0}, {}) == pytest.approx(st.NEED_BONUS * 400)
+
+
+def _games(team_id: int, games: list[tuple[str, bool]]) -> list[rs.WeekResult]:
+    """One result per entry, (outcome "W" | "L" | "T" | "bye", playoff week?), for team_id against team 2."""
+    played = []
+    for week, (outcome, playoff) in enumerate(games, start=1):
+        if outcome == "bye":
+            played.append(rs.WeekResult(week, ((2, 3),), {2: 100.0, 3: 90.0}, {}, {}, playoff))
+            continue
+        mine = {"W": 120.0, "L": 80.0, "T": 100.0}[outcome]
+        played.append(rs.WeekResult(week, ((team_id, 2),), {team_id: mine, 2: 100.0}, {}, {}, playoff))
+    return played
+
+
+@pytest.mark.parametrize("games, streak", [
+    ([("W", False), ("L", False), ("bye", False), ("L", False), ("L", True)], -3),    # a bye is skipped; playoffs count
+    ([("L", False), ("L", False), ("T", False), ("L", False)], -1),                     # a tie ends a run
+    ([("L", False), ("W", False), ("W", False)], 2),
+    ([], 0),
+])
+def test_a_streak_skips_byes_counts_playoff_games_and_ends_at_a_tie(games, streak):
+    """What drives the tilted style: losses in a row."""
+    state = replace(league()[0], results=tuple(_games(CPU, games)))
+
+    assert rs.streak(state, CPU) == streak and rs.losses_in_a_row(state, CPU) == max(0, -streak)
+
+
+def test_a_haggler_does_not_counter_a_stale_offer_a_counter_or_one_for_a_player_who_left():
+    state, know = _haggler_league()
+    opening = state.offers[-1]
+    declined = rt.respond(state, SETTINGS, know, opening.id, accept=False)
+    offer = next(o for o in declined.offers if o.id == opening.id)
+    user = rs.user_team(declined)
+    gone = rs.with_team(declined, replace(user, roster=tuple(p for p in user.roster if p not in offer.get)))
+
+    assert replay_counter.haggle_counter(declined, SETTINGS, know, offer) is not declined          # the normal case
+    assert replay_counter.haggle_counter(replace(declined, week=declined.week + 1), SETTINGS, know, offer).offers == \
+        declined.offers                                                                           # made last week
+    countered = replace(offer, counter_to=99)
+    assert replay_counter.haggle_counter(declined, SETTINGS, know, countered) is declined          # a counter itself
+    assert replay_counter.haggle_counter(gone, SETTINGS, know, offer) is gone                     # his player left
+
+
+def test_a_fan_adds_his_rivals_quarterback_only_when_no_other_can_fill_the_slot(fan_of_rival):
+    from services import replay_waiver_ai as wai
+    state, know = league()
+    team = rs.team(state, CPU)
+    without = tuple(p for p in team.roster if know.by_id[p].position != "QB")
+    state = with_team(state, CPU, roster=without)
+    free_qbs = [v for v in know.values if v.position == "QB" and v.player_id not in rs.rostered(state)]
+    hated = fans.club(max(free_qbs, key=lambda v: v.chart).team)
+    others = tuple(v.player_id for v in free_qbs if fans.club(v.team) != hated)
+    state = with_team(replace(state, phase="open", locked=others), CPU, roster=without, persona="fan",
+                      fan_of=fan_of_rival(hated))
+
+    after = wai.cpu_free_agency(state, SETTINGS, know, 0)
+    qbs = [p for p in rs.team(after, CPU).roster if know.by_id[p].position == "QB"]
+    assert qbs and all(fans.club(know.by_id[p].team) == hated for p in qbs)
+
+
+def test_a_fan_drafts_his_rivals_player_only_when_nobody_else_fits(fan_of_rival):
+    from services import replay_draft as rd
+    from tests import replay_fakes as fakes
+    data = fakes.fake_season()
+    known = data.as_of(0)
+    state = rd.new_game(SETTINGS, 1)
+    qbs = [p for p in known.players.values() if p.position == "QB"]          # with an ADP or not
+    hated = fans.club(known.team_at(next(p for p in qbs if p.adp is not None).player_id, 0))
+    fan = replace(rs.team(state, CPU), persona="fan", fan_of=fan_of_rival(hated))
+    state = rs.with_team(state, fan)
+    rivals = [p.player_id for p in qbs if fans.club(known.team_at(p.player_id, 0)) == hated]
+
+    def taken_but(keep: list[int]) -> rs.State:
+        stash = tuple(p.player_id for p in qbs if p.player_id not in keep)
+        return rs.with_team(state, replace(rs.team(state, 2), roster=stash))
+
+    one_other = next(p.player_id for p in qbs if p.player_id not in rivals)
+    picked, _ = rd._candidates(taken_but(rivals + [one_other]), known, ["QB"], 1, 1, fan)
+    forced, _ = rd._candidates(taken_but(rivals), known, ["QB"], 1, 1, fan)
+    assert [p.player_id for p in picked] == [one_other]
+    assert forced and all(p.player_id in rivals for p in forced)
