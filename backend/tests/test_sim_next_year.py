@@ -348,3 +348,22 @@ def test_every_player_of_the_new_season_stays_in_the_public_view_until_he_plays(
         known = season.as_of(week).players
         assert set(belief.players) <= set(known), week
         assert set(belief.players) <= set(sim_world.estimate(season, week, belief).players), week
+
+
+def test_a_rookie_qb_behind_a_starter_is_priced_on_the_starts_he_may_take_over():
+    """Item 33: a drafted rookie QB behind a non-protected starter gets a share of his value as a starter."""
+    from services import sim_market, sim_qb, sim_world
+    from services.scoring import scoring_for
+    from tests import replay_fakes as fakes
+    belief = sim_world.estimate(fakes.fake_season(), 9)
+    team = next(t for t in sorted(belief.teams) if sum(p.position == "QB" for p in belief.roster(t)) > 1)
+    starter, rookie = sorted((p for p in belief.roster(team) if p.position == "QB"), key=lambda p: -p.starts)[:2]
+    share = ny.rookie_qb_share(belief, {rookie.player_id: 10}, set())
+    weekly = sim_qb.rookie_takeover(10, 0.0, 0.0)
+    assert 0 < share[rookie.player_id] < 1 and share[rookie.player_id] < 17 * weekly
+    assert ny.rookie_qb_share(belief, {rookie.player_id: 10}, {starter.player_id}) == {}
+    assert ny.rookie_qb_share(belief, {rookie.player_id: sim_qb.ROOKIE_PICKS + 1}, set()) == {}
+    half = scoring_for("half")
+    plain = sim_market.market_values(belief, half).get(rookie.player_id, 0.0)       # a backup: no line
+    priced = sim_market.market_values(belief, half, qb_share=share)[rookie.player_id]
+    assert priced > plain and priced == pytest.approx(share[rookie.player_id] * sim_market._as_starter(belief, rookie.player_id, half))

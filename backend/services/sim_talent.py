@@ -28,7 +28,8 @@ reputation, plus dated role changes. Nothing in a simulated SeasonData reads it 
 - Teams: volume (targets and carries together) x lognormal `volume_sd`; pass defense, run defense and
   takeaways each x lognormal `defense_sd`.
 - Dated changes (from a uniform week after from_week to CHANGE_LAST_WEEKS before the end): per team and
-  season, a breakout (a non-lead receiver or back, `breakout_rate`, weights x `breakout_gain`) and a bust (a
+  season, a breakout (a non-lead receiver or back who is not a top-STAR_RANK player, e.g. a star back whose
+  role weight dipped while he was hurt: `breakout_rate`, weights x `breakout_gain`) and a bust (a
   lead one, `bust_rate`, weights x `bust_cut`; never a top-STAR_RANK player at his position by the public's
   rank, sim_market.position_ranks: real stars lose work to injuries, not to a coach's whim). World.at(week)
   applies them. Who starts at QB is not a dated change: it is decided week by week from how the season goes
@@ -141,7 +142,7 @@ def _roles(team_players: list[Player], ranks: Mapping[int, int]) -> tuple[list[P
     for position, count in LEADS.items():
         ranked = _ranked(team_players, position)
         leads += [p for p in ranked[:count] if ranks.get(p.player_id, STAR_RANK + 1) > STAR_RANK]
-        backups += ranked[count:count + 2]
+        backups += [p for p in ranked[count:count + 2] if ranks.get(p.player_id, STAR_RANK + 1) > STAR_RANK]
     return leads, backups
 
 

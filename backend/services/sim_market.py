@@ -212,10 +212,16 @@ def expert_ranks(belief: World, known: Iterable[int], week: int, dice: np.random
 
 def market_values(world: World, scoring: ScoringSettings, games_left: int = SEASON_GAMES,
                   record: Mapping[int, float] | None = None,
-                  premium: Mapping[int, float] | None = None) -> dict[int, float]:
+                  premium: Mapping[int, float] | None = None,
+                  qb_share: Mapping[int, float] | None = None) -> dict[int, float]:
     """{player: the points a game a draft prices him on}: `values`, blended with his `record` (points a game last
-    season, `track_record`) when given, x his `premium` (a rookie's, sim_next_year.rookie_premium) when given."""
+    season, `track_record`) when given, x his `premium` (a rookie's, sim_next_year.rookie_premium) when given. A
+    QB in `qb_share` (a rookie behind the starter, sim_next_year.rookie_qb_share) at least that share of his
+    points a game as the starter: the market prices the starts he is expected to take over."""
     season = values(world, scoring, games_left)
+    for pid, share in (qb_share or {}).items():
+        if pid in world.players and share > 0:
+            season[pid] = max(season.get(pid, 0.0), share * _as_starter(world, pid, scoring))
     if record:
         weight = params()["market"]["record_weight"]
         season = {pid: (1 - weight) * v + weight * record.get(pid, v) for pid, v in season.items()}
@@ -224,13 +230,23 @@ def market_values(world: World, scoring: ScoringSettings, games_left: int = SEAS
     return season
 
 
+def _as_starter(world: World, pid: int, scoring: ScoringSettings) -> float:
+    """His points a game in a healthy week as his team's starting QB."""
+    player = world.players[pid]
+    top = max(p.starts for p in world.roster(player.team) if p.position == "QB")
+    lifted = World(MappingProxyType({**world.players, pid: replace(player, starts=top + 1.0)}), world.teams, world.changes)
+    line = expected(lifted, player.team, None, frozenset(), scoring).get(pid)
+    return line.points if line else 0.0
+
+
 def adp(world: World, scoring: ScoringSettings | None = None, two_qb: bool = False,
         games_left: int = SEASON_GAMES, record: Mapping[int, float] | None = None,
-        premium: Mapping[int, float] | None = None) -> dict[int, tuple[float, float]]:
+        premium: Mapping[int, float] | None = None,
+        qb_share: Mapping[int, float] | None = None) -> dict[int, tuple[float, float]]:
     """{player: (adp, stdev)} for a draft held under `world` with `games_left` games to play (see the module
     docstring): the league's `scoring` (default PPR), a superflex / 2-QB league's list when `two_qb`, priced
     on `market_values` (with `record` and `premium` when given)."""
-    season = market_values(world, scoring or scoring_for("ppr"), games_left, record, premium)
+    season = market_values(world, scoring or scoring_for("ppr"), games_left, record, premium, qb_share)
     return draft_board(world, season, two_qb, games_left)
 
 

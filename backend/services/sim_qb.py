@@ -56,6 +56,11 @@ CURRENT_RANK = 12                # the user's choice: a preseason QB rank this g
 PAST_RANK = 8                    # the user's choice: ... or a real preseason QB ADP rank this good in ...
 PAST_SEASONS = 2                 # ... one of this many seasons before
 ROOKIE_PICKS = 64                # a drafted rookie QB this high (first two rounds) may take over (rookie model)
+FIRST_ROUND = 32                 # a "young" QB: drafted this high ...
+YOUNG_DRAFTS = 3                 # ... in this season's draft or one of this many before (his first four seasons).
+# Real 2019-2025 (sim_qb_fit observations): such a QB holding the job in his first season never lost it healthy
+# (0 of 197 holder-weeks), in his second 3 of 268, and no team with one drafted a QB in the first two rounds
+# (0 holder-weeks with a drafted rookie behind him): he loses no job to a rookie, nor any job as a rookie.
 UNRANKED = 40                    # market rank of a QB the ADP list does not carry (lists carry about 35-45 QBs)
 FORM_PRIOR_STARTS = 3.0          # pseudo-starts at zero points over projection in `form`
 CHANGE_LAST_WEEKS = 2            # no benching in the season's last weeks (as sim_talent.CHANGE_LAST_WEEKS)

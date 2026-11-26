@@ -16,7 +16,9 @@ the league's seed, decided once when the league is built (sim_setup._future_base
    `take_anyway` (near 1 for a consensus top pick, TAKE_WITHOUT_NEED from the end of round 1), except a QB in the first QB_NEED_ROUNDS rounds, which slides to a team that needs one.
    A team needs a QB unless its August starter (sim_next_year.restore_starters, after the moves) is
    established (starts weight STARTER_ROLE+, ESTABLISHED_GAMES games
-   of evidence, quality ESTABLISHED_QUALITY+), and an RB / WR / TE when its best one (WR: second-best) has
+   of evidence, quality ESTABLISHED_QUALITY+) or it has a young QB (a first-rounder of the last
+   sim_qb.YOUNG_DRAFTS drafts: real teams with one drafted no QB in the first two rounds, 2019-2025), and
+   no team takes two QBs in one draft (a QB it can't take slides on), and an RB / WR / TE when its best one (WR: second-best) has
    less volume than the league's median team. A drafted position is no longer needed. A prospect nobody took
    goes with the first open slot after the last one.
 
@@ -25,7 +27,7 @@ market's rookie premium (sim_next_year) and his place on the depth chart. Pure; 
 replay_state.rng(seed, "draft", ...).
 """
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import replace
 from statistics import median
 
@@ -79,10 +81,12 @@ def draft_order(wins: Mapping[str, float], seed: int) -> list[str]:
 
 
 def needs(world: World, moves: Mapping[int, str | None] | None = None,
-          season_starts: Mapping[int, Sequence[tuple[int, str | None]]] | None = None) -> dict[str, set[str]]:
+          season_starts: Mapping[int, Sequence[tuple[int, str | None]]] | None = None,
+          young: Collection[int] = ()) -> dict[str, set[str]]:
     """{team: positions it needs} from the belief at the end of the season, after the offseason `moves`; with
     `season_starts` (sim_next_year.starts_by_team) each team's August starter is restored first, so a starter
-    whose decayed starts weight is low (hurt late) does not leave his team needing a QB."""
+    whose decayed starts weight is low (hurt late) does not leave his team needing a QB. A team with a `young`
+    QB (sim_qb.YOUNG_DRAFTS: a recent first-rounder) needs none."""
     from services.sim_next_year import restore_starters, volume
 
     players = {pid: replace(p, team=team) for pid, p in world.players.items()
@@ -96,7 +100,7 @@ def needs(world: World, moves: Mapping[int, str | None] | None = None,
     for team in TEAMS:
         qbs = rooms.get((team, "QB"), [])
         if not any(q.starts >= STARTER_ROLE and q.games >= ESTABLISHED_GAMES and q.quality >= ESTABLISHED_QUALITY
-                   for q in qbs):
+                   or q.player_id in young for q in qbs):
             out[team].add("QB")
     for position, rank in VOLUME_RANK.items():
         level = {}
@@ -127,6 +131,7 @@ def draft(rookies: Sequence[Rookie], order: Sequence[str], need: Mapping[str, se
                    key=lambda row: row[:2])
     wants = {team: set(positions) for team, positions in need.items()}
     out, last = list(locked), 0
+    has_qb = {r.team for r in locked if r.position == "QB"}
     for slot in range(1, MAX_PICK + 1):
         if not board:
             break
@@ -137,9 +142,13 @@ def draft(rookies: Sequence[Rookie], order: Sequence[str], need: Mapping[str, se
             if spot > slot:
                 break
             wanted = prospect.position in wants.get(team, ())
+            if prospect.position == "QB" and team in has_qb:
+                continue                                       # never two QBs to one team
             if not wanted and (prospect.position == "QB" and rnd <= QB_NEED_ROUNDS
                                or takes[slot - 1] >= take_anyway(prospect.pick)):
                 continue
+            if prospect.position == "QB":
+                has_qb.add(team)
             out.append(replace(prospect, team=team, pick=slot))
             wants.get(team, set()).discard(prospect.position)
             del board[i]
@@ -153,6 +162,7 @@ def draft(rookies: Sequence[Rookie], order: Sequence[str], need: Mapping[str, se
 
 
 def run(rookies: Sequence[Rookie], games: Sequence[Game], world: World, moves: Mapping[int, str | None],
-        seed: int, season_starts: Mapping[int, Sequence[tuple[int, str | None]]] | None = None) -> list[Rookie]:
+        seed: int, season_starts: Mapping[int, Sequence[tuple[int, str | None]]] | None = None,
+        young: Collection[int] = ()) -> list[Rookie]:
     """The seeded draft of `rookies`: standings from `games` (the season so far), needs from `world`."""
-    return draft(rookies, draft_order(final_wins(games, seed), seed), needs(world, moves, season_starts), seed)
+    return draft(rookies, draft_order(final_wins(games, seed), seed), needs(world, moves, season_starts, young), seed)

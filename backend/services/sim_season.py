@@ -194,12 +194,14 @@ def _market(tables: _Tables, base: SeasonData, belief: World, truth: World, seed
             false_rate: float, ranks: Mapping[int, int], lines: Mapping[str, sim_lines.Line] | None = None,
             opinions: dict[str, dict[int, float]] | None = None,
             team_prior: Mapping[str, sim_lines.Rating] | None = None, known: SeasonData | None = None,
-            benched: tuple = (), bench: Mapping[int, float] | None = None, filling: Collection[int] = ()) -> None:
+            benched: tuple = (), bench: Mapping[int, float] | None = None, filling: Collection[int] = (),
+            jobs: sim_qb_jobs.Jobs | None = None) -> None:
     """The week's public tables (projections, expert ranks, buzz). `opinions`: the experts' memory, carried from
     week to week and updated here: {"z": each player's opinion (sim_market.opinion), "worth": the value each is
     ranked on (sim_market.held), "out": who was believed out}; `team_prior`: last season's team ratings (the expert values' scoring edges,
     sim_lines.edges, are worked out only in a week whose expert ranks are drawn here); `known`: the season as
-    known before the week, when already built; `benched`: the week's QB benchings (true buzz); `bench`: each
+    known before the week, when already built; `benched`: the week's QB job changes (their true lines, from
+    `jobs`: sim_qb_jobs.news); `bench`: each
     holder's chance to lose the job (the false buzz's weights, sim_qb_jobs.decide); `filling`: the fill-in QBs
     (replay_fillin.without_news), ranked no better than sim_market.FILL_IN_BEST."""
     scoring, last = scoring_of(base), base.last_week
@@ -238,8 +240,9 @@ def _market(tables: _Tables, base: SeasonData, belief: World, truth: World, seed
             tables.expert_age[rank_week] = sim_market.EXPERT_AGE["ros" if rank_week else "pre"]
     tables.notes.update(sim_market.buzz(truth.changes, belief, week, replay_state.rng(seed, "sim", "buzz", week),
                                         false_rate, out, sim_talent.rumors(belief, ranks, bench) if false_rate else None))
-    # the week's benchings draw from their own stream, so a benching never moves another player's hint or rumour
-    tables.notes.update(sim_market.buzz(benched, belief, week, replay_state.rng(seed, "sim", "buzz", "bench", week), 0.0, out))
+    if jobs is not None:                                       # the week's job changes: their true lines
+        tables.notes.update(sim_qb_jobs.news(benched, jobs, truth.at(week), known, week,
+                                             {pid: p.name for pid, p in base.players.items()}))
     tags = {pid: injury for (pid, w), injury in tables.injuries.items() if w == week}
     tables.notes.update(sim_depth.fill_ins(belief, out, tags, base.players, week))
 
@@ -297,7 +300,7 @@ def simulate(base: SeasonData, seed: int, from_week: int, prior: World | None = 
         lines.update({(home, week): line for home, line in pregame.items()})
         _market(tables, base, public, truth, seed, week, public_out,
                 false_rate if buzz_weeks[0] <= week <= buzz_weeks[1] else 0.0, ranks, pregame, opinions, team_prior,
-                known, tuple(benched), bench, filling)
+                known, tuple(benched), bench, filling, jobs)
         world = sim_qb_jobs.apply(truth.at(week), jobs)
         played_teams, fresh = set(), set()
         for game in sorted((g for g in base.schedule.games if g.week == week), key=lambda g: g.home_team):

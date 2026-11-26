@@ -19,7 +19,8 @@ its fit: services/sim_qb.py).
   (sim_qb.return_loss). A healthy, untagged holder who is not established, in weeks 2 to the last minus
   CHANGE_LAST_WEEKS, loses the job: to the best drafted rookie on the team (pick ROOKIE_PICKS or better, not
   sitting) with sim_qb.rookie_takeover, else to the next QB in line (the truth's starts weight) with
-  sim_qb.hazard. One draw per team and week from replay_state.rng(seed, "sim", "qb", week, team). Everything it
+  sim_qb.hazard; a young first-rounder (sim_qb.YOUNG_DRAFTS) never to a rookie, and not at all in his first
+  season. One draw per team and week from replay_state.rng(seed, "sim", "qb", week, team). Everything it
   reads is public before the week (results, projections, tags, ADP, the draft); the truth only through `world`,
   for who is on the team and next in line.
 - `apply`: the holder's starts weight above every teammate's, in the truth that plays the week and in the public
@@ -45,6 +46,7 @@ class QbInputs:
     """What the QB jobs need from the database (sim_setup.qb_inputs); the default reads nothing."""
     past: frozenset[int] = frozenset()                                  # real ADP rank PAST_RANK+ in the seasons before
     picks: Mapping[int, int] = field(default_factory=lambda: MappingProxyType({}))   # drafted rookie QB -> pick
+    young: Mapping[int, int] = field(default_factory=lambda: MappingProxyType({}))   # sim_qb young QB -> draft season
 
 
 @dataclass
@@ -54,6 +56,7 @@ class Jobs:                      # mutable bookkeeping inside one simulate() cal
     ranks: Mapping[int, int]     # QB -> market rank (sim_qb.market_ranks of the season's ADP)
     established: frozenset[int] = frozenset()
     picks: Mapping[int, int] = field(default_factory=dict)             # drafted rookie QB -> pick
+    young: Mapping[int, int] = field(default_factory=dict)             # young QB -> draft season (sim_qb.YOUNG_DRAFTS)
 
 
 def _qbs(world: World, team: str) -> list[Player]:
@@ -87,7 +90,7 @@ def start(base: SeasonData, belief: World, from_week: int, established: frozense
         if pid not in {p.player_id for p in qbs}:
             pid, missed = qbs[0].player_id, False
         holders[team], out[team] = pid, missed
-    return Jobs(holders, out, sim_qb.market_ranks(base), established, dict(inputs.picks))
+    return Jobs(holders, out, sim_qb.market_ranks(base), established, dict(inputs.picks), dict(inputs.young))
 
 
 def _last_starter(starts: Mapping[tuple[str, int], int], team: str, week: int) -> int | None:
@@ -111,7 +114,8 @@ def _challenger(jobs: Jobs, world: World, team: str, holder: int, sitting: Colle
     rookie on the team who does not sit, with sim_qb.rookie_takeover (not scaled), else the next QB in line, with
     sim_qb.hazard."""
     others = [p.player_id for p in _qbs(world, team) if p.player_id != holder and p.player_id not in sitting]
-    rookies = [pid for pid in others if jobs.picks.get(pid, sim_qb.ROOKIE_PICKS + 1) <= sim_qb.ROOKIE_PICKS]
+    rookies = [pid for pid in others if jobs.picks.get(pid, sim_qb.ROOKIE_PICKS + 1) <= sim_qb.ROOKIE_PICKS
+               and holder not in jobs.young]                       # a young first-rounder loses no job to a rookie
     if rookies:
         rookie = min(rookies, key=lambda pid: (jobs.picks[pid], pid))
         chance = sim_qb.rookie_takeover(jobs.picks[rookie], form, record)
@@ -141,8 +145,8 @@ def decide(jobs: Jobs, world: World, known: SeasonData, week: int, sitting: Coll
         if jobs.out[team]:
             jobs.out[team] = False
             new = _returns(jobs, team, holder, world, starts, week, sitting, draw)
-        elif holder in tags or holder in jobs.established:
-            continue
+        elif holder in tags or holder in jobs.established or jobs.young.get(holder) == known.season:
+            continue                                           # a first-round rookie holder is not benched healthy
         else:
             mine = [w for (t, w), pid in starts.items() if t == team and pid == holder]
             new, chance, raw = _challenger(jobs, world, team, holder, sitting, sim_qb.form(known, holder, mine),
@@ -150,11 +154,37 @@ def decide(jobs: Jobs, world: World, known: SeasonData, week: int, sitting: Coll
             if new is not None and raw >= sim_qb.stored()["elevated"]:
                 rumors[holder] = 1.0 - (1.0 - chance) ** (last_change - week + 1)
             new = new if draw < chance else None
+            if new is not None:
+                rumors.pop(holder, None)                       # the week of the change gets the true line, no rumour
         if new is None:
             continue
         jobs.holders[team] = new
         changes.append(RoleChange(week, holder, kind="bench"))
     return changes, rumors
+
+
+def news(changes: Collection[RoleChange], jobs: Jobs, world: World, known: SeasonData, week: int,
+         names: Mapping[int, str]) -> dict[tuple[int, int], str]:
+    """{(player, week): the true public line} for the week's job changes (`changes`, decide), on the QB who lost
+    the job and on the one who has it now: a holder back from injury whose fill-in keeps the job ("stays the
+    starter"), else a healthy benching. Announced before the games, as a real team names its starter; the
+    rumours (sim_talent.rumors) come only before a change."""
+    out = {}
+    for change in changes:
+        old = change.player_id
+        team = world.players[old].team if old in world.players else None
+        new = jobs.holders.get(team)
+        if new is None or new == old:
+            continue
+        back = any((old, w) in known.injuries and known.injuries[(old, w)].hard for w in range(max(1, week - 2), week))
+        mine, theirs = names.get(old, "the incumbent"), names.get(new, "the backup")
+        if back:
+            out[(old, week)] = f"Healthy again, but {theirs} stays the starter; he is the backup."
+            out[(new, week)] = f"Stays the starter: {mine} is healthy again and the backup."
+        else:
+            out[(old, week)] = f"Benched: {theirs} starts in his place."
+            out[(new, week)] = f"Named the starter over {mine}."
+    return out
 
 
 def apply(world: World, jobs: Jobs) -> World:

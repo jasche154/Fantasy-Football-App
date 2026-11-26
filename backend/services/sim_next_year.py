@@ -115,6 +115,24 @@ def rookie_premium(rookies: Mapping[int, Rookie]) -> dict[int, float]:
     return {pid: premium_at(fit, r.position, r.pick) * r.hype for pid, r in rookies.items()}
 
 
+def rookie_qb_share(belief: World, picks: Mapping[int, int], protected: Collection[int]) -> dict[int, float]:
+    """{rookie QB: the share of the season's games he is expected to start} for each drafted rookie QB (pick
+    sim_qb.ROOKIE_PICKS or better, `picks`) behind his team's starter, from the fitted weekly takeover chance at a
+    neutral form and record (sim_qb.rookie_takeover), none behind a `protected` starter (established or young,
+    who loses no job to a rookie: sim_qb_jobs). The market prices that share (sim_market.market_values)."""
+    out = {}
+    for pid, pick in picks.items():
+        rookie = belief.players.get(pid)
+        if rookie is None or pick > sim_qb.ROOKIE_PICKS:
+            continue
+        starter = max((p for p in belief.roster(rookie.team) if p.position == "QB"), key=lambda p: (p.starts, -p.player_id))
+        if starter.player_id == pid or starter.player_id in protected:
+            continue
+        weekly, games = sim_qb.rookie_takeover(pick, 0.0, 0.0), sim_market.SEASON_GAMES
+        out[pid] = sum(1.0 - (1.0 - weekly) ** week for week in range(games)) / games
+    return out
+
+
 def _bucket(value: float, edges: Sequence[int]) -> int:
     return max(0, sum(1 for edge in edges[1:] if value >= edge))
 
@@ -382,13 +400,13 @@ def next_year(world: World, players: Mapping[int, PoolPlayer], experience: Mappi
 def season_base(season: int, belief: World, pool: Mapping[int, PoolPlayer], schedule: Schedule, scoring: str,
                 rules: ScoringRules | None, defense_prior: Mapping[tuple[str, str], float],
                 adp_format: str = "ppr", record: Mapping[int, float] | None = None,
-                premium: Mapping[int, float] | None = None) -> SeasonData:
+                premium: Mapping[int, float] | None = None, qb_share: Mapping[int, float] | None = None) -> SeasonData:
     """The season before anything happened, ready for sim_season.simulate(base, seed, 1, prior=belief): the
     pool (each player's team is his PoolPlayer.adp_team, as nothing is played) with the market's ADP for the
     league's `adp_format` (replay_adp_format.wanted: priced on its own scoring, rules included; "2qb" for a
     superflex league; recorded as SeasonData.adp_format; leaning on `record`, the players' points a game in
     the season the belief came from, as a real August market leans on what it saw, and paying the rookies'
-    `premium`, rookie_premium), the schedule, and a week-1
+    `premium`, rookie_premium; a rookie QB behind the starter at his `qb_share`, rookie_qb_share), the schedule, and a week-1
     projection for every player of the belief (the market's for those who dress, MIN_PROJECTION for backups
     and depth), so all of them exist from the start: SeasonData.as_of admits a player with an ADP, a
     projection or a game, and a backup QB or a WR6 must be there to step in. simulate replaces week 1's
@@ -399,24 +417,25 @@ def season_base(season: int, belief: World, pool: Mapping[int, PoolPlayer], sche
                       last_week=max(game.week for game in schedule.games),
                       defense_prior=MappingProxyType(dict(defense_prior)), rules=rules, adp_format=adp_format)
     week_one = sim_market.projections(belief, schedule, 1, (), scoring_of(base))
-    return replace(with_market_adp(base, belief, record=record, premium=premium),
+    return replace(with_market_adp(base, belief, record=record, premium=premium, qb_share=qb_share),
                    projected=MappingProxyType({(pid, 1): week_one.get(pid, sim_market.MIN_PROJECTION)
                                                for pid in belief.players}))
 
 
 def with_market_adp(data: SeasonData, belief: World, games_left: int = sim_market.SEASON_GAMES,
                     record: Mapping[int, float] | None = None,
-                    premium: Mapping[int, float] | None = None) -> SeasonData:
+                    premium: Mapping[int, float] | None = None,
+                    qb_share: Mapping[int, float] | None = None) -> SeasonData:
     """`data` with every player's ADP the market's under `belief` with `games_left` games to play (none for a
     player it does not list), priced for data's scoring and its ADP list (data.adp_format "2qb": superflex),
     leaning on each player's `record` (sim_market.track_record) and paying the rookies' `premium`
     (rookie_premium) when given. A 2-QB list also records the 1-QB board of the same scoring as
     `scoring_adp` (replay_superflex values non-QBs on it)."""
     two_qb = data.adp_format == TWO_QB
-    market = sim_market.adp(belief, scoring_of(data), two_qb, games_left, record, premium)
+    market = sim_market.adp(belief, scoring_of(data), two_qb, games_left, record, premium, qb_share)
     players = {pid: replace(player, adp=market[pid][0] if pid in market else None,
                             adp_stdev=market[pid][1] if pid in market else None)
                for pid, player in data.players.items()}
-    one_qb = sim_market.adp(belief, scoring_of(data), False, games_left, record, premium) if two_qb else {}
+    one_qb = sim_market.adp(belief, scoring_of(data), False, games_left, record, premium, qb_share) if two_qb else {}
     return replace(data, players=MappingProxyType(players),
                    scoring_adp=MappingProxyType({pid: one_qb[pid][0] for pid in players if pid in one_qb}))

@@ -104,8 +104,8 @@ def _world(*players):
     return World(MappingProxyType({p.player_id: p for p in players}), MappingProxyType({}))
 
 
-def _jobs(established=(), picks=None, rank=sim_qb.UNRANKED):
-    return sim_qb_jobs.Jobs({TEAM: A}, {TEAM: False}, {A: rank}, frozenset(established), picks or {})
+def _jobs(established=(), picks=None, rank=sim_qb.UNRANKED, young=None):
+    return sim_qb_jobs.Jobs({TEAM: A}, {TEAM: False}, {A: rank}, frozenset(established), picks or {}, young or {})
 
 
 def _changed(data, week=WEEK, seeds=300, sitting=(), **jobs):
@@ -137,6 +137,37 @@ def test_a_drafted_rookie_takes_over_from_a_weak_starter_only_at_the_unscaled_ch
     assert _changed(data, picks={B: 5}) == pytest.approx(0.4, abs=0.07)            # not halved
     assert _changed(data, picks={B: 5}, established={A}) == 0.0                      # behind an established one: sits
     assert _changed(data, picks={B: sim_qb.ROOKIE_PICKS + 1}) == 0.0                # a late pick: the veteran path
+
+
+def test_a_young_first_rounder_loses_no_job_to_a_rookie_nor_any_as_a_rookie(data, monkeypatch):
+    """Item 24: real 2019-2025, a round-1 QB holding the job in his first season was never benched healthy, and
+    no team with one drafted a QB early."""
+    monkeypatch.setattr(sim_qb, "rookie_takeover", lambda pick, form, record: 0.6)
+    monkeypatch.setattr(sim_qb, "raw_hazard", lambda rank, form, record: 0.6)
+    season = data.season
+    assert _changed(data, picks={B: 5}, young={A: season - 1}) == pytest.approx(0.3, abs=0.07)   # the veteran path
+    assert _changed(data, young={A: season}) == 0.0                                  # a first-round rookie holder
+    assert _changed(data, picks={B: 5}, young={A: season - 3}) == pytest.approx(0.3, abs=0.07)
+
+
+def test_a_job_change_gets_its_true_line_the_week_it_happens(data):
+    known = data.as_of(WEEK)
+    jobs = _jobs()
+    jobs.holders[TEAM] = B
+    names = {A: "Old Starter", B: "New Starter"}
+    healthy = sim_qb_jobs.news([sim_world.RoleChange(WEEK, A, kind="bench")], jobs, _world(), known, WEEK, names)
+    assert healthy == {(A, WEEK): "Benched: New Starter starts in his place.", (B, WEEK): "Named the starter over Old Starter."}
+    hurt = replace(known, injuries=MappingProxyType({**known.injuries, (A, WEEK - 1): fakes.Injury("O")}))
+    back = sim_qb_jobs.news([sim_world.RoleChange(WEEK, A, kind="bench")], jobs, _world(), hurt, WEEK, names)
+    assert back[(B, WEEK)].startswith("Stays the starter") and "healthy again" in back[(A, WEEK)].lower()
+
+
+def test_the_benched_holder_is_never_rumoured_the_week_he_loses_the_job(data, monkeypatch):
+    monkeypatch.setattr(sim_qb, "raw_hazard", lambda rank, form, record: 0.6)
+    for seed in range(40):
+        held = _jobs()
+        changes, rumors = sim_qb_jobs.decide(held, _world(), data.as_of(WEEK), WEEK, set(), {}, seed)
+        assert not (changes and A in rumors)
 
 
 def test_a_hurt_holder_sits_then_gets_the_job_back_unless_a_weak_one_loses_it(data, monkeypatch):
