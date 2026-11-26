@@ -268,3 +268,37 @@ def test_published_projections_take_the_positions_scale(belief, monkeypatch):
     assert sim_market.published({qb: 10.0, wr: 10.0, -1: 3.0}, belief) == {qb: pytest.approx(11.0), wr: 10.0, -1: 3.0}
     monkeypatch.undo()
     sim_constants.params.cache_clear()
+
+
+def test_passing_rates_regress_by_their_measured_keep_whatever_the_calibrated_share(monkeypatch):
+    """The passing lead: receivers' yards per catch and catch rate and a QB's quality regress in full in August."""
+    from services import sim_next_year
+    model = {**sim_next_year.stored(), "efficiency_keep": {"ypc": 0.5, "WR ypc": 0.6, "catch": 0.5, "rec_td": 0.3,
+                                                           "quality": 0.55},
+             "efficiency_scale": {"WR": 0.0, "QB": 0.25}}
+    monkeypatch.setattr(sim_next_year, "stored", lambda: model)
+    assert sim_next_year.keep_of("WR", "ypc") == 0.6 and sim_next_year.keep_of("TE", "ypc") == 0.5
+    assert sim_next_year.keep_of("WR", "catch") == 0.5 and sim_next_year.keep_of("QB", "quality") == 0.55
+    assert sim_next_year.keep_of("WR", "rec_td") == 1.0                          # the calibrated share (0) applies
+    assert sim_next_year.keep_of("WR", "rec_td", scaled=False) == 0.3
+
+
+def test_the_keep_slope_reads_full_seasons_of_the_wanted_position():
+    from services import sim_next_year_fit as fit
+    norm = sim_world.params()["positions"]["WR"]["ypc"]
+    def row(position, before, after, games=16):
+        return {"position": position, "games": [games, games], "volume": [100.0, 100.0], "ypc": [before * norm, 0],
+                "raw": {"rec": 80.0, "rec_yds": 80.0 * after * norm}, "passer": [1.0, 1.0]}
+    rows = [row("WR", 1.2, 1.1), row("WR", 0.8, 0.9), row("TE", 1.2, 1.2), row("WR", 1.5, 0.5, games=2)]
+    assert fit._slope(rows, "ypc", lambda p: p == "WR") == pytest.approx(0.5)     # the 2-game season is left out
+
+
+def test_passing_rows_read_the_qb_lines():
+    from services import sim_metrics_shape
+    from services.replay_box import BoxLine
+    players = {1: SimpleNamespace(position="QB"), 2: SimpleNamespace(position="QB"), 3: SimpleNamespace(position="WR")}
+    box = {(1, 1): BoxLine(pass_yds=300), (1, 2): BoxLine(pass_yds=200), (2, 1): BoxLine(pass_yds=100),
+           (3, 1): BoxLine(rec_yds=90, targets=9, rec=6)}
+    data = SimpleNamespace(box=box, players=players, team_at=lambda pid, w: "AAA" if pid != 2 else "BBB")
+    out = sim_metrics_shape.passing(data)
+    assert out["pass yds #1"] == 500 and out["team pass yds max"] == 500 and out["team-game pass yds mean"] == 200

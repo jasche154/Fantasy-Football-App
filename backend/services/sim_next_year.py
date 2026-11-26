@@ -155,12 +155,22 @@ def _role_change(player: Player, experience: int) -> float:
     return math.exp(change)
 
 
+# Applied at their full measured keep whatever the calibrated share: the passing rates. Carried into August
+# unregressed (efficiency_scale 0 for receivers, 0.25 for QBs) and then drawn again in the truth, they spread a
+# whole season's team passing too wide (team yards per target sd 0.92 against a real 0.71; 2027 passers
+# averaged 5,460-yard seasons, one 6,558); at their measured keeps 0.80.
+FULL_KEEP = ("ypc", "catch", "quality")
+
+
 def keep_of(position: str, name: str, scaled: bool = True) -> float:
-    """A rate's efficiency_keep: the position's own when fitted (a QB's rushing), else the shared one; `scaled`:
-    as the belief applies it, 1 - efficiency_scale x (1 - keep) (sim_next_year_calib)."""
+    """A rate's efficiency_keep: the position's own when fitted (a QB's rushing, a receiver's yards per catch),
+    else the shared one; `scaled`: as the belief applies it, 1 - efficiency_scale x (1 - keep)
+    (sim_next_year_calib), except a FULL_KEEP rate, always regressed by its measured keep."""
     keep = stored()["efficiency_keep"]
     raw = keep.get(f"{position} {name}", keep[name])
-    return 1.0 - stored()["efficiency_scale"].get(position, 1.0) * (1.0 - raw) if scaled else raw
+    if not scaled or name in FULL_KEEP:
+        return raw
+    return 1.0 - stored()["efficiency_scale"].get(position, 1.0) * (1.0 - raw)
 
 
 def _efficiency(player: Player, passer: float = AVERAGE_PASSER) -> dict[str, float]:

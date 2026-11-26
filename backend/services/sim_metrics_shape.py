@@ -1,5 +1,6 @@
 """Simulated seasons: the shape of a whole season, read alike on a real one and a simulated one (sim_eval full mode).
 
+- passing(data): the season's passing leader, team season passing yards (spread, most) and a team-game's spread.
 - shape(data): the season's leaders and how a team's work is shared: 4,000-yard passers, 1,000-yard receivers
   and rushers; receiving yards of the #1/#3/#5/#10 WR and TE; receptions #5 and #10; the share of a team's
   targets its top WR, top TE and top five receivers got, its top RB's share of the carries; the
@@ -35,10 +36,29 @@ def _nth(values: list[float], n: int) -> float:
     return sorted(values, reverse=True)[n - 1] if len(values) >= n else 0.0
 
 
+def passing(data: SeasonData) -> dict[str, float]:
+    """The season's passing leader, and the spread of team passing: a team's season yards (sd, max) and a
+    team-game's yards (sd), from the QB lines."""
+    leader: dict[int, float] = defaultdict(float)
+    games: dict[tuple[str, int], float] = defaultdict(float)
+    for (pid, week), line in data.box.items():
+        if line.pass_yds and data.players.get(pid) and data.players[pid].position == "QB":
+            leader[pid] += line.pass_yds
+            games[(data.team_at(pid, week + 1), week)] += line.pass_yds
+    teams: dict[str, float] = defaultdict(float)
+    for (team, _), yards in games.items():
+        teams[team] += yards
+    if not teams:
+        return {}
+    return {"pass yds #1": max(leader.values()), "team pass yds sd": float(np.std(list(teams.values()))),
+            "team pass yds max": max(teams.values()), "team-game pass yds sd": float(np.std(list(games.values()))),
+            "team-game pass yds mean": float(np.mean(list(games.values())))}
+
+
 def shape(data: SeasonData) -> dict[str, float]:
     totals, team_of = _totals(data)
     position = {pid: data.players[pid].position for pid in totals if pid in data.players}
-    out = {"4000-yd passers": float(sum(totals[p]["pass_yds"] >= 4000 for p in position)),
+    out = {**passing(data), "4000-yd passers": float(sum(totals[p]["pass_yds"] >= 4000 for p in position)),
            "1000-yd receivers": float(sum(totals[p]["rec_yds"] >= 1000 for p in position)),
            "1000-yd rushers": float(sum(totals[p]["rush_yds"] >= 1000 for p in position))}
     for pos in ("WR", "TE"):

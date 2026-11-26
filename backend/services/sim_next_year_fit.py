@@ -221,25 +221,34 @@ def _passer_scale(row: dict, name: str, which: int) -> float:
     return row["passer"][which] if name in RECEIVER_RATES and row["position"] in RECEIVERS else 1.0
 
 
+def _slope(rows: list[dict], name: str, wanted) -> float:
+    """The keep of a rate: the volume-weighted slope of next season's rate on the belief's, both over the position
+    norm, for rows whose position passes `wanted` (a full season each: _relevant)."""
+    norms = sim_world.params()["positions"]
+    numerator, base, minimum = RAW[name]
+    x, y, w = [], [], []
+    for r in rows:
+        norm, n = norms[r["position"]].get(name), r["raw"].get(base, 0.0)
+        if not _relevant(r) or not wanted(r["position"]) or not norm or n < minimum:
+            continue
+        x.append(r[name][0] / _passer_scale(r, name, 0) / norm - 1)
+        y.append(r["raw"][numerator] / n / _passer_scale(r, name, 1) / norm - 1)
+        w.append(n)
+    x, y, w = np.array(x), np.array(y), np.array(w)
+    return round(min(1.0, float((w * x * y).sum() / (w * x * x).sum())), 4)
+
+
 def _efficiency_fit(rows: list[dict]) -> dict:
     """{rate: keep}, plus "QB ypr" / "QB rush_td": a QB's rushing is fitted on QBs alone (a scrambler keeps
     far more of his edge than a back's TD rate suggests)."""
-    norms, league = sim_world.params()["positions"], sim_world.params()["league"]
+    league = sim_world.params()["league"]
     out = {}
-    for name, (numerator, base, minimum) in RAW.items():
-        for qbs in (False, True):
-            if qbs and name not in QB_RUSHING:
-                continue
-            x, y, w = [], [], []
-            for r in rows:
-                norm, n = norms[r["position"]].get(name), r["raw"].get(base, 0.0)
-                if not _relevant(r) or (r["position"] == "QB") != qbs or not norm or n < minimum:
-                    continue
-                x.append(r[name][0] / _passer_scale(r, name, 0) / norm - 1)
-                y.append(r["raw"][numerator] / n / _passer_scale(r, name, 1) / norm - 1)
-                w.append(n)
-            x, y, w = np.array(x), np.array(y), np.array(w)
-            out[f"QB {name}" if qbs else name] = round(min(1.0, float((w * x * y).sum() / (w * x * x).sum())), 4)
+    for name in RAW:
+        out[name] = _slope(rows, name, lambda position: position != "QB")
+        if name in QB_RUSHING:
+            out[f"QB {name}"] = _slope(rows, name, lambda position: position == "QB")
+    for position in RECEIVERS:                         # yards per catch by position (sim_next_year.FULL_KEEP)
+        out[f"{position} ypc"] = _slope(rows, "ypc", lambda p, mine=position: p == mine)
     for name, prior in QB_SHRINK.items():
         qbs = [r for r in rows if r["position"] == "QB" and _relevant(r) and r[name][0] > 0 and r[name][1] > 0]
         norm = 1.0 if name == "quality" else league["int_rate"]
