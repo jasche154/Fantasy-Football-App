@@ -31,6 +31,25 @@ from services.replay_state import Settings
 from services.valuation import NoDataError
 
 log = logging.getLogger(__name__)
+_per_data_cache: dict[tuple[int, str], tuple[object, object]] = {}   # (id(data), name) -> (data, value): see _per_data
+PER_DATA_ENTRIES = 16
+
+
+def _per_data(data: SeasonData, name: str, compute):
+    """compute(), once per replay_pool season object (`data`, as load_season_data caches it: new data in the
+    database is a new object) and `name`: the parts of a league's season that every seed shares. Emptied by
+    replay_pool.clear_cache."""
+    hit = _per_data_cache.get((id(data), name))
+    if hit is not None and hit[0] is data:
+        return hit[1]
+    value = compute()
+    if len(_per_data_cache) >= PER_DATA_ENTRIES:
+        _per_data_cache.clear()
+    _per_data_cache[(id(data), name)] = (data, value)
+    return value
+
+
+replay_pool.CLEAR_HOOKS.append(_per_data_cache.clear)
 
 REPLAY, LIVE, FUTURE = "replay", "live", "future"
 MIN_WEEKS_LEFT = 3                  # regular-season weeks a league that starts now must still have
@@ -82,7 +101,8 @@ def build(session: Session, settings: Settings, seed: int) -> tuple[bytes, Seaso
     else:
         base = replay_pool.load_season_data(session, settings.season, settings.scoring, settings.scoring_rules,
                                             settings.adp_format, through=settings.sim_from - 1)
-        rookies = [pid for pid, first in first_seasons(session).items() if first == settings.season]
+        first = _per_data(base, "first seasons", lambda: MappingProxyType(first_seasons(session)))
+        rookies = [pid for pid, season in first.items() if season == settings.season]
         data = sim_season.simulate(with_status_now(session, base, settings.sim_from), seed, settings.sim_from,
                                    rookies=rookies, qbs=qb_inputs(session, settings.season),
                                    team_prior=team_prior(session, settings.season),
@@ -332,15 +352,16 @@ def _future_base(session: Session, season: int, settings: Settings, seed: int = 
     newest, through = source(session)
     data = replay_pool.load_season_data(session, newest, settings.scoring, settings.scoring_rules,
                                         settings.adp_format, through=through)
-    world = sim_world.estimate(data, (through or data.last_week) + 1,
-                               _season_end(session, newest - 1, settings))
+    world = _per_data(data, "belief", lambda: sim_world.estimate(data, (through or data.last_week) + 1,
+                                                                 _season_end(session, newest - 1, settings)))
     rookies, moves = sim_offseason.load(season)
     matched, missing = sim_offseason.match(moves, data.players)
     if missing:
         log.warning("Offseason %s: no player matches %s", season, ", ".join(missing))
     # shortcut: experience counts seasons since a player's first database season (2018 on), so a veteran from
     # before 2018 looks younger than he is until the cap bucket; store birth dates or draft years to fix it.
-    experience = {pid: newest - first + 1 for pid, first in first_seasons(session).items() if first <= newest}
+    first = _per_data(data, "first seasons", lambda: MappingProxyType(first_seasons(session)))
+    experience = {pid: newest - season + 1 for pid, season in first.items() if season <= newest}
     moved = {matched[m.name]: m.team for m in moves if m.name in matched}
     # the pool's schedule carries no scores (results live in data.scores): the draft order needs them back
     played = tuple(replace(g, home_score=data.scores.get((g.home_team, g.week)),
@@ -357,8 +378,9 @@ def _future_base(session: Session, season: int, settings: Settings, seed: int = 
                if pid in belief.players} if start else {}
     belief = sim_carryover.with_expected(belief, carries)
     base = sim_next_year.season_base(season, belief, pool, schedule, settings.scoring,
-                                     settings.scoring_rules, _defense_prior(data), settings.adp_format,
-                                     sim_market.track_record(data), sim_next_year.rookie_premium(drafted))
+                                     settings.scoring_rules, _per_data(data, "defense", lambda: _defense_prior(data)),
+                                     settings.adp_format, _per_data(data, "record", lambda: sim_market.track_record(data)),
+                                     sim_next_year.rookie_premium(drafted))
     base = replace(base, notes=MappingProxyType({(pid, 0): sim_carryover.note(c) for pid, c in carries.items()}))
     scores = [(g.week, g.home_team, g.away_team, g.home_score, g.away_score) for g in played if g.is_final]
     return Future(base, belief, sim_carryover.draw(carries, seed), qbs,
