@@ -181,7 +181,7 @@ export function TradeBuilder({ game, version, roster, ir, maxPlayers, counterTo,
     <div className="replay-builder">
       <div className="weekly-controls">
         {/* A counter always goes back to the team that made the offer. */}
-        <TeamSelect game={game} value={partnerId} label="Trade with" excludeUser disabled={counterTo !== null}
+        <TeamSelect game={game} value={partnerId} label="Trade with" excludeUser disabled={counterTo !== null || actions.isBusy}
           onChange={(id) => change(() => { setPartnerId(id); setGet([]); })} />
       </div>
       {tendency && <p className="hint">{tendency}</p>}
