@@ -84,12 +84,21 @@ def news_lengths() -> Mapping[str, tuple[tuple[int, int], ...]]:
                              for group, counts in raw.items()})
 
 
+def news_group(since: int, first_tag: str) -> str:
+    """The NEWS_LENGTHS table a streak belongs to, by the tag that started it (the fit and the price share it):
+    "preseason" for an IR / PUP move in week 1, "long" for any other IR / PUP streak, else "short". A streak that
+    starts O and moves to IR stays "short": it is fitted that way, so it is priced that way."""
+    if first_tag in SEASON_TAGS:
+        return "preseason" if since == 1 else "long"
+    return "short"
+
+
 def vague_odds(since: int, week: int, tag: str) -> tuple[tuple[int, float], ...]:
     """((return week, chance), ...): what the public can expect of a player out since `since` and still out in `week`,
-    from the absences of his tag group (NEWS_LENGTHS) that lasted longer and ended that season (a vague report is
+    from the absences of his group (`news_group` of the streak's first `tag`, NEWS_LENGTHS) that lasted longer and ended that season (a vague report is
     not a season-ending one). Seed-free and never the real return: the market prices the whole spread
     (replay_chart.with_news) and the report names its median."""
-    group = "preseason" if since == 1 and "preseason" in news_lengths() else "long" if tag in SEASON_TAGS else "short"
+    group = news_group(since, tag)
     done = max(week, since) - since
     longer = [(weeks, n) for weeks, n in news_lengths()[group] if done < weeks < NO_RETURN_WEEKS] or [(done + 1, 1)]
     total = sum(n for _, n in longer)
@@ -116,9 +125,10 @@ def _named(seed: int, player_id: int, since: int, true_return: int, week: int) -
 
 
 def report(seed: int, player_id: int, since: int, true_return: int, week: int, tag: str,
-           last_week: int | None = None) -> Report:
+           last_week: int | None = None, first_tag: str | None = None) -> Report:
     """What the news says before `week` about a player out since `since` who really returns at
-    `true_return` (0 = never). Never names a week <= `week`; a returning player's week stays within the season."""
+    `true_return` (0 = never). Never names a week <= `week`; a returning player's week stays within the season.
+    `first_tag`: the tag that started the streak (`news_group`; default `tag`)."""
     rng = replay_state.rng(seed, "news", player_id, since)
     # every draw is made, always in this order, so a report never depends on which branch an earlier week took
     false_season = rng.random() < FALSE_SEASON_ODDS
@@ -133,7 +143,7 @@ def report(seed: int, player_id: int, since: int, true_return: int, week: int, t
     elif tag == "EXE":
         back = since + fake_weeks
     elif week < since:                                  # the draft, before a preseason move's season starts:
-        back, vague = _median(vague_odds(since, week, tag)), True    # he starts on IR, never how long
+        back, vague = _median(vague_odds(since, week, first_tag or tag)), True    # he starts on IR, never how long
     elif not true_return:
         hopeful = not long_tag or (fake_return and week < since + revised_after)
         back = since + fake_weeks if hopeful else None
@@ -141,7 +151,7 @@ def report(seed: int, player_id: int, since: int, true_return: int, week: int, t
           and week < true_return - CORRECTION_LEAD):                                         # report is the draft's
         back = None
     elif week < true_return - firm_lead:
-        back, vague = _median(vague_odds(since, week, tag)), True
+        back, vague = _median(vague_odds(since, week, first_tag or tag)), True
     else:
         named = _named(seed, player_id, since, true_return, week)
         back = named if last_week is None else min(named, max(last_week, true_return))

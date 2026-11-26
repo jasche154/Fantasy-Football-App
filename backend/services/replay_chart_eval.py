@@ -187,16 +187,15 @@ def absences_unreported(data: SeasonData) -> Counter:
 
 
 def news_lengths(data: SeasonData) -> dict[str, Counter]:
-    """{"long" (IR / PUP) | "short" (other hard tags) | "preseason" (IR / PUP from week 1): {weeks from the first hard tag to the return ("never": not
-    back that season): absences}} over the skill players' hard-tag streaks (replay_news.NEWS_LENGTHS)."""
+    """{replay_news.news_group of the streak's first tag ("preseason": IR / PUP from week 1, "long": other IR / PUP,
+    "short": other hard tags): {weeks from the first hard tag to the return ("never": not back that season):
+    absences}} over the skill players' hard-tag streaks (replay_news.NEWS_LENGTHS)."""
     found: dict[str, Counter] = {"long": Counter(), "short": Counter(), "preseason": Counter()}
     for (pid, since), back in data.returns.items():
         tag = data.injuries[(pid, since)].tag
         if data.players[pid].position not in SKILL or tag in ("SUS", "EXE"):
             continue
-        group = "preseason" if since == 1 and tag in replay_news.SEASON_TAGS else (
-            "long" if tag in replay_news.SEASON_TAGS else "short")
-        found[group][str(back - since) if back else "never"] += 1
+        found[replay_news.news_group(since, tag)][str(back - since) if back else "never"] += 1
     return found
 
 

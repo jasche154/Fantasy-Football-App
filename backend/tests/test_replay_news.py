@@ -160,3 +160,26 @@ def test_a_vague_report_shows_no_week_and_never_one_already_missed():
     assert all(r.back is None or r.back > week for r, week in zip(reports, [w for _ in range(60) for w in range(2, 10)]))
     week_out = [news.report(seed, 1, 2, 10, 9, "IR", 18).back for seed in range(60)]
     assert all(back in (10, 11) for back in week_out) and week_out.count(10) > 40     # a week out: mostly right
+
+
+def _table(group: str, since: int, week: int) -> tuple[tuple[int, float], ...]:
+    """vague_odds rebuilt straight from one NEWS_LENGTHS table."""
+    rows = [(weeks, n) for weeks, n in news.news_lengths()[group] if week - since < weeks < news.NO_RETURN_WEEKS]
+    total = sum(n for _, n in rows)
+    return tuple((since + weeks, n / total) for weeks, n in rows)
+
+
+def test_each_streak_is_priced_on_the_table_it_was_fitted_in():
+    """Review: a week-1 O tag was priced as a preseason IR move (a median nine weeks out instead of four)."""
+    assert news.vague_odds(1, 1, "O") == _table("short", 1, 1)
+    assert news.vague_odds(1, 0, "IR") == _table("preseason", 1, 0)
+    assert news.vague_odds(3, 5, "IR") == _table("long", 3, 5) != news.vague_odds(3, 5, "O") == _table("short", 3, 5)
+    assert [news.news_group(1, t) for t in ("IR", "PUP", "O")] == ["preseason", "preseason", "short"]
+
+
+def test_a_streak_that_starts_out_and_moves_to_ir_keeps_its_starting_group():
+    """The fit groups a streak by its first tag, so the price does too (the vague median doesn't jump on the move)."""
+    moved = [news.report(seed, 7, 3, 16, 6, "IR", 18, first_tag="O") for seed in SEEDS]
+    stayed = [news.report(seed, 7, 3, 16, 6, "O", 18) for seed in SEEDS]
+
+    assert {r.back for r in moved if r.vague} == {r.back for r in stayed if r.vague}

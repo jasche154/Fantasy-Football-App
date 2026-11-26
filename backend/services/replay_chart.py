@@ -330,10 +330,12 @@ def with_news(data: SeasonData, rows: Mapping[int, dict], fields: Mapping[int, d
     players an opportunity shock moves (replay_shocks: the market's reaction, which reads that news)."""
     out: dict[int, dict] = {}
     for pid, (expert, model_part, (since, back, tag), missed) in parts.items():
-        news = replay_news.report(seed, pid, since, back, week, tag, data.last_week)
+        started = data.injuries.get((pid, since))          # the streak's first tag sets its news group
+        first = started.tag if started is not None else tag
+        news = replay_news.report(seed, pid, since, back, week, tag, data.last_week, first)
         if news.vague:                                  # "no timetable yet": the market prices the whole spread
             _, extra = _injured(data, rows[pid], news, week, end_week, expert, model_part)
-            chart = (expert + model_part) * _vague_keep(data, rows[pid], news, tag, week, end_week, missed)
+            chart = (expert + model_part) * _vague_keep(data, rows[pid], news, first, week, end_week, missed)
             out[pid] = {**fields[pid], **extra, "chart": round(chart, 1), "news": news}
             continue
         if missed is not None:                          # frozen: what he comes back worth after the reported absence
