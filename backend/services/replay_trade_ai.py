@@ -19,7 +19,8 @@ than one attempt; the re-trade lock keeps it from moving the same players again.
    wanted (none between CPUs, the persona's edge for a CPU's offer) and take the accepted one with the best
    `Verdict.score` (the lowest CPU net in the deal); two CPUs only make a deal that nets both at least
    SEEK_SCORE. A CPU's own offer is evaluated as one (`offered`, at `replay_trades.offer_multiple`), as
-   `replay_trades.respond` re-checks it, and must be `generous` on the verdict's values. A dealer looks at
+   `replay_trades.respond` re-checks it, and must be `generous` on the verdict's values. No deal brings a
+   team a player it would cut on arrival (`replay_trades.cuts_an_arrival`). A dealer looks at
    2-for-2 swaps first.
 A dealer also makes DEALER_ATTEMPTS extra CPU-CPU attempts a week (each with EXTRA_ATTEMPT_CHANCE), only with
 pairs that include him. Offer rates and edges come from the state (`replay_personas.edge`: a tilted manager on a
@@ -150,7 +151,8 @@ def _best_deal(state: State, settings: Settings, know: Knowledge, sender: Team, 
     for give, get in [deal for deal in found if (need is None or need in deal[1])
                       and (wanted is None or wanted in deal[0])][:scored]:
         verdict = rt.evaluate(state, settings, know, sender.id, receiver.id, give, get, offered=want, counter=counter)
-        if not verdict.accepted or (not sender.is_user and verdict.score < SEEK_SCORE):
+        if (not verdict.accepted or (not sender.is_user and verdict.score < SEEK_SCORE)
+                or rt.cuts_an_arrival(verdict, give, get)):
             continue
         if sender.is_user and not (generous(edge, verdict.value_give, verdict.value_get) if edge
                                    else fair_for_user(settings, know, verdict.value_give, verdict.value_get)):

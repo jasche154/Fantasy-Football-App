@@ -4,7 +4,8 @@ It counters with probability `replay_personas.counter_rate`, one roll per CPU pe
 re-proposing can't reroll it), and searches at most once per week (`State.counter_searched`), so at most one
 counter a week and repeated declines never rerun the search. Candidates: add one of the user's players, swap a
 requested player for a lesser one at his position, or drop one requested player; it picks the one it accepts
-that costs the user least (never a "big_loss" for the user, never one needing a user drop) and stores it as a
+that costs the user least (never a "big_loss" for the user, never one needing a user drop, never one asking for
+a player it would cut on arrival) and stores it as a
 pending Offer(counter_to=declined.id). The declined deal is re-checked with the user's own drops. It never
 counters a counter of its own counter: the user can only answer a counter in the week it was made, and a CPU
 counters at most once a week.
@@ -63,7 +64,7 @@ def counter_offer(state: State, settings: Settings, know: Knowledge, declined: O
             found = rt.evaluate(state, settings, know, declined.from_team, cpu.id, give, get)
         except ValueError:                       # e.g. it would need the user to drop someone
             continue
-        if not found.accepted or found.fair_label == "big_loss":
+        if not found.accepted or found.fair_label == "big_loss" or rt.cuts_an_arrival(found, give, get):
             continue
         cost = found.value_give - found.value_get
         if best is None or cost < best[0]:

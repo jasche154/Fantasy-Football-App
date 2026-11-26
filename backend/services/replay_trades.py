@@ -355,6 +355,11 @@ def propose(state: State, settings: Settings, know: Knowledge, to_team: int, giv
     return (state if asked else record_offer(state, user.id, to_team, give, get, "declined", counter_to)), verdict
 
 
+def cuts_an_arrival(verdict: Verdict, give: Sequence[int], get: Sequence[int]) -> bool:
+    """Would either side cut a player the deal brings it (a CPU never builds such a deal: he counts for nothing)?"""
+    return bool(set(give) & set(verdict.their_drops) or set(get) & set(verdict.your_drops))
+
+
 def same_players(offer: Offer, give: Sequence[int], get: Sequence[int]) -> bool:
     """The offer moves these players (as sets: re-sending a proposal in another order is the same proposal)."""
     return (set(offer.give), set(offer.get)) == (set(give), set(get))

@@ -230,6 +230,7 @@ def test_the_user_gets_at_most_one_offer_a_week_and_each_passes_the_cpus_own_tes
 
             assert offer.to_team == USER and offer.week == week.week
             assert verdict.accepted and verdict.your_drops == (), (week.week, offer, verdict.reasons)
+            assert not set(offer.get) & set(verdict.their_drops)          # never asks for a player it would cut
             edge = replay_personas.edge(week.after, rs.team(week.after, offer.from_team))
             assert ai.generous(edge, verdict.value_give, verdict.value_get), (persona, verdict)
             assert persona == "haggler" or not verdict.fair_label.endswith("loss")     # his opening is a lowball

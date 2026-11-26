@@ -179,3 +179,21 @@ def test_the_counter_does_not_change_when_the_future_does(always, week):
     answer = rc.counter_offer(state, SETTINGS, real, mine, seed=0)
     assert len(answer.offers) == len(state.offers) + 1
     assert rc.counter_offer(state, SETTINGS, changed, mine, seed=0) == answer
+
+
+def test_a_counter_never_asks_for_a_player_the_cpu_would_cut_on_arrival(always, monkeypatch):
+    state, know, mine = declined()
+    plain = rc.counter_offer(state, SETTINGS, know, mine, seed=0).offers[-1]
+    added = next(pid for pid in plain.get if pid not in mine.give)       # the user player its counter asks for
+    evaluate = rt.evaluate
+
+    def cut_him(*args, **kwargs):                                         # as if it had to cut him to make room
+        verdict = evaluate(*args, **kwargs)
+        give = args[5]
+        return replace(verdict, their_drops=(added,)) if added in give else verdict
+
+    monkeypatch.setattr(rc.rt, "evaluate", cut_him)
+    after = rc.counter_offer(state, SETTINGS, know, mine, seed=0)
+
+    assert all(added not in offer.get for offer in after.offers[len(state.offers):])
+    assert rt.cuts_an_arrival(cut_him(state, SETTINGS, know, USER, CPU, plain.get, plain.give), plain.get, plain.give)
