@@ -220,11 +220,14 @@ def test_a_player_who_left_hurt_never_scores_the_overtime_touchdown_and_attempts
     means = [sim_game._side_means(s) for s in sides]
     rng = np.random.default_rng(2)
     offense = [sim_draw._offense(s, 33, 27, 1.0, rng) for s in sides]
+    home_wins = 0
     for _ in range(300):
         after, _, points, _, _ = sim_draw._overtime(sides, offense, [(20, {}), (20, {})], [20, 20],
                                                     np.array([33, 33]), np.array([27, 27]), rng, means)
         if points[0] > points[1]:
+            home_wins += 1
             o, before = after[0], offense[0]
             for ids, gained in ((sides[0].receivers, o.rec_td - before.rec_td), (sides[0].rushers, o.rush_td - before.rush_td)):
                 assert all(n == 0 for pid, n in zip(ids, gained) if pid == star)
             assert o.attempts - before.attempts == int((o.catches - before.catches).sum())
+    assert home_wins > 0                                   # the checks above ran

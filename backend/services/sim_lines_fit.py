@@ -73,7 +73,9 @@ def _season_rows(session, season: int) -> dict:
                           "rest": [sim_lines.rest_days(known, g.home_team, week),
                                    sim_lines.rest_days(known, g.away_team, week)],
                           "vegas": [g.spread_line, g.total_line], "score": [hs, as_]})
-    previous = sim_setup.final_scores(session, season - 1)
+    swap = {code: old for code, old, since in replay_pool.RELOCATED if season < since}     # 2018-19: LV was OAK
+    previous = [(w, swap.get(home, home), swap.get(away, away), hs, as_)
+                for w, home, away, hs, as_ in sim_setup.final_scores(session, season - 1)]
     seen = sim_world._seen(data, data.last_week + 1)
     yards = [(data.scores[key], seen.pass_yards[key] + sum(line.rush_yds for line in lines.values()))
              for key, lines in seen.games.items() if key in data.scores]

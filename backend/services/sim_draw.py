@@ -176,8 +176,10 @@ def _receiver_lines(side, o: _Offense, n_targets: int) -> dict[int, dict]:
     return lines
 
 
-def _passers(side, o: _Offense, rng: np.random.Generator) -> dict[int, dict]:
-    """The QB line(s): the receivers' sums, split with the backup when the starter left hurt."""
+def _passers(side, o: _Offense, rng: np.random.Generator, regulation: _Offense | None = None) -> dict[int, dict]:
+    """The QB line(s): the receivers' sums, split with the backup when the starter left hurt. Only `regulation`'s
+    catches (the offense before overtime, else `o`'s) are split: an overtime catch is the backup's, as the
+    starter had left."""
     if side.qb is None:
         return {}
     catches, yards, tds = o.catches, o.rec_yds, o.rec_td
@@ -185,9 +187,10 @@ def _passers(side, o: _Offense, rng: np.random.Generator) -> dict[int, dict]:
         mine = (catches, yards, tds)
         shares = {side.qb: 1.0}
     else:
-        kept = rng.binomial(catches, side.qb_share)
-        kept_yards = np.where(catches > 0, np.round(yards * kept / np.maximum(catches, 1)), 0).astype(int)
-        kept_tds = rng.hypergeometric(tds, catches - tds, kept)      # his TDs are among the catches he threw
+        base = regulation or o
+        kept = rng.binomial(base.catches, side.qb_share)
+        kept_yards = np.where(base.catches > 0, np.round(base.rec_yds * kept / np.maximum(base.catches, 1)), 0).astype(int)
+        kept_tds = rng.hypergeometric(base.rec_td, base.catches - base.rec_td, kept)   # his TDs among the catches he threw
         mine = (kept, kept_yards, kept_tds)
         shares = {side.qb: side.qb_share, side.backup: 1.0 - side.qb_share}
     out = {}
@@ -232,6 +235,7 @@ def draw_game(sides: Sequence, rng: np.random.Generator, scoring: ScoringSetting
     means = [_side_means(side) for side in sides]
     scored = [_kicking(offense[i], returns[i], rng, means[i]) for i in range(2)]
     points = [scored[i][0] + 2 * int(safeties[i]) for i in range(2)]
+    regulation = offense
     if points[0] == points[1]:
         offense, scored, points, n_targets, n_carries = _overtime(sides, offense, scored, points, n_targets,
                                                                   n_carries, rng, means)
@@ -239,7 +243,7 @@ def draw_game(sides: Sequence, rng: np.random.Generator, scoring: ScoringSetting
     for i, side in enumerate(sides):
         o, opp = offense[i], offense[1 - i]
         lines = _receiver_lines(side, o, int(n_targets[i]))
-        for pid, passing in _passers(side, o, rng).items():
+        for pid, passing in _passers(side, o, rng, regulation[i]).items():
             line = lines.setdefault(pid, {"share": 0.0})
             line.update({k: v for k, v in passing.items() if k not in ("fumbles", "completions")})
             line["fumbles"] = line.get("fumbles", 0) + passing["fumbles"]

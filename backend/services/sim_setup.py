@@ -51,6 +51,7 @@ def _per_data(data: SeasonData, name: str, compute):
 
 
 replay_pool.CLEAR_HOOKS.append(_per_data_cache.clear)
+replay_pool.EVICT_HOOKS.append(_per_data_cache.clear)   # it keys on season objects too
 
 REPLAY, LIVE, FUTURE = "replay", "live", "future"
 MIN_WEEKS_LEFT = 3                  # regular-season weeks a league that starts now must still have
@@ -227,9 +228,13 @@ def qb_inputs(session: Session, season: int, picks: list[dict] | None = None):
                                  .order_by(ReplayAdp.adp, ReplayAdp.player_id).limit(sim_qb.PAST_RANK)).scalars()
         past.update(listed)
     if picks is None:
-        picks = sim_draft_picks._cached_picks().get("rows", [])
+        cached = sim_draft_picks._cached_picks()
+        picks = cached.get("rows", [])
         if not any(r.get("season") == season for r in picks):
             log.info("No cached nflverse draft for %s: its rookie QBs take no job from a starter", season)
+        elif season not in sim_draft_picks._settled(cached):        # a summer download: some gsis ids still empty
+            log.warning("The cached nflverse draft for %s was downloaded before it settled: rookie QBs without an id "
+                        "take no job from a starter (download again with --refresh)", season)
     mine = {r["gsis_id"]: r["pick"] for r in picks if r.get("season") == season and r.get("position") == "QB"
             and r.get("gsis_id")}
     ids = dict(session.execute(select(Player.gsis_id, Player.id).where(Player.gsis_id.in_(list(mine)))).all())

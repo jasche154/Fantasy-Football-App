@@ -19,18 +19,18 @@
  },
  "yards_power": 0.275,
  "margin": {
-  "const": 1.6431,
-  "points": 0.8409,
-  "belief": 0.3034,
-  "qb_level": 6.2525,
-  "qb_change": 7.5497,
-  "rest": 1.0149
+  "const": 1.6438,
+  "points": 0.8353,
+  "belief": 0.3052,
+  "qb_level": 6.4535,
+  "qb_change": 7.2598,
+  "rest": 1.0242
  },
  "total": {
-  "const": -10.6589,
-  "points": 0.583,
-  "belief": 0.2686,
-  "qb_level": 8.4076,
-  "qb_change": 4.2612
+  "const": -10.9448,
+  "points": 0.5803,
+  "belief": 0.2715,
+  "qb_level": 8.5457,
+  "qb_change": 5.6162
  }
 }

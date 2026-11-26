@@ -264,6 +264,7 @@ def test_a_simulated_season_is_deterministic_and_never_takes_an_established_star
     first = sim_season.simulate(data, 4, 8)
     assert first.actual == sim_season.simulate(data, 4, 8).actual
     established = sim_qb_jobs.established_of(data, None, False, sim_qb_jobs.QbInputs())
+    assert established                                      # else the last check holds for nothing
     rows = [r for seed in range(3) for r in sim_qb.walk(sim_season.simulate(data, seed, 8), established=established)[0]
             if r.week >= 8]
     assert {"week", "return"} <= {r.kind for r in rows}

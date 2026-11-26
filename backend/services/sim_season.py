@@ -46,8 +46,8 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass, replace
 from types import MappingProxyType
 
-from services import (replay_fillin, replay_pool, replay_state, sim_depth, sim_injuries, sim_lines, sim_market, sim_qb_jobs,
-                      sim_talent)
+from services import (replay_fillin, replay_pool, replay_state, sim_depth, sim_game, sim_injuries, sim_lines, sim_market,
+                      sim_qb_jobs, sim_talent)
 from services.replay_pool import Injury, SeasonData, hard_tag_returns
 from services.sim_game import on_field, play
 from services.sim_world import World, estimate, scoring_of
@@ -319,6 +319,7 @@ def simulate(base: SeasonData, seed: int, from_week: int, prior: World | None = 
     # an as_of fallback (a real game after the cut) that no simulated game replaced is dropped
     tables.games = {pid: [g for g in games if g[0] < from_week or (pid, g[0]) in tables.actual]
                     for pid, games in tables.games.items()}
+    sim_game._sides.clear()                   # its belief sides hold this season's Worlds: none outlives it
     final = tables.season(base)
     return replace(final, returns=MappingProxyType(hard_tag_returns(final.injuries, final.actual, last)),
                    schedule=_with_lines(base.schedule, lines))

@@ -237,15 +237,16 @@ def edges(known: SeasonData, week: int, belief: World, prior: Mapping[str, Ratin
     return out_edges
 
 
-_last: list = []                 # (known, week, prior, Rated) of the last `_rated` (a week's lines and edges share it)
+_last: list = []                 # [(known, week, prior, Rated)] of the last `_rated` (a week's lines and edges share it)
 
 
 def _rated(known: SeasonData, week: int, prior: Mapping[str, Rating] | None) -> Rated:
     """`ratings` of `known`'s scores before `week`, kept for the next call with the same objects."""
-    if _last and _last[0] is known and _last[1] == week and _last[2] is prior:
-        return _last[3]
+    last = _last[0] if _last else None                  # one read: another league build may replace it meanwhile
+    if last is not None and last[0] is known and last[1] == week and last[2] is prior:
+        return last[3]
     rated = ratings(scores(known, week), week, prior)
-    _last[:] = [known, week, prior, rated]
+    _last[:] = [(known, week, prior, rated)]
     return rated
 
 
