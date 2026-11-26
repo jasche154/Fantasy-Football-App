@@ -113,11 +113,11 @@ def tally(know: Knowledge, persona: str | Mind, sends: Sequence[int], kept: Sequ
         return max(private(pid, True, attach) * (1.0 - off), floor)
 
     kept_worth = {pid: private(pid) for pid in kept}
-    received = (depth_counted(list(kept_worth.values()), [private(pid, True) for pid in sends])
-                - sum(private(pid, True) for pid in drops))
+    received = (depth_counted(list(kept_worth.values()), [private(pid, True, attach) for pid in sends])
+                - sum(private(pid, True, attach) for pid in drops))
     bonus = premium(know, mind.persona, sends, kept, just_added)
     spot = SPOT_VALUE * max(0, len(sends) - len(kept))
-    cap = LINEUP_CAP * sum(sell(pid) for pid in sends)     # undiscounted: a shop moves his price by its discount only
+    cap = LINEUP_CAP * sum(sell(pid, attach=attach) for pid in sends)    # undiscounted: a shop moves his price by its discount only
     lineup = min(max(LINEUP_PER_WEEK * gain_per_week, -cap), cap)
     weight = LINEUP_WEIGHT if lineup > 0 else LINEUP_LOSS_WEIGHT
 

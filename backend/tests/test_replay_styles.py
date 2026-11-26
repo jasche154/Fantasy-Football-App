@@ -128,7 +128,7 @@ def test_a_fan_turns_down_any_trade_that_brings_him_a_rivals_player(fan_of_rival
     fan = with_team(state, to_team, persona="fan", fan_of=favourite)
 
     assert rt.evaluate(state, SETTINGS, know, USER, to_team, give, get).accepted
-    verdict = rt.evaluate(fan, SETTINGS, know, USER, to_team, give, get)
+    verdict = rt.evaluate(fan, SETTINGS, know, USER, to_team, give, get, explain=True)
     assert not verdict.accepted and (verdict.decline, verdict.decline_player) == ("decline_rival", give[0])
     assert any(fans.nickname(fans.RIVALS[favourite]) in reason for reason in verdict.reasons)
 
@@ -432,7 +432,7 @@ def test_a_cpu_with_no_lineup_room_says_so():
     state, know = league(changes={only_te: star(500.0), back: star(900.0, star=1.0)})
     locked = lock_free_agents(state, know, "TE")
 
-    verdict = rt.evaluate(locked, SETTINGS, know, USER, DEEP_AT_WR, [back], [only_te])
+    verdict = rt.evaluate(locked, SETTINGS, know, USER, DEEP_AT_WR, [back], [only_te], explain=True)
     assert not verdict.accepted and verdict.decline == "decline_room"
 
 
@@ -443,7 +443,7 @@ def test_a_lowball_gets_a_value_reply_naming_the_player_asked_for():
     best = max(cpu.roster, key=lambda pid: chart(know, pid))
     worst = min((pid for pid in user.roster if know.by_id[pid].position in SKILL), key=lambda pid: chart(know, pid))
 
-    verdict = rt.evaluate(state, SETTINGS, know, USER, CPU, [worst], [best])
+    verdict = rt.evaluate(state, SETTINGS, know, USER, CPU, [worst], [best], explain=True)
     assert not verdict.accepted and (verdict.decline, verdict.decline_player) == ("decline_value", best)
     assert not chart(know, worst) > (1 - 0.15) * chart(know, best)          # a real lowball
 
@@ -465,7 +465,7 @@ def test_a_cpu_high_on_the_player_asked_for_turns_down_what_it_would_take_withou
     loved = {theirs: {"form_chart": 0.3 * chart(know, theirs)}}
     state, know = league(changes=loved)
 
-    verdict = rt.evaluate(state, SETTINGS, know, USER, CPU, [mine], [theirs])
+    verdict = rt.evaluate(state, SETTINGS, know, USER, CPU, [mine], [theirs], explain=True)
     assert replay_mood.feeling(know.by_id[theirs], "balanced").kind == "high"
     assert not verdict.accepted and (verdict.decline, verdict.decline_player) == ("decline_attached", theirs)
 
@@ -577,7 +577,7 @@ def test_a_league_rule_that_blocks_the_deal_is_the_reply_before_any_persona_reas
     hated = fans.club(know.by_id[give[0]].team)
     state = with_team(state, CPU, persona="fan", fan_of=fan_of_rival(hated))     # a rival player in the deal too
 
-    verdict = rt.evaluate(state, SETTINGS, know, USER, CPU, give, get)
+    verdict = rt.evaluate(state, SETTINGS, know, USER, CPU, give, get, explain=True)
     assert not verdict.accepted and verdict.decline == f"decline_rule_{rule}"
     after = rt.record_offer(state, USER, CPU, give, get, "declined")
     replied = replay_chat.decline_reply(after, know, 1, after.offers[-1].id, verdict)
@@ -592,7 +592,7 @@ def test_every_declined_proposal_gets_a_reply_reason():
     for cpu in (t for t in state.teams if not t.is_user):
         for theirs in [p for p in cpu.roster if know.by_id[p].position in SKILL][:4]:
             for give in mine:
-                verdict = rt.evaluate(state, SETTINGS, know, USER, cpu.id, (give,), (theirs,))
+                verdict = rt.evaluate(state, SETTINGS, know, USER, cpu.id, (give,), (theirs,), explain=True)
                 if not verdict.accepted:
                     declined += 1
                     assert verdict.decline in rt.DECLINE_KINDS, (give, theirs, verdict.reasons)
@@ -818,3 +818,45 @@ def test_the_trade_screen_shows_a_hagglers_counter_as_accepted_and_accepting_it_
     assert row["verdict"]["accepted"] is True
     done = rg.respond_offer(declined, VIEW_SETTINGS, DATA, counter.id, True, seed=SEED)
     assert next(o for o in done.offers if o.id == counter.id).status == "accepted"
+
+
+def test_only_a_users_proposal_works_out_why_a_cpu_said_no():
+    """The CPU trade search evaluates hundreds of deals it never explains."""
+    state, know = league()
+    cpu, user = rs.team(state, CPU), rs.user_team(state)
+    best = max(cpu.roster, key=lambda pid: chart(know, pid))
+    worst = min((pid for pid in user.roster if know.by_id[pid].position in SKILL), key=lambda pid: chart(know, pid))
+
+    assert rt.evaluate(state, SETTINGS, know, USER, CPU, [worst], [best]).decline is None
+    assert rt.propose(state, SETTINGS, know, CPU, [worst], [best])[1].decline == "decline_value"
+
+
+def test_without_the_mark_up_a_deal_is_priced_as_if_he_were_not_high_on_anyone():
+    """attach=False takes the mark-up out everywhere: what he sends, the depth threshold, his own cuts and the
+    lineup cap; so it prices the deal exactly as for the same players with no feeling."""
+    loved = values(p1=star(500.0, form_chart=0.3 * 500.0), p2=star(450.0), p3=star(300.0, form_chart=0.3 * 300.0))
+    plain = values(p1=star(500.0), p2=star(450.0), p3=star(300.0))
+
+    def score(know, attach=True):
+        return tv.tally(know, "balanced", [1], [2], [3], 5.0, 1.0, True, attach=attach)
+
+    assert score(loved).score < score(plain).score
+    assert score(loved, attach=False) == score(plain)
+
+
+def test_a_fans_lineup_cover_skips_his_rivals_free_agents_unless_nobody_else_can_play(fan_of_rival):
+    from services import replay_trade_rosters as rosters
+    state, know = league()
+    team = rs.team(state, CPU)
+    roster = tuple(p for p in team.roster if know.by_id[p].position != "QB")
+    pool = rt.free_agents(state, know)
+    first = rosters.cover(know, SETTINGS, roster, pool)[0]
+    fan = replace(team, persona="fan", fan_of=fan_of_rival(know.by_id[first].team))
+    hated = fans.club(know.by_id[first].team)
+
+    second = rosters.cover(know, SETTINGS, roster, pool, team=fan)[0]
+    only_rivals = [p for p in pool if know.by_id[p].position != "QB" or fans.club(know.by_id[p].team) == hated]
+    forced = rosters.cover(know, SETTINGS, roster, only_rivals, team=fan)[0]
+
+    assert know.by_id[first].position == "QB" and fans.club(know.by_id[second].team) != hated
+    assert fans.club(know.by_id[forced].team) == hated
