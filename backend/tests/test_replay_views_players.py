@@ -275,7 +275,7 @@ def test_a_vague_report_keeps_him_out_every_week_to_come_and_never_reads_the_rea
     star = fakes.INJURED_STAR_ID
     since = next(s for (pid, s) in DATA.returns if pid == star)
 
-    def vague(seed, pid, since, back, week, tag, last=None):
+    def vague(seed, pid, since, back, week, tag, last=None, first_tag=None):
         return replay_news.Report(since, 9, f"Out ({tag}) since week {since}; no timetable yet.", vague=True)
 
     monkeypatch.setattr(replay_news, "report", vague)

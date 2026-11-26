@@ -36,7 +36,7 @@ def hurt(games: int):
 def exact_news(monkeypatch):
     """This module prices the chart's discount curve on news that names the real week (the news noise is
     test_replay_news's)."""
-    def exact(seed, pid, since, back, week, tag, last=None):
+    def exact(seed, pid, since, back, week, tag, last=None, first_tag=None):
         week_named = back if back and (last is None or back <= last) else None
         return replay_news.Report(since, week_named, "Out; expected back." if week_named else "Out for the season.")
     monkeypatch.setattr(replay_news, "report", exact)

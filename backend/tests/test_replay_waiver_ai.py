@@ -866,7 +866,7 @@ def test_a_cpus_stash_and_free_agency_choices_about_an_injured_player_move_only_
     week, data = 6, fakes.fake_season()
     since = next(s for (pid, s) in data.returns if pid == STAR)
     later = replace(data, returns=MappingProxyType({**data.returns, (STAR, since): data.last_week}))
-    monkeypatch.setattr(replay_news, "report", lambda seed, pid, since, back, w, tag, last=None:
+    monkeypatch.setattr(replay_news, "report", lambda seed, pid, since, back, w, tag, last=None, first_tag=None:
                         replay_news.Report(since, since + 4, "Out; expected back."))
 
     def moves(season):

@@ -469,7 +469,7 @@ def test_an_injured_players_draft_price_moves_only_through_the_news(monkeypatch)
     data = fakes.fake_season()
     since = next(s for (pid, s) in data.returns if pid == star)
     later = copy(data, returns=MappingProxyType({**data.returns, (star, since): data.last_week}))
-    monkeypatch.setattr(replay_news, "report", lambda seed, pid, since, back, week, tag, last=None:
+    monkeypatch.setattr(replay_news, "report", lambda seed, pid, since, back, week, tag, last=None, first_tag=None:
                         replay_news.Report(since, since + 4, "Out; expected back."))
 
     picks = [rg.auto_draft(rg.create_game(settings, season, 5), settings, season, 5).picks for season in (data, later)]
