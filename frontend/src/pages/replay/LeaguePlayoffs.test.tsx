@@ -170,6 +170,7 @@ describe('LeaguePlayoffs once the season is over', () => {
     const [late] = cards(column(/^Week 16$/, pool));
     expect(late.querySelector('.is-winner')).toHaveTextContent('Seed 8Red Zone Rebels112.50won');
     expect(late).not.toHaveClass('bracket-game--mine');
+    expect(screen.getByText(/Final places in a pool go by that table after its last week/)).toBeInTheDocument();
   });
 
   it('says once the seeds are final but nobody has won yet that every round is reseeded', async () => {

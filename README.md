@@ -1319,7 +1319,9 @@ that week's games on; only scoring a week reads its real points.
   points in pool weeks, then seed, and pairs them off (1 v 2, 3 v 4); in an odd pool the team idle least
   so far sits out (then the lowest in the table), so the bye rotates, and a pool
   of two plays twice (the team that won both places higher; a split goes to more points, then the higher
-  seed). Games are labelled Quarter-final, Semi-final, Championship, Third place or Consolation; a bye
+  seed). A pool's final places are its table after its last week, not head-to-head: a team that won one
+  consolation game can finish behind the team it beat if it lost its others (the Playoffs page says so).
+  Games are labelled Quarter-final, Semi-final, Championship, Third place or Consolation; a bye
   shows as an idle week on the schedule ("Bye / no game"), and the Matchup tab then shows the week's
   first game. With 5 playoff teams round one is a single wild-card game. Leagues saved before playoff
   sizes existed keep their title games. Their consolation games may pair differently (by the pool table rather than
