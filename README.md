@@ -1692,6 +1692,22 @@ read the belief, so, as in a real season, the public learns the truth only from 
   both of the team's quarterbacks the same way), so a healthy star does not jump from QB1 to QB9 and back: a
   healthy top-16 quarterback's expert rank moves about 1.2-1.5 places a week (real: about 1.1). Quarterback expert ranks still agree less with the week's projections than real ones (rank correlation
   about 0.6-0.68 against 0.72-0.75): QB values are bunched, and the projections follow each week's matchup line.
+  **At a mid-season join** (the live season's first simulated week) the experts' memory starts from the last real
+  week's ranks: each player gets the opinion that makes this week's values give his real rank, which then carries
+  on and drifts as usual, so nobody jumps from QB28 to QB8 with no news (sim_eval mid, 2021-2025 from week 12:
+  the rank change across the join now equals a real week's, QB 1.25 / RB 1.35 / WR 2.50 / TE 0.95 against real
+  1.25 / 1.33 / 2.49 / 0.96). A jump-in league's draft board (the experts) then agrees a little less with its
+  ADP (the belief's): rank correlation of the top 60, real 2026 data, 0.88-0.91 -> 0.77-0.80. The **published
+  projections** take a per-position scale (`market.projection_scale`, QB 1.05, RB 1.09, WR 1.09, TE 1.06):
+  real sources project high (weeks 12-17 of 2021-2025, actual minus projection QB -0.48, RB -0.61, WR -0.27;
+  the belief's own are unbiased), so without it projections stepped down 5-8% at the join (Josh Allen 23.4 ->
+  18.0); the join's projection ratio for healthy top players is now 0.99-1.01 against real 0.98-1.00. The truth
+  and the values experts and the market rank on are untouched. Still measured, not changed: the simulated
+  public's projections move more from week to week than real ones for quarterbacks and receivers (healthy top
+  players, weeks 12-17: median change QB 1.81 against 1.28 points, WR 1.07 against 0.75; RB and TE close),
+  because the belief refits a veteran's role and passing from his recent games with a light prior; trusting
+  a few games no faster than real projections do would mean a heavier, evidence-weighted prior in
+  `sim_world.estimate`, which every fitted game constant is built on, so it waits for a round that refits them.
 
 **2027 specifics:**
 
