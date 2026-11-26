@@ -607,7 +607,7 @@ def test_a_faab_league_takes_bids_on_claims(client):
     missing = refused(client, game + "/claims", {"add": add, "drop": cut})
     claimed = post(client, game + "/claims", {"add": add, "drop": cut, "bid": 10})
     claim_id = get(client, game + "/claims")["results"][0]["id"]
-    rebid = post(client, f"{game}/claims/{claim_id}/bid", {"bid": 25})
+    rebid = post(client, f"{game}/claims/{claim_id}/bid", {"bid": 100})       # all in: no CPU outbids it
     bad_rebid = [refused(client, f"{game}/claims/{claim_id}/bid", {"bid": bid})[0] for bid in (-1, 101)]
     after = post(client, game + "/advance", {"step": "wednesday", "week": 2})
     too_late = refused(client, f"{game}/claims/{claim_id}/bid", {"bid": 5})
@@ -616,7 +616,7 @@ def test_a_faab_league_takes_bids_on_claims(client):
     assert missing == (422, "Enter a bid: $0 to $100 (your budget left).")
     assert set(claimed) >= {"game", "events"} and set(rebid) >= {"game", "events"}
     mine = [e["text"] for e in after["events"] if e["kind"] == "claim" and e["team"]["is_user"]]
-    assert len(mine) == 1 and " for $25, dropping " in mine[0]                     # the rebid is what was paid
+    assert len(mine) == 1 and " for $100, dropping " in mine[0]                    # the rebid is what was paid
     assert too_late == (422, "Bids can only be changed before the weekly waiver run.")
     wednesday = "/games/%d" % post(client, "/games", {"season": SEASON, "seed": 6})["game"]["id"]
     post(client, wednesday + "/draft/auto", whole_draft="true")

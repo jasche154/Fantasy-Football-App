@@ -458,7 +458,7 @@ describe('PlayersView waivers', () => {
 });
 
 describe('PlayersView while an IR player has lost his tag', () => {
-  const BANNER = 'Raheem Mostert is on IR but no longer has an O, IR or PUP tag. Activate or drop him before you add, claim or trade for players.';
+  const BANNER = 'Activate Raheem Mostert from IR to trade or claim: he no longer has an O, IR or PUP tag (or drop him).';
 
   it('shows the banner and disables Add', async () => {
     renderPlayers(summary({ ir_blocked: [MOSTERT] }), [{ path: PLAYERS, reply: json(wire([wireRow(COLLINS)])) }]);

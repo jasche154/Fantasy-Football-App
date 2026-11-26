@@ -323,7 +323,7 @@ describe('TradesView injuries and IR', () => {
   it('shows the IR banner while blocked, and leaves the offer answerable', async () => {
     renderTrades(trades({ offers: [offer()] }), [], { props: { game: summary({ ir_blocked: [COLLINS] }) } });
     const card = await screen.findByRole('listitem', { name: 'Offer from Blitz Brigade' });
-    expect(screen.getByText('Nico Collins is on IR but no longer has an O, IR or PUP tag. Activate or drop him before you add, claim or trade for players.'))
+    expect(screen.getByText('Activate Nico Collins from IR to trade or claim: he no longer has an O, IR or PUP tag (or drop him).'))
       .toHaveAttribute('role', 'status');
     await waitFor(() => expect(within(card).getByRole('button', { name: /Accept/ })).toBeEnabled());
   });

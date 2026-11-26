@@ -1,4 +1,5 @@
 """Replay League waiver rules and the user's roster moves (services/replay_waivers.py), on the fake league."""
+import re
 from dataclasses import replace
 
 import pytest
@@ -449,8 +450,11 @@ def to_ir(state: State, team_id: int, player_id: int) -> State:
 
 
 def blocked_sentence(team_id: int, player_id: int) -> str:
+    name = know().by_id[player_id].name
+    if rs.team(league(), team_id).is_user:
+        return f"Activate {name} from IR to trade or claim: he no longer has an O, IR or PUP tag (or drop him)."
     return (f"{rs.team(league(), team_id).name} can't add, claim or trade for players while "
-            f"{know().by_id[player_id].name} is on IR without an O, IR or PUP tag: activate or drop him first.")
+            f"{name} is on IR without an O, IR or PUP tag: activate or drop him first.")
 
 
 def test_an_ir_player_is_rostered_and_not_available():
@@ -469,9 +473,9 @@ def test_a_blocked_team_cant_add_or_claim():
     sentence = blocked_sentence(USER, stale)
     target = unrostered(league())[0]
 
-    with pytest.raises(ValueError, match="^" + sentence + "$"):
+    with pytest.raises(ValueError, match="^" + re.escape(sentence) + "$"):
         waivers.add_drop(to_ir(league("open"), USER, stale), SETTINGS, know(), USER, target)
-    with pytest.raises(ValueError, match="^" + sentence + "$"):
+    with pytest.raises(ValueError, match="^" + re.escape(sentence) + "$"):
         waivers.submit_claim(to_ir(league("waivers"), USER, stale), SETTINGS, know(), target, None)
 
 
