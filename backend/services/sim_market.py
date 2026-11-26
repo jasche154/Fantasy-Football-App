@@ -61,6 +61,7 @@ from services.sim_world import RoleChange, World, params
 
 MIN_PROJECTION = 0.1
 EXPERT_NOISE = 0.08              # expert opinion vs the belief (lognormal sigma; preseason: vs the ADP)
+OPINION_CAP = 3.0                # implied_opinions: no player's seeded opinion beyond 3 sd
 FILL_IN_BEST = 16                # the best weekly expert rank of a fill-in QB: real 2020-2025 runs of 3+ starts, after
                                  # 2-4 starts, never ranked better (Flacco 2023, Dobbs 2023: QB16; median 29-32)
 OPINION_DEFAULTS = {"opinion_spread": {"QB": 0.35, "RB": 1.0, "WR": 1.0, "TE": 1.0, "K": 1.0, "DST": 1.0},
@@ -155,6 +156,23 @@ def opinion(previous: Mapping[int, float], ids: Iterable[int], dice: np.random.G
     keep = float(opinion_knob("opinion_keep"))
     return {pid: keep * previous[pid] + np.sqrt(1 - keep ** 2) * z if pid in previous else float(z)
             for pid, z in zip(ids, fresh)}
+
+
+def implied_opinions(belief: World, known: SeasonData, week: int, worth: Mapping[int, float]) -> dict[int, float]:
+    """{player: the opinion z under which ranking on `worth` (expert_ranks) gives `known`'s expert ranks of `week`}
+    at each position: the player the real experts ranked r-th gets the r-th best worth among those ranked. Seeds
+    the experts' memory at a mid-season join (the last real week's ranks), so the first simulated ranks carry
+    them on (opinion_keep) instead of starting from fresh opinions. Within +-OPINION_CAP."""
+    spread = opinion_knob("opinion_spread")
+    out = {}
+    for position in ("QB", "RB", "WR", "TE", "K", "DST"):
+        ranked = sorted((rank, pid) for (pid, w), rank in known.expert_ranks.items() if w == week
+                        and pid in belief.players and belief.players[pid].position == position and worth.get(pid, 0) > 0)
+        levels = sorted((worth[pid] for _, pid in ranked), reverse=True)
+        scale = EXPERT_NOISE * spread.get(position, 1.0)
+        for i, ((_, pid), level) in enumerate(zip(ranked, levels)):      # a hair apart: equal levels keep the order
+            out[pid] = float(np.clip(np.log(level * (1 - 1e-6 * i) / worth[pid]) / scale, -OPINION_CAP, OPINION_CAP))
+    return out
 
 
 def held(previous: Mapping[int, float], worth: Mapping[int, float], belief: World,

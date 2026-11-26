@@ -220,3 +220,33 @@ def test_season_shape_and_standings_read_the_box_and_the_scores():
     table = sim_metrics_shape.standings(SimpleNamespace(schedule=SimpleNamespace(games=games), scores=scores))
     assert table["best record (wins)"] == 2 and table["worst record (wins)"] == 0
     assert table["games by 1-3 %"] == 50 and table["games by 8 or fewer %"] == 50
+
+
+def test_implied_opinions_carry_the_last_real_ranks_into_the_first_simulated_week(belief):
+    """Item 28: seeded from week W - 1's real ranks, the experts' first ranks (no fresh noise) repeat them."""
+    from services import sim_market
+    from services.scoring import scoring_for
+    worth = sim_market.values(belief, scoring_for("half"), 8)
+    wrs = sorted((pid for pid in worth if belief.players[pid].position == "WR" and worth[pid] > 0), key=lambda p: -worth[p])[1:11]
+    swapped = [wrs[i ^ 1] for i in range(len(wrs))]                     # the experts swap each neighbouring pair
+    real = {(pid, WEEK - 1): rank for rank, pid in enumerate(swapped, start=1)}
+    known = SimpleNamespace(expert_ranks=real)
+    z = sim_market.implied_opinions(belief, known, WEEK - 1, worth)
+    ranks = sim_market.expert_ranks(belief, wrs, WEEK, np.random.default_rng(0), scoring_for("half"), 8, opinions=z, worth=worth)
+    assert sorted(wrs, key=lambda p: ranks[(p, WEEK)]) == swapped
+    assert all(abs(v) <= sim_market.OPINION_CAP for v in z.values())
+
+
+def test_join_and_churn_rows_read_projections_ranks_and_tags():
+    from services import sim_metrics_join
+    players = {i: SimpleNamespace(position="WR") for i in range(1, 4)}
+    projected = {(1, 4): 10.0, (1, 5): 12.0, (2, 4): 8.0, (2, 5): 6.0, (3, 4): 9.0, (3, 5): 0.0}
+    ranks = {(1, 4): 1, (2, 4): 2, (3, 4): 3, (1, 5): 2, (2, 5): 1, (3, 5): 3}
+    data = SimpleNamespace(players=players, projected=projected, expert_ranks=ranks, injuries={(3, 5): fakes.Injury("O")},
+                           box={(1, 5): None}, scores={("AAA", 5): 3, ("BBB", 5): 24}, team_at=lambda pid, w: "AAA")
+    join = sim_metrics_join.join(data, 5)
+    assert join["join proj ratio WR"] == pytest.approx(18 / 18) and join["join expert churn WR"] == 1.0
+    churn = sim_metrics_join.churn(data, [4, 5])
+    assert churn["proj churn WR median"] == 2.0
+    absent = sim_metrics_join.absences(data, [5])
+    assert absent["untagged no-shows / week"] == 1 and absent["team score <= 6 %"] == 50   # player 2: no box, no tag

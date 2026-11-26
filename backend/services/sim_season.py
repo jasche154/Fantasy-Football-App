@@ -227,8 +227,10 @@ def _market(tables: _Tables, base: SeasonData, belief: World, truth: World, seed
             weekly = worth = edges = None
             if rank_week and opinions is not None:
                 edges = sim_lines.edges(known, week, belief, team_prior)
-                weekly = sim_market.opinion(opinions["z"], [pid for pid in ids if pid in belief.players], dice)
                 fresh_worth = sim_market.values(belief, scoring, last - rank_week + 1, edges)
+                if not opinions["z"] and week > 1:             # the first simulated week after real ones
+                    opinions["z"].update(sim_market.implied_opinions(belief, known, week - 1, fresh_worth))
+                weekly = sim_market.opinion(opinions["z"], [pid for pid in ids if pid in belief.players], dice)
                 worth = sim_market.held(opinions["worth"], fresh_worth, belief, opinions["out"],
                                         [change.player_id for change in benched])
                 opinions["z"].update(weekly)

@@ -49,7 +49,8 @@ from functools import partial
 from pathlib import Path
 
 from services import (replay_pool, sim_carryover, sim_depth, sim_fit, sim_injuries, sim_market, sim_metrics,
-                      sim_metrics_games, sim_metrics_shape, sim_qb, sim_qb_jobs, sim_season, sim_setup, sim_world)
+                      sim_metrics_games, sim_metrics_join, sim_metrics_shape, sim_qb, sim_qb_jobs, sim_season, sim_setup,
+                      sim_world)
 from services.replay_adp_format import TWO_QB
 from services.replay_pool import SeasonData
 from services.sim_world import World
@@ -167,13 +168,14 @@ def _mid(session, season: int, seeds: list[int]) -> tuple[dict, dict]:
 def _mid_sim(data: SeasonData, real: SeasonData, weeks: range, established: frozenset[int]) -> dict[str, float]:
     """_rest plus who holds the QB jobs (sim_qb.job_metrics) and how often week MID_WEEK's starter is the real one."""
     return {**_rest(data, weeks), **sim_qb.job_metrics(data, MID_WEEK, established),
-            **sim_qb.same_starters(data, real, MID_WEEK)}
+            **sim_qb.same_starters(data, real, MID_WEEK), **sim_metrics_join.join(data, MID_WEEK)}
 
 
 def _rest(data: SeasonData, weeks: range) -> dict[str, float]:
     return {**sim_metrics.weekly(data, weeks), **sim_metrics.leaderboard(data, weeks),
             **sim_metrics_games.games(data, weeks), **sim_metrics_games.experts(data, weeks),
-            **sim_metrics_games.tails(data, weeks)}
+            **sim_metrics_games.tails(data, weeks), **sim_metrics_join.churn(data, weeks),
+            **sim_metrics_join.absences(data, weeks)}
 
 
 def _whole(data: SeasonData, rookies: set[int], real: SeasonData, established: frozenset[int]) -> dict[str, float]:
@@ -183,7 +185,8 @@ def _whole(data: SeasonData, rookies: set[int], real: SeasonData, established: f
             **sim_metrics.weekly(data, weeks), **sim_depth.metrics(data), **sim_qb.job_metrics(data, 1, established),
             **sim_metrics_games.games(data, weeks), **sim_metrics_games.experts(data, weeks),
             **sim_metrics_games.tails(data, weeks), **sim_metrics_shape.shape(data),
-            **sim_metrics_shape.standings(data)}
+            **sim_metrics_shape.standings(data), **sim_metrics_join.churn(data, weeks),
+            **sim_metrics_join.absences(data, weeks)}
 
 
 def _full(session, season: int, seeds: list[int], offseason: dict) -> tuple[dict, dict]:
