@@ -163,11 +163,23 @@ class RulesBody(BaseModel):
                             le=max(replay_scoring.TURNOVERS), multiple_of=1)
 
 
+BLANK_LETTERS = frozenset("ᅟᅠㅤﾠ⠀")   # letters that display as nothing (Hangul fillers, Braille blank)
+ZWJ = "‍"                                                       # joins emoji: kept between two of them
+
+
+def _invisible(ch: str) -> bool:
+    return ch in BLANK_LETTERS or unicodedata.category(ch)[0] == "C" or unicodedata.category(ch) in ("Zl", "Zp")
+
+
 def clean_name(name: str | None) -> str | None:
-    """A league name without control, format (bidi overrides, zero-width) or other invisible characters."""
+    """A league name without control, format (bidi overrides, zero-width), line or paragraph separators or blank
+    letters, keeping a zero-width joiner between two emoji. Blank afterwards: the default name is used."""
     if name is None:
         return None
-    return "".join(ch for ch in name if not unicodedata.category(ch).startswith("C")).strip()
+    kept = [ch for ch in name if ch == ZWJ or not _invisible(ch)]
+    joined = [ch for n, ch in enumerate(kept) if ch != ZWJ or (
+        0 < n < len(kept) - 1 and ord(kept[n - 1]) > 0x2000 and ord(kept[n + 1]) > 0x2000)]
+    return "".join(joined).strip()
 
 
 class CreateBody(BaseModel):

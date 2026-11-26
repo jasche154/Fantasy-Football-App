@@ -886,3 +886,30 @@ def test_inf_sent_to_a_choice_field_lists_the_choices_not_a_number_rule(client):
 
     assert response.status_code == 422
     assert all(error["msg"] != "Input should be a finite number" for error in response.json()["detail"])
+
+
+@pytest.mark.parametrize("raw", ['{"season": ' + "[" * 600 + "]" * 600 + "}",
+                                 '{"season": "' + chr(92) + 'ud800"}',          # JSON's escaped lone surrogate
+                                 '{"season": "' + "x" * 200_000 + '"}'])
+def test_a_deep_odd_or_huge_rejected_input_is_a_small_422(client, raw):
+    """Security review: 600 levels deep raised RecursionError (500), a lone surrogate could not be encoded (500),
+    and a huge string came back whole."""
+    response = client.post(API + "/games", content=raw, headers={"content-type": "application/json"})
+
+    assert response.status_code == 422 and len(response.content) < 5_000
+
+
+def test_a_league_name_loses_separators_and_blank_letters_but_keeps_joined_emoji():
+    from api.replay_routes import clean_name
+    family = "\U0001F468‍\U0001F469‍\U0001F467"
+
+    assert clean_name("A B C") == "ABC"
+    assert clean_name("ㅤ⠀ ㅤ") == ""                  # blank: the create route falls back to the default
+    assert clean_name(f"Team {family}") == f"Team {family}"
+    assert clean_name("a‍b") == "ab"
+
+
+def test_a_league_name_that_is_blank_after_cleaning_gets_the_default(client):
+    created = post(client, "/games", {"season": SEASON, "seed": 3, "name": "ㅤ⠀"})
+
+    assert created["game"]["name"] == f"{SEASON} Replay"
