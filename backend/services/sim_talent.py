@@ -70,7 +70,7 @@ MAX_CATCH = 0.95
 DEFAULTS = {"role_sd": 0.30, "eff_sd": 0.12, "quality_sd": 0.08, "evidence": 6.0, "floor": 0.35,
             "team_share": 0.4, "volume_sd": 0.05, "defense_sd": 0.05,
             "breakout_rate": 0.25, "breakout_gain": [1.6, 2.6], "bust_rate": 0.15, "bust_cut": [0.4, 0.7],
-            "season_spread": 1.0, "season_roles": 0.0}
+            "season_spread": 1.0, "season_roles": 0.0, "volume_eff_rho": 0.0}
 
 
 def settings() -> dict:
@@ -129,9 +129,12 @@ def _season_role(player: Player, z: float, knobs: dict) -> Player:
     return replace(player, targets=player.targets * x, carries=player.carries * x)
 
 
-def _team(team: Team, z: np.ndarray, knobs: dict) -> Team:
-    """A team's true volume and defense: z = (volume, pass defense, rush defense, takeaways) draws."""
-    volume, defense = _lognormal(knobs["volume_sd"], z[0]), knobs["defense_sd"]
+def _team(team: Team, z: np.ndarray, knobs: dict, eff_z: float = 0.0) -> Team:
+    """A team's true volume and defense: z = (volume, pass defense, rush defense, takeaways) draws; `eff_z`: its
+    offense's shared efficiency draw, which the volume follows at the tuned `volume_eff_rho` (real teams that
+    pass well do not also pass more: season targets a game against yards per target, r = -0.28 in 2021-2025)."""
+    rho = knobs["volume_eff_rho"]
+    volume, defense = _lognormal(knobs["volume_sd"], rho * eff_z + math.sqrt(1 - rho ** 2) * z[0]), knobs["defense_sd"]
     return replace(team, targets=team.targets * volume, carries=team.carries * volume,
                    pass_def=team.pass_def * _lognormal(defense, z[1]), rush_def=team.rush_def * _lognormal(defense, z[2]),
                    takeaways=team.takeaways * _lognormal(defense, z[3]))
@@ -217,7 +220,7 @@ def truth(belief: World, seed: int, from_week: int, last_week: int, rookies: Col
     names = sorted(belief.teams)
     team_draws = replay_state.rng(seed, "sim", "teams").standard_normal((len(names), 5))
     team_z = {team: team_draws[i] for i, team in enumerate(names)}
-    teams = {team: _team(belief.teams[team], team_z[team][1:], knobs) for team in names}
+    teams = {team: _team(belief.teams[team], team_z[team][1:], knobs, float(team_z[team][0])) for team in names}
     ids = sorted(belief.players)
     draws = replay_state.rng(seed, "sim", "talent").standard_normal((len(ids), 3))
     players = {pid: _level(belief.players[pid], draws[i], float(team_z.get(belief.players[pid].team, [0.0])[0]), knobs)

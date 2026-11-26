@@ -41,16 +41,29 @@ def passing(data: SeasonData) -> dict[str, float]:
     team-game's yards (sd), from the QB lines."""
     leader: dict[int, float] = defaultdict(float)
     games: dict[tuple[str, int], float] = defaultdict(float)
+    targets: dict[str, float] = defaultdict(float)
+    played: dict[str, set] = defaultdict(set)
     for (pid, week), line in data.box.items():
-        if line.pass_yds and data.players.get(pid) and data.players[pid].position == "QB":
+        player = data.players.get(pid)
+        if player is None:
+            continue
+        team = data.team_at(pid, week + 1)
+        if line.pass_yds and player.position == "QB":
             leader[pid] += line.pass_yds
-            games[(data.team_at(pid, week + 1), week)] += line.pass_yds
+            games[(team, week)] += line.pass_yds
+        elif player.position != "QB":
+            targets[team] += line.targets
+            played[team].add(week)
     teams: dict[str, float] = defaultdict(float)
     for (team, _), yards in games.items():
         teams[team] += yards
     if not teams:
         return {}
-    return {"pass yds #1": max(leader.values()), "team pass yds sd": float(np.std(list(teams.values()))),
+    both = [t for t in teams if targets.get(t, 0) > 0]
+    volume = np.array([targets[t] / len(played[t]) for t in both])
+    per_target = np.array([teams[t] / targets[t] for t in both])
+    return {"pass yds #1": max(leader.values()),
+            "team volume vs yds/target r": float(np.corrcoef(volume, per_target)[0, 1]) if len(both) > 2 else float("nan"), "team pass yds sd": float(np.std(list(teams.values()))),
             "team pass yds max": max(teams.values()), "team-game pass yds sd": float(np.std(list(games.values()))),
             "team-game pass yds mean": float(np.mean(list(games.values())))}
 

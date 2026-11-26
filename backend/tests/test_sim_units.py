@@ -302,3 +302,14 @@ def test_passing_rows_read_the_qb_lines():
     data = SimpleNamespace(box=box, players=players, team_at=lambda pid, w: "AAA" if pid != 2 else "BBB")
     out = sim_metrics_shape.passing(data)
     assert out["pass yds #1"] == 500 and out["team pass yds max"] == 500 and out["team-game pass yds mean"] == 200
+
+
+def test_a_teams_volume_leans_against_its_efficiency_draw():
+    """The passing lead: real teams that pass well do not also pass more (r = -0.28); the truth's volume draw
+    follows the offense's shared efficiency draw at volume_eff_rho."""
+    team = sim_world.Team("AAA", 32.0, 26.0, 0.0, 0.0)
+    knobs = {**sim_talent.settings(), "volume_eff_rho": -0.5, "volume_sd": 0.1}
+    z = np.zeros(4)
+    assert sim_talent._team(team, z, knobs, eff_z=2.0).targets < sim_talent._team(team, z, knobs, eff_z=-2.0).targets
+    assert sim_talent._team(team, z, {**knobs, "volume_eff_rho": 0.0}, eff_z=2.0).targets == pytest.approx(
+        32.0 * np.exp(-0.1 ** 2 / 2))
