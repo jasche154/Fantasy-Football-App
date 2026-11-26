@@ -88,7 +88,19 @@ def test_scores_are_the_sum_of_each_teams_starters_real_points():
         for team_id, lineup in result.starters.items():
             total = sum(data.points(pid, result.week) for ids in lineup.values() for pid in ids)
             assert result.scores[team_id] == pytest.approx(total, abs=0.005)
-            assert {slot: len(ids) for slot, ids in lineup.items()} == dict(_settings().starters)
+            sitting = {slot: n - len(lineup[slot]) for slot, n in _settings().starters.items() if len(lineup[slot]) < n}
+            assert set(sitting) <= {"K", "DST"} and all(n == 1 for n in sitting.values())   # only a lone K/DST on bye
+
+
+def test_a_lone_kicker_or_defense_on_a_bye_sits_and_his_slot_stays_empty():
+    """Oracle: the auto-lineup started a defense on its bye."""
+    data, state = fakes.fake_season(), _played(12, FINAL)
+    bye = next((t, w) for t in state.teams for w in range(1, 13) for pid in t.roster
+               if data.players[pid].position == "DST" and data.on_bye(pid, w))
+    team, week = bye
+    lineup = next(r.starters[team.id] for r in state.results if r.week == week)
+
+    assert lineup["DST"] == () or all(not data.on_bye(pid, week) for pid in lineup["DST"])
 
 
 def test_play_week_is_deterministic_and_leaves_its_input_alone():

@@ -158,6 +158,8 @@ export interface ReplayStatLine {
 
 export interface ReplayWireRow extends ReplayPlayerRow {
   status: ReplayPlayerStatus;
+  /** On waivers in the open phase: dropped this week, claimable only after this week's games. */
+  after_games?: boolean;
   owner: ReplayTeamRef | null;
   /** Real points in weeks already played. */
   season_points: number;

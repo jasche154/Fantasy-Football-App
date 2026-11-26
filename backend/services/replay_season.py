@@ -104,7 +104,8 @@ def starters_for(state: State, settings: Settings, know: rv.Knowledge, team_id: 
     if team.is_user and state.lineup is not None:
         return _repaired(state.lineup, team.roster, settings, know)
     best = rv.best_lineup(know, team.roster, settings)
-    return {slot: tuple(best.get(slot, ())) for slot in _slots(settings)}
+    return {slot: tuple(pid for pid in best.get(slot, ()) if slot not in ("K", "DST") or know.by_id[pid].projection > 0)
+            for slot in _slots(settings)}      # a lone K or DST on a bye sits: the slot stays empty, and the screen says so
 
 
 # ---------------- matchups ----------------

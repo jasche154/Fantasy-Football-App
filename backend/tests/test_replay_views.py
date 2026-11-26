@@ -23,7 +23,7 @@ SEED = 7
 USER = SETTINGS.draft_slot
 PLAYER_ROW = {"player", "opponent", "bye", "out", "projection", "points", "ros_ppg", "value", "rank", "pos_rank",
               "adp", "pre_rank", "expert_rank", "news", "buzz", "games", "ppg", "trade_locked", "defense"}
-WIRE_ROW = PLAYER_ROW | {"status", "owner", "season_points", "last_points", "usage", "line"}
+WIRE_ROW = PLAYER_ROW | {"status", "after_games", "owner", "season_points", "last_points", "usage", "line"}
 TEAM_REF = {"team_id", "name", "is_user", "tendency", "mood", "needs", "deep"}
 SIDE = TEAM_REF | {"projected", "points", "record"}
 RECORD = {"wins", "losses", "ties", "rank", "points_for", "points_against", "place"}
