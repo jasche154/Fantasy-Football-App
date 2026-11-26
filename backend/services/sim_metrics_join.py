@@ -7,7 +7,7 @@ a real season measured the same way shows how much a normal week moves.
   change.
 - churn(data, weeks): the week-to-week change of a healthy top player's projection (points, absolute; median and
   90th percentile), the expert-rank churn's 90th percentile beside sim_metrics_games' mean.
-- absences(data, weeks): no-shows a week (a player projected PLAYING_PROJECTION+ whose team played, no box line
+- absences(data, weeks): no-shows a week (a QB, RB, WR or TE projected PLAYING_PROJECTION+ whose team played, no box line
   and no tag at all), zero projections a week (a player projected PLAYING_PROJECTION+ the week before, no tag,
   projected ZERO_PROJECTION or less, and he played), and the share of team scores of 6 or fewer.
 """
@@ -78,7 +78,8 @@ def absences(data: SeasonData, weeks: Iterable[int]) -> dict[str, float]:
     played = {(team, w) for (team, w) in data.scores if w in weeks}
     shows = 0
     for (pid, week), projection in data.projected.items():
-        if week not in weeks or projection < PLAYING_PROJECTION or (pid, week) in data.box or (pid, week) in data.injuries:
+        if (week not in weeks or projection < PLAYING_PROJECTION or (pid, week) in data.box or (pid, week) in data.injuries
+                or data.players[pid].position not in TOP):            # K and D/ST have no box lines
             continue
         team = data.team_at(pid, week + 1)
         shows += (team, week) in played

@@ -244,8 +244,8 @@ def test_implied_opinions_carry_the_last_real_ranks_into_the_first_simulated_wee
 
 def test_join_and_churn_rows_read_projections_ranks_and_tags():
     from services import sim_metrics_join
-    players = {i: SimpleNamespace(position="WR") for i in range(1, 4)}
-    projected = {(1, 4): 10.0, (1, 5): 12.0, (2, 4): 8.0, (2, 5): 9.0, (3, 4): 9.0, (3, 5): 0.0}
+    players = {i: SimpleNamespace(position="WR") for i in range(1, 4)} | {9: SimpleNamespace(position="K")}
+    projected = {(1, 4): 10.0, (1, 5): 12.0, (2, 4): 8.0, (2, 5): 9.0, (3, 4): 9.0, (3, 5): 0.0, (9, 5): 8.5}
     ranks = {(1, 4): 1, (2, 4): 2, (3, 4): 3, (1, 5): 2, (2, 5): 1, (3, 5): 3}
     data = SimpleNamespace(players=players, projected=projected, expert_ranks=ranks, injuries={(3, 5): fakes.Injury("O")},
                            box={(1, 5): None}, scores={("AAA", 5): 3, ("BBB", 5): 24}, team_at=lambda pid, w: "AAA")
