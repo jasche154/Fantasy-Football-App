@@ -1003,3 +1003,39 @@ def test_a_value_decline_names_its_own_cuts_and_the_players_it_is_high_on(monkey
     assert f"They would have to cut {know.by_id[own].name} to make room, worth 60 to them." in sentence
     assert f"They are high on {know.by_id[theirs].name}: they count him" in sentence
     assert "get 47 back" in sentence and "-" not in sentence                 # never a negative "get back"
+
+
+def _adds_up(sentence: str) -> tuple[int, int]:
+    """(gives + lineup + cuts + share on top - credit - gets, the shortfall the sentence says it leaves by its count)."""
+    import re
+    gives = int(re.search(r"would give (\d+)", sentence).group(1))
+    gets = int(re.search(r"and get (\d+) back", sentence).group(1))
+    on_top = sum(int(n) for n in re.findall(r"\((\d+)\)", sentence))
+    credit = sum(int(n) for n in re.findall(r"so (\d+) comes off", sentence))
+    cuts = sum(int(n) for n in re.findall(r"worth (\d+) to them", sentence))
+    left = re.search(r"leaves them (\d+) short", sentence) or re.search(r"need about (\d+) more", sentence)
+    return gives + on_top + cuts - credit - gets, int(left.group(1))
+
+
+def test_an_expired_own_offer_still_adds_up_with_its_edge_as_a_credit():
+    """Reviewer: below a bar of 1 the share on top was negative, never printed, and the parts overshot N."""
+    from services import replay_trade_reasons as reasons
+    know, side, theirs, mine = _stub_side("none")
+    own = replace(side, tally=tv.Tally(400.0, 300.0, 0.0, 0.0, 0.0, -60.0, 0.0, 0.0, -40.0))   # gives 400, gets 300
+
+    sentence = reasons._value_reason(own, rs.user_team(league()[0]), know, 0.9)
+
+    total, left = _adds_up(sentence)
+    assert "comes off what they need" in sentence and abs(total - left) <= 2 and left == 60
+
+
+def test_a_market_guard_shortfall_names_both_numbers():
+    from services import replay_trade_reasons as reasons
+    know, side, theirs, mine = _stub_side("none")
+    guarded = replace(side, market_ok=False, tally=tv.Tally(100.0, 98.0, 0.0, 0.0, 0.0, -5.0, 0.0, 0.0, 3.0))
+
+    sentence = reasons._value_reason(guarded, rs.user_team(league()[0]), know, 1.03)
+
+    total, left = _adds_up(sentence)
+    assert abs(total - left) <= 2 and left == 5
+    assert "won't take back less than 80%" in sentence and "They need about" in sentence

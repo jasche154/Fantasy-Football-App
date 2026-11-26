@@ -61,6 +61,7 @@ class Tally:
     score: float               # accept at >= 0
     need: float = 0.0          # its need bonus, after the cap
     cut: float = 0.0           # its price of its own players it must cut (already taken off `received`)
+    extra: float = 0.0         # what it wants on top of `out` (its multiple and margin; below 0 for its own offer)
 
 
 def fresh(know: Knowledge, picked: Iterable[int]) -> frozenset[int]:
@@ -133,9 +134,10 @@ def tally(know: Knowledge, persona: str | Mind, sends: Sequence[int], kept: Sequ
     sent_worth = {pid: private(pid, True, attach) for pid in sends}
     need = min(replay_styles.need_bonus(know, mind, sends, kept_worth, sent_worth), room)
     margin = SHARK_MARGIN * out if mind.persona == "shark" and not offered else 0.0
-    score = received + max(0.0, bonus) + spot + weight * lineup + need - out * multiple * OUT_MARGIN - margin
+    extra = out * multiple * OUT_MARGIN + margin - out
+    score = received + max(0.0, bonus) + spot + weight * lineup + need - out - extra
     return Tally(round(sent, 2), round(received, 2), round(bonus, 2), spot, round(lineup, 2), round(score, 2),
-                 round(need, 2), round(own_cut, 2))
+                 round(need, 2), round(own_cut, 2), round(extra, 2))
 
 
 def market_ok(know: Knowledge, sends: Sequence[int], kept: Sequence[int], drops: Sequence[int],

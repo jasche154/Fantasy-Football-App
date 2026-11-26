@@ -81,6 +81,8 @@ def shortfall(know: Knowledge, side: Side) -> float:
     counted = side.tally
     if counted is None:
         return 0.0
+    if side.market_ok:
+        return max(-counted.score, 0.0)
     sent = [tv.chart(know, pid, side.just_added) for pid in side.sends]
     got = tv.depth_counted([tv.chart(know, pid, side.just_added) for pid in side.kept], sent)
     return max(-counted.score, tv.MARKET_GUARD * sum(sent) - got, 0.0)
@@ -113,7 +115,7 @@ def _value_reason(side: Side, other: Team, know: Knowledge, bar: float) -> str |
     lineup = (-tv.LINEUP_LOSS_WEIGHT * counted.lineup if counted.lineup < 0 else 0.0)
     gets = (counted.received + counted.cut + max(0.0, counted.premium) + counted.spot + counted.need
             + (tv.LINEUP_WEIGHT * counted.lineup if counted.lineup > 0 else 0.0))
-    extra = -counted.score - gives - lineup - counted.cut + gets          # the share it wants on top (and a shark's)
+    extra = counted.extra                                                # the share it wants on top (signed)
     text = f"{name} would give {gives:.0f} of value and get {gets:.0f} back."
     if lineup_led(side):
         text = f"{LINEUP_REASON} (worth {lineup:.0f} of value to them). {text}"
@@ -132,11 +134,14 @@ def _value_reason(side: Side, other: Team, know: Knowledge, bar: float) -> str |
     if held and side.rescore is not None and side.market_ok and side.rescore(floor=False).score >= 0:   # it decided
         text += (f" They won't let {names(know, held)} go for less than {tv.OUT_SELL_SHARE:.0%} of "
                  f"healthy value while out.")
-    if bar > 1 and extra >= 0.5:
-        text += f" They want {bar - 1:.0%} more than they give ({extra:.0f})."
-    if not side.market_ok:
-        text += guard
-    return f"{text} They need about {max(1, round(shortfall(know, side)))} more."
+    if extra >= 0.5:
+        text += f" They want {max(bar - 1, 0):.0%} more than they give ({extra:.0f})."
+    elif extra <= -0.5:                                                  # its own offer: it gives the user an edge
+        text += f" As their own offer it gives you {1 - bar:.0%} more, so {-extra:.0f} comes off what they need."
+    needed, short = max(1, round(shortfall(know, side))), max(0.0, -counted.score)
+    if not side.market_ok and needed > round(short):
+        return f"{text} That leaves them {short:.0f} short by their count.{guard} They need about {needed} more."
+    return f"{text}{guard if not side.market_ok else ''} They need about {needed} more."
 
 
 def rivals(know: Knowledge, side: Side) -> list[int]:
