@@ -7,11 +7,6 @@ rate fits; each season S is built like a future season from S-1, sim_eval.next_b
   real stars outscored it (points a game on our preseason value: slope 1.1-1.4). s is chosen per position from
   SCALE_GRID to minimize the squared error of the real points a game (GAMES_MIN games or more; veterans; QBs
   who were the believed starter) on the preseason value (sim_market.values, half PPR).
-- `bench`: a logistic in a week-1 starting QB's preseason rank among the week-1 starters (by
-  sim_market.position_ranks; sim_talent.public_ranks ranks the believed starters the same way) of the chance
-  he loses the job healthy: a later week (before the last CHANGE_LAST_WEEKS) where another QB threw his
-  team's most passing yards while he carried no injury tag that week or the two after, and he started
-  fewer than half of the team's games from then on (sim_talent.bench_chance).
 - `rookie_growth`: rookies (drafted that year, or first seen in the database that season) against veterans with
   the same first half: their opportunities a game after SPLIT_WEEK over before, as a chance of a growth step
   and its size (growth_fit; sim_talent dates the step around SPLIT_WEEK). Real rookies 2019-2025 gain about 6%
@@ -24,17 +19,15 @@ from collections.abc import Collection, Iterable, Mapping
 
 import numpy as np
 
-from services import replay_pool, sim_metrics, sim_world
-from services.sim_talent import CHANGE_LAST_WEEKS
+from services import replay_pool, sim_world
+from services.sim_eval import SCORING        # the real seasons are read as sim_eval reads them
 
 log = logging.getLogger(__name__)
 
-SCORING = "half"
 SKILL = ("QB", "RB", "WR", "TE")
 SCALE_GRID = (0.0, 0.25, 0.5, 0.75, 1.0)
 GAMES_MIN = 8
 STARTER = 0.5                    # a QB with this starts weight is his team's believed starter
-LOGIT_STEPS = 50
 SPLIT_WEEK = 9                   # rookie growth: weeks 1-9 against 10 on
 HALF_GAMES = 4
 GROWTH_MIN_ROLE = 0.5            # opportunities a game in the first half (a rookie who barely played counts too)
@@ -78,50 +71,6 @@ def best_scale(by_scale: Mapping[float, Mapping[int, Mapping[str, tuple[float, i
     seasons = list(seasons)
     return {position: min(by_scale, key=lambda s: (sum(by_scale[s][y].get(position, (0.0, 0))[0] for y in seasons), s))
             for position in SKILL}
-
-
-def lost_jobs(session, reals: Iterable, offseason: Mapping) -> list[tuple[int, int, bool]]:
-    """[(season, preseason rank, lost the job healthy)] of every real week-1 starting QB (module docstring)."""
-    from services import sim_market
-
-    rows = []
-    for real in reals:
-        belief, _ = _belief(session, real, offseason)
-        ranks = sim_market.position_ranks(belief)
-        starter: dict[tuple[str | None, int], int] = {}
-        for pid, weeks in sim_metrics.qb_starts(real).items():
-            starter.update({(real.team_at(pid, week), week): pid for week in weeks})
-        week1 = sorted(((team, pid) for (team, week), pid in starter.items() if week == 1), key=lambda tp: str(tp[0]))
-        order = sorted((pid for _, pid in week1), key=lambda pid: (ranks.get(pid, len(ranks)), pid))
-        among = {pid: rank for rank, pid in enumerate(order, start=1)}      # ranked among the starters
-        for team, pid in week1:
-            weeks = sorted(w for t, w in starter if t == team)
-            rows.append((real.season, among[pid], _lost(real, starter, team, pid, weeks)))
-    return rows
-
-
-def _lost(real, starter: Mapping, team: str, pid: int, weeks: list[int]) -> bool:
-    for week in weeks[1:]:
-        if starter[(team, week)] == pid:
-            continue
-        if week > real.last_week - CHANGE_LAST_WEEKS or any((pid, w) in real.injuries for w in range(week, week + 3)):
-            return False
-        rest = [w for w in weeks if w >= week]
-        return sum(1 for w in rest if starter[(team, w)] == pid) < len(rest) / 2
-    return False
-
-
-def logistic(rows: Iterable[tuple[int, int, bool]]) -> dict:
-    """{"logit": [a, b], "n", "lost"}: P(lost) = 1 / (1 + exp(-(a + b x rank))), maximum likelihood (Newton)."""
-    rows = list(rows)
-    x = np.array([[1.0, rank] for _, rank, _ in rows])
-    y = np.array([float(lost) for _, _, lost in rows])
-    beta = np.zeros(2)
-    for _ in range(LOGIT_STEPS):
-        p = 1.0 / (1.0 + np.exp(-x @ beta))
-        hessian = x.T @ (x * (p * (1 - p))[:, None]) + 1e-9 * np.eye(2)
-        beta = beta + np.linalg.solve(hessian, x.T @ (y - p))
-    return {"logit": [round(float(beta[0]), 4), round(float(beta[1]), 4)], "n": len(rows), "lost": int(y.sum())}
 
 
 def halves(data) -> dict[int, tuple[tuple[int, float, float], tuple[int, float, float]]]:

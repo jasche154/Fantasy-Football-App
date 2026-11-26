@@ -1181,6 +1181,44 @@
    205.0
   ]
  },
+ "qb_adp": [
+  22.2,
+  29.9,
+  34.8,
+  41.9,
+  48.4,
+  55.9,
+  58.8,
+  67.4,
+  77.0,
+  82.3,
+  88.5,
+  96.4,
+  103.0,
+  107.6,
+  113.8,
+  120.1,
+  125.2,
+  130.0,
+  135.8,
+  139.7,
+  144.9,
+  151.9,
+  158.1,
+  161.8,
+  165.6,
+  171.2,
+  175.9,
+  177.7,
+  184.5,
+  188.5,
+  193.1,
+  197.5,
+  199.3,
+  204.5,
+  209.1,
+  230.7
+ ],
  "tuned": {
   "game": {
    "eff_sd": 0.05,
@@ -1189,7 +1227,15 @@
    "carries_sd": 0.1,
    "share_sd_targets": 0.05,
    "share_sd_carries": 0.15,
-   "share_sd_qb_carries": 0.45
+   "share_sd_qb_carries": 0.45,
+   "td_drives": 5,
+   "ot_field_goal": 0.5,
+   "ot_td_yards": {
+    "rec": 12,
+    "rush": 4
+   },
+   "fg_power": 1.0,
+   "ypc_volume": 0.3
   },
   "rates": {
    "rec_cv": 0.68
@@ -1198,7 +1244,13 @@
    "role_sd": 0.2,
    "evidence": 2,
    "floor": 0.2,
-   "season_spread": 1.0
+   "season_spread": 0.5,
+   "strength_sd": 2,
+   "edge_scale": 1.12,
+   "depth_targets": 0.78,
+   "depth_carries": 0.8,
+   "season_roles": 0.25,
+   "volume_eff_rho": -0.25
   },
   "market": {
    "two_qb_replacement": 30,
@@ -1208,6 +1260,23 @@
     "RB": 32,
     "WR": 40,
     "TE": 8
+   },
+   "opinion_spread": {
+    "QB": 0.35,
+    "RB": 1.0,
+    "WR": 1.0,
+    "TE": 1.0,
+    "K": 1.0,
+    "DST": 1.0
+   },
+   "opinion_keep": 0.9,
+   "worth_step": 0.4,
+   "fill_in_trust": 0.15,
+   "projection_scale": {
+    "QB": 1.05,
+    "RB": 1.09,
+    "WR": 1.09,
+    "TE": 1.06
    }
   }
  }

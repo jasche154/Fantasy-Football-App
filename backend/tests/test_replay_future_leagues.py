@@ -67,7 +67,7 @@ def test_the_future_season_is_built_from_the_season_in_progress(app):
     _, engine = app
     with Session(engine) as session:
         assert sim_setup.source(session) == (LIVE, THROUGH)
-        base, belief, _ = sim_setup._future_base(session, FUTURE, _settings())
+        base, belief, *_ = sim_setup._future_base(session, FUTURE, _settings())
     _check_future(base, belief, 18)
     assert len(base.schedule.games) == 272                       # generated: no 2027 schedule is stored
     assert {g.week for g in base.schedule.games} == set(range(1, 19))
@@ -83,7 +83,7 @@ def test_a_stored_schedule_is_used_and_a_finished_season_still_builds(app):
         try:
             assert sim_setup.source(session) == (LIVE, None)
             assert sim_setup.future_problem(session, FUTURE) is None
-            base, belief, _ = sim_setup._future_base(session, FUTURE, _settings())
+            base, belief, *_ = sim_setup._future_base(session, FUTURE, _settings())
         finally:
             session.rollback()
             replay_pool.clear_cache()
@@ -196,3 +196,23 @@ def test_a_future_leagues_screens_never_show_an_unplayed_week(app):
     client, engine = app
     game = post(client, "/games", {"season": FUTURE, "seed": 32, "draft_slot": 5})["game"]
     screens_never_leak(client, engine, f"/games/{game['id']}")
+
+
+def test_only_a_missing_draft_cache_takes_an_unseen_qb_for_the_seeded_rookie(app, monkeypatch):
+    """Review of #66, round 5: with the real draft class cached, a real backup with no stats stays in his room."""
+    from types import MappingProxyType
+
+    from services import sim_depth, sim_qb_jobs
+
+    _, engine = app
+    calls = []
+    real = sim_depth.with_real_qbs
+    monkeypatch.setattr(sim_depth, "with_real_qbs", lambda *args, **kw: calls.append(kw) or real(*args, **kw))
+    for picks in ({}, {999001: 5}):
+        monkeypatch.setattr(sim_setup, "qb_inputs", lambda session, season, warn=True, picks=picks:
+                            sim_qb_jobs.QbInputs(picks=MappingProxyType(picks)))
+        with Session(engine) as session:
+            sim_setup._future_base(session, FUTURE, _settings())
+    without, cached = calls
+    assert without["seen"] and without["rookie_teams"] and not without["rookies"]
+    assert cached["seen"] is None and cached["rookies"] == {999001}

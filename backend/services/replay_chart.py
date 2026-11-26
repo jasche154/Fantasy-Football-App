@@ -47,7 +47,8 @@ from collections.abc import Mapping, Sequence
 from functools import lru_cache
 from types import MappingProxyType
 
-from services import replay_chart_injury, replay_news, replay_pool, replay_role, replay_shocks, replay_superflex
+from services import (replay_chart_injury, replay_fillin, replay_news, replay_pool, replay_role, replay_shocks,
+                      replay_superflex)
 from services.replay_pool import SeasonData
 
 TAU = 40.0                     # pick_value decay: 1 -> 1000, 12 -> 760, 24 -> 563, 50 -> 294, 100 -> 84
@@ -94,6 +95,8 @@ def clear_cache() -> None:
     _by_week.cache_clear()
     replay_news.clear_cache()
     replay_shocks.clear_cache()
+    replay_fillin.history.cache_clear()
+    replay_fillin.fill_ins.cache_clear()
 
 
 replay_pool.EVICT_HOOKS.append(clear_cache)
@@ -345,7 +348,34 @@ def with_news(data: SeasonData, rows: Mapping[int, dict], fields: Mapping[int, d
             expert, model_part = expert * factor, model_part * factor
         chart, extra = _injured(data, rows[pid], news, week, end_week, expert, model_part)
         out[pid] = {**fields[pid], **extra, "chart": round(chart, 1), "news": news}
-    return {**out, **_shocked(data, rows, fields, out, week)}
+    shocked = {**out, **_shocked(data, rows, fields, out, week)}
+    return {**shocked, **_filling(data, rows, {**fields, **shocked}, week, end_week, seed)}
+
+
+def _filling(data: SeasonData, rows: Mapping[int, dict], fields: Mapping[int, dict], week: int,
+             end_week: int, seed: int) -> dict[int, dict]:
+    """{id: fields} of the fill-in QBs (replay_fillin): share x the value of his rank without the form bonus +
+    (1 - share) x a backup's (the QB ranked just past one per team), never above his own chart. `share` reads
+    the regular starter's news, so it is the same report his injured chart is priced on."""
+    found = replay_fillin.fill_ins(data, week)
+    if not found:
+        return {}
+    curve = slot_curve(data)
+    backup = value_at(curve, "QB", len({team for team, _ in data.schedule.opponents}) + 1)
+    out: dict[int, dict] = {}
+    for pid, fill in found.items():
+        if pid not in fields or pid not in rows:
+            continue
+        now = fields[pid]
+        news = replay_fillin.regular_news(data, fill, week, seed)       # the report his injured chart reads
+        played = replay_fillin.share(fill, news, _game_weeks(data, rows[pid]["team"], week, end_week))
+        if played is None:                              # past probation, his regular not expected back: the team's QB
+            continue
+        rank_value = now["healthy_chart"] - now.get("form_chart", 0.0)
+        chart = min(now["chart"], played * rank_value + (1 - played) * min(backup, rank_value))
+        out[pid] = {**now, "chart": round(chart, 1), "healthy_chart": round(chart, 1), "form_chart": 0.0,
+                    "fill_in": round(played, 3)}
+    return out
 
 
 def _vague_keep(data: SeasonData, row: dict, news: "replay_news.Report", tag: str, week: int, end_week: int,

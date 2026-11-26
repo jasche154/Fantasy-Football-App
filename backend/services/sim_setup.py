@@ -21,6 +21,7 @@ import logging
 from datetime import datetime
 from dataclasses import replace
 from types import MappingProxyType
+from collections.abc import Mapping
 from typing import NamedTuple
 
 from sqlalchemy.orm import Session
@@ -31,6 +32,27 @@ from services.replay_state import Settings
 from services.valuation import NoDataError
 
 log = logging.getLogger(__name__)
+_NO_DRAFT_LOGGED: set[int] = set()        # seasons already logged as having no cached draft QBs
+_per_data_cache: dict[tuple[int, str], tuple[object, object]] = {}   # (id(data), name) -> (data, value): see _per_data
+PER_DATA_ENTRIES = 16
+
+
+def _per_data(data: SeasonData, name: str, compute):
+    """compute(), once per replay_pool season object (`data`, as load_season_data caches it: new data in the
+    database is a new object) and `name`: the parts of a league's season that every seed shares. Emptied by
+    replay_pool.clear_cache."""
+    hit = _per_data_cache.get((id(data), name))
+    if hit is not None and hit[0] is data:
+        return hit[1]
+    value = compute()
+    if len(_per_data_cache) >= PER_DATA_ENTRIES:
+        _per_data_cache.clear()
+    _per_data_cache[(id(data), name)] = (data, value)
+    return value
+
+
+replay_pool.CLEAR_HOOKS.append(_per_data_cache.clear)
+replay_pool.EVICT_HOOKS.append(_per_data_cache.clear)   # it keys on season objects too
 
 REPLAY, LIVE, FUTURE = "replay", "live", "future"
 MIN_WEEKS_LEFT = 3                  # regular-season weeks a league that starts now must still have
@@ -70,22 +92,76 @@ def build(session: Session, settings: Settings, seed: int) -> tuple[bytes, Seaso
     """The whole season a new simulated league plays (real weeks before settings.sim_from, its own simulated
     future after), to be frozen with it: (its save's bytes, the season as the save holds it; replay_blob.freeze).
     NoDataError when the season's data is not ready."""
-    from services import sim_next_year, sim_season      # the engine, imported only when a league is built
+    from services import sim_depth, sim_next_year, sim_season      # the engine, imported only when a league is built
 
     if settings.sim_from is None:
         raise ValueError(f"{settings.season} is not a simulated season.")
     if settings.sim_from == 1:
-        base, world, carried = _future_base(session, settings.season, settings, seed)
+        base, world, carried, qbs, teams = _future_base(session, settings.season, settings, seed)
         rookies = [pid for pid in world.players if pid >= sim_next_year.ROOKIE_ID_BASE]     # this draft class
-        data = sim_season.simulate(base, seed, 1, prior=world, carried=carried, rookies=rookies)
+        data = sim_season.simulate(base, seed, 1, prior=world, carried=carried, rookies=rookies, qbs=qbs,
+                                   team_prior=teams)
     else:
         base = replay_pool.load_season_data(session, settings.season, settings.scoring, settings.scoring_rules,
                                             settings.adp_format, through=settings.sim_from - 1)
-        rookies = [pid for pid, first in first_seasons(session).items() if first == settings.season]
+        first = _per_data(base, "first seasons", lambda: MappingProxyType(first_seasons(session)))
+        rookies = [pid for pid, season in first.items() if season == settings.season]
+        base = sim_depth.with_real_qbs(base, qb_rooms(session), settings.sim_from)
         data = sim_season.simulate(with_status_now(session, base, settings.sim_from), seed, settings.sim_from,
-                                   rookies=rookies)
+                                   rookies=rookies, qbs=qb_inputs(session, settings.season),
+                                   team_prior=team_prior(session, settings.season),
+                                   posted=posted_lines(base, settings.sim_from))
         data = _market_adp(data, settings) if settings.start_week > 1 else data
     return replay_blob.freeze(data)
+
+
+def qb_rooms(session: Session) -> dict[str, list[tuple[int, str]]]:
+    """{team: [(player id, name)]} of each NFL team's quarterbacks today, by depth: the depth_charts snapshot,
+    else (a team it lacks) Sleeper's depth order in player_status. sim_depth.with_real_qbs adds the ones a
+    simulated season's pool lacks, so a team's real backup is its backup."""
+    from sqlalchemy import select
+
+    from database.models import DepthChartEntry, Player, PlayerStatus
+
+    rooms: dict[str, list[tuple[int, str]]] = {}
+    for team, pid, name in session.execute(select(DepthChartEntry.team, Player.id, Player.full_name)
+                                           .join(Player, Player.id == DepthChartEntry.player_id)
+                                           .where(DepthChartEntry.position == "QB")
+                                           .order_by(DepthChartEntry.team, DepthChartEntry.depth, Player.id)):
+        rooms.setdefault(team, []).append((pid, name))
+    charted = set(rooms)
+    for team, pid, name in session.execute(select(PlayerStatus.team, Player.id, Player.full_name)
+                                           .join(Player, Player.id == PlayerStatus.player_id)
+                                           .where(PlayerStatus.depth_position == "QB", PlayerStatus.team.is_not(None))
+                                           .order_by(PlayerStatus.team, PlayerStatus.depth_order, Player.id)):
+        if team not in charted:
+            rooms.setdefault(team, []).append((pid, name))
+    return rooms
+
+
+def final_scores(session: Session, season: int) -> list[tuple[int, str, str, int, int]]:
+    """(week, home, away, home points, away points) of `season`'s finished games in the database."""
+    from services.schedule_strength import load_schedule
+
+    return [(g.week, g.home_team, g.away_team, g.home_score, g.away_score)
+            for g in load_schedule(session, season).games if g.is_final]
+
+
+def team_prior(session: Session, season: int) -> dict:
+    """{team: sim_lines.Rating}: the points ratings `season`'s games start from, last season's final ones
+    regressed (sim_lines.carry_over), from its real scores in the database (none: {})."""
+    from services import sim_lines
+
+    scores = final_scores(session, season - 1)
+    return sim_lines.carry_over(scores) if scores else {}
+
+
+def posted_lines(base: SeasonData, from_week: int) -> dict[tuple[str, int], tuple[float | None, float | None]]:
+    """{(home team, from_week): (spread, total)} of the real lines already posted for the first simulated week
+    (either may be None): its games use them as their prediction (sim_lines). Later weeks' posted lines are not
+    passed: they know nothing of the simulated weeks before them (a starter hurt in a simulated game)."""
+    return {(g.home_team, g.week): (g.spread_line, g.total_line) for g in base.schedule.games
+            if g.week == from_week and (g.spread_line is not None or g.total_line is not None)}
 
 
 def _market_adp(data: SeasonData, settings: Settings) -> SeasonData:
@@ -159,6 +235,43 @@ def _played_since(base: SeasonData, pid: int, week: int, fetched: datetime) -> b
 SLEEPER_TAGS = {"OUT": "O", "DOUBTFUL": "O", "DNR": "O", "NA": "O", "COV": "O", "IR": "IR", "IR-R": "IR",
                 "NFI": "IR", "PUP": "PUP", "SUS": "SUS"}
 LONG_TAGS = {"IR", "PUP", "SUS"}     # absences of weeks: still news when the status sync is a few days old
+
+
+def qb_inputs(session: Session, season: int, picks: list[dict] | None = None, warn: bool = True):
+    """sim_qb_jobs.QbInputs for `season`: the QBs whose real preseason QB ADP rank (the "ppr" list, 2018 on) was
+    sim_qb.PAST_RANK or better in one of the sim_qb.PAST_SEASONS seasons before, and this season's drafted QBs
+    with their picks (nflverse rows `picks`, else the cached download only: building a league never downloads;
+    without the cache the live season has no rookie takeovers, logged unless `warn` is False)."""
+    from sqlalchemy import select
+
+    from database.models import Player, ReplayAdp
+    from services import sim_draft_picks, sim_qb, sim_qb_jobs
+
+    past: set[int] = set()
+    for year in range(season - sim_qb.PAST_SEASONS, season):
+        listed = session.execute(select(ReplayAdp.player_id).join(Player, Player.id == ReplayAdp.player_id)
+                                 .where(ReplayAdp.season == year, ReplayAdp.format == "ppr", Player.position == "QB")
+                                 .order_by(ReplayAdp.adp, ReplayAdp.player_id).limit(sim_qb.PAST_RANK)).scalars()
+        past.update(listed)
+    cached = sim_draft_picks._cached_picks() if not picks else {}
+    history = picks or cached.get("rows", [])
+    cached_used = picks is None
+    if cached_used:
+        picks = history
+    if cached_used and warn:                        # warn=False: the caller replaces this season's picks (seeded draft)
+        if not any(r.get("season") == season for r in picks):
+            log.info("No cached nflverse draft for %s: its rookie QBs take no job from a starter", season)
+        elif season not in sim_draft_picks._settled(cached):        # a summer download: some gsis ids still empty
+            log.warning("The cached nflverse draft for %s was downloaded before it settled: rookie QBs without an id "
+                        "take no job from a starter (download again with --refresh)", season)
+    mine = {r["gsis_id"]: r["pick"] for r in picks if r.get("season") == season and r.get("position") == "QB"
+            and r.get("gsis_id")}
+    young = {r["gsis_id"]: r["season"] for r in history if r.get("position") == "QB" and r.get("gsis_id")
+             and r.get("pick", sim_qb.FIRST_ROUND + 1) <= sim_qb.FIRST_ROUND
+             and season - sim_qb.YOUNG_DRAFTS <= r.get("season", 0) <= season}
+    ids = dict(session.execute(select(Player.gsis_id, Player.id).where(Player.gsis_id.in_([*mine, *young]))).all())
+    return sim_qb_jobs.QbInputs(frozenset(past), MappingProxyType({ids[g]: pick for g, pick in mine.items() if g in ids}),
+                                MappingProxyType({ids[g]: year for g, year in young.items() if g in ids}))
 
 
 # ---------------- the future season ----------------
@@ -250,6 +363,8 @@ class Future(NamedTuple):
     base: SeasonData             # every player of the new belief, the schedule, preseason ADP, week-1 projections
     belief: object               # the prior World (sim_world.World)
     carried: dict                # {player: sim_injuries.Spell}: the truth's absences running into week 1
+    qbs: object = None           # sim_qb_jobs.QbInputs: the QB jobs' inputs (the seeded draft's rookie QB picks)
+    teams: Mapping = MappingProxyType({})   # {team: sim_lines.Rating}: the newest season's team ratings, carried over
 
 
 def injury_detail(session: Session) -> dict[int, tuple[str | None, str | None]]:
@@ -267,8 +382,8 @@ def _future_base(session: Session, season: int, settings: Settings, seed: int = 
     """The season after the newest one, from what is known today plus the league's `seed` (its draft:
     sim_rookie_draft; its carried injuries: sim_carryover), through sim_next_year. Raises NoDataError when it
     can't be built (future_problem says why)."""
-    from services import (sim_carryover, sim_market, sim_next_year, sim_offseason, sim_rookie_draft,
-                          sim_world)
+    from services import (sim_carryover, sim_depth, sim_lines, sim_market, sim_next_year, sim_offseason, sim_qb,
+                          sim_rookie_draft, sim_world)
 
     problem = future_problem(session, season)
     if problem:
@@ -276,33 +391,54 @@ def _future_base(session: Session, season: int, settings: Settings, seed: int = 
     newest, through = source(session)
     data = replay_pool.load_season_data(session, newest, settings.scoring, settings.scoring_rules,
                                         settings.adp_format, through=through)
-    world = sim_world.estimate(data, (through or data.last_week) + 1,
-                               _season_end(session, newest - 1, settings))
+    world = _per_data(data, "belief", lambda: sim_world.estimate(data, (through or data.last_week) + 1,
+                                                                 _season_end(session, newest - 1, settings)))
     rookies, moves = sim_offseason.load(season)
     matched, missing = sim_offseason.match(moves, data.players)
     if missing:
         log.warning("Offseason %s: no player matches %s", season, ", ".join(missing))
     # shortcut: experience counts seasons since a player's first database season (2018 on), so a veteran from
     # before 2018 looks younger than he is until the cap bucket; store birth dates or draft years to fix it.
-    experience = {pid: newest - first + 1 for pid, first in first_seasons(session).items() if first <= newest}
+    first = _per_data(data, "first seasons", lambda: MappingProxyType(first_seasons(session)))
+    experience = {pid: newest - season + 1 for pid, season in first.items() if season <= newest}
     moved = {matched[m.name]: m.team for m in moves if m.name in matched}
     # the pool's schedule carries no scores (results live in data.scores): the draft order needs them back
     played = tuple(replace(g, home_score=data.scores.get((g.home_team, g.week)),
                            away_score=data.scores.get((g.away_team, g.week))) for g in data.schedule.games)
     starts = sim_next_year.starts_by_team(data)
-    by_name = {r.name: r for r in sim_rookie_draft.run(rookies, played, world, moved, seed, starts)}
+    inputs = qb_inputs(session, season, warn=False)            # its picks are the seeded draft's, below
+    by_name = {r.name: r for r in sim_rookie_draft.run(rookies, played, world, moved, seed, starts, inputs.young)}
     drafted = {pid: by_name[r.name] for pid, r in sim_next_year.rookie_ids(season, rookies).items()}  # ids: file picks
-    belief, pool = sim_next_year.next_year(world, data.players, experience, drafted, moved, starts)
+    mine = {pid: r.pick for pid, r in drafted.items() if r.position == "QB"}       # the seeded draft's picks
+    qbs = replace(inputs, picks=MappingProxyType(mine), young=MappingProxyType(
+        {**inputs.young, **{pid: season for pid, pick in mine.items() if pick <= sim_qb.FIRST_ROUND}}))
+    record = _per_data(data, "record", lambda: sim_market.track_record(data))
+    belief, pool = sim_next_year.next_year(world, data.players, experience, drafted, moved, starts, qbs.past, record)
     schedule = _schedule(session, season, data)
     start = sim_carryover.next_week_one(data, schedule)
     carries = {pid: c for pid, c in sim_carryover.carried(data, start, injury_detail(session)).items()
                if pid in belief.players} if start else {}
     belief = sim_carryover.with_expected(belief, carries)
+    protected = sim_qb.established_qbs(sim_qb.preseason_ranks(belief, record), qbs.past) | set(qbs.young)
     base = sim_next_year.season_base(season, belief, pool, schedule, settings.scoring,
-                                     settings.scoring_rules, _defense_prior(data), settings.adp_format,
-                                     sim_market.track_record(data), sim_next_year.rookie_premium(drafted))
-    base = replace(base, notes=MappingProxyType({(pid, 0): sim_carryover.note(c) for pid, c in carries.items()}))
-    return Future(base, belief, sim_carryover.draw(carries, seed))
+                                     settings.scoring_rules, _per_data(data, "defense", lambda: _defense_prior(data)),
+                                     settings.adp_format, record,
+                                     sim_next_year.rookie_premium(drafted),
+                                     sim_next_year.rookie_qb_share(belief, qbs.picks, protected))
+    drawn = sim_carryover.draw(carries, seed)
+    base = replace(base, notes=MappingProxyType({**{(pid, 0): sim_carryover.note(c) for pid, c in carries.items()},
+                                                 **sim_carryover.cleared(carries, drawn)}))
+    if not inputs.picks and season not in _NO_DRAFT_LOGGED:
+        _NO_DRAFT_LOGGED.add(season)
+        log.info("No cached nflverse draft QBs for %s: a depth-chart QB with no stats on a team with a seeded rookie "
+                 "QB is taken for that rookie", season)
+    # with the real class cached, `rookies` already leaves the draftee out: a real backup with no stats stays
+    base = sim_depth.with_real_qbs(base, qb_rooms(session), 1, moved, rookies=set(inputs.picks),
+                                   seen=None if inputs.picks else set(data.players),
+                                   rookie_teams={r.team for r in drafted.values() if r.position == "QB"})
+    scores = [(g.week, g.home_team, g.away_team, g.home_score, g.away_score) for g in played if g.is_final]
+    return Future(base, belief, drawn, qbs,
+                  sim_lines.carry_over(scores) if scores else {})
 
 
 # ---------------- the seasons list ----------------

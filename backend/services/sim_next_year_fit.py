@@ -8,9 +8,8 @@ belief at the end of S-2 as its prior when stored, as sim_setup builds a future 
 - rookies (nflverse draft picks of year S, through nflreadpy, joined to the players table by gsis id): their
   role in S as a line in log(pick) per position (targets, carries, a kicker's starts, a QB's chance to start
   week 1), fitted by least squares on every rookie (a never-seen late pick counts as no role), so the mean
-  is right; a position with fewer than MIN_ROOKIES gets its mean. Also rookie QBs' passer quality and how
-  often a top-64 rookie QB who did not start week 1 started a game later (`qb_takeover`, the target for
-  sim_talent's rookie takeover);
+  is right; a position with fewer than MIN_ROOKIES gets its mean. Also rookie QBs' passer quality (a rookie
+  QB's takeover from a weak starter is fitted by sim_qb_fit);
 - veterans with GAMES_MIN games and a relevant role (VOLUME_MIN) this season and NEXT_GAMES_MIN games the next
   (selected on this season only: requiring a relevant role next season too would drop the players who fell
   off and flatten the slope): log volume next season (floored at VOLUME_FLOOR) on log volume this season
@@ -54,6 +53,7 @@ from services.sim_metrics import qb_starts
 from services.replay_pool import SeasonData
 from services.sim_next_year import PATH, RECEIVER_RATES, RECEIVERS, VOLUME_MIN, premium_at, volume
 from services.sim_offseason import Rookie
+from services.sim_eval import SCORING        # the real seasons are read as sim_eval reads them
 from services.sim_schedule import TEAMS
 from services.sim_draft_picks import draft_picks
 from services.sim_eval import season_end
@@ -61,14 +61,12 @@ from services.sim_setup import first_seasons
 
 log = logging.getLogger(__name__)
 
-SCORING = "half"
 POSITIONS = ("QB", "RB", "WR", "TE")
 EXPERIENCE_EDGES = (1, 2, 3, 4, 6, 9)           # experience buckets: 1, 2, 3, 4-5, 6-8, 9+ seasons
 GAMES_MIN = 6
 NEXT_GAMES_MIN = 3
 VOLUME_FLOOR = 0.5                              # opportunities per game: a vanished role counts as this
 MIN_ROOKIES = 30
-TAKEOVER_PICKS = 64
 DRAFT_HISTORY_FROM = 1995
 RAW = {"catch": ("rec", "targets", 20), "ypc": ("rec_yds", "rec", 15), "rec_td": ("rec_td", "rec", 15),
        "ypr": ("rush_yds", "carries", 30), "rush_td": ("rush_td", "carries", 30)}    # numerator, volume, minimum
@@ -163,16 +161,32 @@ def _line(rows: list[dict], field: str) -> list[float]:
     return [round(float(a), 5), round(float(b), 5)]
 
 
+def _log_residual(rows: list[dict]) -> float:
+    """sd of log(volume) around the rookie lines' volume at his pick (targets and carries together, as the
+    league's volume weighs them): how far a rookie's real role lands from his pick's (sim_talent._season_role)."""
+    if len(rows) < MIN_ROOKIES:
+        return 0.0
+    league = sim_world.params()["league"]
+    fit = {field: _line(rows, field) for field in ("targets", "carries")}
+    pairs = []
+    for r in rows:
+        x = math.log(r["pick"])
+        line = sum(max(0.0, fit[f][0] + fit[f][1] * x) * league[f] for f in fit)
+        real = sum(float(r[f]) * league[f] for f in fit)
+        if line > 0 and real > 0:
+            pairs.append(math.log(real / line))
+    return round(float(np.std(pairs, ddof=2)), 4) if len(pairs) > 2 else 0.0
+
+
 def _rookie_fit(rows: list[dict]) -> dict:
     out: dict = {}
     for position in (*POSITIONS, "K"):
         mine = [r for r in rows if r["position"] == position]
         fields = {"QB": ("carries", "week1"), "K": ("starts",)}.get(position, ("targets", "carries"))
         out[position] = {field: _line(mine, field) for field in fields} | {"n": len(mine)}
-    benched = [r for r in rows if r["position"] == "QB" and r["pick"] <= TAKEOVER_PICKS and not r["week1"]]
+        if position in ("RB", "WR", "TE"):
+            out[position]["role_sd"] = _log_residual(mine)
     played = [r["quality"] for r in rows if r["position"] == "QB" and r["started"] >= 3 and r["quality"]]
-    out["qb_takeover"] = round(sum(1 for r in benched if r["started"]) / max(1, len(benched)), 4)
-    out["qb_takeover_n"] = len(benched)
     out["qb_quality"] = round(float(np.mean(played)), 4) if played else 0.9
     return out
 
@@ -181,7 +195,7 @@ def _relevant(row: dict) -> bool:
     return min(row["games"]) >= GAMES_MIN and min(row["volume"]) >= VOLUME_MIN[row["position"]]
 
 
-def _age_fit(rows: list[dict], position: str) -> tuple[dict, float, float]:
+def _age_fit(rows: list[dict], position: str) -> tuple[dict, float, float, float]:
     mine = [r for r in rows if r["position"] == position and r["games"][0] >= GAMES_MIN
             and r["volume"][0] >= VOLUME_MIN[position] and r["games"][1] >= NEXT_GAMES_MIN]
     x = np.log([r["volume"][0] for r in mine])
@@ -194,9 +208,11 @@ def _age_fit(rows: list[dict], position: str) -> tuple[dict, float, float]:
     effects = dict(zip(used, solved[:-1].tolist()))
     middle = float(np.mean(list(effects.values())))
     change = [round(effects.get(g, effects[max(used)]) - middle, 4) for g in range(len(EXPERIENCE_EDGES))]
+    residual = (y - x) - design @ solved                     # what the curve and the regression leave unexplained
     return ({"edges": list(EXPERIENCE_EDGES), "log_change": change,
              "n": [int((groups == g).sum()) for g in range(len(EXPERIENCE_EDGES))]},
-            round(min(1.0, 1.0 + float(solved[-1])), 4), round(center, 4))      # never anti-regression
+            round(min(1.0, 1.0 + float(solved[-1])), 4), round(center, 4),      # never anti-regression
+            round(float(residual.std(ddof=design.shape[1])), 4))
 
 
 def _passer_scale(row: dict, name: str, which: int) -> float:
@@ -205,25 +221,34 @@ def _passer_scale(row: dict, name: str, which: int) -> float:
     return row["passer"][which] if name in RECEIVER_RATES and row["position"] in RECEIVERS else 1.0
 
 
+def _slope(rows: list[dict], name: str, wanted) -> float:
+    """The keep of a rate: the volume-weighted slope of next season's rate on the belief's, both over the position
+    norm, for rows whose position passes `wanted` (a full season each: _relevant)."""
+    norms = sim_world.params()["positions"]
+    numerator, base, minimum = RAW[name]
+    x, y, w = [], [], []
+    for r in rows:
+        norm, n = norms[r["position"]].get(name), r["raw"].get(base, 0.0)
+        if not _relevant(r) or not wanted(r["position"]) or not norm or n < minimum:
+            continue
+        x.append(r[name][0] / _passer_scale(r, name, 0) / norm - 1)
+        y.append(r["raw"][numerator] / n / _passer_scale(r, name, 1) / norm - 1)
+        w.append(n)
+    x, y, w = np.array(x), np.array(y), np.array(w)
+    return round(min(1.0, float((w * x * y).sum() / (w * x * x).sum())), 4)
+
+
 def _efficiency_fit(rows: list[dict]) -> dict:
     """{rate: keep}, plus "QB ypr" / "QB rush_td": a QB's rushing is fitted on QBs alone (a scrambler keeps
     far more of his edge than a back's TD rate suggests)."""
-    norms, league = sim_world.params()["positions"], sim_world.params()["league"]
+    league = sim_world.params()["league"]
     out = {}
-    for name, (numerator, base, minimum) in RAW.items():
-        for qbs in (False, True):
-            if qbs and name not in QB_RUSHING:
-                continue
-            x, y, w = [], [], []
-            for r in rows:
-                norm, n = norms[r["position"]].get(name), r["raw"].get(base, 0.0)
-                if not _relevant(r) or (r["position"] == "QB") != qbs or not norm or n < minimum:
-                    continue
-                x.append(r[name][0] / _passer_scale(r, name, 0) / norm - 1)
-                y.append(r["raw"][numerator] / n / _passer_scale(r, name, 1) / norm - 1)
-                w.append(n)
-            x, y, w = np.array(x), np.array(y), np.array(w)
-            out[f"QB {name}" if qbs else name] = round(min(1.0, float((w * x * y).sum() / (w * x * x).sum())), 4)
+    for name in RAW:
+        out[name] = _slope(rows, name, lambda position: position != "QB")
+        if name in QB_RUSHING:
+            out[f"QB {name}"] = _slope(rows, name, lambda position: position == "QB")
+    for position in RECEIVERS:                         # yards per catch by position (sim_next_year.FULL_KEEP)
+        out[f"{position} ypc"] = _slope(rows, "ypc", lambda p, mine=position: p == mine)
     for name, prior in QB_SHRINK.items():
         qbs = [r for r in rows if r["position"] == "QB" and _relevant(r) and r[name][0] > 0 and r[name][1] > 0]
         norm = 1.0 if name == "quality" else league["int_rate"]
@@ -333,21 +358,18 @@ def _premium_fit(cases: list[dict]) -> dict[str, list[float]]:
 
 
 def summarize(rows: Mapping[str, list[dict]], seasons: list[int]) -> dict:
-    age, keep, center = {}, {}, {}
+    age, keep, center, role = {}, {}, {}, {}
     for position in POSITIONS:
-        age[position], keep[position], center[position] = _age_fit(rows["veterans"], position)
+        age[position], keep[position], center[position], role[position] = _age_fit(rows["veterans"], position)
     efficiency = _efficiency_fit(rows["veterans"])
     return {"seasons": seasons, "rookies": _rookie_fit(rows["rookies"]), "age": age, "keep": keep,
-            "center": center, "efficiency_keep": efficiency,
+            "center": center, "role_sd": role, "efficiency_keep": efficiency,
             "efficiency_sd": _spread_fit(rows["veterans"], efficiency), "team_keep": _team_fit(rows["teams"])}
 
 
-def _seasons(text: str) -> list[int]:
-    first, _, last = text.partition("-")
-    return list(range(int(first), int(last or first) + 1))
-
-
 def main(argv: list[str] | None = None) -> None:
+    from services.replay_data import parse_seasons     # the CLI's only use of the importer
+
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--fit", action="store_true", help="measure and write sim_next_year.json")
@@ -360,7 +382,7 @@ def main(argv: list[str] | None = None) -> None:
         return
     from database.db import SessionLocal
 
-    seasons = _seasons(args.seasons)
+    seasons = parse_seasons(args.seasons)
     if args.refresh:
         draft_picks(range(DRAFT_HISTORY_FROM, max(seasons) + 1), refresh=True)
     with SessionLocal() as session:
@@ -374,26 +396,22 @@ def main(argv: list[str] | None = None) -> None:
             premium = _premium_fit(premium_cases(session, seasons))
     PATH.write_text(json.dumps({**fitted, "rookie_premium": premium}, indent=1) + "\n")    # once, every step done
     sim_next_year.stored.cache_clear()
-    log.info("wrote %s (scale %s, bench %s, growth %s, rookie premium %s)", PATH.name, fitted.get("efficiency_scale"),
-             fitted.get("bench"), fitted.get("rookie_growth"), premium)
+    log.info("wrote %s (scale %s, growth %s, rookie premium %s)", PATH.name, fitted.get("efficiency_scale"),
+             fitted.get("rookie_growth"), premium)
 
 
 def whole_season_fits(session, seasons: list[int], fitted: Mapping) -> dict:
-    """{"efficiency_scale", "bench"} (services/sim_next_year_calib.py) on the model just fitted."""
+    """{"efficiency_scale", "rookie_growth"} (services/sim_next_year_calib.py) on the model just fitted."""
     from services import sim_next_year_calib as calib
 
     offseason = {"picks": draft_picks(range(DRAFT_HISTORY_FROM, max(seasons) + 1)), "first": first_seasons(session)}
     reals = calib.load(session, seasons)
-    no_bench = {"logit": [0.0, 0.0]}
     by_scale = {}
     for scale in calib.SCALE_GRID:
-        with _in_use({**fitted, "efficiency_scale": dict.fromkeys(POSITIONS, scale), "bench": no_bench,
-                      "rookie_premium": {}}):
+        with _in_use({**fitted, "efficiency_scale": dict.fromkeys(POSITIONS, scale), "rookie_premium": {}}):
             by_scale[scale] = calib.errors(session, reals, offseason)
         log.info("efficiency scale %s: %s", scale, by_scale[scale])
     out = {"efficiency_scale": calib.best_scale(by_scale, seasons)}
-    with _in_use({**fitted, **out, "bench": no_bench, "rookie_premium": {}}):
-        out["bench"] = calib.logistic(calib.lost_jobs(session, reals, offseason))
     growth = []
     for real in reals:
         rookies = set(draft_class(session, real.season, offseason["picks"]))

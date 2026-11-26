@@ -16,6 +16,13 @@
   with its leaderboard, weekly, rookies, how our ADP agrees with S's real ADP, all of it and the rookies':
   ours priced in the real list's format, PPR; and how the preseason experts agree with the ADP).
   mid reports the leaderboard of the simulated weeks too.
+- both modes report who holds the QB jobs (sim_qb.job_metrics: healthy job losses, those of a top-12 QB and of
+  an established one, the share of injured starters who start again when healthy; mid: from MID_WEEK on; the
+  QB inputs and the established QBs as sim_setup builds them, sim_setup.qb_inputs) and mid how often week
+  MID_WEEK's simulated starter is the QB who really started it (sim_qb.same_starters).
+- both modes report whole games (sim_metrics_games.games: the pregame line, a real season's Vegas line and a
+  simulated one's own, against the result; blowouts, home wins, ties, odd team scores) and the expert ranks
+  (sim_metrics_games.experts: week-to-week churn and agreement with the projections), by position.
 - both modes report injuries (sim_metrics.injuries: new injuries per game played, missed share, by position)
   against the real rate and the target, real x sim_injuries.INJURY_SCALE (simulated seasons have fewer on purpose).
 - --set overrides a sim_params.json value for this run (section.key=value, JSON value); --save-tuned writes
@@ -41,8 +48,9 @@ from dataclasses import replace
 from functools import partial
 from pathlib import Path
 
-from services import (replay_pool, sim_carryover, sim_depth, sim_fit, sim_injuries, sim_market, sim_metrics, sim_season,
-                      sim_setup, sim_world)
+from services import (replay_pool, sim_carryover, sim_depth, sim_fit, sim_injuries, sim_market, sim_metrics,
+                      sim_metrics_games, sim_metrics_join, sim_metrics_shape, sim_qb, sim_qb_jobs, sim_season, sim_setup,
+                      sim_world)
 from services.replay_adp_format import TWO_QB
 from services.replay_pool import SeasonData
 from services.sim_world import World
@@ -51,13 +59,6 @@ log = logging.getLogger(__name__)
 
 MID_WEEK = 12
 SCORING = "half"
-
-
-def _seasons(text: str) -> list[int]:
-    if "-" in text:
-        first, last = text.split("-")
-        return list(range(int(first), int(last) + 1))
-    return [int(s) for s in text.split(",")]
 
 
 def cut(real: SeasonData, week: int) -> SeasonData:
@@ -100,7 +101,9 @@ def next_belief(session, real: SeasonData, offseason: dict) -> tuple[World, dict
                if pid not in world.players}
     experience = fit.experience(session, real.season - 1, offseason["picks"], offseason["first"])
     belief, pool = sim_next_year.next_year(world, previous.players, experience, rookies, real_moves(world, real),
-                                           sim_next_year.starts_by_team(previous))
+                                           sim_next_year.starts_by_team(previous),
+                                           sim_setup.qb_inputs(session, real.season, offseason["picks"]).past,
+                                           sim_market.track_record(previous))
     return belief, pool, rookies
 
 
@@ -154,27 +157,47 @@ def _mid(session, season: int, seeds: list[int]) -> tuple[dict, dict]:
     weeks = range(MID_WEEK, real.last_week + 1)
     base = cut(real, MID_WEEK)
     rookies = [pid for pid, first in sim_setup.first_seasons(session).items() if first == season]
-    sims = [_rest(sim_season.simulate(base, seed, MID_WEEK, rookies=rookies), weeks) for seed in seeds]
-    return _rest(real, weeks), _mean(sims)
+    qbs = sim_setup.qb_inputs(session, season)
+    established = sim_qb_jobs.established_of(base, None, False, qbs)
+    teams = sim_setup.team_prior(session, season)
+    sims = [_mid_sim(sim_season.simulate(base, seed, MID_WEEK, rookies=rookies, qbs=qbs, team_prior=teams),
+                     real, weeks, established) for seed in seeds]
+    return _mid_sim(real, real, weeks, established), _mean(sims)
+
+
+def _mid_sim(data: SeasonData, real: SeasonData, weeks: range, established: frozenset[int]) -> dict[str, float]:
+    """_rest plus who holds the QB jobs (sim_qb.job_metrics) and how often week MID_WEEK's starter is the real one."""
+    return {**_rest(data, weeks), **sim_qb.job_metrics(data, MID_WEEK, established),
+            **sim_qb.same_starters(data, real, MID_WEEK), **sim_metrics_join.join(data, MID_WEEK)}
 
 
 def _rest(data: SeasonData, weeks: range) -> dict[str, float]:
-    return {**sim_metrics.weekly(data, weeks), **sim_metrics.leaderboard(data, weeks)}
+    return {**sim_metrics.weekly(data, weeks), **sim_metrics.leaderboard(data, weeks),
+            **sim_metrics_games.games(data, weeks), **sim_metrics_games.experts(data, weeks),
+            **sim_metrics_games.tails(data, weeks), **sim_metrics_join.churn(data, weeks),
+            **sim_metrics_join.absences(data, weeks)}
 
 
-def _whole(data: SeasonData, rookies: set[int], real: SeasonData) -> dict[str, float]:
+def _whole(data: SeasonData, rookies: set[int], real: SeasonData, established: frozenset[int]) -> dict[str, float]:
     weeks = range(1, data.last_week + 1)
     return {**sim_metrics.season(data), **sim_metrics.rookies(data, rookies),
             **sim_metrics.adp_agreement(data, real, rookies), **sim_metrics.expert_agreement(data),
-            **sim_metrics.weekly(data, weeks), **sim_depth.metrics(data)}
+            **sim_metrics.weekly(data, weeks), **sim_depth.metrics(data), **sim_qb.job_metrics(data, 1, established),
+            **sim_metrics_games.games(data, weeks), **sim_metrics_games.experts(data, weeks),
+            **sim_metrics_games.tails(data, weeks), **sim_metrics_shape.shape(data),
+            **sim_metrics_shape.standings(data), **sim_metrics_join.churn(data, weeks),
+            **sim_metrics_join.absences(data, weeks)}
 
 
 def _full(session, season: int, seeds: list[int], offseason: dict) -> tuple[dict, dict]:
     real = replay_pool.load_season_data(session, season, SCORING)
     base, prior, rookies, carries = next_season(session, real, offseason)
-    sims = [_whole(sim_season.simulate(base, seed, 1, prior, sim_carryover.draw(carries, seed), rookies=rookies), rookies,
-                   real) for seed in seeds]
-    return _whole(real, rookies, real), _mean(sims)
+    qbs = sim_setup.qb_inputs(session, season, offseason["picks"])
+    established = sim_qb_jobs.established_of(base, sim_world.estimate(base, 1, prior), True, qbs)
+    teams = sim_setup.team_prior(session, season)
+    sims = [_whole(sim_season.simulate(base, seed, 1, prior, sim_carryover.draw(carries, seed), rookies=rookies,
+                                       qbs=qbs, team_prior=teams), rookies, real, established) for seed in seeds]
+    return _whole(real, rookies, real, sim_qb_jobs.established_of(real, None, False, qbs)), _mean(sims)
 
 
 def _table(title: str, real: dict, sim: dict) -> list[str]:
@@ -273,6 +296,8 @@ def run(seasons: list[int], seeds: list[int], mode: str, workers: int = 1, overr
 
 
 def main(argv: list[str] | None = None) -> None:
+    from services.replay_data import parse_seasons     # the CLI's only use of the importer
+
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--seasons", default="2021-2025")
@@ -286,7 +311,7 @@ def main(argv: list[str] | None = None) -> None:
                         help="processes for the (mode, season) cases (default: one per CPU; 1 = serial)")
     parser.add_argument("--refresh", action="store_true", help="download the draft picks again (else cached)")
     args = parser.parse_args(argv)
-    seasons = _seasons(args.seasons)
+    seasons = parse_seasons(args.seasons)
     if args.fit:
         from database.db import SessionLocal
         with SessionLocal() as session:

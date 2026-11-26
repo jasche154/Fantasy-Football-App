@@ -89,11 +89,6 @@ def test_real_moves_are_read_from_the_next_seasons_games(data):
     assert moves[mover] == new_team and moves[gone] is None and stays not in moves
 
 
-def test_season_ranges_parse():
-    assert sim_eval._seasons("2021-2023") == [2021, 2022, 2023]
-    assert sim_eval._seasons("2019,2024") == [2019, 2024]
-
-
 def test_rookie_and_market_metrics(data):
     rookies = {fakes.player_id("WR", rank) for rank in range(1, 30)} | {fakes.player_id("QB", 1)}
     found = sim_metrics.rookies(data, rookies)

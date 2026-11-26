@@ -8,7 +8,8 @@ A World is everything the game simulator (services/sim_game.py) needs to play an
 - per player: ROLE WEIGHTS, not fixed shares. In a game a player's share of his team's targets is his
   weight / the weights of the teammates who are active, so an injured player's work flows to the others,
   a rookie dilutes everyone and a QB change moves every receiver. QBs and kickers have a `starts` weight:
-  the active one with the highest weight plays. Efficiency (catch rate, yards per catch, TDs per catch,
+  the active one with the highest weight plays (in a simulated season the QB job holder's is raised above his
+  teammates', sim_qb_jobs). Efficiency (catch rate, yards per catch, TDs per catch,
   yards and TDs per carry, a QB's quality and INT rate) is per player.
 
 `estimate(data, week, prior)` is the PUBLIC belief before `week`, read from `data.as_of(week)` only:
@@ -17,11 +18,16 @@ A World is everything the game simulator (services/sim_game.py) needs to play an
   counts follow the weights of the players who played it, a game a week older counts DECAY as much, and
   ROLE_PRIOR_GAMES pseudo-games hold every player at his prior share. The prior share is the `prior`
   World's (last season, carried over by sim_next_year), else the one his earliest known projections imply
-  (projection / his position's points per opportunity / the league's team volume), else his ADP's (the
+  (projection / his position's points per opportunity / the league's team volume; a QB's starts weight is the
+  fitted chance a QB with that projection starts, sim_qb.start_chance, no cliff), else his ADP's (the
   Nth by ADP at a position gets the Nth value of `adp_curve`), else a depth share. Not the prior World
   averaged with projections: in a simulated season the projections come from the belief itself, and
   averaging them back in pulls every role toward an average player's (a rushing QB's carries toward the
   norm, an efficient receiver's targets up) a little more each week.
+- A QB's starts weight (`sim_qb.qb_starts`) is the decayed share of passing yards he threw in the games he was
+  available for, over ROLE_PRIOR_GAMES pseudo-games at his prior: his team's games since he joined it (a game
+  he missed with an injury tag does not count against him) and his games for any other team this season (a
+  starter traded in keeps his record). A kicker's is the decayed share of his team's games he kicked.
 - Efficiency is his own rates shrunk toward the prior World's value (else the position norm) by
   EFFICIENCY_PRIOR pseudo-volume. Team volume and defense factors are decayed means of its games shrunk
   toward the prior World / league (last season's `defense_prior` stands in when there is no prior World).
@@ -53,7 +59,7 @@ LUCE_ITERATIONS = 25
 MIN_WEIGHT = 1e-4
 MIN_SHARE_FOR_TEAM_TOTAL = 0.05  # target shares below this are too rough to back out the team's targets
 IR_BELIEF_WEEKS = 4
-STARTER_PROJECTION = {"QB": 9.0, "K": 3.0}   # a projection this high means he is expected to start
+STARTER_PROJECTION = {"K": 3.0}  # a kicker projected this high is expected to start (a QB: sim_qb.start_chance)
 STARTER_ROLE = 0.5               # a QB whose prior starts weight is this high is expected to start
 EARLY_PROJECTIONS = 3           # his first projections are the prior (later ones echo the fit itself)
 PRIOR_GAMES_CARRY = 0.25         # last season's games count this much as evidence for this season
@@ -152,8 +158,10 @@ def implied_role(position: str, points: float, scoring: ScoringSettings) -> tupl
     if position in ("K", "DST") or norm is None:
         return 0.0, 0.0, 1.0 if points >= STARTER_PROJECTION.get(position, 0.0) else 0.1
     if position == "QB":
-        starter = points >= STARTER_PROJECTION["QB"]
-        return 0.0, norm["starter_carries"] if starter else 0.0, 1.0 if starter else norm["backup_starts"]
+        from services.sim_qb import start_chance        # imported here: it pulls in sim_metrics
+
+        chance = start_chance(points)
+        return 0.0, norm["starter_carries"] * chance, max(norm["backup_starts"], chance)
     per_target, per_carry = unit_points(position, scoring)
     ratio = norm["carries_per_target"]                       # his carries for each target he gets
     targets = max(0.0, points) / (per_target + ratio * per_carry)
@@ -185,7 +193,7 @@ def _luce(games: list[tuple[float, dict[int, float]]], prior: Mapping[int, float
 
 
 def _starts(games: list[tuple[float, dict[int, float]]], prior: Mapping[int, float]) -> dict[int, float]:
-    """Decayed share of the team's games each player started (a game's counts: QB passing yards, K kicks),
+    """Decayed share of the team's games each kicker kicked (a game's counts: his kicks),
     with ROLE_PRIOR_GAMES pseudo-games at his prior. One starter per game makes a Luce fit flat, so not that."""
     numerators = {member: ROLE_PRIOR_GAMES * share for member, share in prior.items()}
     total_weight = ROLE_PRIOR_GAMES
@@ -211,6 +219,7 @@ class _Seen:
     targets: Mapping[tuple[str, int], float]                  # team pass targets in that game
     kicks: Mapping[tuple[str, int], tuple[int, ...]]          # kickers who played it
     pass_yards: Mapping[tuple[str, int], float]               # team passing yards in that game
+    hurt: frozenset[tuple[int, int]] = frozenset()            # (player, week) with an injury tag, played or not
 
 
 def _seen(known: SeasonData, week: int) -> _Seen:
@@ -232,7 +241,8 @@ def _seen(known: SeasonData, week: int) -> _Seen:
         pooled = float(sum(line.targets for line in lines.values()))
         targets[key] = max(pooled, median(backed)) if backed else pooled
     passing = {key: float(sum(max(0, line.pass_yds) for line in lines.values())) for key, lines in games.items()}
-    return _Seen(games, targets, {key: tuple(v) for key, v in kicks.items()}, passing)
+    hurt = frozenset(key for key in known.injuries if key[1] < week)
+    return _Seen(games, targets, {key: tuple(v) for key, v in kicks.items()}, passing, hurt)
 
 
 def _first_projections(known: SeasonData) -> dict[int, float]:
@@ -280,8 +290,9 @@ def _prior_roles(known: SeasonData, team_of: Mapping[int, str], prior: World | N
 def _team_roles(team: str, seen: _Seen, members: list[int], roles: Mapping[int, tuple[float, float, float]],
                 positions: Mapping[int, str], week: int, other: tuple[float, float]) -> dict[str, dict[int, float]]:
     """{"targets"|"carries"|"starts": {player: weight}} for one team's current players (OTHER included)."""
+    from services import sim_qb          # it imports this module
     league = params()["league"]
-    target_games, carry_games, pass_games, kick_games = [], [], [], []
+    target_games, carry_games, kick_games = [], [], []
     for (game_team, game_week), lines in seen.games.items():
         if game_team != team:
             continue
@@ -290,9 +301,6 @@ def _team_roles(team: str, seen: _Seen, members: list[int], roles: Mapping[int, 
         counts[OTHER] = max(0.0, seen.targets[(team, game_week)] - sum(counts.values()))
         target_games.append((decay, counts))
         carry_games.append((decay, {**{pid: float(line.carries) for pid, line in lines.items()}, OTHER: 0.0}))
-        passing = {pid: float(max(0, line.pass_yds)) for pid, line in lines.items() if positions.get(pid) == "QB"}
-        if passing:
-            pass_games.append((decay, passing))
     for (game_team, game_week), kickers in seen.kicks.items():
         if game_team == team:
             kick_games.append((DECAY ** max(0, week - 1 - game_week), dict.fromkeys(kickers, 1.0)))
@@ -302,7 +310,7 @@ def _team_roles(team: str, seen: _Seen, members: list[int], roles: Mapping[int, 
     kickers = {pid: roles[pid][2] for pid in members if positions[pid] == "K"}
     return {"targets": _luce(target_games, {**receivers, OTHER: other[0]}, league["targets"]),
             "carries": _luce(carry_games, {**rushers, OTHER: other[1]}, league["carries"]),
-            "starts": {**_starts(pass_games, qbs), **_starts(kick_games, kickers)}}
+            "starts": {**sim_qb.qb_starts(team, seen, qbs, week), **_starts(kick_games, kickers)}}
 
 
 BOX_KEYS = ("targets", "rec", "rec_yds", "rec_td", "carries", "rush_yds", "rush_td", "pass_yds", "pass_int")

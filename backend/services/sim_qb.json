@@ -1,0 +1,141 @@
+{
+ "seasons": [
+  2019,
+  2020,
+  2021,
+  2022,
+  2023,
+  2024,
+  2025
+ ],
+ "hazard": {
+  "intercept": -21.799,
+  "market": 5.2855,
+  "form": -0.3486,
+  "record": 0.4137,
+  "n": 1231,
+  "events": 21
+ },
+ "rookie": {
+  "intercept": -2.4543,
+  "pick": -0.2544,
+  "record": -4.9218,
+  "form": -0.2598,
+  "n": 87,
+  "events": 7
+ },
+ "return": {
+  "intercept": -10.1762,
+  "market": 2.6929,
+  "n": 57,
+  "events": 13
+ },
+ "elevated": 0.01706,
+ "prior": {
+  "intercept": -4.4012,
+  "points": 0.5177,
+  "n": 532
+ },
+ "validation": {
+  "hazard: none": {
+   "log_loss": 0.08812,
+   "auc": 0.3185
+  },
+  "hazard: market": {
+   "log_loss": 0.07486,
+   "auc": 0.8264
+  },
+  "hazard: model": {
+   "log_loss": 0.07394,
+   "auc": 0.8304
+  },
+  "hazard: model + starts": {
+   "log_loss": 0.07383,
+   "auc": 0.8345,
+   "coefficient": 0.2594
+  },
+  "hazard: model + points": {
+   "log_loss": 0.07496,
+   "auc": 0.8252,
+   "coefficient": 0.0443
+  },
+  "hazard: model + pick": {
+   "log_loss": 0.0753,
+   "auc": 0.8148,
+   "coefficient": 0.0548
+  },
+  "hazard: model + years": {
+   "log_loss": 0.07432,
+   "auc": 0.8268,
+   "coefficient": 0.0255
+  },
+  "hazard: model + expert": {
+   "log_loss": 0.07375,
+   "auc": 0.8298,
+   "coefficient": 1.0184
+  },
+  "rookie: none": {
+   "log_loss": 0.28846,
+   "auc": 0.2875
+  },
+  "rookie: model": {
+   "log_loss": 0.28639,
+   "auc": 0.5964
+  },
+  "return: none": {
+   "log_loss": 0.55128,
+   "auc": 0.3339
+  },
+  "return: model": {
+   "log_loss": 0.52711,
+   "auc": 0.6442
+  }
+ },
+ "losers": [
+  "2020 wk13 PHI Carson Wentz (ADP rank 12, week, established)",
+  "2022 wk16 IND Matt Ryan (ADP rank 17, week, established)",
+  "2025 wk7 NYJ Justin Fields (ADP rank 17, week, established)",
+  "2024 wk10 PIT Justin Fields (ADP rank 21, return, established)",
+  "2024 wk16 ATL Kirk Cousins (ADP rank 19, week)",
+  "2020 wk13 JAX Gardner Minshew (ADP rank 20, return)",
+  "2020 wk5 SF Jimmy Garoppolo (ADP rank 21, return)",
+  "2022 wk7 NO Jameis Winston (ADP rank 21, return)",
+  "2025 wk16 MIA Tua Tagovailoa (ADP rank 21, week)",
+  "2023 wk8 PIT Kenny Pickett (ADP rank 24, week)",
+  "2022 wk15 WAS Carson Wentz (ADP rank 27, return)",
+  "2019 wk6 TEN Marcus Mariota (ADP rank 28, week)",
+  "2021 wk5 NYG Daniel Jones (ADP rank 29, week)",
+  "2022 wk12 NYJ Zach Wilson (ADP rank 29, week)",
+  "2020 wk12 LAC Tyrod Taylor (ADP rank 30, return)",
+  "2020 wk5 WAS Dwayne Haskins (ADP rank 31, week)",
+  "2023 wk9 LV Jimmy Garoppolo (ADP rank 31, week)",
+  "2025 wk4 NYG Russell Wilson (ADP rank 31, week)",
+  "2019 wk3 NYG Eli Manning (ADP rank 32, week)",
+  "2023 wk13 NE Mac Jones (ADP rank 32, week)",
+  "2020 wk8 MIA Ryan Fitzpatrick (ADP rank 33, week)",
+  "2022 wk4 PIT Mitchell Trubisky (ADP rank 33, week)",
+  "2023 wk11 TEN Ryan Tannehill (ADP rank 33, return)",
+  "2024 wk12 NYG Daniel Jones (ADP rank 33, week)",
+  "2020 wk3 CHI Mitchell Trubisky (ADP rank 34, week)",
+  "2025 wk9 NO Spencer Rattler (ADP rank 34, week)",
+  "2019 wk11 WAS Case Keenum (ADP rank 35, return)",
+  "2020 wk14 CHI Nick Foles (ADP rank 35, return)",
+  "2021 wk13 HOU Tyrod Taylor (ADP rank 35, week)",
+  "2022 wk13 CLE Jacoby Brissett (ADP rank 35, week)",
+  "2023 wk16 ATL Desmond Ridder (ADP rank 35, week)",
+  "2024 wk6 LV Gardner Minshew (ADP rank 35, week)",
+  "2021 wk5 CHI Andy Dalton (ADP rank 37, return)",
+  "2024 wk6 NE Jacoby Brissett (ADP rank 37, week)",
+  "2025 wk13 CLE Dillon Gabriel (ADP rank 39, return)",
+  "2020 wk6 SF C.J. Beathard (ADP rank 40, week)",
+  "2021 wk6 NYG Mike Glennon (ADP rank 40, week)",
+  "2022 wk14 CAR PJ Walker (ADP rank 40, return)",
+  "2022 wk4 NYJ Joe Flacco (ADP rank 40, week)",
+  "2023 wk10 ARI Clayton Tune (ADP rank 40, week)",
+  "2023 wk12 NYJ Zach Wilson (ADP rank 40, week)",
+  "2023 wk14 NYJ Tim Boyle (ADP rank 40, week)",
+  "2023 wk9 PIT Mitchell Trubisky (ADP rank 40, week)",
+  "2024 wk14 NYG Tommy DeVito (ADP rank 40, return)",
+  "2025 wk10 NYJ Tyrod Taylor (ADP rank 40, return)"
+ ]
+}

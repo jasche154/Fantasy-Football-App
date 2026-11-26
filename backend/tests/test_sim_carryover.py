@@ -72,3 +72,11 @@ def test_a_carried_absence_starts_the_season_on_the_injury_report(data):
     assert all((HURT, w) not in season.actual for w in played[:3])
     assert (HURT, played[3]) in season.actual
     assert season.returns.get((HURT, 1)) == played[3]
+
+
+def test_a_carried_player_the_truth_has_ready_is_cleared_before_week_one():
+    """Item 34: priced as out for weeks, back for week 1 in the truth: the opener's news says so."""
+    expected_out, ready = co.Carry("Knee", 15, 10.0, 7.5, 2.6), co.Carry("Ankle", 16, 4.0, 4.0, 0.2)
+    drawn = {3: co.Spell(games_out=2, exit_share=1.0, body="Knee", questionable_back=False)}
+    lines = co.cleared({1: expected_out, 2: ready, 3: expected_out}, drawn)
+    assert lines == {(1, 1): "Ahead of schedule: cleared to play in week 1."}

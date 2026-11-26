@@ -17,7 +17,8 @@ Run through `python -m services.sim_eval --fit [--seasons 2021-2025]`. Read-only
 - kick: FG band shares and make rates, XP rate, two-point share; FG attempts ~ Poisson regression on the
   team's yards and TDs. dst: return TDs per INT / lost fumble (least squares), safeties, blocks.
 - adp_curve: per scoring, the Nth by ADP at a position gets the Nth highest week-1 projection (averaged
-  over seasons); adp_stdev: stdev = a + b x adp.
+  over seasons); adp_stdev: stdev = a + b x adp; kdst_adp / qb_adp: the mean ADP of the Nth K, D/ST and QB
+  taken on the real 1-QB PPR lists.
 """
 import json
 import logging
@@ -308,15 +309,17 @@ def _adp_curve(session: Session, seasons: list[int]) -> dict:
     return curves
 
 
-def _kdst_adp(session: Session, seasons: list[int]) -> dict[str, list[float]]:
-    """{K / DST: mean ADP of the Nth one drafted} over the seasons."""
+def _kdst_adp(session: Session, seasons: list[int], positions: tuple[str, ...] = ("K", "DST"),
+              every: bool = False) -> dict[str, list[float]]:
+    """{position: mean ADP of the Nth one drafted} over the seasons' 1-QB PPR lists (K and D/ST; "qb_adp": QB).
+    `every`: only the ranks every season lists (a tail averaged over fewer lists is not monotonic)."""
     out = {}
-    for position in ("K", "DST"):
+    for position in positions:
         lists = [[r[0] for r in _rows(session, """select a.adp from replay_adp a join players p on p.id = a.player_id
                   where a.season=:s and a.format='ppr' and p.position=:p order by a.adp""", s=season, p=position)]
                  for season in seasons]
         lists = [v for v in lists if v]
-        out[position] = [round(mean(v[i] for v in lists if len(v) > i), 1) for i in range(max(map(len, lists)))]
+        out[position] = [round(mean(v[i] for v in lists if len(v) > i), 1) for i in range((min if every else max)(map(len, lists)))]
     return out
 
 
@@ -342,7 +345,7 @@ def fit(session: Session, seasons: list[int]) -> dict:
     return {"seasons": seasons, "league": league, "positions": positions,
             "rates": rates, "game": game, "kick": _kick(session, seasons, teams), "dst": dst,
             "adp_curve": _adp_curve(session, seasons), "adp_stdev": _adp_stdev(session, seasons),
-            "kdst_adp": _kdst_adp(session, seasons)}
+            "kdst_adp": _kdst_adp(session, seasons), "qb_adp": _kdst_adp(session, seasons, ("QB",), every=True)["QB"]}
 
 
 def _rounded(value):

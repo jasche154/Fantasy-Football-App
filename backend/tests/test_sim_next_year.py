@@ -91,12 +91,13 @@ def test_rookie_roles_fall_with_the_pick_and_are_not_extrapolated_above_the_floo
     assert receiver.ypc == pytest.approx(params()["positions"]["WR"]["ypc"] * team.passer)
 
 
-def test_a_rookie_qb_starts_only_where_the_job_is_open_or_he_went_very_high():
+def test_a_rookie_qb_starts_only_where_the_job_is_open_or_he_went_very_high(monkeypatch):
+    monkeypatch.setattr(ny.sim_qb, "established_qbs", lambda ranks, past: frozenset())   # a weak incumbent
     rookie = Rookie("First Round Passer", "QB", "PIT", 10, "Penn State")
     rid = ny.ROOKIE_ID_BASE + 2027 * ny.ROOKIE_ID_SEASON + 10
     assert ny.ROOKIE_QB_NAMED <= ny._line("QB", "week1", 10) < ny.ROOKIE_QB_FRANCHISE
     behind, _ = _next(rookies=(rookie,))                                   # above-average incumbent keeps it
-    assert behind.players[pid("PIT", "QB1")].starts > behind.players[rid].starts >= sim_talent.ROOKIE_HOPEFUL
+    assert behind.players[pid("PIT", "QB1")].starts > behind.players[rid].starts > ny.VETERAN_BACKUP_STARTS
     open_job, _ = _next(moves={pid("PIT", "QB1"): None}, rookies=(rookie,))
     assert open_job.players[rid].starts == 1.0
     weak = _world((_player("PIT", "QB1", 0.92),))                          # a below-average incumbent
@@ -105,6 +106,19 @@ def test_a_rookie_qb_starts_only_where_the_job_is_open_or_he_went_very_high():
     first_pick = Rookie("Franchise Passer", "QB", "PIT", 1, "Ohio State")
     franchise, _ = _next(rookies=(first_pick,))                            # the top picks start anyway
     assert franchise.players[ny.ROOKIE_ID_BASE + 2027 * ny.ROOKIE_ID_SEASON + 1].starts == 1.0
+
+
+def test_an_established_incumbent_is_never_beaten_by_a_rookie_in_august():
+    """The user's choice: a rookie takes over from weak starters only, so the top pick sits behind an
+    established starter (sim_qb.established by last season's market rank) and plays only when he is hurt or
+    benched (sim_qb_jobs)."""
+    first_pick = Rookie("Franchise Passer", "QB", "PIT", 1, "Ohio State")
+    weak = _world((_player("PIT", "QB1", 0.92),))
+    assert pid("PIT", "QB1") in ny.sim_qb.established_qbs(ny.sim_qb.preseason_ranks(weak), ())   # two teams: all rank high
+    for world in (None, weak):
+        belief, _ = _next(world, rookies=(first_pick,))
+        assert belief.players[pid("PIT", "QB1")].starts == 1.0
+        assert belief.players[ny.ROOKIE_ID_BASE + 2027 * ny.ROOKIE_ID_SEASON + 1].starts < 1.0
 
 
 def test_the_healthy_incumbent_gets_his_job_back():
@@ -153,7 +167,7 @@ def test_each_start_counts_for_the_team_he_played_that_game_for(monkeypatch):
     """A QB traded before week 9 started week 9 for his new team (team_at would say the old one)."""
     from services import replay_pool, sim_metrics
 
-    data = SimpleNamespace(team_by_week={7: ((7, "ARI"), (8, "ARI"), (9, "BAL"))}, players={})
+    data = SimpleNamespace(team_by_week={7: ((7, "ARI"), (8, "ARI"), (9, "BAL"))}, players={}, injuries={})
     data.team_at = lambda player_id, week: replay_pool.SeasonData.team_at(data, player_id, week)
     monkeypatch.setattr(sim_metrics, "qb_starts", lambda _: {7: [7, 8, 9]})
     assert ny.starts_by_team(data) == {7: [(7, "ARI"), (8, "ARI"), (9, "BAL")]}
@@ -215,25 +229,9 @@ def test_the_season_base_holds_every_player_who_dresses_before_anything_happened
     assert all(base.team_at(i, 1) == belief.players[i].team for i in known)
 
 
-def test_rookies_are_the_least_certain_and_prospects_take_over_at_the_rookie_rate():
+def test_rookies_are_the_least_certain():
     knobs = sim_talent.settings()
     assert sim_talent._spread(knobs["role_sd"], 0, knobs) > sim_talent._spread(knobs["role_sd"], 4.25, knobs)
-    starter, prospect, veteran = (Player(1, "QB", "MIA", starts=1.0, games=17), Player(2, "QB", "MIA", starts=0.4),
-                                  Player(3, "QB", "MIA", starts=0.05, games=17))
-
-    def benched(backup: Player, whole: bool, rank: int = 20, share: float = 1.0) -> float:
-        dice = np.random.default_rng(5)
-        return np.mean([any(c.kind == "bench" for c in sim_talent._changes([starter, backup], dice, (2, 15), knobs, whole,
-                                                                          {1: rank}, share))
-                        for _ in range(2000)])
-
-    usual = sim_talent.bench_chance(20)
-    assert benched(prospect, True) == pytest.approx(knobs["rookie_bench_rate"], abs=0.04)
-    assert benched(veteran, True) == pytest.approx(usual, abs=0.03)
-    assert benched(prospect, False) == pytest.approx(usual, abs=0.03)       # mid-season: the usual rate
-    assert benched(veteran, True, rank=1) < benched(veteran, True, rank=32)   # a top-rated starter keeps his job
-    assert benched(veteran, False, share=0.4) == pytest.approx(0.4 * usual, abs=0.03)    # fewer weeks left
-
 
 def test_the_market_pays_a_rookie_premium_on_his_price_only():
     """Real drafters pay for a rookie's upside: his ADP rises with the premium, every position's veterans keep
@@ -332,7 +330,7 @@ def test_the_preseason_experts_rank_players_the_way_the_preseason_market_drafts_
         agreement.append(sim_metrics.spearman([experts[p] for p in skill], [adp[p] for p in skill]))
         assert all(adp[p] <= 2 * experts[p] + 1 for p in skill if experts[p] <= 12)
         assert all(experts[p] < experts[q] for p in adp for q in experts            # the undrafted rank last
-                   if q not in adp and pool[p].position == pool[q].position)
+                   if q not in adp and pool[p].position == season.players[q].position)
     assert np.mean(agreement) >= REAL_EXPERT_ADP_R - 0.02
 
 
@@ -350,6 +348,25 @@ def test_every_player_of_the_new_season_stays_in_the_public_view_until_he_plays(
         known = season.as_of(week).players
         assert set(belief.players) <= set(known), week
         assert set(belief.players) <= set(sim_world.estimate(season, week, belief).players), week
+
+
+def test_a_rookie_qb_behind_a_starter_is_priced_on_the_starts_he_may_take_over():
+    """Item 33: a drafted rookie QB behind a non-protected starter gets a share of his value as a starter."""
+    from services import sim_market, sim_qb, sim_world
+    from services.scoring import scoring_for
+    from tests import replay_fakes as fakes
+    belief = sim_world.estimate(fakes.fake_season(), 9)
+    team = next(t for t in sorted(belief.teams) if sum(p.position == "QB" for p in belief.roster(t)) > 1)
+    starter, rookie = sorted((p for p in belief.roster(team) if p.position == "QB"), key=lambda p: -p.starts)[:2]
+    share = ny.rookie_qb_share(belief, {rookie.player_id: 10}, set())
+    weekly = sim_qb.rookie_takeover(10, 0.0, 0.0)
+    assert 0 < share[rookie.player_id] < 1 and share[rookie.player_id] < 17 * weekly
+    assert ny.rookie_qb_share(belief, {rookie.player_id: 10}, {starter.player_id}) == {}
+    assert ny.rookie_qb_share(belief, {rookie.player_id: sim_qb.ROOKIE_PICKS + 1}, set()) == {}
+    half = scoring_for("half")
+    plain = sim_market.market_values(belief, half).get(rookie.player_id, 0.0)       # a backup: no line
+    priced = sim_market.market_values(belief, half, qb_share=share)[rookie.player_id]
+    assert priced > plain and priced == pytest.approx(share[rookie.player_id] * sim_market._as_starter(belief, rookie.player_id, half))
 
 
 def test_a_2qb_market_also_records_the_1qb_board_of_the_same_scoring(monkeypatch):

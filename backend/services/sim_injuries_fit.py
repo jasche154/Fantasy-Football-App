@@ -365,12 +365,9 @@ def check(seasons: int = 1000, seed: int = 0) -> dict:
                             for p in SIM_POOL}}
 
 
-def _seasons(text: str) -> list[int]:
-    first, _, last = text.partition("-")
-    return list(range(int(first), int(last or first) + 1))
-
-
 def main(argv: list[str] | None = None) -> None:
+    from services.replay_data import parse_seasons     # the CLI's only use of the importer
+
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--fit", action="store_true")
@@ -381,7 +378,7 @@ def main(argv: list[str] | None = None) -> None:
         from database.db import SessionLocal
 
         with SessionLocal() as session:
-            model = fit(session, _seasons(args.seasons))
+            model = fit(session, parse_seasons(args.seasons))
         si.PATH.write_text(json.dumps(model, indent=1), encoding="utf-8")
         si.stored.cache_clear()
         log.info("Wrote %s", si.PATH)

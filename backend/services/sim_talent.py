@@ -18,23 +18,33 @@ reputation, plus dated role changes. Nothing in a simulated SeasonData reads it 
   The keep here is the rate's own (unscaled: sim_next_year.keep_of), what a season leaves unexplained even
   though the belief applies only part of the regression. `season_spread` (tuned with `role_sd` on the
   leave-season-out full-mode gate: whole seasons' leaderboards and big games, WR leaders not overshooting).
+  A veteran's role x its own lognormal draw too, sd = what his position's role curve leaves unexplained from one
+  season to the next (sim_next_year.json `role_sd`, about 0.43 for a WR) x `season_roles`. Tuned together with
+  sim_next_year's depth discount (`depth_targets` / `depth_carries`) on the full-mode season-shape rows
+  (sim_metrics_shape): 2021-2025, 2 seeds, real / before / after: 1,000-yard receivers 24.0 / 16.1 / 21.2,
+  rushers 13.6 / 11.0 / 12.5, top five receivers' share of targets 0.74 / 0.71 / 0.74, yards per target sd
+  1.34 / 1.74 / 1.59, WR / RB / TE top-12 points a game 14.8 / 16.1 / 9.7 against 14.7 / 15.1 / 9.0 before and
+  15.5 / 16.0 / 9.7 after (season_spread 1.0 -> 0.5, season_roles 0.25, depth 0.85 / 0.8).
 - Teams: volume (targets and carries together) x lognormal `volume_sd`; pass defense, run defense and
   takeaways each x lognormal `defense_sd`.
 - Dated changes (from a uniform week after from_week to CHANGE_LAST_WEEKS before the end): per team and
-  season, a breakout (a non-lead receiver or back, `breakout_rate`, weights x `breakout_gain`), a bust (a
+  season, a breakout (a non-lead receiver or back who is not a top-STAR_RANK player, e.g. a star back whose
+  role weight dipped while he was hurt: `breakout_rate`, weights x `breakout_gain`) and a bust (a
   lead one, `bust_rate`, weights x `bust_cut`; never a top-STAR_RANK player at his position by the public's
-  rank, sim_market.position_ranks: real stars lose work to injuries, not to a coach's whim) and a QB benching
-  (bench_chance: a logistic in the starter's public rank, fitted on real week-1 starters who lost the job
-  healthy, sim_next_year_fit: a top-ranked starter almost never, a bottom one about a fifth of the time; x the
-  share of the season's change weeks left; the starter's starts weight x BENCHED, so the next QB plays from
-  then on). World.at(week) applies them. In a whole season (from week 1)
-  a team whose next QB in line is an unproven prospect (no games of evidence, starts weight ROOKIE_HOPEFUL or
-  more: a drafted rookie, sim_next_year) benches its starter at `rookie_bench_rate` instead: most such
-  rookies start before the season is out (sim_next_year_fit's `qb_takeover`, injuries included).
+  rank, sim_market.position_ranks: real stars lose work to injuries, not to a coach's whim). World.at(week)
+  applies them. Who starts at QB is not a dated change: it is decided week by week from how the season goes
+  (sim_qb_jobs); the third draw of each team's dice, once a pre-rolled benching, is still drawn so the other
+  changes keep their seeds.
 - Rookie growth (`rookies`: players in their first season; only RBs, WRs and TEs grow, the positions it is
   fitted on): each one's role weights x `gain` from a uniform week around mid-season (split_week - 1 to split_week + 2) with `chance`, both fitted on real rookies against
   veterans with the same first half (sim_next_year.json `rookie_growth`, sim_next_year_calib); only steps after
   from_week happen (a live season's real weeks stay real). No buzz: the public learns it from results.
+
+- Team strength (`strength`): each team's offense and defense differ from the public's line by a hidden
+  number of points, normal with sd `strength_sd`, drawn once per season, and the line's edge (a shrunk,
+  regression estimate, as a real line is: real margins run about 1.2 x the Vegas spread) is widened by
+  `edge_scale` (`edge_scale()`); both tuned so simulated results against the sim's own pregame line look like
+  real results against the Vegas line (sim_eval's game metrics). The public learns them only from the scores.
 
 The spreads and rates are tuned so simulated seasons reshuffle like real ones (`sim_eval --set talent.<knob>=...`
 against ADP rank vs final rank, breakouts, busts; `--save-tuned` stores them in sim_params.json's tuned "talent"
@@ -50,18 +60,17 @@ import numpy as np
 from services import replay_state, sim_market, sim_next_year
 from services.sim_world import Player, RoleChange, Team, World, params
 
-BENCHED = 0.01                   # a benched QB's starts weight is multiplied by this
 LEADS = {"RB": 1, "WR": 2, "TE": 1}    # this many per position count as a team's lead players
 CHANGE_LAST_WEEKS = 2            # no new role change in the season's last weeks
 STAR_RANK = 12                   # the public's top this many at a position: no bust, no false rumour
-UNRANKED = 32                    # the rank of a player the public does not rank
-ROOKIE_HOPEFUL = 0.1             # an unproven QB with this starts weight is a prospect pushing for the job
+STRENGTH_SD = 2.0               # default of the tuned `talent.strength_sd` (points)
+EDGE_SCALE = 1.05               # default of the tuned `talent.edge_scale`
 SEASON_RATES = ("catch", "ypc", "rec_td", "ypr", "rush_td", "quality", "int_rate")
 MAX_CATCH = 0.95
 DEFAULTS = {"role_sd": 0.30, "eff_sd": 0.12, "quality_sd": 0.08, "evidence": 6.0, "floor": 0.35,
             "team_share": 0.4, "volume_sd": 0.05, "defense_sd": 0.05,
             "breakout_rate": 0.25, "breakout_gain": [1.6, 2.6], "bust_rate": 0.15, "bust_cut": [0.4, 0.7],
-            "rookie_bench_rate": 0.8, "season_spread": 1.0}
+            "season_spread": 1.0, "season_roles": 0.0, "volume_eff_rho": 0.0}
 
 
 def settings() -> dict:
@@ -104,9 +113,28 @@ def _offseason(player: Player, z: np.ndarray, knobs: dict) -> Player:
     return replace(player, **rates)
 
 
-def _team(team: Team, z: np.ndarray, knobs: dict) -> Team:
-    """A team's true volume and defense: z = (volume, pass defense, rush defense, takeaways) draws."""
-    volume, defense = _lognormal(knobs["volume_sd"], z[0]), knobs["defense_sd"]
+def _season_role(player: Player, z: float, knobs: dict) -> Player:
+    """A whole-season role: x lognormal, sd = what his position's role curve leaves unexplained from one season to
+    the next (sim_next_year.json `role_sd`), for a rookie what the rookie role line at his pick leaves
+    (`rookies.<position>.role_sd`), x the tuned `season_roles`."""
+    model = sim_next_year.stored()
+    if player.games > 0:
+        sd = model.get("role_sd", {}).get(player.position, 0.0)
+    else:                                          # a rookie: around the role a player taken at his pick had
+        sd = model.get("rookies", {}).get(player.position, {}).get("role_sd", 0.0)
+    sd *= knobs["season_roles"]
+    if sd <= 0:
+        return player
+    x = _lognormal(sd, z)
+    return replace(player, targets=player.targets * x, carries=player.carries * x)
+
+
+def _team(team: Team, z: np.ndarray, knobs: dict, eff_z: float = 0.0) -> Team:
+    """A team's true volume and defense: z = (volume, pass defense, rush defense, takeaways) draws; `eff_z`: its
+    offense's shared efficiency draw, which the volume follows at the tuned `volume_eff_rho` (real teams that
+    pass well do not also pass more: season targets a game against yards per target, r = -0.28 in 2021-2025)."""
+    rho = knobs["volume_eff_rho"]
+    volume, defense = _lognormal(knobs["volume_sd"], rho * eff_z + math.sqrt(1 - rho ** 2) * z[0]), knobs["defense_sd"]
     return replace(team, targets=team.targets * volume, carries=team.carries * volume,
                    pass_def=team.pass_def * _lognormal(defense, z[1]), rush_def=team.rush_def * _lognormal(defense, z[2]),
                    takeaways=team.takeaways * _lognormal(defense, z[3]))
@@ -116,45 +144,21 @@ def _ranked(players: list[Player], position: str) -> list[Player]:
     return sorted((p for p in players if p.position == position), key=lambda p: (-(p.targets + p.carries), p.player_id))
 
 
-def bench_chance(rank: int) -> float:
-    """The chance a starting QB the public ranks `rank` at his position (sim_market.position_ranks) loses his
-    job healthy over a whole season: a logistic in the rank, fitted on real week-1 starters 2019-2025
-    (sim_next_year.json `bench`)."""
-    a, b = sim_next_year.stored()["bench"]["logit"]
-    return 1.0 / (1.0 + math.exp(-(a + b * rank)))
-
-
-def _starter(qbs: list[Player]) -> Player:
-    return max(qbs, key=lambda p: (p.starts, -p.player_id))
-
-
-def public_ranks(belief: World) -> dict[int, int]:
-    """{player: the public's rank at his position} (sim_market.position_ranks), except that each team's starting
-    QB (most starts weight) is ranked among the starting QBs only, as bench_chance is fitted."""
-    ranks = sim_market.position_ranks(belief)
-    starters = [_starter(qbs) for team in sorted(belief.teams)
-                if (qbs := [p for p in belief.roster(team) if p.position == "QB"])]
-    order = sorted(starters, key=lambda p: (ranks.get(p.player_id, UNRANKED), p.player_id))
-    return {**ranks, **{p.player_id: rank for rank, p in enumerate(order, start=1)}}
-
-
-def _roles(team_players: list[Player], ranks: Mapping[int, int]) -> tuple[list[Player], list[Player], list[Player]]:
-    """(leads who may bust: not a top-STAR_RANK player at his position, backups who may break out, QBs by starts)."""
+def _roles(team_players: list[Player], ranks: Mapping[int, int]) -> tuple[list[Player], list[Player]]:
+    """(leads who may bust: not a top-STAR_RANK player at his position, backups who may break out)."""
     leads, backups = [], []
     for position, count in LEADS.items():
         ranked = _ranked(team_players, position)
         leads += [p for p in ranked[:count] if ranks.get(p.player_id, STAR_RANK + 1) > STAR_RANK]
-        backups += ranked[count:count + 2]
-    return leads, backups, sorted((p for p in team_players if p.position == "QB"), key=lambda p: (-p.starts, p.player_id))
+        backups += [p for p in ranked[count:count + 2] if ranks.get(p.player_id, STAR_RANK + 1) > STAR_RANK]
+    return leads, backups
 
 
 def _changes(team_players: list[Player], dice: np.random.Generator, weeks: tuple[int, int],
-             knobs: dict, whole: bool = False, ranks: Mapping[int, int] | None = None,
-             share: float = 1.0) -> list[RoleChange]:
-    """This team's dated changes (`whole`: a season simulated from week 1; `ranks`: the public's position
-    ranks, sim_market.position_ranks; `share`: the share of a whole season's change weeks left). Always the
+             knobs: dict, ranks: Mapping[int, int] | None = None) -> list[RoleChange]:
+    """This team's dated changes (`ranks`: the public's position ranks, sim_market.position_ranks). Always the
     same number of draws, whichever happen."""
-    leads, backups, qbs = _roles(team_players, ranks or {})
+    leads, backups = _roles(team_players, ranks or {})
     rolls, when = dice.random(3), dice.integers(weeks[0], weeks[1] + 1, 3)
     picks, sizes = dice.random(2), dice.random(2)
     out = []
@@ -168,43 +172,28 @@ def _changes(team_players: list[Player], dice: np.random.Generator, weeks: tuple
         who = leads[int(picks[1] * len(leads))]
         cut = low + (high - low) * sizes[1]
         out.append(RoleChange(int(when[1]), who.player_id, cut, cut, 1.0, "bust"))
-    prospect = len(qbs) > 1 and whole and qbs[1].games == 0 and qbs[1].starts >= ROOKIE_HOPEFUL
-    bench = bench_chance((ranks or {}).get(qbs[0].player_id, UNRANKED)) * share if qbs else 0.0
-    if len(qbs) > 1 and rolls[2] < (knobs["rookie_bench_rate"] if prospect else bench):
-        out.append(RoleChange(int(when[2]), qbs[0].player_id, 1.0, 1.0, BENCHED, "bench"))
     return out
 
 
-def _share(from_week: int, last_week: int) -> float:
-    """The share of a whole season's change weeks left when simulating from `from_week`."""
-    first, last = change_weeks(from_week, last_week)
-    whole = change_weeks(1, last_week)
-    return (last - first + 1) / (whole[1] - whole[0] + 1)
-
-
-def rumors(belief: World, ranks: Mapping[int, int]) -> dict[str, dict[int, float]]:
+def rumors(belief: World, ranks: Mapping[int, int], bench: Mapping[int, float] | None = None) -> dict[str, dict[int, float]]:
     """{kind: {player: weight}} a false buzz line may be about (sim_market.buzz), each as plausible as the
     true changes: a team's backups break out (breakout_rate), its leads who are not stars bust (bust_rate),
-    its starting QB is benched (bench_chance of his rank), but never one ranked in the top STAR_RANK: the
-    public does not float a job-in-danger rumour about an established star."""
+    and the QB job holders whose job is really in danger lose it (`bench`: {holder: his chance over the change
+    weeks left}, sim_qb_jobs.decide; never an established starter)."""
     knobs = settings()
-    out: dict[str, dict[int, float]] = {"breakout": {}, "bust": {}, "bench": {}}
+    out: dict[str, dict[int, float]] = {"breakout": {}, "bust": {}, "bench": dict(bench or {})}
     for team in sorted(belief.teams):
-        leads, backups, qbs = _roles(list(belief.roster(team)), ranks)
+        leads, backups = _roles(list(belief.roster(team)), ranks)
         out["breakout"].update({p.player_id: knobs["breakout_rate"] / len(backups) for p in backups})
         out["bust"].update({p.player_id: knobs["bust_rate"] / len(leads) for p in leads})
-        if len(qbs) > 1 and ranks.get(qbs[0].player_id, UNRANKED) > STAR_RANK:
-            out["bench"][qbs[0].player_id] = bench_chance(ranks.get(qbs[0].player_id, UNRANKED))
     return out
 
 
-def expected_changes(belief: World, ranks: Mapping[int, int], from_week: int, last_week: int) -> float:
-    """The true changes a season makes on average (sizes the false buzz: sim_market.expected_hints)."""
-    knobs, share = settings(), _share(from_week, last_week)
-    starters = [_starter(qbs) for team in belief.teams
-                if (qbs := [p for p in belief.roster(team) if p.position == "QB"])]
-    return (len(belief.teams) * (knobs["breakout_rate"] + knobs["bust_rate"])
-            + share * sum(bench_chance(ranks.get(p.player_id, UNRANKED)) for p in starters))
+def expected_changes(belief: World) -> float:
+    """The true breakouts and busts a season makes on average (with sim_qb_jobs.expected_benchings, sizes the
+    false buzz: sim_market.expected_hints)."""
+    knobs = settings()
+    return len(belief.teams) * (knobs["breakout_rate"] + knobs["bust_rate"])
 
 
 def change_weeks(from_week: int, last_week: int) -> tuple[int, int]:
@@ -231,23 +220,38 @@ def truth(belief: World, seed: int, from_week: int, last_week: int, rookies: Col
     names = sorted(belief.teams)
     team_draws = replay_state.rng(seed, "sim", "teams").standard_normal((len(names), 5))
     team_z = {team: team_draws[i] for i, team in enumerate(names)}
-    teams = {team: _team(belief.teams[team], team_z[team][1:], knobs) for team in names}
+    teams = {team: _team(belief.teams[team], team_z[team][1:], knobs, float(team_z[team][0])) for team in names}
     ids = sorted(belief.players)
     draws = replay_state.rng(seed, "sim", "talent").standard_normal((len(ids), 3))
     players = {pid: _level(belief.players[pid], draws[i], float(team_z.get(belief.players[pid].team, [0.0])[0]), knobs)
                for i, pid in enumerate(ids)}
     if from_week == 1:
         season = replay_state.rng(seed, "sim", "offseason").standard_normal((len(ids), len(SEASON_RATES)))
-        players = {pid: _offseason(players[pid], season[i], knobs) for i, pid in enumerate(ids)}
+        roles = replay_state.rng(seed, "sim", "offseason", "role").standard_normal(len(ids))
+        players = {pid: _season_role(_offseason(players[pid], season[i], knobs), float(roles[i]), knobs)
+                   for i, pid in enumerate(ids)}
     first, last = change_weeks(from_week, last_week)
-    ranks, share = public_ranks(belief), _share(from_week, last_week)
+    ranks = sim_market.position_ranks(belief)
     changes = []
     for team in names:
         team_dice = replay_state.rng(seed, "sim", "changes", team)
-        changes += _changes([p for p in players.values() if p.team == team], team_dice, (first, last), knobs,
-                            from_week == 1, ranks, share)
+        changes += _changes([p for p in players.values() if p.team == team], team_dice, (first, last), knobs, ranks)
     # growth is fitted on rookie RBs/WRs/TEs only
     changes += growth([pid for pid in rookies if pid in players and players[pid].position in ("RB", "WR", "TE")],
                       seed, from_week)
     return World(MappingProxyType(players), MappingProxyType(teams),
                  tuple(sorted(changes, key=lambda c: (c.week, c.player_id))))
+
+
+def strength(teams: Collection[str], seed: int) -> dict[str, tuple[float, float]]:
+    """{team: (offense, defense)}: the hidden points it scores and allows over what the public's line expects
+    (see the module docstring). Its own random stream, so no other draw moves."""
+    sd = float(settings().get("strength_sd", STRENGTH_SD))
+    names = sorted(teams)
+    z = replay_state.rng(seed, "sim", "strength").standard_normal((len(names), 2))
+    return {team: (sd * float(z[i, 0]), sd * float(z[i, 1])) for i, team in enumerate(names)}
+
+
+def edge_scale() -> float:
+    """How much wider the truth's margins are than the public line's (see the module docstring)."""
+    return float(settings().get("edge_scale", EDGE_SCALE))

@@ -373,9 +373,9 @@ def tagged(data: SeasonData, injuries: Mapping[tuple[int, int], Injury | None]) 
 
 
 def future_changed(data: SeasonData, after_week: int, seed: int = 1) -> SeasonData:
-    """A copy whose real points, usage, box lines, projections and injury tags for every week after `after_week` are
-    different (about one projection in ten disappears; every later tag is removed and BREAKOUT_ID and BUST_ID
-    are on IR), and identical up to it: the no-hindsight probe."""
+    """A copy whose real points, usage, box lines, projections, injury tags and pregame lines (the schedule's spread
+    and total) for every week after `after_week` are different (about one projection in ten disappears; every
+    later tag is removed and BREAKOUT_ID and BUST_ID are on IR), and identical up to it: the no-hindsight probe."""
     rng = np.random.default_rng(seed)
 
     def shaken(table: Mapping[tuple[int, int], float], drop: float) -> dict[tuple[int, int], float | None]:
@@ -393,8 +393,11 @@ def future_changed(data: SeasonData, after_week: int, seed: int = 1) -> SeasonDa
     ranks = {(pid, week): rank if week <= after_week else rank + 1 + int(rng.integers(0, 60))   # always worse than before
              for (pid, week), rank in data.expert_ranks.items()}
     scores = {key: points + 7 if key[1] > after_week else points for key, points in data.scores.items()}
+    lines = replace(data.schedule, games=tuple(
+        replace(g, spread_line=(g.spread_line or 0.0) + 13.5, total_line=(g.total_line or 44.0) + 9.0)
+        if g.week > after_week else g for g in data.schedule.games))
     # returns stay the original's on purpose: they are the one sanctioned leak (see returns_changed)
-    return tagged(replace(changed, usage=MappingProxyType(usage), box=MappingProxyType(box),
+    return tagged(replace(changed, usage=MappingProxyType(usage), box=MappingProxyType(box), schedule=lines,
                           expert_ranks=MappingProxyType(ranks), scores=MappingProxyType(scores)), tags)
 
 

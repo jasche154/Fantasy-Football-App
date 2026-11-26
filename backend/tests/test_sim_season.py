@@ -1,11 +1,11 @@
 """sim_season: a simulated rest-of-season (and whole season) that the Replay engine plays like a real one."""
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import replace
 from types import MappingProxyType
 
 import pytest
 
-from services import replay_game as rg, replay_pool, replay_state, sim_season, sim_talent, sim_world
+from services import replay_game as rg, replay_pool, replay_state, sim_depth, sim_season, sim_talent, sim_world
 from tests import replay_fakes as fakes
 
 FROM = 8
@@ -33,7 +33,14 @@ def test_real_weeks_are_copied_through_untouched(data, simulated):
         return {pid: before for pid, games in season.team_by_week.items()
                 if (before := tuple(g for g in games if g[0] < FROM))}
     assert real(simulated) == real(data)
-    assert simulated.players == data.players and simulated.schedule == data.schedule
+    pooled = {pid for pid in simulated.players if pid >= sim_depth.BACKUP_QB_ID_BASE}     # sim_depth.with_backup_qbs
+    qbs = Counter(data.team_at(pid, FROM) for pid, p in data.players.items() if p.position == "QB")
+    assert len(pooled) == sum(1 for team in {t for t, _ in data.schedule.opponents} if qbs[team] < 2) > 0
+    assert {pid: p for pid, p in simulated.players.items() if pid not in pooled} == data.players
+    assert simulated.schedule.opponents == data.schedule.opponents
+    # the schedule is the same but for the simulated games' pregame lines (sim_lines), stored as a real season's are
+    unlined = [replace(g, spread_line=None, total_line=None) if g.week >= FROM else g for g in simulated.schedule.games]
+    assert unlined == [replace(g, spread_line=None, total_line=None) if g.week >= FROM else g for g in data.schedule.games]
 
 
 def test_every_simulated_week_is_filled(data, simulated):
@@ -165,7 +172,9 @@ def test_the_replay_engine_plays_a_simulated_season_to_a_champion(simulated):
 
 def test_a_league_that_jumps_in_drafts_on_a_board_whose_order_agrees_with_its_adp(data):
     """The draft room's default order (pre_rank: the week's expert snapshot, which the simulation draws) and the
-    market ADP come from one belief, injured starters included."""
+    market ADP agree, injured starters included. The experts carry the last real week's ranks over the join
+    (sim_market.implied_opinions, item 28) while the ADP is the belief's, so they agree less than one belief
+    would: real 2026 jump-in leagues 0.77-0.80 (0.88-0.91 before the seeding)."""
     from services import replay_chart, sim_metrics, sim_setup
 
     known = data.as_of(FROM)                        # as the live season loads: nothing from week FROM on
@@ -176,7 +185,7 @@ def test_a_league_that_jumps_in_drafts_on_a_board_whose_order_agrees_with_its_ad
     ranks = replay_chart.pre_ranks(replay_chart.pre_picks(drafted, replay_state.draft_week(settings)))
     top = sorted(ranks, key=ranks.get)[:60]
     adp = [drafted.players[pid].adp or 1000.0 for pid in top]
-    assert sim_metrics.spearman([ranks[pid] for pid in top], adp) > 0.85
+    assert sim_metrics.spearman([ranks[pid] for pid in top], adp) > 0.75
     assert max(adp[:12]) <= 48                      # nobody the market takes past round 4 is a first-rounder
 
 
@@ -259,7 +268,7 @@ def test_an_open_absence_misses_the_drawn_games_and_no_more(data, monkeypatch, o
 def test_buzz_runs_only_in_the_weeks_a_role_change_can_start(data, simulated):
     """False lines go where true ones can land (sim_talent.change_weeks), or every line outside it is false."""
     first, last = sim_talent.change_weeks(FROM, data.last_week)
-    weeks = {w for _, w in simulated.notes if w >= FROM}
+    weeks = {w for (_, w), note in simulated.notes.items() if w >= FROM and not note.startswith("Expected to start")}
     assert weeks and weeks <= set(range(first, last + 1))
 
 

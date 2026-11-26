@@ -139,3 +139,17 @@ def test_the_home_edge_favors_the_home_side_of_an_even_matchup():
     even = [Game(w, TEAMS[0], TEAMS[1], None, None, None, None) for w in range(1, 1001)]
     wins = rd.final_wins(even, seed=7)
     assert wins[TEAMS[0]] > wins[TEAMS[1]] + 30                  # P(home) = Phi(1.5 / 13.5) = 0.544
+
+
+def test_a_team_with_a_young_first_rounder_takes_no_qb_early_and_none_takes_two():
+    """Items 24 and 33: real teams with a recent first-round QB drafted none in the first two rounds."""
+    world, order = _world(set()), list(TEAMS)
+    young = {i * 10 + 1 for i, team in enumerate(TEAMS) if team in ("ARI", "NYJ")}
+    need = rd.needs(world, young=young)
+    assert "QB" not in need["ARI"] and "QB" not in need["NYJ"] and "QB" in need["NYG"]
+    passers = CLASS + (Rookie("Third Passer", "QB", "NYG", 40, "Miami"), Rookie("Fourth Passer", "QB", "NYG", 50, "Duke"))
+    for seed in range(20):
+        drafted = rd.draft(passers, order, need, seed)
+        qbs = [r for r in drafted if r.position == "QB"]
+        assert len({r.team for r in qbs}) == len(qbs)                                 # never two to one team
+        assert not [r for r in qbs if r.team in ("ARI", "NYJ") and r.pick <= 64]

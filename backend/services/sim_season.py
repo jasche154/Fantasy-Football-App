@@ -22,9 +22,18 @@ week's, from what is known through from_week - 1 (a half-published mid-week inju
    - tags known before W: sitting players get sim_injuries.tag (byes included), a player's first game back
      may carry return_tag's Q, and healthy regulars (PHANTOM_MIN_SNAP in the latest public belief, never the
      truth) may be listed Q/D (phantom) and play;
+   - each team's QB job holder is decided (sim_qb_jobs.decide: a hurt one sits, one back from injury may find
+     his fill-in keeping the job, a healthy one may be benched by sim_qb's weekly hazard) and starts whenever he
+     dresses, in the truth and in the public belief (sim_qb_jobs.apply: a benching is announced);
    - the public belief estimate(data so far, W) gives W's projections (hard-tagged players out), expert ranks
      (when the week has none; the preseason ones, week 0, follow base's ADP: sim_market.expert_ranks) and buzz
      notes (sim_market; false ones only in the weeks a true one can land, sim_talent.change_weeks);
+   - the pregame line of every game (sim_lines.week_lines, from the same public belief and the games so far;
+     a `posted` real line instead in the first simulated week) centres both the projections and the game: the
+     game's target is each side's line points + what the truth knows that the belief doesn't (the truth's mean
+     points minus the belief's, carried on the line: talent, in-game injuries, role changes) + the hidden team
+     strength (sim_talent.strength). The lines are stored on the schedule's games of the simulated weeks, as a
+     real season's closing lines are;
    - the truth at W plays every game (sim_game.play). Players on the field are hurt with
      sim_injuries.hazard (scaled down below FULL_EXPOSURE_SNAP); a hurt player plays exit_share of the game,
      then misses games_out team games (tagged from W + 1, as real tags are known before the week).
@@ -37,10 +46,11 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass, replace
 from types import MappingProxyType
 
-from services import replay_pool, replay_state, sim_depth, sim_injuries, sim_market, sim_talent
+from services import (replay_fillin, replay_pool, replay_state, sim_depth, sim_game, sim_injuries, sim_lines, sim_market,
+                      sim_qb_jobs, sim_talent)
 from services.replay_pool import Injury, SeasonData, hard_tag_returns
 from services.sim_game import on_field, play
-from services.sim_world import World, estimate, scoring_of
+from services.sim_world import RoleChange, World, estimate, scoring_of
 
 FULL_EXPOSURE_SNAP = 20.0        # a player who really plays (a recorded game) carries the full injury hazard
 PHANTOM_MIN_SNAP = 50.0          # healthy regulars this involved may be listed Q/D (the fit counted relevant ones)
@@ -181,13 +191,25 @@ def _hurt(world: World, team: str, out: set[int], dice) -> dict[int, sim_injurie
 
 
 def _market(tables: _Tables, base: SeasonData, belief: World, truth: World, seed: int, week: int, out: set[int],
-            false_rate: float, ranks: Mapping[int, int]) -> None:
+            false_rate: float, ranks: Mapping[int, int], lines: Mapping[str, sim_lines.Line] | None = None,
+            opinions: dict[str, dict[int, float]] | None = None,
+            team_prior: Mapping[str, sim_lines.Rating] | None = None, known: SeasonData | None = None,
+            benched: tuple = (), bench: Mapping[int, float] | None = None, filling: Collection[int] = (),
+            jobs: sim_qb_jobs.Jobs | None = None) -> None:
+    """The week's public tables (projections, expert ranks, buzz). `opinions`: the experts' memory, carried from
+    week to week and updated here: {"z": each player's opinion (sim_market.opinion), "worth": the value each is
+    ranked on (sim_market.held), "out": who was believed out}; `team_prior`: last season's team ratings (the expert values' scoring edges,
+    sim_lines.edges, are worked out only in a week whose expert ranks are drawn here); `known`: the season as
+    known before the week, when already built; `benched`: the week's QB job changes (their true lines, from
+    `jobs`: sim_qb_jobs.news); `bench`: each
+    holder's chance to lose the job (the false buzz's weights, sim_qb_jobs.decide); `filling`: the fill-in QBs
+    (replay_fillin.without_news), ranked no better than sim_market.FILL_IN_BEST."""
     scoring, last = scoring_of(base), base.last_week
-    known = _known(base, tables, week)
+    known = known if known is not None else _known(base, tables, week)
     snapshot = sorted(pid for pid, w in tables.projected if w == week)      # the snapshot's own (from_week only)
     for pid in snapshot:
         del tables.projected[(pid, week)]
-    fresh = sim_market.projections(belief, base.schedule, week, out, scoring)
+    fresh = sim_market.published(sim_market.projections(belief, base.schedule, week, out, scoring, lines), belief)
     tables.projected.update({(pid, week): p for pid, p in fresh.items()})
     if snapshot:
         # a player the snapshot alone admits (a backup QB, a WR6: no ADP, no game, no earlier projection) keeps a
@@ -201,24 +223,61 @@ def _market(tables: _Tables, base: SeasonData, belief: World, truth: World, seed
             ids = known.players if rank_week else base.as_of(0).players
             # preseason experts and the preseason market price players alike: the experts follow base's ADP
             market = {} if rank_week else {pid: p.adp for pid, p in base.players.items() if p.adp is not None}
+            dice = replay_state.rng(seed, "sim", "experts", rank_week)
+            weekly = worth = edges = None
+            if rank_week and opinions is not None:
+                edges = sim_lines.edges(known, week, belief, team_prior)
+                fresh_worth = sim_market.values(belief, scoring, last - rank_week + 1, edges)
+                if not opinions["z"] and week > 1:             # the first simulated week after real ones
+                    opinions["z"].update(sim_market.implied_opinions(belief, known, week - 1, fresh_worth))
+                weekly = sim_market.opinion(opinions["z"], [pid for pid in ids if pid in belief.players], dice)
+                worth = sim_market.held(opinions["worth"], fresh_worth, belief, opinions["out"],
+                                        [change.player_id for change in benched])
+                opinions["z"].update(weekly)
+                opinions["worth"] = worth
+                opinions["out"] = {pid: 1.0 for pid, p in belief.players.items() if p.out_weeks > 0}
             tables.expert_ranks.update(sim_market.expert_ranks(
-                belief, ids, rank_week, replay_state.rng(seed, "sim", "experts", rank_week), scoring,
-                last - max(1, rank_week) + 1, market))
+                belief, ids, rank_week, dice, scoring, last - max(1, rank_week) + 1, market, weekly,
+                edges if rank_week else None, worth, filling if rank_week else ()))
             tables.expert_age[rank_week] = sim_market.EXPERT_AGE["ros" if rank_week else "pre"]
     tables.notes.update(sim_market.buzz(truth.changes, belief, week, replay_state.rng(seed, "sim", "buzz", week),
-                                        false_rate, out, sim_talent.rumors(belief, ranks) if false_rate else None))
+                                        false_rate, out, sim_talent.rumors(belief, ranks, bench) if false_rate else None))
+    if jobs is not None and jobs.in_danger:                    # next week's likely benchings: their true hint
+        tables.notes.update(sim_market.buzz([RoleChange(week, pid, kind="bench") for pid in sorted(jobs.in_danger)],
+                                            belief, week, replay_state.rng(seed, "sim", "buzz", "bench", week), 0.0, out))
+    if jobs is not None:                                       # the week's job changes: their true lines
+        tables.notes.update(sim_qb_jobs.news(benched, jobs, truth.at(week), known, week,
+                                             {pid: p.name for pid, p in base.players.items()}))
     tags = {pid: injury for (pid, w), injury in tables.injuries.items() if w == week}
     tables.notes.update(sim_depth.fill_ins(belief, out, tags, base.players, week))
 
 
 def simulate(base: SeasonData, seed: int, from_week: int, prior: World | None = None,
-             carried: Mapping[int, sim_injuries.Spell] | None = None, rookies: Collection[int] = ()) -> SeasonData:
+             carried: Mapping[int, sim_injuries.Spell] | None = None, rookies: Collection[int] = (),
+             qbs: sim_qb_jobs.QbInputs = sim_qb_jobs.QbInputs(),
+             team_prior: Mapping[str, sim_lines.Rating] | None = None,
+             posted: Mapping[tuple[str, int], tuple[float, float]] | None = None) -> SeasonData:
     """A new SeasonData with weeks from_week..base.last_week simulated (see the module docstring). `carried`:
     the truth's absences running into week 1 of a whole season (sim_carryover.draw); `rookies`: the players in
-    their first season (sim_talent.growth)."""
+    their first season (sim_talent.growth); `qbs`: the QB jobs' database inputs (sim_setup.qb_inputs);
+    `team_prior`: last season's team ratings (sim_lines.carry_over); `posted`: {(home team, week): (spread,
+    total)}, real lines already posted, used for from_week's games only."""
     if not 1 <= from_week <= base.last_week:
         raise ValueError(f"Week {from_week} is outside the season (1-{base.last_week}).")
+    try:
+        return _simulate(base, seed, from_week, prior, carried, rookies, qbs, team_prior, posted)
+    finally:
+        sim_game._sides.clear()               # its belief sides hold this season's Worlds: none outlives it
+
+
+def _simulate(base: SeasonData, seed: int, from_week: int, prior: World | None,
+              carried: Mapping[int, sim_injuries.Spell] | None, rookies: Collection[int], qbs: sim_qb_jobs.QbInputs,
+              team_prior: Mapping[str, sim_lines.Rating] | None,
+              posted: Mapping[tuple[str, int], tuple[float, float]] | None) -> SeasonData:
     scoring, last = scoring_of(base), base.last_week
+    # later weeks' lines are never read (as_of blanks them); dropping them once spares every week's as_of copy
+    base = replace(base, schedule=replay_pool._lines_through(base.schedule, from_week))
+    base = sim_depth.with_backup_qbs(base, from_week)        # no team plays a game without a QB
     tables = _real(base, from_week)
     belief = estimate(base, from_week, prior)
     truth = sim_talent.truth(belief, seed, from_week, last, rookies)
@@ -228,28 +287,46 @@ def simulate(base: SeasonData, seed: int, from_week: int, prior: World | None = 
     absences = _absences(base, belief, seed, from_week, carried)
     returning: dict[int, sim_injuries.Spell] = {}
     buzz_weeks = sim_talent.change_weeks(from_week, last)          # false buzz only where true buzz can land
-    ranks = sim_talent.public_ranks(belief)                        # the public's ranks the rumours lean on
-    false_rate = sim_market.expected_hints(sim_talent.expected_changes(belief, ranks, from_week, last),
+    ranks = sim_market.position_ranks(belief)                      # the public's ranks the rumours lean on
+    established = sim_qb_jobs.established_of(base, belief, from_week == 1 and prior is not None, qbs)
+    jobs = sim_qb_jobs.start(base, belief, from_week, established, qbs)    # who holds each QB job (sim_qb_jobs)
+    expected = sim_talent.expected_changes(belief)
+    false_rate = sim_market.expected_hints(expected + sim_qb_jobs.expected_benchings(jobs, buzz_weeks[1] - buzz_weeks[0] + 1),
                                            buzz_weeks[1] - buzz_weeks[0] + 1)
     public = belief                                  # the latest public belief (last week's, for this week's tags)
+    hidden = sim_talent.strength(belief.teams, seed)
+    opinions: dict[str, dict[int, float]] = {"z": {}, "worth": {}, "out": {}}    # the experts' memory, week to week
+    lines: dict[tuple[str, int], sim_lines.Line] = {}
     for week in range(from_week, last + 1):
         tags = _tags(base, public, absences, returning, week, from_week, replay_state.rng(seed, "sim", "tags", week))
+        out = {pid for pid, injury in tags.items() if injury.hard} | {pid for pid, a in absences.items() if a.left > 0}
+        sitting = sim_depth.emergency(truth.at(week), out, {pid: a.left for pid, a in absences.items()})
+        tags = {pid: injury for pid, injury in tags.items() if pid in sitting or pid not in out}   # an emergency start is active
         tables.injuries.update({(pid, week): injury for pid, injury in tags.items()})
         public_out = {pid for pid, injury in tags.items() if injury.hard}
-        sitting = public_out | {pid for pid, a in absences.items() if a.left > 0}
-        public = estimate(_known(base, tables, week), week, prior)
+        known = _known(base, tables, week)
+        benched, bench = sim_qb_jobs.decide(jobs, truth.at(week), known, week, sitting, tags, seed)
+        # the job holders start in the public belief too, so the line and the projections see the week's QB
+        public = sim_qb_jobs.apply(estimate(known, week, prior), jobs)
+        filling = replay_fillin.without_news(known, week)   # the trade chart's definition, point in time
+        public = sim_market.fill_in_view(public, filling)
+        # a posted line only for the first simulated week: a later one knows nothing of the simulated games before it
+        pregame = sim_lines.week_lines(known, week, public, public_out, team_prior, posted if week == from_week else None)
+        lines.update({(home, week): line for home, line in pregame.items()})
         _market(tables, base, public, truth, seed, week, public_out,
-                false_rate if buzz_weeks[0] <= week <= buzz_weeks[1] else 0.0, ranks)
-        world = truth.at(week)
+                false_rate if buzz_weeks[0] <= week <= buzz_weeks[1] else 0.0, ranks, pregame, opinions, team_prior,
+                known, tuple(benched), bench, filling, jobs)
+        world = sim_qb_jobs.apply(truth.at(week), jobs)
         played_teams, fresh = set(), set()
         for game in sorted((g for g in base.schedule.games if g.week == week), key=lambda g: g.home_team):
             if game.home_team not in world.teams or game.away_team not in world.teams:
                 continue
             dice = replay_state.rng(seed, "sim", "hurt", week, game.home_team)
             hurt = {**_hurt(world, game.home_team, sitting, dice), **_hurt(world, game.away_team, sitting, dice)}
+            exits = {pid: spell.exit_share for pid, spell in hurt.items()}
+            shift = _shift(pregame.get(game.home_team), game.home_team, game.away_team, hidden)
             result = play(world, game.home_team, game.away_team, sitting,
-                          replay_state.rng(seed, "sim", "game", week, game.home_team), scoring,
-                          {pid: spell.exit_share for pid, spell in hurt.items()})
+                          replay_state.rng(seed, "sim", "game", week, game.home_team), scoring, exits, shift=shift)
             _record(tables, world, result, week)
             played_teams |= {game.home_team, game.away_team}
             fresh |= set(hurt)
@@ -264,7 +341,29 @@ def simulate(base: SeasonData, seed: int, from_week: int, prior: World | None = 
     tables.games = {pid: [g for g in games if g[0] < from_week or (pid, g[0]) in tables.actual]
                     for pid, games in tables.games.items()}
     final = tables.season(base)
-    return replace(final, returns=MappingProxyType(hard_tag_returns(final.injuries, final.actual, last)))
+    return replace(final, returns=MappingProxyType(hard_tag_returns(final.injuries, final.actual, last)),
+                   schedule=_with_lines(base.schedule, lines))
+
+
+def _shift(line: sim_lines.Line | None, home: str, away: str,
+           hidden: Mapping[str, tuple[float, float]]) -> dict[str, float] | None:
+    """{team: points added to its side's own mean under the truth} (see the module docstring): the game is centred
+    on the line's points (its edge widened) + the truth's mean points - the belief's (`line.belief`) + the hidden
+    strength. None without a line."""
+    if line is None or line.belief is None:
+        return None
+    bh, ba = line.belief
+    (ho, hd), (ao, ad) = hidden.get(home, (0.0, 0.0)), hidden.get(away, (0.0, 0.0))
+    edge = sim_talent.edge_scale() * line.margin / 2          # the truth's edges are wider than the shrunk line's
+    return {home: line.total / 2 + edge - bh + ho + ad, away: line.total / 2 - edge - ba + ao + hd}
+
+
+def _with_lines(schedule, lines: Mapping[tuple[str, int], sim_lines.Line]):
+    """The schedule with each simulated game's pregame line as its spread and total."""
+    games = tuple(replace(g, spread_line=lines[(g.home_team, g.week)].margin,
+                          total_line=lines[(g.home_team, g.week)].total)
+                  if (g.home_team, g.week) in lines else g for g in schedule.games)
+    return replace(schedule, games=games)
 
 
 def _record(tables: _Tables, world: World, result, week: int) -> None:

@@ -1,11 +1,9 @@
-"""sim_next_year_calib: the whole-season fits (efficiency scale, QB benchings, rookie growth) on synthetic data."""
-from types import MappingProxyType, SimpleNamespace
+"""sim_next_year_calib: the whole-season fits (efficiency scale, rookie growth) on synthetic data."""
 
 import numpy as np
 import pytest
 
 from services import sim_metrics, sim_next_year_calib as calib
-from services.replay_pool import Injury
 from tests import replay_fakes as fakes
 
 
@@ -15,28 +13,6 @@ def test_the_scale_with_the_least_error_wins_per_position_over_the_given_seasons
     assert calib.best_scale(by_scale, [2021, 2022])["QB"] == 1.0
     assert calib.best_scale(by_scale, [2021, 2022])["WR"] == 1.0
     assert calib.best_scale(by_scale, [2021])["WR"] == 0.0          # leaving 2022 out changes the answer
-
-
-def test_the_logistic_recovers_a_known_curve():
-    dice = np.random.default_rng(0)
-    a, b = -4.0, 0.1
-    rows = [(2020, int(rank), bool(dice.random() < 1 / (1 + np.exp(-(a + b * rank)))))
-            for rank in dice.integers(1, 33, 20000)]
-    fit = calib.logistic(rows)
-    assert fit["logit"] == pytest.approx([a, b], abs=0.15) and fit["n"] == 20000
-
-
-def test_a_starter_loses_the_job_only_when_healthy_and_for_good():
-    weeks = list(range(1, 18))
-    real = SimpleNamespace(last_week=18, injuries=MappingProxyType({}))
-    benched = {("KC", w): 1 if w < 6 else 2 for w in weeks}
-    assert calib._lost(real, benched, "KC", 1, weeks)
-    hurt = SimpleNamespace(last_week=18, injuries=MappingProxyType({(1, 7): Injury("O")}))
-    assert not calib._lost(hurt, benched, "KC", 1, weeks)            # tagged: an injury, not a benching
-    back = {("KC", w): 2 if w in (6, 7) else 1 for w in weeks}
-    assert not calib._lost(real, back, "KC", 1, weeks)               # two games, then his job again
-    late = {("KC", w): 1 if w < 17 else 2 for w in weeks}
-    assert not calib._lost(real, late, "KC", 1, weeks)               # resting in the last weeks
 
 
 def test_growth_recovers_a_known_chance_and_step():

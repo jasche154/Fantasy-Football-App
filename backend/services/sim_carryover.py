@@ -164,6 +164,14 @@ def draw(carries: Mapping[int, Carry], seed: int) -> dict[int, Spell]:
     return out
 
 
+def cleared(carries: Mapping[int, Carry], drawn: Mapping[int, Spell]) -> dict[tuple[int, int], str]:
+    """{(player, 1): news line} for each carried player the public expects to miss games (`note`) whom the truth
+    (`drawn`) has ready for week 1: his team says so before the opener, so a player priced as out who plays in
+    week 1 is never a surprise without a word."""
+    return {(pid, 1): "Ahead of schedule: cleared to play in week 1." for pid, c in carries.items()
+            if round(c.expected) > 0 and pid not in drawn}
+
+
 def note(c: Carry) -> str:
     """The preseason news line: when the public expects him back (the expected games out, rounded)."""
     when = round(c.expected)
