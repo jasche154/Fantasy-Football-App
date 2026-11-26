@@ -420,14 +420,15 @@ def _upgrade(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: _C
     valuable player it can drop for him (one of its DROPPABLE_COUNT least valuable, or any it can spare at his
     position) at a position it can use: a manager doesn't leave a 300-point player on
     the wire (testers added and flipped them for 75-85% of chart). He goes to IR after the move when he is out; with the
-    IR slot taken an out player is added only when he is worth more than the one on IR (they swap, `_stash_added`)."""
+    IR slot taken an out player is added only when he is worth more than the one on IR (they swap, `_stash_added`), and
+    never one who is out but can't go on IR (a suspension)."""
     spare = _spare(roster, ctx.know, ctx.protected, ctx.keep) if len(roster) >= ctx.settings.roster_size else []
     if not spare:
         return None
     stashed = max((v.chart for v in ctx.stash), default=None)   # IR taken: an out add must beat its player
     for add in sorted((v for v in free if v.position in SKILL), key=lambda v: (-v.chart, v.player_id)):
-        if add.out and stashed is not None and add.chart <= stashed:
-            continue                                              # he would sit on the bench out of reach
+        if add.out and (not replay_ir.eligible(ctx.know, add.player_id) or (stashed is not None and add.chart <= stashed)):
+            continue                                              # he would sit on the bench (suspended: no IR)
         drops = [*spare[:DROPPABLE_COUNT], *(v for v in spare[DROPPABLE_COUNT:] if v.position == add.position)]
         legal = [out for out in _legal_drops(roster, add, drops, ctx)
                  if add.chart >= max(UPGRADE_SHARE * out.chart, out.chart + UPGRADE_GAP)]

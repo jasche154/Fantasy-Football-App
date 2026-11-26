@@ -905,3 +905,18 @@ def test_an_out_player_added_with_a_lesser_player_on_ir_swaps_places_with_him():
     after = ai._stash_added(state, SETTINGS, hurt, team_id, fakes.BREAKOUT_ID)
 
     assert rs.team(after, team_id).ir == (fakes.BREAKOUT_ID,) and low in rs.team(after, team_id).roster
+
+
+def test_free_agency_never_adds_a_suspended_player_who_could_only_sit_on_the_bench():
+    """Review: a suspended player is out but can't go on IR, so a CPU would drop someone for a bench seat."""
+    week, team_id = 6, CPUS[0]
+    suspended = tagged_know(week, {(fakes.BREAKOUT_ID, week): fakes.Injury("SUS")})
+    hurt = tagged_know(week, {(fakes.BREAKOUT_ID, week): fakes.Injury("O")})
+    state = league(week, phase="open")
+    team = rs.team(state, team_id)
+    ctx = {k: ai._for_team(ai._context(k, SETTINGS, state), team) for k in (suspended, hurt)}
+
+    assert suspended.by_id[fakes.BREAKOUT_ID].out and not replay_ir.eligible(suspended, fakes.BREAKOUT_ID)
+    assert ai._upgrade([suspended.by_id[p] for p in team.roster], [suspended.by_id[fakes.BREAKOUT_ID]],
+                       ctx[suspended]) is None
+    assert ai._upgrade([hurt.by_id[p] for p in team.roster], [hurt.by_id[fakes.BREAKOUT_ID]], ctx[hurt]) is not None

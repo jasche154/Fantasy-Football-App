@@ -168,7 +168,9 @@ ZWJ = "‍"                                                       # joins emoji:
 
 
 def _invisible(ch: str) -> bool:
-    return ch in BLANK_LETTERS or unicodedata.category(ch)[0] == "C" or unicodedata.category(ch) in ("Zl", "Zp")
+    # Cc control, Cf format (bidi, zero-width), Cs surrogate, Co private use; not Cn: an emoji newer than this
+    # runtime's Unicode data is unassigned to it, not invisible
+    return ch in BLANK_LETTERS or unicodedata.category(ch) in ("Cc", "Cf", "Cs", "Co", "Zl", "Zp")
 
 
 def clean_name(name: str | None) -> str | None:

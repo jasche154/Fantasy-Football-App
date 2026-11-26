@@ -913,3 +913,22 @@ def test_a_league_name_that_is_blank_after_cleaning_gets_the_default(client):
     created = post(client, "/games", {"season": SEASON, "seed": 3, "name": "ㅤ⠀"})
 
     assert created["game"]["name"] == f"{SEASON} Replay"
+
+
+def test_a_league_name_keeps_an_emoji_newer_than_the_runtimes_unicode_data():
+    import unicodedata
+
+    from api.replay_routes import clean_name
+    newest = next(chr(cp) for cp in range(0x1FAE8, 0x1FAFF) if unicodedata.category(chr(cp)) == "Cn")
+
+    assert clean_name(f"Shakers {newest}") == f"Shakers {newest}"
+
+
+def test_a_nan_nested_in_a_list_is_echoed_as_text_in_a_422(client):
+    from api.validation import _safe
+
+    response = client.post(API + "/games", content='{"season": [1, [NaN, Infinity]]}',
+                           headers={"content-type": "application/json"})
+
+    assert response.status_code == 422
+    assert _safe([1, [float("nan"), float("inf")]]) == [1, ["nan", "inf"]]
