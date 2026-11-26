@@ -150,6 +150,17 @@ def test_a_young_first_rounder_loses_no_job_to_a_rookie_nor_any_as_a_rookie(data
     assert _changed(data, picks={B: 5}, young={A: season - 3}) == pytest.approx(0.3, abs=0.07)
 
 
+def test_a_young_first_rounder_back_from_injury_keeps_his_job_from_a_rookie(data, monkeypatch):
+    known = data.as_of(WEEK + 1)
+    monkeypatch.setattr(sim_qb, "starters", lambda known: {(TEAM, WEEK): B})
+    monkeypatch.setattr(sim_qb, "return_loss", lambda rank: 1.0)
+    for young, picks, holder in (({A: data.season - 2}, {B: 30}, A), ({A: data.season - 2}, {}, B), ({A: data.season}, {}, A)):
+        jobs = _jobs(picks=picks, young=young)
+        sim_qb_jobs.decide(jobs, _world(), known, WEEK, {A}, {}, 1)
+        sim_qb_jobs.decide(jobs, _world(), known, WEEK + 1, set(), {}, 1)
+        assert jobs.holders[TEAM] == holder
+
+
 def test_a_job_change_gets_its_true_line_the_week_it_happens(data):
     known = data.as_of(WEEK)
     jobs = _jobs()

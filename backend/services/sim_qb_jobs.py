@@ -98,11 +98,13 @@ def _last_starter(starts: Mapping[tuple[str, int], int], team: str, week: int) -
     return starts[(team, max(played))] if played else None
 
 
-def _returns(jobs: Jobs, team: str, holder: int, world: World, starts, week: int, sitting, draw: float) -> int | None:
+def _returns(jobs: Jobs, team: str, holder: int, world: World, starts, week: int, sitting, draw: float,
+             known_season: int) -> int | None:
     """The fill-in who keeps the job from a holder back from injury, or None."""
     new = _last_starter(starts, team, week)
     on_team = {p.player_id for p in _qbs(world, team)}
-    if (holder in jobs.established or new is None or new == holder or new not in on_team or new in sitting
+    young = holder in jobs.young and (new in jobs.picks or jobs.young[holder] == known_season)   # no job to a rookie
+    if (holder in jobs.established or young or new is None or new == holder or new not in on_team or new in sitting
             or draw >= sim_qb.return_loss(jobs.ranks.get(holder, sim_qb.UNRANKED))):
         return None
     return new
@@ -144,7 +146,7 @@ def decide(jobs: Jobs, world: World, known: SeasonData, week: int, sitting: Coll
             continue
         if jobs.out[team]:
             jobs.out[team] = False
-            new = _returns(jobs, team, holder, world, starts, week, sitting, draw)
+            new = _returns(jobs, team, holder, world, starts, week, sitting, draw, known.season)
         elif holder in tags or holder in jobs.established or jobs.young.get(holder) == known.season:
             continue                                           # a first-round rookie holder is not benched healthy
         else:
