@@ -1,13 +1,11 @@
 """Review of #66, round 3, item 4: small fixture tests for logic the season tests only reach indirectly."""
-from dataclasses import replace
 from datetime import datetime, timezone
-from types import MappingProxyType
 
 import numpy as np
 import pytest
 
 from database.models import DepthChartEntry, Player, PlayerStatus
-from services import replay_fillin, sim_draw, sim_game, sim_market, sim_qb, sim_setup, sim_world
+from services import replay_fillin, sim_draw, sim_game, sim_qb, sim_setup, sim_world
 from services.replay_pool import Injury
 from tests import replay_fakes as fakes
 from tests import test_replay_fillin as fillin_tests
