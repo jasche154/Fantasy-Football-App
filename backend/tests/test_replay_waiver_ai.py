@@ -4,6 +4,7 @@
 module; the behaviour tests read that log, the unit tests use one week of a freshly drafted league.
 """
 import time
+from unittest import mock
 from dataclasses import dataclass, replace
 from types import MappingProxyType
 
@@ -67,7 +68,14 @@ def top_hundred(knowledge: Knowledge) -> set[int]:
 
 @pytest.fixture(scope="module")
 def season() -> tuple[Week, ...]:
+    """The claim and free-agency rules over 12 weeks, without `_upgrade` (tested on its own below): its trade-value
+    adds would take the breakout back in free agency the week the market notices him, before any claim."""
     state, weeks = fakes.drafted_state(SETTINGS), []
+    with mock.patch.object(ai, "_upgrade", lambda *args: None):
+        return _season(state, weeks)
+
+
+def _season(state: State, weeks: list) -> tuple[Week, ...]:
     for week in range(1, SIM_WEEKS + 1):            # the order replay_game uses: IR, claims, IR, free agency
         before = replace(state, week=week, phase="waivers", locked=())
         knowledge = know(week)

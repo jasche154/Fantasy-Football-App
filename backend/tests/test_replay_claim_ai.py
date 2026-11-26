@@ -165,11 +165,12 @@ def test_a_full_roster_compares_a_hot_add_with_its_drops_at_his_hot_rate():
     assert ai._best_add(roster, [add], ctx, 0.0)[1] is add
 
 
-def test_free_agency_ignores_hot_streaks():
+def test_free_agency_ignores_hot_streaks(monkeypatch):
     state = replace(fakes.drafted_state(SETTINGS), week=3, phase="open")
     team = rs.team(state, 12)
     state = rs.with_team(state, replace(team, roster=team.roster[:-1]))        # an open roster spot
 
+    monkeypatch.setattr(ai, "_upgrade", lambda *args: None)   # trade-value adds follow the market's chart, not hot rates
     plain = ai.cpu_free_agency(state, SETTINGS, know(3), SEED)
     hot_run = ai.cpu_free_agency(state, SETTINGS, know(3, big(3)), SEED)
 

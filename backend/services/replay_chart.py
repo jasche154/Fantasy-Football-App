@@ -97,6 +97,11 @@ def pick_value(pick: float) -> float:
     return CHART_MAX * math.exp(-(max(1.0, pick) - 1) / TAU)
 
 
+def chart_pick(value: float) -> float | None:
+    """The draft pick `pick_value` gives this many chart points (None for 0: undraftable)."""
+    return 1.0 + TAU * math.log(CHART_MAX / value) if value > 0 else None
+
+
 def pick_at(curve: Mapping[str, Sequence[float]], position: str, rank: float) -> float:
     """The ADP pick of a (fractional, 1-based) position rank; past the last drafted, PICKS_PAST_LAST per rank."""
     picks = curve.get(position, ())

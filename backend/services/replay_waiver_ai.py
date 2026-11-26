@@ -9,7 +9,8 @@ numbers for the current week), so no CPU ever sees a result or a projection from
 - `cpu_free_agency` (after the run), free agents only: first cover every starting slot (kicker and
   defense included) that nobody on the roster can fill with a projection this week (bye or out), whatever
   that costs later. Then, up to MAX_FREE_AGENT_MOVES moves in all: fill an empty roster spot, get back
-  under a positional limit, and swap a kicker or defense who does play only for STREAM_EDGE projected points
+  under a positional limit, add a free agent whose trade value clearly beats a player it can drop at a position
+  it can use (`_upgrade`: UPGRADE_SHARE x and UPGRADE_GAP more; to IR at once when he is out), and swap a kicker or defense who does play only for STREAM_EDGE projected points
   (a streamer, about STREAMER_SHARE of CPUs picked once from the game's seed by `streamers`, for
   STREAMER_EDGE: it chases a matchup most weeks).
 - A fan never claims or adds his rival's players (replay_fans), unless one is the only way to field his lineup.
@@ -24,7 +25,7 @@ numbers for the current week), so no CPU ever sees a result or a projection from
   7 WR) unless nobody it has there plays this week, and it lets the extra one go again afterwards.
 - `cpu_ir` (before claims and free agency): a CPU brings back an IR player who lost his tag (into an open
   spot, swapping in an eligible player worth keeping, or cutting one it can spare, maybe him), then puts its
-  best eligible player worth keeping on IR. Size and this week's lineup read the active roster only; season
+  most valuable eligible player (by trade value) on IR. Size and this week's lineup read the active roster only; season
   points and positional limits also count the IR player (`_Context.stash`): he is coming back.
 
 The only dice roll is `streamers`, once per game; ties go to the better-ranked player, so the same state
@@ -64,6 +65,8 @@ STREAM_EDGE = 4.0                 # projected points a free-agent K / DST must b
                                   # all of them defenses chasing a matchup, 28 at 3.0 and 12 at 4.0)
 STREAMER_EDGE = 1.5               # a streamer's edge: it plays the matchup at K and DST
 STREAMER_SHARE = 0.4              # about this share of CPU managers stream
+UPGRADE_SHARE = 1.5               # a free agent worth this x the trade value of the player he replaces ...
+UPGRADE_GAP = 100.0               # ... and this many chart points more (100: about the top 100) is added for him
 STREAMED = ("K", "DST")
 LONG_TAGS = ("IR", "PUP")         # out for most of what is left (replay_values.IR_OUT_SHARE)
 
@@ -390,6 +393,23 @@ def _close_by_chart(spare: Sequence[ReplayValue]) -> list[ReplayValue]:
     return [v for run in runs for v in sorted(run, key=lambda v: (v.healthy_chart, v.player_id))]
 
 
+def _upgrade(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: _Context) -> Move | None:
+    """The free agent with the most trade value who clearly beats (UPGRADE_SHARE x and UPGRADE_GAP more) the least
+    valuable player it can drop for him at a position it can use: a manager doesn't leave a 300-point player on
+    the wire (testers added and flipped them for 75-85% of chart). He goes to IR after the move when he is out."""
+    drops = droppable(roster, ctx.know, ctx.protected) if len(roster) >= ctx.settings.roster_size else []
+    if not drops:
+        return None
+    for add in sorted((v for v in free if v.position in SKILL), key=lambda v: (-v.chart, v.player_id)):
+        legal = [out for out in _legal_drops(roster, add, drops, ctx)
+                 if add.chart >= max(UPGRADE_SHARE * out.chart, out.chart + UPGRADE_GAP)]
+        if legal:
+            return add.player_id, min(legal, key=lambda v: (v.chart, v.healthy_value, -v.player_id)).player_id
+        if add.chart < UPGRADE_GAP:
+            return None                               # sorted: nobody further down can clear the gap
+    return None
+
+
 def _stream(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: _Context) -> Move | None:
     """Swap a kicker for a kicker or a defense for a defense when the free agent beats the team's own by
     `ctx.stream_edge` this week (one who does not play at all is `_cover`'s job). The bigger edge wins."""
@@ -415,7 +435,7 @@ def _next_move(state: State, team_id: int, ctx: _Context, made: int) -> Move | N
     roster, ctx = [ctx.know.by_id[pid] for pid in team.roster], _for_team(ctx, team)
     free = _unrostered(state, ctx.know, state.locked)
     allowed = [v for v in free if not replay_fans.banned(team, v.team)]
-    steps = (_cover, _fill_spot, _trim, _stream) if made < MAX_FREE_AGENT_MOVES else (_cover,)
+    steps = (_cover, _fill_spot, _trim, _upgrade, _stream) if made < MAX_FREE_AGENT_MOVES else (_cover,)
     found = next((move for step in steps if (move := step(roster, allowed, ctx)) is not None), None)
     return found if found is not None or len(allowed) == len(free) else _cover(roster, free, ctx)
 
@@ -437,18 +457,20 @@ def cpu_free_agency(state: State, settings: Settings, know: Knowledge, seed: int
             if move is None:
                 break
             state = replay_waivers.execute_move(state, settings, know, team_id, *move)
+            if not rs.team(state, team_id).ir and replay_ir.eligible(know, move[0]):
+                state = replay_ir.place(state, know, team_id, move[0])     # a stash frees his spot at once
     return state
 
 
 # ---------------- the IR slot ----------------
 
 def _stash_pick(group: Sequence[ReplayValue], ctx: _Context) -> ReplayValue | None:
-    """The best eligible skill player the team would never spare (top player, or above replacement), and only
-    one the rest of `group` can field a lineup without (a QB-heavy superflex roster may lack a spare back)."""
+    """The most valuable (by trade value) eligible skill player, and only one the rest of `group` can field a
+    lineup without (a QB-heavy superflex roster may lack a spare back). Any eligible player is better on IR
+    than on the bench: it frees his spot (testers saw season-ending injuries on benches beside an empty slot)."""
     keep = [v for v in group if v.position in SKILL and replay_ir.eligible(ctx.know, v.player_id)
-            and (v.player_id in ctx.protected or v.last_projection > ctx.know.replacement[v.position])
             and rv.can_field_lineup([o.position for o in group if o is not v], ctx.settings)]
-    return max(keep, key=lambda v: (v.healthy_value, v.ros_ppg, -v.player_id), default=None)
+    return max(keep, key=lambda v: (v.chart, v.healthy_value, -v.player_id), default=None)
 
 
 def _bring_back(state: State, ctx: _Context, team: rs.Team, player_id: int) -> State:
