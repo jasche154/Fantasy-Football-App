@@ -10,7 +10,7 @@ than one attempt; the re-trade lock keeps it from moving the same players again.
 1. Each side's TOP_SKILL tradable skill players (out players too, from the active roster), most valuable
    first; a shark looks first at the other side's slumping stars (star x a negative form_chart: buy low)
    and offers its own hot players (sell high); a stasher looks first at the other side's out stars with a
-   return date (healthy_chart). Packages of one or two of them. A fan never receives his rival's players.
+   return date (healthy_chart) and never offers his own. Packages of one or two of them. A fan never receives his rival's players.
 2. Keep the deals that pass every CPU's market guard on package chart sums (cheap: no lineup maths) and,
    for an offer to the user, need no drop from him and look right for him: a shop's is fair for him
    (`fair_for_user`); one a CPU makes because it wants his player gives him more than he sends, by its
@@ -75,8 +75,10 @@ def _tradable(state: State, know: Knowledge, team: Team, look: str = "",
               held_back: frozenset[int] = frozenset()) -> list[ReplayValue]:
     """The team's TOP_SKILL skill players that may move (not re-trade locked, not `held_back`; out players may:
     an IR slot is not on the roster), in search order."""
+    stasher = team.persona == "stasher" and not team.is_user       # his injured stars are what he collects
     values = [value for pid in team.roster if (value := know.by_id[pid]).position in SKILL
-              and not rs.retrade_locked(state, pid) and pid not in held_back]
+              and not rs.retrade_locked(state, pid) and pid not in held_back
+              and not (stasher and replay_personas.stashable(value))]
     return sorted(values, key=lambda v: _order(v, look))[:TOP_SKILL]
 
 

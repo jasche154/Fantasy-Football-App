@@ -180,8 +180,10 @@ def test_a_shop_offer_that_also_sends_another_worrying_player_names_the_shopped_
     state = rs.with_team(state, cpu)
     know = knowledge(state)
     shopped, other = cpu.roster[1], cpu.roster[0]
+    rate = know.by_id[other].ros_ppg
     worried = replace(know.by_id[other], form_chart=-0.5 * know.by_id[other].chart, shock_chart=0.0, out=False,
-                      injury=None, healthy_chart=max(know.by_id[other].healthy_chart, replay_mood.FEEL_MIN_CHART))
+                      injury=None, healthy_chart=max(know.by_id[other].healthy_chart, replay_mood.FEEL_MIN_CHART),
+                      recent_points=(0.5 * rate, 0.5 * rate))                       # a two-game slump
     know = replace(know, by_id=MappingProxyType({**know.by_id, other: worried}))
     played = DATA.as_of(state.week)
     assert replay_mood.feeling(worried, "panicky").kind == "worried"

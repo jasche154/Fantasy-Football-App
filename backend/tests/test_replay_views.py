@@ -187,7 +187,7 @@ def test_moods_are_worked_out_once_per_team_per_request(monkeypatch):
     Game works each team's mood out once."""
     calls: list[int] = []
     real = views.replay_mood.mood_line
-    monkeypatch.setattr(views.replay_mood, "mood_line", lambda know, team, persona=None: (calls.append(team.id), real(know, team, persona))[1])
+    monkeypatch.setattr(views.replay_mood, "mood_line", lambda know, team, persona=None, fresh=(): (calls.append(team.id), real(know, team, persona, fresh))[1])
     shown = game(at(8))
     for screen in (views.summary, league.trades, league.activity, league.chat, league.standings):
         screen(shown)
@@ -558,7 +558,7 @@ def test_verdict_is_told_from_the_users_side():
     shown = league.verdict(game(state), found)
 
     assert set(shown) == {"accepted", "reasons", "fair_label", "value_give", "value_get", "percent", "your_gain",
-                          "their_gain", "give", "get", "your_drops", "their_drops", "suggestion"}
+                          "their_gain", "give", "get", "your_drops", "their_drops", "suggestion", "premium"}
     assert [row["player"]["id"] for row in shown["give"]] == give and [r["player"]["id"] for r in shown["get"]] == get
     assert shown["give"][0]["value"] == shown["value_give"] and shown["accepted"] == found.accepted
     assert isinstance(shown["reasons"], list) and (shown["accepted"] or shown["reasons"])

@@ -826,3 +826,32 @@ def test_free_agency_never_adds_by_trade_value_for_a_small_gap():
     close = [v for v in free if v.chart < worst.chart + ai.UPGRADE_GAP]
 
     assert ai._upgrade(roster, close, ctx) is None
+
+
+def test_a_cpu_drops_a_player_it_just_added_only_after_every_other_spare_one():
+    week, team_id = 6, CPUS[0]
+    state = league(week, phase="open")
+    roster = values(state, team_id, week)
+    worst = ai._spare(roster, know(week), frozenset())[0]
+    added = rs.add_event(state, "add", team_id, "added", (worst.player_id,))
+
+    ctx = ai._for_team(ai._context(know(week), SETTINGS, added), rs.team(added, team_id))
+
+    assert worst.player_id in ctx.keep
+    assert ai.droppable(roster, know(week), ctx.protected, ctx.keep)[0] != worst
+
+
+def test_covering_a_slot_never_cuts_a_better_player_who_is_only_on_a_bye():
+    week, team_id = 6, CPUS[0]
+    state = league(week, phase="open")
+    roster = values(state, team_id, week)
+    resting = max((v for v in roster if v.position == "WR"), key=lambda v: v.healthy_value)
+    bye = replace(resting, projection=0.0, out=False)
+    others = [v if v is not resting else bye for v in roster]
+    ctx = ai._for_team(ai._context(know(week), SETTINGS, state), rs.team(state, team_id))
+    free = [v for v in ai._unrostered(state, know(week)) if v.position == "TE" and v.projection > 0]
+    hole = [v for v in others if v.position != "TE"]        # nobody plays TE: the cover must find a drop
+
+    move = ai._cover(hole, free, ctx)
+
+    assert move is None or move[1] != bye.player_id

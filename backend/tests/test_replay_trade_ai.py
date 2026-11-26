@@ -474,3 +474,21 @@ def test_a_shop_that_closes_and_reopens_later_sends_one_new_offer(monkeypatch):
     after = mood_knowledge(later_week + 1)
     after = with_values(after, slumping(after.by_id[star.player_id], 0.1))
     assert _shop_offer(renewed, after, monkeypatch, never).offers == renewed.offers      # no repeat while open
+
+
+def test_a_stasher_never_offers_away_an_injured_star_he_collects():
+    from types import MappingProxyType
+    state = fakes.drafted_state(SETTINGS)
+    know = knowledge(6)
+    team = replace(rs.team(state, STAR_OWNER), persona="stasher")
+    hurt = [pid for pid in team.roster if replay_personas.stashable(know.by_id[pid])]
+    if not hurt:                                                    # make his best player out with a return date
+        best = max((pid for pid in team.roster if know.by_id[pid].position in SKILL), key=lambda p: know.by_id[p].chart)
+        news = next(v.news for v in know.values if replay_personas.stashable(v))
+        know = replace(know, by_id=MappingProxyType({**know.by_id, best: replace(know.by_id[best], out=True, news=news)}))
+        hurt = [best]
+
+    tradable = {v.player_id for v in ai._tradable(state, know, team)}
+
+    assert not tradable & set(hurt)
+    assert set(hurt) & {v.player_id for v in ai._tradable(state, know, replace(team, persona="balanced"))}

@@ -266,7 +266,8 @@ class Game:
     @cached_property
     def moods(self) -> dict[int, str | None]:
         """Each CPU's mood line now (replay_mood.mood_line), worked out once per request: team_ref asks per row."""
-        return {team.id: replay_mood.mood_line(self.know, team, replay_personas.now(self.state, team))
+        fresh = replay_mood.acquired(self.state)
+        return {team.id: replay_mood.mood_line(self.know, team, replay_personas.now(self.state, team), fresh)
                 for team in self.state.teams if not team.is_user}
 
     @cached_property

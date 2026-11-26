@@ -483,3 +483,24 @@ def test_a_stashers_worried_line_is_about_a_slump_never_about_selling_before_he_
     from services import replay_chat
     lines = replay_chat.bank()["offer_worried"]["stasher"]
     assert not [line for line in lines if re.search(r"still has value|before|fading|while he", line, re.IGNORECASE)]
+
+
+def test_worry_needs_two_games_below_his_rate_never_one():
+    """Oracle 2024: Justin Jefferson scoring 16 / 23 / 20 / 20 / 15 was shopped with "I age a year"."""
+    value = slumping(best_skill(knowledge(), league().teams[1]), 0.3)
+    one_bad = replace(value, recent_points=(1.0, value.ros_ppg + 5))
+    scoring = replace(value, recent_points=(value.ros_ppg + 1, value.ros_ppg + 6))
+
+    assert rm.feeling(value, "panicky").kind == "worried"
+    assert rm.feeling(one_bad, "panicky") is None and rm.feeling(scoring, "panicky") is None
+
+
+def test_nobody_is_worried_about_a_player_he_got_this_week():
+    state, know = league(), knowledge()
+    team = state.teams[1]
+    star = slumping(best_skill(know, team), 0.3)
+    know = with_values(know, star)
+    traded = replace(state, traded={star.player_id: state.week})
+
+    assert "Worried about" in (rm.mood_line(know, team, "panicky") or "")
+    assert "Worried about" not in (rm.mood_line(know, team, "panicky", rm.acquired(traded)) or "")
