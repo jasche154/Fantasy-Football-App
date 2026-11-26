@@ -24,7 +24,9 @@ and who nobody could think was hurt (`might_be_hurt`, on last week's game), shop
 probability SHOP_RATE (panicky most; steady and shark never). At most one shop per CPU and MAX_SHOPS in the
 league. A shop holds a seeded `discount` (DISCOUNT_BASE by persona + worry, +- jitter, within
 DISCOUNT_RANGE) that `replay_trade_value.tally` takes off his price for the user only, via
-`replay_state.markdowns`. While it is open the player is the user's to buy: no other CPU may trade for him
+`replay_state.markdowns`. The shop's own offer is judged at the CPU's own-offer bar (replay_trade_ai, as accepting it
+is), so the discount stacks with the persona's edge: a shopped player can go for about 0.79 of the CPU's own price
+(still inside the 80% market guard on chart values). While it is open the player is the user's to buy: no other CPU may trade for him
 (replay_trade_ai). It stays open week to week while he stays that worried and the player is on his active
 roster and doesn't look hurt; a good game or the deadline closes it, and a trade, drop or IR move removes it
 at once (`replay_state.with_team`). He sends the user his shop offer for a player once per shop (`Shop.opened`,

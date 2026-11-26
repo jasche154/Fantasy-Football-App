@@ -1288,7 +1288,9 @@ that week's games on; only scoring a week reads its real points.
   (chance by persona: panicky 75%, gambler 35%, balanced 25%, steady and shark never; one shop per CPU, at
   most 2 in the league): he sends you a message, the player shows under **Shopping to you** on the Trades
   tab, and for you only he asks a seeded 5-15% less for that player (panicky 9%, gambler 7%, balanced 6%,
-  plus more the more worried he is). The discount is applied once, in the CPU's value test
+  plus more the more worried he is). His own shop offer is judged at the bar he uses for his own offers, so the
+  discount stacks with his persona's offer edge: a shopped player can go for about 0.79 of his price, not only
+  5-15% off (still inside the 80% market guard). The discount is applied once, in the CPU's value test
   (`replay_trade_value.tally` via `replay_state.markdowns`), so evaluate, propose, counters and his own offer
   all see it; it never moves the chart, and the re-trade lock stops you flipping the player. A manager who
   shops a starter has chosen to lose him, so a deal for him carries no lineup-loss cost for the CPU: an
