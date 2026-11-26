@@ -17,8 +17,9 @@ Hard rules sit on top: a roster must always be able to end legal (every starting
 included), position caps, kickers and defenses only in the last rounds, no backup QB or TE before round
 10 of 15, never a reach of more than a round of picks in rounds 1-4, a round and a half in rounds 5-9 and
 25 picks later (never more than 25), and at least two bench backs and two bench receivers.
-In a superflex league (replay_slots.two_qb: a SUPERFLEX slot or 2+ QB slots) a CPU drafts from the 2-QB ADP
-list (replay_adp_format), else through replay_chart.superflex_view (QB ADP x SUPERFLEX_QB_ADP), and counts the
+In a superflex league (replay_slots.two_qb: a SUPERFLEX slot or 2+ QB slots) a CPU drafts through
+replay_chart.superflex_view (replay_superflex.view: RBs, WRs and TEs in the league-scoring order, each QB placed
+among them where the real 2-QB list takes him, the fitted average without one), and counts the
 SUPERFLEX slots as QB starters (so it drafts two QBs early and may back them up).
 The user may pick anyone as long as the roster can still end legal. Players without an ADP come after
 everyone who has one, by their own projection for the first week played (0 when a hard tag rules him out).

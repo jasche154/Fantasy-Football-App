@@ -8,10 +8,10 @@ floored at pick KDST_FIRST_PICK + N (the ADP source takes them rounds too early)
 depends on the weeks left: values move with injuries, form, expert ranks and a small bump once a player's
 bye is behind him.
 
-- Superflex leagues (`superflex_view`): the season's 2-QB ADP list when it is loaded (data.adp_format ==
-  "2qb", replay_adp_format), used as is. Without it every QB's ADP (and its spread) is multiplied by
-  SUPERFLEX_QB_ADP before anything above reads it: QB1 goes about pick 10 instead of 25, QB12 about 45
-  instead of 110, close to real superflex drafts. The chart, pre_rank and the CPU draft all use it.
+- Superflex leagues (`superflex_view` = replay_superflex.view): RBs, WRs, TEs, Ks and DSTs on the league-scoring
+  1-QB list exactly as in a regular league; each QB at the pick of the non-QB slot the real 2-QB list puts him
+  in (the fitted average slots without a 2-QB list). The chart, pre_rank and the CPU draft all use it. `star`
+  reads a non-QB's rank in the 1-QB draft (replay_superflex.one_qb), so his chart is the regular league's.
 - pre_rank: overall order of preseason picks (the slot of his preseason expert rank, else of his ADP);
   star = clamp((STAR_TOP - pre_rank) / STAR_SPAN, 0, 1). A league drafted in week K (jump in now) takes the
   latest expert snapshot by week K instead: its "preseason" is its draft.
@@ -26,9 +26,12 @@ bye is behind him.
   stand in (ageing a week per week played). A season with no expert ranks at all (2018-19) has the ranks of
   ros_ppg (the sites' slow consensus) stand in at EXPERT_WEIGHT from week 1 (STAND_IN_EXPERTS): the model
   alone swung QBs 124 -> 495 -> 633 in three weeks; this halves the weekly moves and ranks no worse.
-- chart: with a news report (replay_news), healthy_chart x share of games he plays x AVAILABILITY_SHARE (0 if
-  out for the season; from his second week out only the model half is discounted, the experts already price
-  it). Out without a report: healthy_chart x the OUT_SHARE availability replay_values gives him.
+- chart: healthy_chart x (1 - replay_chart_injury.discount(games he misses, games left)): with a news report
+  (replay_news) the games before the reported return (a season-ending report, or a return after the league's
+  last week, keeps replay_chart_injury.SEASON_REPORT_KEEP); out without one, unreported_discount. The whole
+  chart is discounted: while he is out it is his frozen pre-absence value (replay_values._frozen). The
+  discount follows the user's targets (out 1-4 weeks 5-12% off, 6+ weeks 35-45%), not the share of games
+  missed: availability and expected_missed (lineups, waivers) stay the real expected games.
 
 Pure: no database, no Knowledge.
 """
@@ -36,12 +39,11 @@ import math
 from bisect import bisect_left, bisect_right
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
-from dataclasses import replace
 from functools import lru_cache
 from types import MappingProxyType
 
-from services import replay_news, replay_pool, replay_role, replay_shocks
-from services.replay_pool import PoolPlayer, SeasonData
+from services import replay_chart_injury, replay_news, replay_pool, replay_role, replay_shocks, replay_superflex
+from services.replay_pool import SeasonData
 
 TAU = 40.0                     # pick_value decay: 1 -> 1000, 12 -> 760, 24 -> 563, 50 -> 294, 100 -> 84
 CHART_MAX = 1000.0
@@ -58,9 +60,7 @@ EXPERT_WEIGHT = 0.65           # blend weight on the expert rank for a snapshot 
 EXPERT_FRESH_DAYS = 10
 UNLISTED_GAP = 10              # missing from an existing snapshot: last listed + this
 BYE_BUMP = 1.03                # once his bye is behind him
-AVAILABILITY_SHARE = 0.9       # chart x share_played x this, when a news report exists
 DAYS_PER_WEEK = 7
-SUPERFLEX_QB_ADP = 0.4         # superflex without a 2-QB ADP list: a QB's ADP x this
 STAND_IN_EXPERTS = True        # a season with no expert ranks at all: ros_ppg ranks stand in at EXPERT_WEIGHT
 
 
@@ -78,23 +78,11 @@ def slot_curve(data: SeasonData) -> Mapping[str, tuple[float, ...]]:
     return MappingProxyType({position: tuple(found) for position, found in curve.items() if found})
 
 
-@lru_cache(maxsize=64)
-def superflex_view(data: SeasonData) -> SeasonData:
-    """The season as a superflex league sees it: every QB's ADP and spread x SUPERFLEX_QB_ADP (cached, so
-    the curves built on it are cached too). A season read with the 2-QB ADP list already prices QBs so."""
-    if data.adp_format == "2qb":
-        return data
-
-    def scaled(p: PoolPlayer) -> PoolPlayer:
-        if p.position != "QB" or p.adp is None:
-            return p
-        stdev = p.adp_stdev * SUPERFLEX_QB_ADP if p.adp_stdev is not None else None
-        return replace(p, adp=p.adp * SUPERFLEX_QB_ADP, adp_stdev=stdev)
-    return replace(data, players=MappingProxyType({pid: scaled(p) for pid, p in data.players.items()}))
+superflex_view = replay_superflex.view          # the season as a superflex league values it (cached)
 
 
 def clear_cache() -> None:
-    superflex_view.cache_clear()
+    replay_superflex.clear_cache()
     slot_curve.cache_clear()
     _by_week.cache_clear()
     replay_news.clear_cache()
@@ -223,15 +211,17 @@ def _injured(data: SeasonData, row: dict, news: "replay_news.Report | None", wee
              expert: float, model: float) -> tuple[float, dict]:
     """(chart, availability fields from the news) from his weighted expert and model parts."""
     if news is None:
-        return (expert + model) * row["availability"], {}
-    share = replay_news.share_played(news, _game_weeks(data, row["team"], week, end_week))
+        if not row["out"]:
+            return expert + model, {}
+        injury = row["injury"]
+        ir_tag = injury is not None and injury.tag in ("IR", "PUP")
+        return (expert + model) * (1 - replay_chart_injury.unreported_discount(row["games_left"], ir_tag)), {}
+    games = _game_weeks(data, row["team"], week, end_week)
+    share = replay_news.share_played(news, games)
     extra = {"availability": round(share, 3), "expected_missed": round(row["games_left"] * (1 - share), 2)}
-    discount = share * AVAILABILITY_SHARE
-    if news.back is None:
-        return 0.0, extra
-    if week > news.since:                               # second week out on: the experts already price it
-        return expert + model * discount, extra
-    return (expert + model) * discount, extra
+    if news.back is None or share == 0:                 # season-long (or back after the league's last week); may be wrong
+        return (expert + model) * (1 - replay_chart_injury.season_report_discount(len(games))), extra
+    return (expert + model) * (1 - replay_chart_injury.discount(len(games) * (1 - share), len(games))), extra
 
 
 Parts = Mapping[int, tuple[float, float, tuple[int, int, str]]]    # {id: (expert part, model part, open streak)}
@@ -249,11 +239,21 @@ def charts(data: SeasonData, rows: Sequence[dict], priors: Mapping[int, float], 
 
 
 def base_charts(data: SeasonData, rows: Sequence[dict], priors: Mapping[int, float], week: int,
-                end_week: int, drafted: int = 0) -> tuple[dict[int, dict], Parts, str]:
+                end_week: int, drafted: int = 0, regular: SeasonData | None = None,
+                frozen: Mapping[int, float] | None = None, live: dict[int, float] | None = None,
+                ) -> tuple[dict[int, dict], Parts, str]:
     """`charts` without the seeded news: (fields with news None, the parts `with_news` needs for players
-    with an open hard-tag streak, rank_source). `drafted`: the league's draft week (see `pre_picks`)."""
+    with an open hard-tag streak, rank_source). `drafted`: the league's draft week (see `pre_picks`).
+    `regular`: a superflex league's season on the 1-QB list (replay_superflex.one_qb), whose overall ranks
+    set a non-QB's `star`, so the SUPERFLEX slot changes only the QBs. `frozen`: {id: healthy chart} for the
+    players in an injury absence (replay_values), standing in for the expert and model parts; their live
+    healthy chart goes into `live` when given."""
+    frozen = frozen or {}
     curve, picks = slot_curve(data), pre_picks(data, drafted)
     overall = pre_ranks(picks)
+    star_ranks = overall if regular is None else {
+        **pre_ranks(pre_picks(regular, drafted)),
+        **{pid: rank for pid, rank in overall.items() if data.players[pid].position == "QB"}}
     listed, age_weight = snapshot(data, week)
     by_position: dict[str, list[dict]] = defaultdict(list)
     for row in rows:
@@ -267,7 +267,7 @@ def base_charts(data: SeasonData, rows: Sequence[dict], priors: Mapping[int, flo
         w = age_weight if ranks else 0.0
         source = "experts" if w > 0 else source
         last = max(ranks, default=0)
-        stars = {r["player_id"]: star(overall.get(r["player_id"])) for r in group}
+        stars = {r["player_id"]: star(star_ranks.get(r["player_id"])) for r in group}
         form = {r["player_id"]: model_ppg(r["ros_ppg"], priors.get(r["player_id"], 0.0), r["recent_points"],
                                           stars[r["player_id"]]) for r in group}
         model = fractional_ranks(replay_role.model_scores(data, group, form, week))
@@ -283,6 +283,10 @@ def base_charts(data: SeasonData, rows: Sequence[dict], priors: Mapping[int, flo
             model_part = (1 - w) * model_value * bump
             if expert + model_part > CHART_MAX:         # the bye bump never lifts anyone past the top of the scale
                 expert, model_part = (part * CHART_MAX / (expert + model_part) for part in (expert, model_part))
+            if pid in frozen:                           # out: his value before the absence (replay_values._frozen)
+                if live is not None:
+                    live[pid] = expert + model_part
+                expert, model_part = min(CHART_MAX, frozen[pid] * bump), 0.0
             streak = replay_news.open_streak(data, pid, week)
             if streak is not None:
                 parts[pid] = (expert, model_part, streak)

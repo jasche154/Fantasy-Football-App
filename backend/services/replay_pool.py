@@ -22,6 +22,7 @@ from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from threading import Lock
 from types import MappingProxyType
+from weakref import WeakKeyDictionary, ref
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
@@ -34,6 +35,7 @@ from services.kdst_rankings import DST_PREFIX
 from services.projections import load_game_lines
 from services.replay_box import BoxLine
 from services.replay_live import SUPPORTED_SEASONS  # noqa: F401 (re-exported; replay_live.replay_seasons grows it)
+from services.replay_returns import hard_tag_returns  # noqa: F401 (re-exported)
 from services.replay_readiness import (  # noqa: F401 (re-exported)
     MIN_ADP_PLAYERS, MIN_DEFENSES, MIN_KICKERS, data_version, readiness, ready_last_weeks, ready_seasons,
 )
@@ -110,6 +112,7 @@ class SeasonData:
     defense_prior: Mapping[tuple[str, str], float] = field(default_factory=lambda: MappingProxyType({}))  # last season
     rules: ScoringRules | None = None                         # custom key settings on `scoring` (replay_scoring)
     adp_format: str = "ppr"                                   # the replay_adp list `players` carry (replay_adp_format)
+    scoring_adp: Mapping[int, float] = field(default_factory=lambda: MappingProxyType({}))  # "2qb": the 1-QB list's
     notes: Mapping[PlayerWeek, str] = field(default_factory=lambda: MappingProxyType({}))  # news before the week
     # (team, week) -> points the team scored in that week's game: a result, like `actual` (as_of keeps played weeks)
     scores: Mapping[tuple[str, int], int] = field(default_factory=lambda: MappingProxyType({}))
@@ -129,7 +132,8 @@ class SeasonData:
             raise ValueError(f"Week {week} is not a valid week.")
         if self.known_before is not None and self.known_before <= week:
             return self                                       # already holds no more than that
-        return _as_of(self, week)
+        source = _SOURCE.get(self)                            # a copy's copy is the season's own copy
+        return _as_of((source and source()) or self, week)
 
     def team_at(self, player_id: int, week: int) -> str | None:
         """His team as known before `week`: the team of his last game before it, else of his first game of
@@ -165,6 +169,9 @@ def _preseason(key: PlayerWeek, tag: Injury, week: int) -> bool:
     return week == 0 and key[1] == 1 and tag.tag in PRESEASON_TAGS
 
 
+_SOURCE: WeakKeyDictionary = WeakKeyDictionary()       # as_of copy -> weak ref to the season it was cut from
+
+
 @lru_cache(maxsize=256)
 def _as_of(data: SeasonData, week: int) -> SeasonData:
     actual = {key: points for key, points in data.actual.items() if key[1] < week}
@@ -173,7 +180,7 @@ def _as_of(data: SeasonData, week: int) -> SeasonData:
     players = {pid: p for pid, p in data.players.items() if p.adp is not None or pid in seen}
     games = {pid: tuple(g for g in played if g[0] < week) or played[:1]
              for pid, played in data.team_by_week.items() if pid in players}
-    return replace(
+    copy = replace(
         data, known_before=week, players=MappingProxyType(players), team_by_week=MappingProxyType(games),
         actual=MappingProxyType({key: v for key, v in actual.items() if key[0] in players}),
         projected=MappingProxyType({key: v for key, v in projected.items() if key[0] in players}),
@@ -186,6 +193,8 @@ def _as_of(data: SeasonData, week: int) -> SeasonData:
         expert_ranks=MappingProxyType({key: v for key, v in data.expert_ranks.items() if key[1] <= week}),
         expert_age=MappingProxyType({w: v for w, v in data.expert_age.items() if w <= week}),
         returns=MappingProxyType({key: v for key, v in data.returns.items() if key[1] <= week}))
+    _SOURCE[copy] = ref(data)
+    return copy
 
 
 # ---------------- loading ----------------
@@ -210,6 +219,7 @@ def clear_cache() -> None:
     with _cache_lock:
         _cache.clear()
     _as_of.cache_clear()
+    _SOURCE.clear()
     replay_defense.ratings.cache_clear()
     for hook in CLEAR_HOOKS:
         hook()
@@ -218,6 +228,7 @@ def clear_cache() -> None:
 def free_dependents() -> None:
     """Empty every cache keyed on a SeasonData: call when a season is dropped, or they would keep it alive."""
     _as_of.cache_clear()
+    _SOURCE.clear()
     replay_defense.ratings.cache_clear()
     for hook in EVICT_HOOKS:
         hook()
@@ -357,25 +368,6 @@ def _by_player(teams: Mapping[PlayerWeek, str]) -> dict[int, tuple[tuple[int, st
     return {player_id: tuple(sorted(games)) for player_id, games in grouped.items()}
 
 
-def hard_tag_returns(injuries: Mapping[PlayerWeek, Injury], actual: Mapping[PlayerWeek, float],
-                     last_week: int) -> dict[PlayerWeek, int]:
-    """{(player, first week of a hard-tag streak): first later week he really played, 0 = never}. A streak
-    runs from a hard tag until his next game (byes and untagged weeks in between stay in it). Only the tag
-    starts one: whether he played that week anyway is not known before it is played."""
-    tagged: dict[int, list[int]] = defaultdict(list)
-    for (player_id, week), injury in injuries.items():
-        if injury.hard:
-            tagged[player_id].append(week)
-    out: dict[PlayerWeek, int] = {}
-    for player_id, weeks in tagged.items():
-        back = None                                     # the week the open streak ends; 0 = it never does
-        for week in sorted(weeks):
-            if back is None or 0 < back <= week:
-                back = next((w for w in range(week + 1, last_week + 1) if (player_id, w) in actual), 0)
-                out[(player_id, week)] = back
-    return out
-
-
 def _expert_ranks(session: Session, season: int, schedule: Schedule, players: Mapping[int, PoolPlayer],
                   weeks: int) -> tuple[dict[PlayerWeek, int], dict[int, int]]:
     from services.replay_experts import week_ranks      # it imports this module
@@ -436,6 +428,8 @@ def _build(session: Session, season: int, scoring: str, rules: ScoringRules | No
                       expert_ranks=MappingProxyType(expert_ranks), expert_age=MappingProxyType(expert_age),
                       returns=MappingProxyType(hard_tag_returns(injuries, actual, weeks)),
                       box=MappingProxyType(box), rules=rules, adp_format=adp_format, scores=MappingProxyType(scores),
+                      scoring_adp=MappingProxyType(replay_adp_format.scoring_list(
+                          session, season, scoring, rules, players, adp_format)),
                       defense_prior=MappingProxyType(replay_defense.load_prior(session, season, rescored))))
 
 

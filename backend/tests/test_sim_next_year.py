@@ -350,3 +350,25 @@ def test_every_player_of_the_new_season_stays_in_the_public_view_until_he_plays(
         known = season.as_of(week).players
         assert set(belief.players) <= set(known), week
         assert set(belief.players) <= set(sim_world.estimate(season, week, belief).players), week
+
+
+def test_a_2qb_market_also_records_the_1qb_board_of_the_same_scoring(monkeypatch):
+    from services import sim_market
+
+    real, boards = sim_market.adp, {}
+
+    def spy(belief, scoring, two_qb=False, *args, **kwargs):
+        boards[two_qb] = real(belief, scoring, two_qb, *args, **kwargs)
+        return boards[two_qb]
+    monkeypatch.setattr(sim_market, "adp", spy)
+    belief, pool = _next()
+    two_qb = ny.season_base(2027, belief, pool, _schedule(), "half", None, {}, adp_format="2qb")
+
+    assert set(boards) == {True, False}                                       # the 2-QB board and the 1-QB one
+    assert two_qb.scoring_adp == {pid: pick for pid, (pick, _) in boards[False].items() if pid in two_qb.players}
+    assert {pid: p.adp for pid, p in two_qb.players.items() if p.adp} == {
+        pid: pick for pid, (pick, _) in boards[True].items() if pid in two_qb.players}
+    assert two_qb.scoring_adp
+    boards.clear()
+    assert ny.season_base(2027, belief, pool, _schedule(), "half", None, {}).scoring_adp == {}
+    assert set(boards) == {False}                                             # a 1-QB season asks once

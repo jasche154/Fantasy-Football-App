@@ -33,7 +33,9 @@ from dataclasses import dataclass
 from functools import lru_cache
 from types import MappingProxyType, SimpleNamespace
 
-from services import lineup_gain, my_team as mt, replay_chart, replay_slots, replay_state
+from services import (
+    lineup_gain, my_team as mt, replay_chart, replay_chart_injury, replay_slots, replay_state, replay_superflex,
+)
 from services.league import LeagueSettings, replacement_levels
 from services.replay_news import Report
 from services.replay_pool import PRESEASON_TAGS, SKILL, Injury, PoolPlayer, SeasonData
@@ -42,7 +44,7 @@ from services.schedule_strength import NEUTRAL, DefenseStrength, Schedule
 RECENCY_WEIGHTS = (4, 3, 2, 1)                        # newest first: the projections (or priors) behind ros_ppg
 OUT_SHARE = {1: 0.45, 2: 0.55, 3: 0.60, 4: 0.65, 5: 0.75}    # share of remaining games missed, by weeks out so far
 OUT_SHARE_LONG = 0.90                                 # six or more weeks out (measured, RB/WR/TE 2021-25)
-IR_OUT_SHARE = 0.80                                   # least share missed when tagged IR or PUP (measured 2018-25)
+IR_OUT_SHARE = replay_chart_injury.IR_OUT_SHARE      # least share missed when tagged IR or PUP (measured 2018-25)
 FLEX_POSITIONS = replay_slots.FLEX_POSITIONS
 eligible = replay_slots.eligible                      # slot -> the positions that can play there
 BACKUPS = {"QB": 1, "RB": 3, "WR": 4, "TE": 1}        # most a CPU carries behind its starters (no spare K or DST)
@@ -207,14 +209,55 @@ def _ranked(rows: Iterable[dict]) -> tuple[ReplayValue, ...]:
 class _Base:
     """One week's values before the seeded injury news: shared by every game (seed) on that season."""
     rows: Mapping[int, dict]                        # valued rows by id (never mutated)
+    chart_data: SeasonData                          # the season the chart reads (superflex: replay_superflex.view)
     parts: replay_chart.Parts                       # what replay_chart.with_news needs, hard-tagged players only
     replacement: Mapping[str, float]
     source: str
+    live: Mapping[int, float]                       # healthy chart before the freeze, frozen players only
 
 
-@lru_cache(maxsize=64)
+def _absences(data: SeasonData, week: int) -> dict[int, int]:
+    """{player: the last week before his open injury absence} (0 = preseason: hurt before week 1); `data` is as
+    of `week`. An absence starts with a hard tag and ends at the first earlier week he was available for a game:
+    he played, or his team played and he carried no hard tag (a healthy scratch or a backup with no stat line
+    is back too, so nobody stays frozen by never recording a stat again)."""
+    tagged: dict[int, set[int]] = defaultdict(set)
+    for (pid, w), tag in data.injuries.items():
+        if tag.hard and w <= week:
+            tagged[pid].add(w)
+    found: dict[int, int] = {}
+    for pid, weeks in tagged.items():
+        start = None
+        for w in range(min(weeks), week + 1):
+            if w in weeks and start is None:
+                start = w
+            if w < week and ((pid, w) in data.actual or (w not in weeks and data.schedule.opponent(
+                    data.team_at(pid, w), w) is not None)):
+                start = None                                # available that week: the absence is over
+        if start is not None:
+            found[pid] = start - 1
+    return found
+
+
+def _frozen(data: SeasonData, league: LeagueSettings, week: int, end_week: int, drafted: int) -> dict[int, float]:
+    """{player: healthy chart, without the bye bump} frozen at the last week before his open injury absence, until
+    he is available for a game again (`_absences`): the expert and model ranks of a hurt player fall while he is out (the experts price the
+    injury), and the chart's discount (replay_chart_injury) is the one price of it. Point in time: the frozen
+    week's values are built from data.as_of(that week). A player listed nowhere that week keeps his live value."""
+    found: dict[int, float] = {}
+    for pid, before in _absences(data, week).items():
+        base = _base(data.as_of(before), league, before, end_week, min(drafted, before))
+        if pid in base.rows:                        # back that week from an earlier absence: his live value then
+            row = base.rows[pid]
+            bumped = replay_chart._bye_done(data, row["team"], before)     # replay_chart re-applies today's bump
+            found[pid] = base.live.get(pid, row["healthy_chart"]) / (replay_chart.BYE_BUMP if bumped else 1.0)
+    return found
+
+
+@lru_cache(maxsize=128)
 def _base(data: SeasonData, league: LeagueSettings, week: int, end_week: int, drafted: int = 0) -> _Base:
-    priors = _priors(data)
+    regular = replay_superflex.one_qb(data)                     # superflex: non-QBs as in a 1-QB league
+    priors = _priors(regular)
     weeks_left = max(0, end_week - max(1, week) + 1)
     by_team: dict[str | None, int] = {None: weeks_left}          # unknown team: every week left
 
@@ -226,12 +269,16 @@ def _base(data: SeasonData, league: LeagueSettings, week: int, end_week: int, dr
     teams = {pid: data.team_at(pid, week) for pid in data.players}
     rows = [_row(data, player, priors[pid], week, teams[pid], games_left(teams[pid]))
             for pid, player in data.players.items()]
-    chart_data = replay_chart.superflex_view(data) if replay_slots.two_qb(league.starters) else data  # QBs go earlier
-    charts, parts, source = replay_chart.base_charts(chart_data, rows, priors, week, end_week, drafted)
+    two_qb = replay_slots.two_qb(league.starters)
+    chart_data = replay_chart.superflex_view(data) if two_qb else regular        # QBs go where 2-QB drafts take them
+    frozen = _frozen(data, league, week, end_week, drafted)
+    live: dict[int, float] = {}
+    charts, parts, source = replay_chart.base_charts(chart_data, rows, priors, week, end_week, drafted,
+                                                     regular if two_qb else None, frozen, live)
     rows = [{**row, **charts[row["player_id"]]} for row in rows]
     replacement = replacement_levels(((r["position"], r["ros_ppg"]) for r in rows if r["position"] in SKILL), league)
-    return _Base(MappingProxyType({r["player_id"]: _valued(r, replacement) for r in rows}), parts,
-                 MappingProxyType(replacement), source)
+    return _Base(MappingProxyType({r["player_id"]: _valued(r, replacement) for r in rows}), chart_data, parts,
+                 MappingProxyType(replacement), source, MappingProxyType(live))
 
 
 @lru_cache(maxsize=32)
@@ -239,7 +286,7 @@ def _knowledge(data: SeasonData, league: LeagueSettings, week: int, end_week: in
                drafted: int) -> Knowledge:
     """`_base` plus this seed's news (which may set availability) on the hard-tagged players only."""
     base = _base(data, league, week, end_week, drafted)
-    news = replay_chart.with_news(data, base.rows, base.rows, base.parts, week, end_week, seed)
+    news = replay_chart.with_news(base.chart_data, base.rows, base.rows, base.parts, week, end_week, seed)
     values = _ranked(_valued(news[pid], base.replacement) if pid in news else row for pid, row in base.rows.items())
     through = max(0, week - 1)
     return Knowledge(season=data.season, week=week, league=league, values=values,

@@ -1,0 +1,199 @@
+"""An injured player's trade chart over his absence (replay_values._frozen + replay_chart_injury): the value he
+had the week before falls once by the user's curve and climbs back to it the week he returns."""
+from dataclasses import replace
+from types import MappingProxyType
+
+import pytest
+
+from services import replay_news, replay_values as rv
+from services.replay_pool import Injury, hard_tag_returns
+from tests import replay_fakes as fakes
+
+DATA = fakes.fake_season()
+SETTINGS = fakes.fake_settings()
+END = SETTINGS.end_week
+LEAGUE = rv.league_settings(SETTINGS)
+PID = fakes.player_id("WR", 2)
+GAMES = [w for w in range(1, END + 1) if DATA.schedule.opponent(DATA.team_at(PID, w), w) is not None]
+START = next(w for w in GAMES if sum(g >= w for g in GAMES) == 13)        # 13 of his team's games left
+
+
+def hurt(games: int):
+    """DATA with PID out (O tag, no projection, no game) for his team's next `games` games from START, and a
+    news draw whose report names his real return."""
+    out = set(GAMES[GAMES.index(START):GAMES.index(START) + games])
+    gone = {(PID, w) for w in out}
+    projected = {k: v for k, v in DATA.projected.items() if k not in gone}
+    actual = {k: v for k, v in DATA.actual.items() if k not in gone}
+    injuries = {**DATA.injuries, **{key: Injury("O", "DNP", "Ankle") for key in gone}}
+    data = replace(DATA, projected=MappingProxyType(projected), actual=MappingProxyType(actual),
+                   injuries=MappingProxyType(injuries),
+                   returns=MappingProxyType(hard_tag_returns(injuries, actual, DATA.last_week)))
+    back = data.returns[(PID, START)]
+    seed = next(s for s in range(500) if all(
+        replay_news.report(s, PID, START, back, w, "O", data.last_week).back == back for w in range(START, back)))
+    return data, seed, back
+
+
+def value(data, week: int, seed: int, pid: int = PID) -> rv.ReplayValue:
+    return rv.knowledge(data, LEAGUE, week, END, seed).by_id[pid]
+
+
+def loss(data, week: int, seed: int, before: float) -> float:
+    return 1 - value(data, week, seed).chart / before
+
+
+def test_the_player_is_a_healthy_starter_before():
+    assert not any(tag.hard for (pid, _), tag in DATA.injuries.items() if pid == PID)
+    assert value(DATA, START - 1, 0).healthy_chart > 300
+
+
+def test_one_game_out_costs_five_to_eight_percent_and_he_is_back_at_his_value_the_next_week():
+    data, seed, back = hurt(1)
+    before = value(data, START - 1, seed).healthy_chart
+
+    assert 0.05 <= loss(data, START, seed, before) <= 0.08
+    assert value(data, back, seed).chart == pytest.approx(before)          # before his first game back
+
+
+def test_three_of_thirteen_cost_five_to_twelve_percent():
+    data, seed, _ = hurt(3)
+    before = value(data, START - 1, seed).healthy_chart
+
+    assert 0.05 <= loss(data, START, seed, before) <= 0.12
+
+
+def test_eight_of_thirteen_cost_35_to_45_percent_then_less_every_week_and_nothing_on_return():
+    data, seed, back = hurt(8)
+    before = value(data, START - 1, seed).healthy_chart
+    weeks = [w for w in range(START, back) if w in GAMES]
+    losses = [loss(data, w, seed, before) for w in weeks]
+
+    assert 0.35 <= losses[0] <= 0.45
+    assert all(later < earlier for earlier, later in zip(losses, losses[1:]))
+    frozen = value(data, weeks[-1], seed).healthy_chart / before                  # frozen all along,
+    assert frozen in (pytest.approx(1.0, abs=1e-3), pytest.approx(rv.replay_chart.BYE_BUMP, abs=1e-3))  # bye bump as for anyone
+    assert abs(loss(data, back, seed, before)) <= 0.05                              # the week he returns
+
+
+def test_the_frozen_value_sees_no_hindsight():
+    data, seed, back = hurt(8)
+    week = START + 2
+
+    assert value(data, week, seed) == value(fakes.future_changed(data, week), week, seed)
+
+
+def spell(data, pid: int, tagged: range, gone: range, tag: str = "O"):
+    """`data` with `pid` hard-tagged (and unprojected) in `tagged` and no stat line in `gone`."""
+    drop = {(pid, w) for w in gone}
+    actual = {k: v for k, v in data.actual.items() if k not in drop}
+    projected = {k: v for k, v in data.projected.items() if k[0] != pid or k[1] not in tagged}
+    injuries = {**data.injuries, **{(pid, w): Injury(tag, "DNP", "Knee") for w in tagged}}
+    return replace(data, actual=MappingProxyType(actual), projected=MappingProxyType(projected),
+                   injuries=MappingProxyType(injuries),
+                   returns=MappingProxyType(hard_tag_returns(injuries, actual, data.last_week)))
+
+
+@pytest.mark.parametrize("case", ["no stat line", "a backup with snaps", "released while out"])
+def test_an_absence_ends_the_first_game_he_is_available_for_stat_line_or_not(case):
+    pid = fakes.player_id("WR", 3)
+    tagged = range(5, 6) if case != "released while out" else range(5, 8)        # his tags stop, he never plays
+    data = spell(DATA, pid, tagged, range(5, END + 1))
+    if case == "a backup with snaps":
+        data = replace(data, usage=MappingProxyType({**data.usage, **{
+            (pid, w): replace(next(iter(data.usage.values())), snap_pct=0.2) for w in range(6, END + 1)}}))
+    games = [w for w in range(tagged.stop, END + 1) if data.schedule.opponent(data.team_at(pid, w), w)]
+    back = games[0]                                                               # his first untagged team game
+
+    assert pid in rv._absences(data.as_of(back), back)                           # that week: still his old value
+    for week in (back + 1, back + 5):
+        assert pid not in rv._absences(data.as_of(week), week)
+        now = value(data, week, 0, pid)
+        assert now.chart == now.healthy_chart                                     # live again, nothing to discount
+        assert now.healthy_chart == rv._base(data.as_of(week), LEAGUE, week, END, 0).rows[pid]["healthy_chart"]
+
+
+def test_a_second_absence_freezes_at_his_live_value_after_the_first_return():
+    pid = fakes.player_id("WR", 3)
+    data = spell(DATA, pid, tagged=range(5, 6), gone=range(5, 7))               # out 5, back 6 without a stat line
+    data = spell(data, pid, tagged=range(7, 9), gone=range(7, 9))                 # out again 7-8
+    base = rv._base(data.as_of(6), LEAGUE, 6, END, 0)
+
+    assert rv._absences(data.as_of(7), 7)[pid] == 6 and pid in base.live         # frozen at week 6, the return week
+    frozen = rv._frozen(data.as_of(7), LEAGUE, 7, END, 0)[pid]
+    bump = rv.replay_chart.BYE_BUMP if rv.replay_chart._bye_done(data, base.rows[pid]["team"], 6) else 1.0
+    assert frozen == pytest.approx(base.live[pid] / bump)
+    assert base.live[pid] != base.rows[pid]["healthy_chart"]                      # not the first absence's value
+
+
+def test_the_frozen_value_and_chart_ignore_everything_after_the_week():
+    data, seed, back = hurt(8)
+    week = START + 2
+    later = spell(data, PID, tagged=range(back, back + 3), gone=range(back, back + 3))   # a later return
+    now = value(data, week, seed)
+
+    assert now == value(fakes.future_changed(data, week), week, seed)            # later games, tags, points
+    assert now.healthy_chart == value(later, week, seed).healthy_chart           # his return week moved too
+    live = rv._base(data.as_of(week), LEAGUE, week, END, 0).live[PID]
+    assert now.healthy_chart != pytest.approx(live, abs=1.0)                      # the freeze is doing the work
+
+
+def test_a_jump_in_league_freezes_a_player_hurt_before_its_draft():
+    drafted, week = START + 3, START + 4
+    data, seed, back = hurt(8)
+
+    now = rv.knowledge(data, LEAGUE, week, END, seed, drafted=drafted).by_id[PID]
+    before = rv._base(data.as_of(START - 1), LEAGUE, START - 1, END, START - 1).rows[PID]["healthy_chart"]
+
+    assert now.healthy_chart in (pytest.approx(before, abs=0.1),
+                                 pytest.approx(before * rv.replay_chart.BYE_BUMP, abs=0.1))
+
+
+def test_a_superflex_league_freezes_an_injured_qb_at_his_superflex_value():
+    sf = rv.league_settings(fakes.fake_settings(starters={**fakes.fake_settings().starters, "SUPERFLEX": 1}))
+    qb = fakes.player_id("QB", 2)
+    data = spell(DATA, qb, tagged=range(6, 9), gone=range(6, 9))
+    regular = rv.knowledge(data, LEAGUE, 5, END, 0).by_id[qb].healthy_chart
+    before = rv.knowledge(data, sf, 5, END, 0).by_id[qb].healthy_chart
+    now = rv.knowledge(data, sf, 7, END, 0).by_id[qb]
+
+    assert before > regular * 1.5
+    assert now.healthy_chart in (pytest.approx(before, abs=0.1),
+                                 pytest.approx(before * rv.replay_chart.BYE_BUMP, abs=0.1))
+
+
+def test_as_of_of_an_as_of_copy_is_the_seasons_own_copy_and_never_regains_weeks():
+    from services import replay_pool
+
+    assert DATA.as_of(9).as_of(5) is DATA.as_of(5)
+    early = DATA.as_of(5)
+    assert early.as_of(9) is early and max(w for _, w in early.actual) < 5
+    replay_pool.clear_cache()
+    assert not replay_pool._SOURCE                                                # no stale season kept
+
+
+def test_a_frozen_value_takes_the_bye_bump_once_and_never_tops_the_scale(monkeypatch):
+    back = fakes.player_id("RB", 5)                                             # his bye is week 7
+    for frozen, expected in ((500.0, 500.0 * rv.replay_chart.BYE_BUMP), (999.0, rv.replay_chart.CHART_MAX)):
+        monkeypatch.setattr(rv, "_frozen", lambda *a, frozen=frozen, **k: {back: frozen})
+        rv.clear_cache()
+        assert rv.knowledge(DATA, LEAGUE, 9, END, 0).by_id[back].healthy_chart == pytest.approx(expected, abs=0.05)
+    rv.clear_cache()
+
+
+def test_a_player_frozen_before_his_bye_is_bumped_once_after_it():
+    back = fakes.player_id("RB", 5)                                             # bye week 7, out weeks 5-9
+    data = spell(DATA, back, tagged=range(5, 10), gone=range(5, 10))
+    before = value(data, 4, 0, back).healthy_chart                              # no bye behind him yet
+
+    for week in (6, 8, 9):
+        bump = rv.replay_chart.BYE_BUMP if week > 7 else 1.0
+        expected = min(rv.replay_chart.CHART_MAX, before * bump)
+        assert value(data, week, 0, back).healthy_chart == pytest.approx(expected, abs=0.05)
+
+
+def test_a_player_hurt_in_a_game_he_played_is_frozen_from_that_week():
+    pid = fakes.player_id("WR", 3)
+    data = spell(DATA, pid, tagged=range(5, 8), gone=range(6, 8))                # keeps his week-5 stat line
+
+    assert rv._absences(data.as_of(7), 7)[pid] == 5                              # out from week 6, not week 5

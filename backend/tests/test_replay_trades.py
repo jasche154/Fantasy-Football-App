@@ -255,7 +255,7 @@ def test_a_shark_wants_an_edge_and_an_out_player_is_sold_to_the_user_at_a_floor(
 
     assert tv.tally(know, "balanced", [1], [2], [], 0.0, 1.0, False).score > tv.tally(
         know, "shark", [1], [2], [], 0.0, 1.0, False).score
-    assert tv.tally(know, "balanced", [3], [1], [], 0.0, 1.0, True).sent == tv.OUT_SELL_SHARE * 800
+    assert tv.tally(know, "balanced", [3], [1], [], 0.0, 1.0, True).sent == pytest.approx(tv.OUT_SELL_SHARE * 800)
     assert tv.tally(know, "balanced", [3], [1], [], 0.0, 0.95, False).sent == 200
 
 

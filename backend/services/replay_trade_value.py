@@ -41,7 +41,7 @@ LINEUP_CAP = 0.15              # lineup term clamped to +- this share of `out`
 LINEUP_WEIGHT = 0.5            # a lineup gain counts half
 LINEUP_LOSS_WEIGHT = 1.0       # a lineup loss counts in full: a CPU feels losing a starter (Kelce for Goedert + Davis)
 OUT_MARGIN = 1.03
-OUT_SELL_SHARE = 0.5           # an out player sent to the user counts >= this x healthy_chart
+OUT_SELL_SHARE = 0.5           # an out player sent to the user counts >= this x healthy_chart (the user's choice)
 MARKET_GUARD = 0.80            # neutral market in >= this x out, whatever the persona
 SHARK_MARGIN = 0.05
 DEPTH_SHARE = 0.35             # a piece beyond the first extra one in a many-for-few deal counts at this share

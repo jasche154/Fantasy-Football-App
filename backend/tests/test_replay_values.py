@@ -54,7 +54,8 @@ def test_knowledge_covers_the_pool_known_that_week_ranked_best_first():
 
 def test_trade_value_is_points_over_replacement_for_the_games_left():
     data, know = fakes.fake_season(), know_at(5)
-    back = roster_of(know, "RB8")[0]
+    # a healthy back around RB8 (an out back now keeps more of his chart, so RB8 itself may be the injured one)
+    back = next(v for v in know.values if v.position == "RB" and not v.out and int(v.pos_rank[2:]) >= 8)
 
     games_left = len(data.schedule.remaining_opponents(back.team, 4, END))
     over = back.ros_ppg - know.replacement["RB"]
@@ -506,7 +507,8 @@ def test_a_trade_package_counts_the_chart_value():
 
     assert star.chart > 700 and scrub.trade_value == 0.0 and 0 < scrub.chart < 30
     assert 0 < out.chart < out.healthy_chart                                         # discounted, not zero
-    discount = out.availability * rv.replay_chart.AVAILABILITY_SHARE                # his first week out
+    missed = out.games_left * (1 - out.availability)                                # his first week out
+    discount = 1 - rv.replay_chart_injury.discount(missed, out.games_left)
     assert out.chart == pytest.approx(out.healthy_chart * discount, abs=0.2) and out.chart > 0
     assert all(0 <= v.chart <= rv.replay_chart.CHART_MAX * rv.replay_chart.BYE_BUMP for v in know.values)
 
@@ -677,9 +679,11 @@ def test_the_ir_kicker_who_never_returns_is_reported_out_for_the_season():
     for week in range(fakes.IR_KICKER_WEEK, data.last_week + 1):
         tagged, plain = know_at(week).by_id[kicker], know_at(week, untagged).by_id[kicker]
         assert tagged.news.since == fakes.IR_KICKER_WEEK and plain.news is None
-        assert tagged.availability == 0.0 and tagged.healthy_chart == plain.healthy_chart   # no game left for him
+        frozen = know_at(fakes.IR_KICKER_WEEK - 1, untagged).by_id[kicker].healthy_chart
+        assert tagged.availability == 0.0                  # his value before the absence (and a bye bump since)
+        assert tagged.healthy_chart in (frozen, pytest.approx(frozen * rv.replay_chart.BYE_BUMP, abs=0.1))
         ignored = {"availability": 0, "expected_missed": 0, "chart": 0, "rank": 0, "pos_rank": "",
-                   "news": None, "trade_value": 0}
+                   "news": None, "trade_value": 0, "healthy_chart": 0}
         assert replace(tagged, injury=None, **ignored) == replace(plain, **ignored)
     assert know_at(fakes.IR_KICKER_WEEK + 3).by_id[kicker].news.back is None
 
@@ -745,9 +749,11 @@ def test_changing_returns_moves_only_players_hard_tagged_now(week):
 def test_the_seed_moves_only_the_news():
     data, league = fakes.fake_season(), rv.league_settings(fakes.fake_settings())
     rv.clear_cache()
-    reports = {seed: rv.knowledge(data, league, 7, END, seed) for seed in range(6)}
+    reports = {0: rv.knowledge(data, league, 7, END, 0)}
+    built = rv._base.cache_info().misses                              # week 7, and the frozen weeks before absences
+    reports.update({seed: rv.knowledge(data, league, 7, END, seed) for seed in range(1, 6)})
 
-    assert rv._base.cache_info().misses == 1                          # one chart pass serves every game's seed
+    assert rv._base.cache_info().misses == built                      # one chart pass serves every game's seed
     assert len({know.by_id[fakes.INJURED_STAR_ID].news for know in reports.values()}) > 1
     for know in reports.values():
         for v in know.values:

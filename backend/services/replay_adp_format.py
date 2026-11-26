@@ -1,11 +1,12 @@
 """Replay League: which preseason ADP list (replay_adp.format) a league drafts from.
 
-- `wanted`: a superflex league (replay_slots.two_qb: a SUPERFLEX slot, or 2+ QB slots) drafts from the 2-QB list; any other
+- `wanted`: a superflex league (replay_slots.two_qb: a SUPERFLEX slot, or 2+ QB slots) reads the 2-QB list (and,
+  in SeasonData.scoring_adp, its scoring's list: replay_superflex places its QBs among those non-QBs); any other
   league from its scoring's list: ppr / half / std, and custom rules from the preset nearest their points
   per reception (a tie goes to the bigger one: 0.75 -> ppr, 0.25 -> half).
 - `choose`: the wanted list if that season has it, else the nearest one it has (2qb -> the scoring's list,
   then the nearest; ppr <-> half <-> std). SeasonData.adp_format records the list actually used, so a
-  superflex league without a 2-QB list still gets replay_chart.superflex_view's QB boost.
+  superflex league without a 2-QB list still gets replay_superflex's fitted QB placement.
 
 ADP is preseason data: the same list serves every week, no hindsight.
 """
@@ -43,6 +44,17 @@ def choose(want: str, scoring: str, available: Collection[str]) -> str | None:
     """The list to read: `want` if stored, else the nearest stored one; None when the season has no ADP."""
     order = (TWO_QB, *NEAREST[scoring]) if want == TWO_QB else NEAREST[want]
     return next((f for f in order if f in available), None)
+
+
+def scoring_list(session: Session, season: int, scoring: str, rules: ScoringRules | None, players: Collection[int],
+                 listed: str) -> dict[int, float]:
+    """{player: ADP} on the stored 1-QB list nearest the league's scoring, for `players`, when the season is read
+    from the 2-QB list (`listed`); else empty (SeasonData.scoring_adp, replay_superflex)."""
+    found = stored(session, season, scoring, rules) if listed == TWO_QB else TWO_QB
+    if found == TWO_QB:
+        return {}
+    return {pid: adp for pid, adp in session.execute(select(ReplayAdp.player_id, ReplayAdp.adp).where(
+        ReplayAdp.season == season, ReplayAdp.format == found)) if pid in players}
 
 
 def stored(session: Session, season: int, scoring: str, rules: ScoringRules | None = None,
