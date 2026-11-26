@@ -983,7 +983,10 @@ that week's games on; only scoring a week reads its real points.
   player (100 in a 12-team league, scaled to the league size: 66 with 8 teams, 116 with 14), nor in the
   league's first 4 weeks one of the league's picks from rounds 1-8 (`replay_waiver_ai.EARLY_ROUNDS` /
   `EARLY_WEEKS`: about three games before a manager gives up on a mid-round pick) unless the news has him out
-  for the season. It keeps an injured player who was above replacement, or who has a healthy chart of 50 or
+  for the season. A player it added this week, one it is "high on" and one at a position it needs go only after
+  every other player it can spare, and a better player who is only on a bye is never cut to cover a slot. After
+  a trade forces a cut, the CPU refills the open roster spot. A stasher never offers away the injured stars he
+  collects. It keeps an injured player who was above replacement, or who has a healthy chart of 50 or
   more (`KEEP_OUT_CHART`) and a return date in the news; when it trims back to a positional limit, players
   whose season values are within 5 points (`TRIM_CLOSE`, often all 0) are cut cheapest on the chart first. It
   drops an injured player it would otherwise keep only in one case: a starting slot has nobody who plays, its IR
@@ -1196,7 +1199,12 @@ that week's games on; only scoring a week reads its real points.
   than it gets, by persona (`replay_personas.OFFER_EDGE`: steady 5-6%, shark and dealer 5-7%, balanced, fan, stasher,
   contender and a calm tilted manager 6-8%, panicky and gambler 8-10%; the haggler's opening offer is the
   exception, see below), judged as its own offer (`replay_trades.offer_multiple`) both when made and when you accept
-  it; a shop's offer is priced as before, at the shop discount. After a deal each starting slot
+  it; a shop's offer is priced as before, at the shop discount. How a CPU's own offer leans is drawn per offer
+  (`replay_personas.favours`, the user's "about 50/50"): with FAVOUR_SHARE (panicky 65%, gambler and tilted
+  60%, shark 35%, everyone else 50%) it favours you on the numbers the preview shows (a want offer by the edge
+  above, a shop offer by 0-10%), otherwise it comes close (up to 4% short); "a good deal, I promise" lines
+  only go with an offer that favours you. Measured over 3 seasons x 3 seeds: 40% of non-haggler offers favour
+  you and 96% of all offers are within 5% (before: 35%; every want offer favoured you, shop offers rarely did). After a deal each starting slot
   the CPU can no longer fill needs a player it can add (unrostered, not out, not on waivers; in the waiver
   phase, when everyone unrostered is on waivers, anyone you haven't claimed), and it adds him
   (`replay_cover.cpu_cover`): right away, or in the waiver phase once waivers clear. Each CPU has a hidden **persona**
@@ -1266,10 +1274,12 @@ that week's games on; only scoring a week reads its real points.
   steady ones a slump only 0.3x (and stay high on a slumping star, cooler on one who outran draft day).
   Strength is that signal over his chart (at least 250): worried at -0.08 or below, high at +0.08 or above,
   and only on the side of the chart his own price is on (worried only when he values the player at or below
-  the chart, high only at or above it), so a mood line or message never points the other way from his price. Once 3 NFL weeks of results are known (week 4 on; a league
+  the chart, high only at or above it), so a mood line or message never points the other way from his price.
+  Worry also needs his last two games below his rate (never one bad game, never a player scoring at or above
+  it), and nobody is worried about a player he got this week. Once 3 NFL weeks of results are known (week 4 on; a league
   that jumped in at week 4 or later has them from its first week, since the real weeks before it are known) each CPU shows a **mood
   line** in the trade builder ("Worried about X. High on Y."). When a CPU is worried at -0.15 or worse about
-  one of his 6 most valuable skill players whose last game fell short of his rate (and who nobody could think
+  one of his 6 most valuable skill players whose last two games fell short of his rate (and who nobody could think
   was hurt: the same test as the chat's dud lines below), he may **shop him to you** at the start of a week,
   after the CPUs' IR and free-agency moves
   (chance by persona: panicky 75%, gambler 35%, balanced 25%, steady and shark never; one shop per CPU, at
