@@ -965,8 +965,11 @@ that week's games on; only scoring a week reads its real points.
   still count an IR player for their positional limits and their view of the rest of the season. A
   week's final report and roster status are shown from the start of that week (before its waiver run),
   like its projection. The draft shows only week 1's IR, PUP, suspension and exempt-list tags (`replay_pool.PRESEASON_TAGS`):
-  those are preseason moves (2021: Gus Edwards' and J.K. Dobbins' ACLs), and a CPU counts such a player at
-  twice his ADP (`replay_draft.OUT_PUSH`), so it waits on him. A week-1 O or Q is game-week news and
+  those are preseason moves (2021: Gus Edwards' and J.K. Dobbins' ACLs), and a CPU drafts such a player at
+  his chart value (the pick his discounted chart is worth, `replay_chart.chart_pick`), so it waits on him as
+  long as the trade market would. A jump-in draft does the same for anyone a hard tag rules out of its first
+  week, whom the current market's ADP leaves out altogether (a superflex jump-in used to leave QBs worth
+  400-700 on IR on the wire). A week-1 O or Q is game-week news and
   appears when the draft ends, and the CPUs make their week-1 moves first, as they do every week.
 - **Draft:** a snake draft, 15 rounds by default (QB, 2 RB, 2 WR, TE, FLEX, K, DST, 6 bench). CPUs follow
   ADP: each takes the lowest `(ADP + noise) x need x taste` among the best players left, with position
@@ -1042,13 +1045,13 @@ that week's games on; only scoring a week reads its real points.
   absence began (built from what was known that week, with today's bye bump like anyone's; a player hurt before
   week 1 keeps his draft-time value; one listed nowhere that week keeps his live value; a second absence right
   after a return freezes at his live value of the return week), and
-  the chart is that value less a share that follows the user's targets: out 1-4 weeks about 5-12% (one game
-  6% at any point of the season), 6+ weeks 35-45% when first reported and less each week as the return nears,
-  out for the season (or a return after the league's last week) the whole chart. At 13 games left: 1 game
-  missed 6%, 3 10%, 4 12%, 6 40%, 8 45%, 12 45%; never less than 0.6 x (share of the remaining games missed -
-  0.35), a ramp that matters once he misses most of what is left (2 of the last 3 games 19%, 4 of the last 5
-  27%) and is as steep as the targets allow: one more game missed or left never moves it by more than 15
-  points, and a fixed return week never costs more the next week. So the value falls once when he goes out and climbs back each week, reaching
+  the chart is that value less a share that follows the user's targets: out 1-4 weeks about 5-12%, 6+ weeks
+  35-45% when first reported and less each week as the return nears, out for the season (or a return after
+  the league's last week) the whole chart. At 13 games left: 1 game missed 6%, 3 10%, 4 12%, 6 40%, 8 45%,
+  12 45%; never less than (share of the remaining games missed)^1.8 (`SHARE_POWER`, the user's choice), which
+  prices a player who misses most of what is left: 1 of the last 2 games 29%, 3 of 6 29%, 4 of 6 48%, 5 of 6
+  72% (testers saw Kenneth Walker, back for the last 2 of 6, still RB7). More games missed never cost less,
+  and a fixed return week never costs more the next week. So the value falls once when he goes out and climbs back each week, reaching
   his old value the week he returns: before this the experts' and the model's ranks fell while he was out and
   the discount came on top (2026 superflex QA league: Aaron Rodgers missing one game 474 -> 129, now 446;
   2027: Jonathan Taylor out weeks 7-14 789 -> 209, now 454 climbing to 741; real 2024: Puka Nacua worth least,
@@ -1137,7 +1140,10 @@ that week's games on; only scoring a week reads its real points.
   later data (a beat report would know as much). Shown under a tagged player on the Players and Trades
   screens.
 - **The week:** Wednesday waivers by rolling priority (CPUs claim when a player adds about a lineup point
-  a week), then free agency, then the games: every team's best lineup by projection (yours can be set
+  a week), then free agency, then the games. In free agency a CPU also adds a free agent whose trade value
+  clearly beats a player it can drop at a position it can use (1.5 x his value and 100 more,
+  `replay_waiver_ai._upgrade`), straight to IR when he is out, and every CPU keeps its most valuable eligible
+  player in its IR slot, so a valuable player rarely sits on the wire: every team's best lineup by projection (yours can be set
   by hand), scored with real points. With waivers off, every unrostered player is a free agent.
 - **FAAB:** the same week, but each claim carries a blind bid from a $100 season budget (whole dollars, $0
   allowed). At the waiver run the highest bid wins, ties go to the team earlier in the rolling waiver order,

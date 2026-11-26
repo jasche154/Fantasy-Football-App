@@ -395,12 +395,14 @@ def _close_by_chart(spare: Sequence[ReplayValue]) -> list[ReplayValue]:
 
 def _upgrade(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: _Context) -> Move | None:
     """The free agent with the most trade value who clearly beats (UPGRADE_SHARE x and UPGRADE_GAP more) the least
-    valuable player it can drop for him at a position it can use: a manager doesn't leave a 300-point player on
+    valuable player it can drop for him (one of its DROPPABLE_COUNT least valuable, or any it can spare at his
+    position) at a position it can use: a manager doesn't leave a 300-point player on
     the wire (testers added and flipped them for 75-85% of chart). He goes to IR after the move when he is out."""
-    drops = droppable(roster, ctx.know, ctx.protected) if len(roster) >= ctx.settings.roster_size else []
-    if not drops:
+    spare = _spare(roster, ctx.know, ctx.protected) if len(roster) >= ctx.settings.roster_size else []
+    if not spare:
         return None
     for add in sorted((v for v in free if v.position in SKILL), key=lambda v: (-v.chart, v.player_id)):
+        drops = [*spare[:DROPPABLE_COUNT], *(v for v in spare[DROPPABLE_COUNT:] if v.position == add.position)]
         legal = [out for out in _legal_drops(roster, add, drops, ctx)
                  if add.chart >= max(UPGRADE_SHARE * out.chart, out.chart + UPGRADE_GAP)]
         if legal:
