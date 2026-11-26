@@ -1544,9 +1544,10 @@ read the belief, so, as in a real season, the public learns the truth only from 
   gets shorter catches (yards per catch x (targets / the team's usual) ^ -0.3, `game.ypc_volume`, matched to
   the real spread of single-game passing yards): with volume and efficiency drawn apart, 2027 leagues had 21.6
   400-yard passing games a season against a real 8.8, 3.25 500-yard ones against 0.4, and a 716-yard game (the
-  real record is 554); now (full-mode gate, 2021-2025, 3 seeds) 15.9 and 1.5, the season's top game 522 yards
-  against a real 491: still too many big passing days, as whole simulated seasons still have too many 4,000-yard
-  passers (12.3 against 8.2; starters miss fewer games by the user's injury setting). `sim_eval` reports these tails beside real seasons (400+ and 500+ yard passing games, the
+  real record is 554); now (full-mode gate, 2021-2025, 3 seeds) 11.7 and 0.7, the season's top game 519 yards
+  against a real 491 (see the passing game of a whole season above). Weeks 12-18 simulated from a real season
+  still have 5.9 400+ yard games against a real 2.6: the August regression does not apply mid-season.
+  `sim_eval` reports these tails beside real seasons (400+ and 500+ yard passing games, the
   season's top single-game passing, rushing and receiving yards, targets and carries, 200+ yard games, and
   team-games without a QB line, real 0), and in full mode the season's shape (sim_metrics_shape: 4,000-yard
   passers, 1,000-yard receivers and rushers, the WR and TE leaders, target and carry shares, yards per target
@@ -1591,7 +1592,7 @@ read the belief, so, as in a real season, the public learns the truth only from 
   unexplained from one season to the next, `role_sd` in `sim_next_year.json`: about 0.43 on the log scale for a
   receiver, a quarter of it used, `talent.season_roles`; a rookie's around the role a player taken at his pick
   had, what the rookie role line leaves unexplained, 0.65-0.75: rookie top-24 finishes on the gate 6.6 -> 7.4
-  against a real 8.4; 7.1 on the final 3-seed run), and its belief takes 15% of the targets (20% of the
+  against a real 8.4; 6.8 on the final 3-seed run), and its belief takes 22% of the targets (20% of the
   carries) from each team's depth beyond its top five receivers (top two backs) to give to them
   (`talent.depth_targets` / `depth_carries`): a belief carried over from the end of a season spreads a team's
   work too thinly. With the whole-season efficiency spread halved (`talent.season_spread` 0.5), on the
@@ -1602,6 +1603,27 @@ read the belief, so, as in a real season, the public learns the truth only from 
   short: the simulated whole season is more predictable than a real one (ADP against finish, WRs 0.73 against
   0.60; breakouts 7.1 against 10.6):
   more role noise brings that closer but sends the top receivers past real leaders' seasons.
+- **The passing game of a whole season.** The August belief regresses a receiver's yards per catch and catch
+  rate and a quarterback's passing quality by their measured year-to-year keep (the slope of next season's rate on
+  the end-of-season belief's, 2019-2025, full seasons: yards per catch WR 0.58, TE 0.52, RB 0.16; catch rate
+  0.52; passing quality 0.54; `FULL_KEEP` in `sim_next_year.py`), whatever share the whole-season calibration
+  picks for the other rates (0 for all four positions now). Carried over unregressed and then drawn again in the
+  truth, they spread a team's season passing too wide (team yards per target sd 0.92 against a real 0.71). A
+  team's true volume also leans against its offense's shared efficiency draw (`talent.volume_eff_rho` -0.25):
+  real teams that pass well do not also pass more (season targets a game against yards per target, r = -0.27;
+  simulated -0.25, was -0.22). With the truth closer to the belief, the truth's edge over the line
+  (`talent.edge_scale` 1.05 -> 1.12) and the depth discount (0.85 -> 0.78) were retuned on the same gate.
+  Whole-season gate (2021-2025, 3 seeds; real / before / after): the season's passing leader 4,963 / 5,300 /
+  5,106; a team's season passing sd 495 / 548 / 493 (most 4,997 / 5,335 / 5,144); 400+ yard passing games 8.8 /
+  15.9 / 11.7 a season, 500+ 0.4 / 1.5 / 0.7, the top game 491 / 522 / 519; 4,000-yard passers 8.2 / 12.3 /
+  11.3; 1,000-yard receivers 24.0 / 19.4 / 19.5, rushers 13.6 / 12.5 / 12.7; 21+ point wins in the most
+  lopsided fifth by the line 25.1 / 23.5 / 25.0, line r 0.46 / 0.45 / 0.44; QB top-1 / top-6 / top-12 points
+  a game 23.9 / 21.3 / 19.6 against 24.9 / 21.1 / 19.4 before and 24.2 / 20.6 / 19.1 after. Over 8 fresh 2027
+  leagues: the season's leader 5,460 -> 5,242 (4,874-6,137), 4,000-yard passers 10.9 -> 10.0. Still high:
+  4,000-yard passers (real 8.2: the simulation passes 2.5% more a team-game, 240 against 234 yards, and its
+  starters miss fewer games by the user's injury setting, worth about 0.5 of them), and one 2027 league in 8
+  had a 6,137-yard season (Caleb Williams again: role, efficiency, quality and volume draws all high on one
+  offense; Chicago was not a top-5 passing team in real 2026).
 - **Who starts at quarterback** (`services/sim_qb.py`, `sim_qb_jobs.py`): each team has a **job holder**.
   He starts whenever he is healthy; when he is hurt the next quarterback in line fills in, and when he is
   healthy again he gets the job back. An **established starter** never loses the job while healthy and always
@@ -1824,11 +1846,10 @@ read the belief, so, as in a real season, the public learns the truth only from 
   by hand, not fitted on past drafts.
 - The rookies and moves in the 2027 file are a snapshot of mock drafts and reports (dated in the file), not
   facts.
-- Top passing seasons run high in 2027 leagues: the season leader averaged 5,460 yards over 8 fresh leagues
-  (real 2021-2025: 4,963, at most 5,316), one league 6,558 (Caleb Williams: Chicago's receivers carry 2026's
-  yards per catch into the belief unregressed, as the fitted `efficiency_scale` for receivers is 0, and its
-  shared offense draw, his passing draw and its volume all landed high). The fix is a regression of a
-  receiver's yards per catch of its own in the August belief, judged on the whole-season gate.
+- Passing still runs a little high: 4,000-yard passers 11.3 a whole season against a real 8.2, 400+ yard games
+  11.7 against 8.8 (and twice real in weeks simulated from mid-season), and an occasional record season when
+  several draws land high on one offense (a 6,137-yard season in 1 of 8 fresh 2027 leagues). The passing level is
+  2.5% above 2021-2025's (real seasons drift: 241 yards a team-game in 2021, 225 in 2025).
 - Games are not decided by late scores: real margins land on exactly 3 in 14.6% of games, simulated ones in 8.0%
   (7: 7.7% against 5.9%), so games decided by 1-3 points are 17.5% against 24.9% and records run more extreme
   (best 14.9 wins against 13.8, worst 2.1 against 2.8). The hidden team strength is not the cause (with none,
