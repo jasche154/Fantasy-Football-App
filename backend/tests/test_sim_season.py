@@ -1,5 +1,5 @@
 """sim_season: a simulated rest-of-season (and whole season) that the Replay engine plays like a real one."""
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import replace
 from types import MappingProxyType
 
@@ -33,8 +33,9 @@ def test_real_weeks_are_copied_through_untouched(data, simulated):
         return {pid: before for pid, games in season.team_by_week.items()
                 if (before := tuple(g for g in games if g[0] < FROM))}
     assert real(simulated) == real(data)
-    pooled = {pid for pid in simulated.players if pid >= sim_depth.BACKUP_QB_ID_BASE}     # one QB per team, sim_depth
-    assert len(pooled) == len({team for team, _ in data.schedule.opponents})
+    pooled = {pid for pid in simulated.players if pid >= sim_depth.BACKUP_QB_ID_BASE}     # sim_depth.with_backup_qbs
+    qbs = Counter(data.team_at(pid, FROM) for pid, p in data.players.items() if p.position == "QB")
+    assert len(pooled) == sum(1 for team in {t for t, _ in data.schedule.opponents} if qbs[team] < 2) > 0
     assert {pid: p for pid, p in simulated.players.items() if pid not in pooled} == data.players
     assert simulated.schedule.opponents == data.schedule.opponents
     # the schedule is the same but for the simulated games' pregame lines (sim_lines), stored as a real season's are

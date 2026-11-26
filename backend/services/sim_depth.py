@@ -20,12 +20,14 @@ loser, so sim_market.buzz may hint it). The belief learns the winner only from p
 `fill_ins`: the public news line on a backup QB in a week the belief's starter is hard-tagged ("Expected to
 start while Justin Herbert is out (IR, Knee)."), so a league shows why the backup plays (sim_season).
 
-`with_backup_qbs`: every team always has a QB to start. A backup who never played is in no table the pool reads,
-so a team could reach a simulated season with one QB (2027: Cincinnati, Dallas, San Francisco), or lose both, and
-its games then had receivers catching passes nobody threw. Each team gets one pooled QB ("DAL backup QB": the
-QB2 of a one-QB team, else its QB3), with a token projection so the public sees him and a manager can add him;
-the belief makes him a typical backup (no prior: the depth role, the backup's passing quality); `emergency`
-puts him under centre in a week all the team's other QBs sit (sim_season), as a real team signs one.
+Every team always has a QB to start. A backup who never played is in no table the pool reads, so a team could
+reach a simulated season with one QB (2027: Cincinnati, Dallas, San Francisco), or lose both, and its games then
+had receivers catching passes nobody threw. `with_real_qbs` first adds each team's real quarterbacks of today
+(sim_setup.qb_rooms: the depth chart, else Sleeper's depth order; the offseason file's moves and retirements on
+top) to a live or next season's pool; then `with_backup_qbs` gives a team still short of two a pooled QB ("DAL
+backup QB"). Either kind gets a token projection so the public sees him and a manager can add him; the belief
+makes him a typical backup (no prior: the depth role, the backup's passing quality). `emergency` puts a QB under
+centre in a week all the team's QBs sit (sim_season): the pooled one, else the one due back soonest.
 """
 import sys
 from pathlib import Path
@@ -34,8 +36,8 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import json  # noqa: E402
-from collections import defaultdict  # noqa: E402
-from collections.abc import Mapping  # noqa: E402
+from collections import Counter, defaultdict  # noqa: E402
+from collections.abc import Mapping, Sequence  # noqa: E402
 from dataclasses import replace  # noqa: E402
 from types import MappingProxyType  # noqa: E402
 from functools import lru_cache  # noqa: E402
@@ -227,13 +229,11 @@ if __name__ == "__main__":
 BACKUP_QB_ID_BASE = 2_000_000_000       # pooled QBs: above database rows and rookie ids, below 2^31
 
 
-def with_backup_qbs(base: SeasonData, from_week: int) -> SeasonData:
-    """`base` with one pooled QB per schedule team (module docstring): id BACKUP_QB_ID_BASE + season x 100 + the
-    team's index, the same in every league of a season."""
-    teams = sorted({team for team, _ in base.schedule.opponents})
-    added = {BACKUP_QB_ID_BASE + base.season * 100 + i: team for i, team in enumerate(teams)}
-    added = {pid: PoolPlayer(pid, f"{team} backup QB", "QB", adp_team=team)
-             for pid, team in added.items() if pid not in base.players}
+def _qb_counts(base: SeasonData, week: int) -> Counter:
+    return Counter(base.team_at(pid, week) for pid, p in base.players.items() if p.position == "QB")
+
+
+def _with_added(base: SeasonData, added: Mapping[int, PoolPlayer], from_week: int) -> SeasonData:
     if not added:
         return base
     return replace(base, players=MappingProxyType({**base.players, **added}),
@@ -241,12 +241,39 @@ def with_backup_qbs(base: SeasonData, from_week: int) -> SeasonData:
                                                **{(pid, from_week): sim_market.MIN_PROJECTION for pid in added}}))
 
 
-def emergency(world: World, sitting: set[int]) -> set[int]:
-    """`sitting` without the pooled QB of any team whose other QBs all sit (he starts: no game without a QB)."""
-    out = set(sitting)
+def with_real_qbs(base: SeasonData, rooms: Mapping[str, Sequence[tuple[int, str]]], from_week: int,
+                  moved: Mapping[int, str | None] | None = None) -> SeasonData:
+    """`base` with each team's real quarterbacks of today who are not in its pool yet (`rooms`: {team: [(id,
+    name)]} by depth, sim_setup.qb_rooms), on `moved`'s team when the offseason file moves him (None: retired,
+    left out). Like the pooled QB he has no games of evidence: a backup's level and starts weight. Only for a
+    live or the next season (today's rooms)."""
+    teams = {team for team, _ in base.schedule.opponents}
+    moved = moved or {}
+    added = {pid: PoolPlayer(pid, name, "QB", adp_team=moved.get(pid, team))
+             for team, qbs in rooms.items() for pid, name in qbs
+             if pid not in base.players and moved.get(pid, team) in teams}
+    return _with_added(base, added, from_week)
+
+
+def with_backup_qbs(base: SeasonData, from_week: int) -> SeasonData:
+    """`base` with a pooled QB for each schedule team with fewer than two QBs (module docstring): id
+    BACKUP_QB_ID_BASE + season x 100 + the team's index, the same in every league of a season."""
+    teams = sorted({team for team, _ in base.schedule.opponents})
+    counts = _qb_counts(base, from_week)
+    added = {BACKUP_QB_ID_BASE + base.season * 100 + i: team for i, team in enumerate(teams) if counts[team] < 2}
+    return _with_added(base, {pid: PoolPlayer(pid, f"{team} backup QB", "QB", adp_team=team)
+                              for pid, team in added.items() if pid not in base.players}, from_week)
+
+
+def emergency(world: World, sitting: set[int], left: Mapping[int, int] | None = None) -> set[int]:
+    """`sitting` without one QB of any team whose QBs all sit (no game without a QB): its pooled QB, else the
+    one due back soonest (`left`: weeks of absence still to run; a QB with none, say a public tag, first)."""
+    out, left = set(sitting), left or {}
     for team in world.teams:
         qbs = [p.player_id for p in world.roster(team) if p.position == "QB"]
+        real = [pid for pid in qbs if pid < BACKUP_QB_ID_BASE]
+        if not real or not all(pid in out for pid in real):
+            continue
         pooled = [pid for pid in qbs if pid >= BACKUP_QB_ID_BASE]
-        if pooled and all(pid in sitting for pid in qbs if pid < BACKUP_QB_ID_BASE):
-            out.difference_update(pooled)
+        out.difference_update(pooled or [min(real, key=lambda pid: (left.get(pid, 0), pid))])
     return out

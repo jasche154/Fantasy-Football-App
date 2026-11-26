@@ -281,9 +281,11 @@ def simulate(base: SeasonData, seed: int, from_week: int, prior: World | None = 
     lines: dict[tuple[str, int], sim_lines.Line] = {}
     for week in range(from_week, last + 1):
         tags = _tags(base, public, absences, returning, week, from_week, replay_state.rng(seed, "sim", "tags", week))
+        out = {pid for pid, injury in tags.items() if injury.hard} | {pid for pid, a in absences.items() if a.left > 0}
+        sitting = sim_depth.emergency(truth.at(week), out, {pid: a.left for pid, a in absences.items()})
+        tags = {pid: injury for pid, injury in tags.items() if pid in sitting or pid not in out}   # an emergency start is active
         tables.injuries.update({(pid, week): injury for pid, injury in tags.items()})
         public_out = {pid for pid, injury in tags.items() if injury.hard}
-        sitting = sim_depth.emergency(truth.at(week), public_out | {pid for pid, a in absences.items() if a.left > 0})
         known = _known(base, tables, week)
         benched, bench = sim_qb_jobs.decide(jobs, truth.at(week), known, week, sitting, tags, seed)
         # the job holders start in the public belief too, so the line and the projections see the week's QB
