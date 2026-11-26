@@ -1007,7 +1007,8 @@ that week's games on; only scoring a week reads its real points.
   Rank, and `star`) is the overall order of these preseason picks: the slot of his preseason expert rank,
   else of his ADP at his position. The rank blends this
   week's expert rank (weight 0.65 for a fresh snapshot, less as it ages) with the app's model rank
-  (`ros_ppg` nudged by his last three real games). Two extras keep the model rank from trailing the news
+  (`ros_ppg` nudged by his last five real games: the user chose five over three so values swing a little less; after a
+  big move with no news the old value was closer to the next four weeks 71% of the time, 2020-25). Two extras keep the model rank from trailing the news
   (`services/replay_role.py`): from week 2 his newest projection counts half its gap to `ros_ppg` (a back
   the site re-rates after he wins the job moves now, not a quarter at a time), and when a teammate at his
   position is expected to miss games, a player with no projection since then (out or on a bye himself,

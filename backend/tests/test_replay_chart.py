@@ -54,21 +54,24 @@ def test_model_ppg_without_games_is_the_rate():
 
 
 def test_a_stars_dip_counts_less_than_anyone_elses():
-    star, other = chart.model_ppg(20.0, 20.0, (8, 10, 12), 1.0), chart.model_ppg(20.0, 20.0, (8, 10, 12), 0.0)
+    games = (8, 10, 12, 9, 11)                                          # FORM_GAMES = 5, mean 10
+    star, other = chart.model_ppg(20.0, 20.0, games, 1.0), chart.model_ppg(20.0, 20.0, games, 0.0)
 
     assert other == pytest.approx(20 - 0.5 * 10) and star == pytest.approx(20 - 0.5 * 0.4 * 10)
 
 
 def test_a_star_below_his_prior_bounces_back_faster():
-    star, other = chart.model_ppg(12.0, 20.0, (20, 20, 20), 1.0), chart.model_ppg(12.0, 20.0, (20, 20, 20), 0.0)
-    above_prior = chart.model_ppg(12.0, 10.0, (20, 20, 20), 1.0)
+    games = (20,) * chart.FORM_GAMES
+    star, other = chart.model_ppg(12.0, 20.0, games, 1.0), chart.model_ppg(12.0, 20.0, games, 0.0)
+    above_prior = chart.model_ppg(12.0, 10.0, games, 1.0)
 
     assert other == pytest.approx(16.0) and star == pytest.approx(12 + 0.65 * 8) and above_prior == other
 
 
-def test_fewer_games_move_the_rate_less_and_only_the_last_three_count():
-    assert chart.model_ppg(10.0, 10.0, (16,), 0.0) == pytest.approx(10 + 0.5 / 3 * 6)
-    assert chart.model_ppg(10.0, 10.0, (13, 13, 13, 100), 0.0) == pytest.approx(11.5)
+def test_fewer_games_move_the_rate_less_and_only_the_last_five_count():
+    assert chart.FORM_GAMES == 5
+    assert chart.model_ppg(10.0, 10.0, (16,), 0.0) == pytest.approx(10 + 0.5 / 5 * 6)       # one game: a tenth of it
+    assert chart.model_ppg(10.0, 10.0, (13,) * 5 + (100,), 0.0) == pytest.approx(11.5)
 
 
 def test_evenly_spaced_scores_get_whole_ranks():

@@ -17,7 +17,11 @@ bye is behind him.
   latest expert snapshot by week K instead: its "preseason" is its draft.
 - model_ppg: ros_ppg + k x (mean of his last <= FORM_GAMES real games - ros_ppg), k = n / FORM_GAMES x
   FORM_WEIGHT, x (1 - FORM_STAR_DOWN x star) for a dip, x (1 + FORM_STAR_UP x star) for a rise while ros_ppg
-  is below his prior.
+  is below his prior. FORM_GAMES = 5 is the user's choice ("values should swing a little less"), informed by real
+  2020-25 weeks: 36% of healthy top-24 players moved more than 25% in a week, 1,618 of 2,432 such moves had no news
+  behind them (no tag, opportunity shock or 5+ place expert move), and after those the old value was closer to his
+  next four weeks 71% of the time. Five games instead of three cut those no-news moves by 12% and lift the
+  held-out rank order (0.556 -> 0.558 on common player-weeks) at a small cost on out players (RMSE 3.156 -> 3.175).
 
 - healthy_chart = w x value_at(expert rank) + (1 - w) x value_at(model rank), x BYE_BUMP once the bye is
   past, never above CHART_MAX (nor after an opportunity shock). The model rank is his fractional position
@@ -52,7 +56,7 @@ EMPTY_CURVE_START = 200.0      # a position nobody drafted starts here
 KDST = ("K", "DST")
 KDST_FIRST_PICK = 150.0        # K/DST slot curve starts no earlier than this pick (FFC ADP drafts them too early)
 STAR_TOP, STAR_SPAN = 60, 48   # star = clamp((STAR_TOP - pre_rank) / STAR_SPAN, 0, 1)
-FORM_GAMES = 3                 # model_ppg: his last real games
+FORM_GAMES = 5                 # model_ppg: his last real games (the user's choice, module docstring)
 FORM_WEIGHT = 0.50
 FORM_STAR_DOWN = 0.6           # a star's dip counts less
 FORM_STAR_UP = 0.3             # a breakout below his prior counts more for a star
