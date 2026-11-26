@@ -155,14 +155,14 @@ def decide(jobs: Jobs, world: World, known: SeasonData, week: int, sitting: Coll
             continue                                           # a first-round rookie holder is not benched healthy
         else:
             mine = [w for (t, w), pid in starts.items() if t == team and pid == holder]
-            new, chance, raw = _challenger(jobs, world, team, holder, sitting, sim_qb.form(known, holder, mine),
-                                           sim_qb.record(known, team, week))
-            if new is not None and raw >= sim_qb.stored()["elevated"]:
+            cand, chance, raw = _challenger(jobs, world, team, holder, sitting, sim_qb.form(known, holder, mine),
+                                            sim_qb.record(known, team, week))
+            if cand is not None and raw >= sim_qb.stored()["elevated"]:
                 rumors[holder] = 1.0 - (1.0 - chance) ** (last_change - week + 1)
-            new = new if draw < chance else None
+            new = cand if draw < chance else None
             if new is not None:
                 rumors.pop(holder, None)                       # the week of the change gets the true line, no rumour
-            elif (week < last_change and known.schedule.opponent(team, week + 1)
+            elif (cand is not None and week < last_change and known.schedule.opponent(team, week + 1)
                   and replay_state.rng(seed, "sim", "qb", week + 1, team).random() < chance):
                 jobs.in_danger.add(holder)                     # next week's die benches him at today's chance
         if new is None:
