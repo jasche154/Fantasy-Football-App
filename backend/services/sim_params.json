@@ -1270,7 +1270,13 @@
    },
    "opinion_keep": 0.9,
    "worth_step": 0.4,
-   "fill_in_trust": 0.15
+   "fill_in_trust": 0.15,
+   "projection_scale": {
+    "QB": 1.05,
+    "RB": 1.09,
+    "WR": 1.09,
+    "TE": 1.06
+   }
   }
  }
 }

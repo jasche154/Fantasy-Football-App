@@ -65,11 +65,23 @@ OPINION_CAP = 3.0                # implied_opinions: no player's seeded opinion 
 FILL_IN_BEST = 16                # the best weekly expert rank of a fill-in QB: real 2020-2025 runs of 3+ starts, after
                                  # 2-4 starts, never ranked better (Flacco 2023, Dobbs 2023: QB16; median 29-32)
 OPINION_DEFAULTS = {"opinion_spread": {"QB": 0.35, "RB": 1.0, "WR": 1.0, "TE": 1.0, "K": 1.0, "DST": 1.0},
-                    "opinion_keep": 0.9, "worth_step": 0.4, "fill_in_trust": 1.0}   # defaults of the tuned `market` knobs
+                    "opinion_keep": 0.9, "worth_step": 0.4, "fill_in_trust": 1.0,
+                    "projection_scale": {}}                       # defaults of the tuned `market` knobs
+
+
+def published(fresh: Mapping[int, float], belief: World) -> dict[int, float]:
+    """The week's projections as the public reads them: each x its position's tuned `market.projection_scale`.
+    Real sources project high (2021-2025 weeks 12-17: actual - projection QB -0.48, RB -0.61, WR -0.27; the
+    belief's own are unbiased), so without it a mid-season league's projections dropped 5-8% at the first
+    simulated week (sim_eval mid's "join proj ratio"). The public's table only, never the truth or the values
+    experts and the market rank on."""
+    scale = opinion_knob("projection_scale")
+    return {pid: p * scale.get(belief.players[pid].position, 1.0) if pid in belief.players else p
+            for pid, p in fresh.items()}
 
 
 def opinion_knob(name: str):
-    """A tuned `market` knob (opinion_spread, opinion_keep, worth_step, fill_in_trust)."""
+    """A tuned `market` knob (opinion_spread, opinion_keep, worth_step, fill_in_trust, projection_scale)."""
     return params()["market"].get(name, OPINION_DEFAULTS[name])
 EXPERT_AGE = {"pre": 6, "ros": 2}     # days before the Sunday, as the real snapshots are (week 0 / later weeks)
 SEASON_GAMES = 17

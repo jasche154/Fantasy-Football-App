@@ -209,7 +209,7 @@ def _market(tables: _Tables, base: SeasonData, belief: World, truth: World, seed
     snapshot = sorted(pid for pid, w in tables.projected if w == week)      # the snapshot's own (from_week only)
     for pid in snapshot:
         del tables.projected[(pid, week)]
-    fresh = sim_market.projections(belief, base.schedule, week, out, scoring, lines)
+    fresh = sim_market.published(sim_market.projections(belief, base.schedule, week, out, scoring, lines), belief)
     tables.projected.update({(pid, week): p for pid, p in fresh.items()})
     if snapshot:
         # a player the snapshot alone admits (a backup QB, a WR6: no ADP, no game, no earlier projection) keeps a

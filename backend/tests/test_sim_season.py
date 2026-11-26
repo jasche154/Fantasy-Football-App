@@ -172,7 +172,9 @@ def test_the_replay_engine_plays_a_simulated_season_to_a_champion(simulated):
 
 def test_a_league_that_jumps_in_drafts_on_a_board_whose_order_agrees_with_its_adp(data):
     """The draft room's default order (pre_rank: the week's expert snapshot, which the simulation draws) and the
-    market ADP come from one belief, injured starters included."""
+    market ADP agree, injured starters included. The experts carry the last real week's ranks over the join
+    (sim_market.implied_opinions, item 28) while the ADP is the belief's, so they agree less than one belief
+    would: real 2026 jump-in leagues 0.77-0.80 (0.88-0.91 before the seeding)."""
     from services import replay_chart, sim_metrics, sim_setup
 
     known = data.as_of(FROM)                        # as the live season loads: nothing from week FROM on
@@ -183,7 +185,7 @@ def test_a_league_that_jumps_in_drafts_on_a_board_whose_order_agrees_with_its_ad
     ranks = replay_chart.pre_ranks(replay_chart.pre_picks(drafted, replay_state.draft_week(settings)))
     top = sorted(ranks, key=ranks.get)[:60]
     adp = [drafted.players[pid].adp or 1000.0 for pid in top]
-    assert sim_metrics.spearman([ranks[pid] for pid in top], adp) > 0.85
+    assert sim_metrics.spearman([ranks[pid] for pid in top], adp) > 0.75
     assert max(adp[:12]) <= 48                      # nobody the market takes past round 4 is a first-rounder
 
 

@@ -257,3 +257,14 @@ def test_join_and_churn_rows_read_projections_ranks_and_tags():
     assert absent["untagged no-shows / week"] == 1 and absent["team score <= 6 %"] == 50   # player 2: no box, no tag
     data.projected[(1, 5)] = 0.0
     assert sim_metrics_join.absences(data, [5])["untagged zero projections / week"] == 1   # player 1 played
+
+
+def test_published_projections_take_the_positions_scale(belief, monkeypatch):
+    """Item 27: the public table only, scaled per position (real sources project high)."""
+    from services import sim_constants, sim_market
+    monkeypatch.setitem(sim_constants._overrides, "market", {"projection_scale": {"QB": 1.1}})
+    sim_constants.params.cache_clear()
+    qb, wr = (next(p for p in belief.players.values() if p.position == pos).player_id for pos in ("QB", "WR"))
+    assert sim_market.published({qb: 10.0, wr: 10.0, -1: 3.0}, belief) == {qb: pytest.approx(11.0), wr: 10.0, -1: 3.0}
+    monkeypatch.undo()
+    sim_constants.params.cache_clear()
