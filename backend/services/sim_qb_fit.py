@@ -222,7 +222,7 @@ def fit(session, seasons: list[int]) -> dict:
 def _league(session, season: int, seed: int):
     """(the season a league on `season` would play with `seed`, its first simulated week, its established QBs, its
     rookie ids, seconds the simulation alone took)."""
-    from services import sim_next_year, sim_qb_jobs, sim_season, sim_setup, sim_world
+    from services import sim_depth, sim_next_year, sim_qb_jobs, sim_season, sim_setup, sim_world
     from services.replay_state import Settings
 
     kind, through = sim_setup.kind_of(session, season)
@@ -235,8 +235,9 @@ def _league(session, season: int, seed: int):
                                    team_prior=teams)
         took = time.perf_counter() - started
         return data, 1, sim_qb_jobs.established_of(base, sim_world.estimate(base, 1, world), True, qbs), set(rookies), took
-    base = sim_setup.with_status_now(session, replay_pool.load_season_data(session, season, settings.scoring,
-                                                                           through=through), through + 1)
+    base = replay_pool.load_season_data(session, season, settings.scoring, through=through)
+    base = sim_setup.with_status_now(session, sim_depth.with_real_qbs(base, sim_setup.qb_rooms(session), through + 1),
+                                     through + 1)                  # as sim_setup.build: today's real QB rooms
     rookies = [pid for pid, first in sim_setup.first_seasons(session).items() if first == season]
     qbs = sim_setup.qb_inputs(session, season)
     started = time.perf_counter()
