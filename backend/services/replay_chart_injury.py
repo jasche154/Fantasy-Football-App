@@ -43,7 +43,9 @@ healthy players with the same recent rate (regression to the mean, 0.869): 1-2 g
 0.862 (n=60), 6-9 0.80 (n=13, 90% interval 0.68-0.93); no in-season absence of 10+ games came back with two games
 to measure. The user's short-absence targets stay exact (out 1-4 games: factor 1, the anchors already price it),
 then the factor falls to RETURN_LONG at 6 games and holds there. A long absence's first report so costs
-1 - 0.80 x (1 - 0.45) = 56% in all.
+1 - 0.80 x (1 - 0.45) = 56% in all. The factor is already in his `healthy_chart` while he is frozen, so everything that
+reads it carries it too: the 50% floor a CPU sells an out player at (replay_trade_value.OUT_SELL_SHARE) is about 40%
+of his pre-injury value once he has missed 6+ games.
 
 Pure: no database.
 """

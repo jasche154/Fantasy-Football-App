@@ -10,6 +10,8 @@ from fastapi.responses import JSONResponse
 
 NOT_FINITE = "Input should be a finite number"
 NON_FINITE_WORDS = {"nan", "inf", "+inf", "-inf", "infinity", "+infinity", "-infinity"}
+NUMBER_ERRORS = {"float_parsing", "float_type", "int_parsing", "int_type", "int_from_float", "finite_number",
+                 "less_than", "less_than_equal", "greater_than", "greater_than_equal", "multiple_of"}
 
 
 def _not_finite(value: Any) -> bool:
@@ -34,7 +36,7 @@ def safe_errors(errors: list[dict]) -> list[dict]:
     found = []
     for error in errors:
         error = dict(error)
-        if _not_finite(error.get("input")):
+        if error.get("type") in NUMBER_ERRORS and _not_finite(error.get("input")):    # not a Literal's "inf"
             error["msg"], error["type"] = NOT_FINITE, "finite_number"
             error.pop("ctx", None)
         found.append(_safe(error))

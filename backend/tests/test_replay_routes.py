@@ -879,3 +879,10 @@ def test_a_matchup_for_week_zero_names_the_weeks_that_can_be_shown(client):
     post(client, game + "/advance", {"step": "play", "week": 1})
 
     assert refused(client, game + "/matchup", method="GET", week=0) == (422, "Week 0 can't be shown: pick a week from 1 to 2.")
+
+
+def test_inf_sent_to_a_choice_field_lists_the_choices_not_a_number_rule(client):
+    response = client.post(API + "/games", json={"season": 2024, "scoring": "inf"})
+
+    assert response.status_code == 422
+    assert all(error["msg"] != "Input should be a finite number" for error in response.json()["detail"])
