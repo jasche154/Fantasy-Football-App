@@ -1,5 +1,7 @@
 """Review of #66, round 3, item 4: small fixture tests for logic the season tests only reach indirectly."""
+from dataclasses import replace
 from datetime import datetime, timezone
+from types import MappingProxyType
 
 import numpy as np
 import pytest
@@ -129,3 +131,34 @@ def test_a_holder_marked_in_danger_gets_the_job_danger_note_that_week(monkeypatc
     monkeypatch.setattr(sim_market, "HINT_RATE", 1.0)
     data = sim_season.simulate(fakes.fake_season(), 1, 10)
     assert data.notes[(marked[11], 11)] == sim_market.BUZZ["bench"]
+
+
+def _one_qb_rooms():
+    data = fakes.fake_season()
+    first = {}
+    for pid, p in sorted(data.players.items(), key=lambda kv: (kv[1].adp or 999, kv[0])):
+        if p.position == "QB":
+            first.setdefault(data.team_at(pid, 5), pid)
+    one = replace(data, players=MappingProxyType({pid: p for pid, p in data.players.items()
+                                                  if p.position != "QB" or pid in first.values()}))
+    return one, sorted({t for t, _ in data.schedule.opponents})
+
+
+def test_a_room_qb_named_like_a_receiver_still_joins():
+    """Review round 4, item 4: only pooled QBs' names count as the same QB."""
+    from services import sim_depth
+    one, teams = _one_qb_rooms()
+    receiver = next(p for p in one.players.values() if p.position == "WR")
+    added = sim_depth.with_real_qbs(one, {teams[0]: [(900010, receiver.name)]}, 5)
+    assert 900010 in added.players
+
+
+def test_without_the_draft_cache_an_unseen_qb_on_a_team_with_a_seeded_rookie_is_left_out():
+    """Review round 4, item 3: no cached picks; the depth chart spells the rookie apart from the offseason file."""
+    from services import sim_depth
+    one, teams = _one_qb_rooms()
+    rooms = {teams[0]: [(900020, "Arch Manning III-X")], teams[1]: [(900021, "Unseen Backup")],
+             teams[2]: [(900022, "Seen Veteran")]}
+    added = sim_depth.with_real_qbs(one, rooms, 5, seen={900022}, rookie_teams={teams[0], teams[2]})
+    assert 900020 not in added.players                   # unseen, his team drafted a rookie QB: that rookie
+    assert 900021 in added.players and 900022 in added.players

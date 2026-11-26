@@ -243,18 +243,24 @@ def _with_added(base: SeasonData, added: Mapping[int, PoolPlayer], from_week: in
 
 
 def with_real_qbs(base: SeasonData, rooms: Mapping[str, Sequence[tuple[int, str]]], from_week: int,
-                  moved: Mapping[int, str | None] | None = None, rookies: Collection[int] = ()) -> SeasonData:
+                  moved: Mapping[int, str | None] | None = None, rookies: Collection[int] = (),
+                  seen: Collection[int] | None = None, rookie_teams: Collection[str] = ()) -> SeasonData:
     """`base` with each team's real quarterbacks of today who are not in its pool yet (`rooms`: {team: [(id,
     name)]} by depth, sim_setup.qb_rooms), on `moved`'s team when the offseason file moves him (None: retired,
     left out). Like the pooled QB he has no games of evidence: a backup's level and starts weight. Only for a
     live or the next season (today's rooms). Never one already in the pool by name (a rookie of the seeded draft
-    has a synthetic id) nor one of `rookies` (the coming season's real draft class): no QB twice."""
+    has a synthetic id) nor one of `rookies` (the coming season's real draft class): no QB twice. Without the
+    draft class (no cached picks) a QB with no stats yet (not in `seen`) on a team with a seeded rookie QB
+    (`rookie_teams`) is taken for that rookie under the depth chart's spelling and left out too."""
     teams = {team for team, _ in base.schedule.opponents}
-    moved, pooled = moved or {}, {normalize(p.name) for p in base.players.values()}
+    moved = moved or {}
+    pooled = {normalize(p.name) for p in base.players.values() if p.position == "QB"}
+    def unseen_rookie(pid: int, team: str) -> bool:
+        return seen is not None and pid not in seen and moved.get(pid, team) in rookie_teams
     added = {pid: PoolPlayer(pid, name, "QB", adp_team=moved.get(pid, team))
              for team, qbs in rooms.items() for pid, name in qbs
              if pid not in base.players and pid not in rookies and normalize(name) not in pooled
-             and moved.get(pid, team) in teams}
+             and not unseen_rookie(pid, team) and moved.get(pid, team) in teams}
     return _with_added(base, added, from_week)
 
 

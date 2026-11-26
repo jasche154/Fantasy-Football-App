@@ -32,6 +32,7 @@ from services.replay_state import Settings
 from services.valuation import NoDataError
 
 log = logging.getLogger(__name__)
+_NO_DRAFT_LOGGED: set[int] = set()        # seasons already logged as having no cached draft QBs
 _per_data_cache: dict[tuple[int, str], tuple[object, object]] = {}   # (id(data), name) -> (data, value): see _per_data
 PER_DATA_ENTRIES = 16
 
@@ -427,7 +428,12 @@ def _future_base(session: Session, season: int, settings: Settings, seed: int = 
     drawn = sim_carryover.draw(carries, seed)
     base = replace(base, notes=MappingProxyType({**{(pid, 0): sim_carryover.note(c) for pid, c in carries.items()},
                                                  **sim_carryover.cleared(carries, drawn)}))
-    base = sim_depth.with_real_qbs(base, qb_rooms(session), 1, moved, rookies=set(inputs.picks))
+    if not inputs.picks and season not in _NO_DRAFT_LOGGED:
+        _NO_DRAFT_LOGGED.add(season)
+        log.info("No cached nflverse draft QBs for %s: a depth-chart QB with no stats on a team with a seeded rookie "
+                 "QB is taken for that rookie", season)
+    base = sim_depth.with_real_qbs(base, qb_rooms(session), 1, moved, rookies=set(inputs.picks), seen=set(data.players),
+                                   rookie_teams={r.team for r in drafted.values() if r.position == "QB"})
     scores = [(g.week, g.home_team, g.away_team, g.home_score, g.away_score) for g in played if g.is_final]
     return Future(base, belief, drawn, qbs,
                   sim_lines.carry_over(scores) if scores else {})
