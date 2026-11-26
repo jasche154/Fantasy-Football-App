@@ -87,6 +87,7 @@ class ReplayValue:
     shock_chart: float = 0.0       # signed chart points from an opportunity shock (replay_shocks)
     shock: str | None = None       # its kind: teammate_out, teammate_left, starter_back, role_won, role_lost
     hype_reason: str | None = None  # why his role jumped (replay_shocks.reason), when a shock lifts him STAR_MIN+
+    fill_in: float | None = None   # a fill-in QB: the share of his team's games left he is expected to start
 
 
 @dataclass(frozen=True, eq=False)

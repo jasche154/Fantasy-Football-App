@@ -1,6 +1,7 @@
 """Simulated seasons: fill-in quarterbacks, measured the same way on real and simulated seasons.
 
-A FILL-IN start is a start (the passing-yards leader, sim_qb.starters) by a QB other than his team's job holder
+A FILL-IN start is a start (the passing-yards leader, sim_qb.starters; replay_fillin.history, the trade chart's
+definition) by a QB other than his team's job holder
 while the holder carries an injury tag that week (hurt, suspended); the holder is the team's last starter who was
 not a fill-in, so a healthy holder who does not play has lost the job and his replacement is the new holder (one
 who left a game early, untagged, keeps it).
@@ -17,14 +18,13 @@ import argparse
 import json
 import logging
 import os
-from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from functools import partial
 
 import numpy as np
 
-from services import sim_qb
+from services import replay_fillin
 from services.replay_pool import SeasonData
 
 MIN_RUN = 3                      # a run of this many starts is a fill-in stint, not a one-off
@@ -46,13 +46,6 @@ class Run:
     lift: dict = None            # {k: (that projection - his first start's, his mean points in k starts - it)}
 
 
-def _starts_by_team(data: SeasonData) -> dict[str, dict[int, int]]:
-    by_team: dict[str, dict[int, int]] = defaultdict(dict)
-    for (team, week), pid in sim_qb.starters(data).items():
-        by_team[team][week] = pid
-    return by_team
-
-
 def _projection_ranks(data: SeasonData, week: int) -> dict[int, int]:
     qbs = sorted(((points, pid) for (pid, w), points in data.projected.items()
                   if w == week and pid in data.players and data.players[pid].position == "QB"), reverse=True)
@@ -60,22 +53,19 @@ def _projection_ranks(data: SeasonData, week: int) -> dict[int, int]:
 
 
 def runs(data: SeasonData, from_week: int = 1) -> list[Run]:
-    """Every fill-in run of MIN_RUN or more starts beginning in week from_week or later (module docstring)."""
+    """Every fill-in run of MIN_RUN or more starts beginning in week from_week or later (module docstring), from
+    replay_fillin.history (the trade chart's definition of who is filling in)."""
     found = []
-    for team, weeks in sorted(_starts_by_team(data).items()):
-        order = sorted(weeks)
-        holder, stint = weeks[order[0]], []
-        for week in order[1:]:
-            starter = weeks[week]
-            filling = starter != holder and (holder, week) in data.injuries
+    for team, rows in sorted(replay_fillin.history(data).items()):
+        weeks = {week: starter for week, starter, _, _ in rows}
+        stint, holder = [], rows[0][2]
+        for week, starter, regular, filling in rows[1:]:
             if filling and stint and weeks[stint[-1]] == starter:
                 stint.append(week)
                 continue
             if len(stint) >= MIN_RUN and stint[0] >= from_week:
                 found.append(_run(data, team, holder, stint, weeks))
-            stint = [week] if filling else []
-            if not filling and starter != holder and (holder, week) not in data.box:
-                holder = starter                      # a healthy holder who did not play: the job moved
+            stint, holder = ([week] if filling else []), regular
         if len(stint) >= MIN_RUN and stint[0] >= from_week:
             found.append(_run(data, team, holder, stint, weeks))
     return found
