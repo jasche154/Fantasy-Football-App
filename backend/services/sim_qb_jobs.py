@@ -165,6 +165,16 @@ def decide(jobs: Jobs, world: World, known: SeasonData, week: int, sitting: Coll
     return changes, rumors
 
 
+def _back_from_injury(known: SeasonData, pid: int, team: str | None, week: int) -> bool:
+    """Hard-tagged last week, or the week before when last week was his team's bye or he did not play it (a
+    holder who played healthy in between is benched healthy, not kept out on his return)."""
+    def hard(w: int) -> bool:
+        return w >= 1 and (pid, w) in known.injuries and known.injuries[(pid, w)].hard
+    last = week - 1
+    idle = (team is not None and not known.schedule.opponent(team, last)) or (pid, last) not in known.box
+    return hard(last) or (hard(week - 2) and idle)
+
+
 def news(changes: Collection[RoleChange], jobs: Jobs, world: World, known: SeasonData, week: int,
          names: Mapping[int, str]) -> dict[tuple[int, int], str]:
     """{(player, week): the true public line} for the week's job changes (`changes`, decide), on the QB who lost
@@ -178,7 +188,7 @@ def news(changes: Collection[RoleChange], jobs: Jobs, world: World, known: Seaso
         new = jobs.holders.get(team)
         if new is None or new == old:
             continue
-        back = any((old, w) in known.injuries and known.injuries[(old, w)].hard for w in range(max(1, week - 2), week))
+        back = _back_from_injury(known, old, team, week)
         mine, theirs = names.get(old, "the incumbent"), names.get(new, "the backup")
         if back:
             out[(old, week)] = f"Healthy again, but {theirs} stays the starter; he is the backup."

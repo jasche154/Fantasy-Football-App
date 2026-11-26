@@ -171,6 +171,16 @@ def test_a_job_change_gets_its_true_line_the_week_it_happens(data):
     hurt = replace(known, injuries=MappingProxyType({**known.injuries, (A, WEEK - 1): fakes.Injury("O")}))
     back = sim_qb_jobs.news([sim_world.RoleChange(WEEK, A, kind="bench")], jobs, _world(), hurt, WEEK, names)
     assert back[(B, WEEK)].startswith("Stays the starter") and "healthy again" in back[(A, WEEK)].lower()
+    # review item 2: hurt two weeks ago, played healthy last week, benched now: a healthy benching
+    week = WEEK + 2                                                          # weeks 9 and 10 are both KC games
+    later = data.as_of(week)
+    earlier = replace(later, injuries=MappingProxyType({**later.injuries, (A, week - 2): fakes.Injury("O")}),
+                      box=MappingProxyType({**later.box, (A, week - 1): BoxLine(pass_yds=200)}))
+    played = sim_qb_jobs.news([sim_world.RoleChange(week, A, kind="bench")], jobs, _world(), earlier, week, names)
+    assert played[(A, week)].startswith("Benched")
+    idle = replace(earlier, box=MappingProxyType({k: v for k, v in earlier.box.items() if k != (A, week - 1)}))
+    assert sim_qb_jobs.news([sim_world.RoleChange(week, A, kind="bench")], jobs, _world(), idle, week,
+                            names)[(A, week)].startswith("Healthy again")
 
 
 def test_the_benched_holder_is_never_rumoured_the_week_he_loses_the_job(data, monkeypatch):
