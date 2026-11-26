@@ -947,3 +947,19 @@ def test_a_league_name_keeps_joiners_and_selectors_only_inside_emoji(raw, cleane
     from api.replay_routes import clean_name
 
     assert clean_name(raw) == cleaned
+
+
+def test_the_echo_limits_cut_text_lists_dicts_and_depth():
+    from api.validation import MAX_DEPTH, _safe
+
+    deep: list = []
+    for _ in range(25):
+        deep = [deep]
+    flat = _safe(deep)
+    for _ in range(MAX_DEPTH):
+        flat = flat[0]
+
+    assert len(_safe("x" * 300)) == 203 and _safe("x" * 300).endswith("...")
+    assert _safe(list(range(9))) == [0, 1, 2, 3, 4, "..."]
+    assert _safe({str(n): n for n in range(7)})["..."] == "2 more"
+    assert flat == ["..."]

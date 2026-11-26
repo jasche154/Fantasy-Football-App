@@ -501,3 +501,25 @@ def test_a_defense_on_a_bye_with_a_backup_who_plays_starts_the_backup():
     lineup, defense, roster = _with_bye("DST", backup=True)
 
     assert len(lineup["DST"]) == 1 and lineup["DST"][0] != defense and lineup["DST"][0] in roster
+
+
+@pytest.mark.parametrize("case", ["hard tag", "bye", "no team"])
+def test_a_kicker_with_no_projection_leaves_his_slot_empty_when_he_cannot_play(case):
+    from dataclasses import replace as copy
+    from types import MappingProxyType
+
+    from services import replay_values as rv
+    data, settings = fakes.fake_season(), _settings()
+    state = fakes.drafted_state(settings)
+    team = next(t for t in state.teams if not t.is_user)
+    kicker = next(pid for pid in team.roster if data.players[pid].position == "K")
+    week = next(w for w in range(1, 15) if data.on_bye(kicker, w)) if case == "bye" else 3
+    know = fakes.fake_knowledge(week, settings, fakes.patched(data, projected={(kicker, week): None}))
+    value = know.by_id[kicker]
+    if case == "hard tag":
+        value = copy(value, injury=fakes.Injury("O"))
+    elif case == "no team":
+        value = copy(value, team=None)
+    know = copy(know, by_id=MappingProxyType({**know.by_id, kicker: value}))
+
+    assert value.projection == 0 and "K" in rv.idle_slots(know, team.roster, settings)

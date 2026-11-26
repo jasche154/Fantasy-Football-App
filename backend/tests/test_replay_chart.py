@@ -207,3 +207,20 @@ def test_without_any_expert_ranks_the_sites_consensus_stands_in_and_damps_a_hot_
 def test_a_season_with_expert_ranks_never_uses_the_stand_in(monkeypatch):
     data = fakes.fake_season()
     assert _hot_streak_rise(data, monkeypatch, True) == _hot_streak_rise(data, monkeypatch, False)
+
+
+@pytest.mark.parametrize("missed", [7, None])
+def test_the_vague_keep_carries_the_return_factor_for_a_frozen_player_only(monkeypatch, missed):
+    from services import replay_chart_injury as injury, replay_news
+    data, week, end, back = fakes.fake_season(), 5, 17, 11
+    pid = fakes.player_id("WR", 3)
+    row = {"team": data.team_at(pid, week)}
+    monkeypatch.setattr(replay_news, "vague_odds", lambda since, w, tag: ((back, 1.0),))
+    games = chart._game_weeks(data, row["team"], week, end)
+    left = sum(w < back for w in games)
+
+    keep = chart._vague_keep(data, row, replay_news.Report(2, back, "", vague=True), "IR", week, end, missed)
+
+    factor = injury.return_factor(missed + left) if missed is not None else 1.0
+    assert keep == pytest.approx((1 - injury.discount(left, len(games))) * factor)
+    assert missed is None or factor < 1
