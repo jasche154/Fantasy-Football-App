@@ -197,10 +197,15 @@ def test_the_depth_discount_moves_work_to_a_teams_top_receivers_and_keeps_its_to
     sim_constants.params.cache_clear()
 
 
-def test_a_whole_season_draws_a_veterans_role_but_not_a_rookies(monkeypatch):
+def test_a_whole_season_draws_a_veterans_role_and_a_rookies_by_its_own_residual(monkeypatch):
+    from services import sim_next_year
+    model = {**sim_next_year.stored(), "role_sd": {"WR": 0.4}, "rookies": {"WR": {"role_sd": 0.6}}}
+    monkeypatch.setattr(sim_next_year, "stored", lambda: model)
     knobs = {**sim_talent.settings(), "season_roles": 1.0}
     veteran, rookie = sim_world.Player(1, "WR", "AAA", targets=0.2, games=17), sim_world.Player(2, "WR", "AAA", targets=0.2)
     assert sim_talent._season_role(veteran, 1.0, knobs).targets > 0.2 > sim_talent._season_role(veteran, -1.0, knobs).targets
+    assert sim_talent._season_role(rookie, 1.0, knobs).targets > sim_talent._season_role(veteran, 1.0, knobs).targets
+    model["rookies"] = {}
     assert sim_talent._season_role(rookie, 1.0, knobs) == rookie
 
 
@@ -240,13 +245,15 @@ def test_implied_opinions_carry_the_last_real_ranks_into_the_first_simulated_wee
 def test_join_and_churn_rows_read_projections_ranks_and_tags():
     from services import sim_metrics_join
     players = {i: SimpleNamespace(position="WR") for i in range(1, 4)}
-    projected = {(1, 4): 10.0, (1, 5): 12.0, (2, 4): 8.0, (2, 5): 6.0, (3, 4): 9.0, (3, 5): 0.0}
+    projected = {(1, 4): 10.0, (1, 5): 12.0, (2, 4): 8.0, (2, 5): 9.0, (3, 4): 9.0, (3, 5): 0.0}
     ranks = {(1, 4): 1, (2, 4): 2, (3, 4): 3, (1, 5): 2, (2, 5): 1, (3, 5): 3}
     data = SimpleNamespace(players=players, projected=projected, expert_ranks=ranks, injuries={(3, 5): fakes.Injury("O")},
                            box={(1, 5): None}, scores={("AAA", 5): 3, ("BBB", 5): 24}, team_at=lambda pid, w: "AAA")
     join = sim_metrics_join.join(data, 5)
-    assert join["join proj ratio WR"] == pytest.approx(18 / 18) and join["join expert churn WR"] == 1.0
+    assert join["join proj ratio WR"] == pytest.approx(21 / 18) and join["join expert churn WR"] == 1.0
     churn = sim_metrics_join.churn(data, [4, 5])
-    assert churn["proj churn WR median"] == 2.0
+    assert churn["proj churn WR median"] == 1.5
     absent = sim_metrics_join.absences(data, [5])
     assert absent["untagged no-shows / week"] == 1 and absent["team score <= 6 %"] == 50   # player 2: no box, no tag
+    data.projected[(1, 5)] = 0.0
+    assert sim_metrics_join.absences(data, [5])["untagged zero projections / week"] == 1   # player 1 played

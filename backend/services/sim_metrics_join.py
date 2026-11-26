@@ -8,7 +8,8 @@ a real season measured the same way shows how much a normal week moves.
 - churn(data, weeks): the week-to-week change of a healthy top player's projection (points, absolute; median and
   90th percentile), the expert-rank churn's 90th percentile beside sim_metrics_games' mean.
 - absences(data, weeks): no-shows a week (a player projected PLAYING_PROJECTION+ whose team played, no box line
-  and no tag at all), and the share of team scores of 6 or fewer.
+  and no tag at all), zero projections a week (a player projected PLAYING_PROJECTION+ the week before, no tag,
+  projected ZERO_PROJECTION or less, and he played), and the share of team scores of 6 or fewer.
 """
 from collections.abc import Iterable
 
@@ -17,8 +18,10 @@ import numpy as np
 from services.replay_pool import SeasonData
 
 TOP = {"QB": 12, "RB": 24, "WR": 24, "TE": 12}
-PLAYING_PROJECTION = 5.0         # a projection this high says he is expected to play
+PLAYING_PROJECTION = 8.0         # a projection this high says he is expected to play (item 29's measure)
+ZERO_PROJECTION = 0.5            # a projection this low says he is not expected to play
 LOW_SCORE = 6                    # team points: a score this low is rare (real ~4% of team-games)
+LATE_WEEK = 15                   # ... also measured from this week on (item 30: low scores late in the season)
 
 
 def _top(data: SeasonData, week: int, position: str) -> list[int]:
@@ -79,6 +82,12 @@ def absences(data: SeasonData, weeks: Iterable[int]) -> dict[str, float]:
             continue
         team = data.team_at(pid, week + 1)
         shows += (team, week) in played
+    flicker = sum(1 for (pid, week), projection in data.projected.items()
+                  if week in weeks and projection <= ZERO_PROJECTION and (pid, week) in data.box
+                  and (pid, week) not in data.injuries and data.projected.get((pid, week - 1), 0.0) >= PLAYING_PROJECTION)
     scores = [points for (team, w), points in data.scores.items() if w in weeks]
+    late = [points for (team, w), points in data.scores.items() if w in weeks and w >= LATE_WEEK]
     return {"untagged no-shows / week": shows / max(1, len(weeks)),
-            f"team score <= {LOW_SCORE} %": float(100 * np.mean([p <= LOW_SCORE for p in scores])) if scores else float("nan")}
+            "untagged zero projections / week": flicker / max(1, len(weeks)),
+            f"team score <= {LOW_SCORE} %": float(100 * np.mean([p <= LOW_SCORE for p in scores])) if scores else float("nan"),
+            f"team score <= {LOW_SCORE} % wk {LATE_WEEK}+": float(100 * np.mean([p <= LOW_SCORE for p in late])) if late else float("nan")}
