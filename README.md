@@ -1138,11 +1138,15 @@ that week's games on; only scoring a week reads its real points.
   rows show, with the public reason ("Hype: role jumped after Puka Nacua went out for the season", "... he
   won the backfield").
 - **Injury news:** a player who is out carries a report of when he is due back (`services/replay_news.py`).
-  It is built from the week he really returned, blurred by seeded noise (off by up to two weeks until a
-  week before the return, a few false "out for the season" calls, season-ending injuries first reported as a
-  return weeks out); an IR or PUP report reads "no timetable yet" until a seeded 1-7 weeks before the return
-  (so the week the text firms up says nothing exact), valued on the same guess, which moves on by 2-4 weeks once
-  it has passed; it never names a week already reached. Only an IR or PUP tag is ever
+  Until a seeded 1-7 weeks before his real return it reads "no timetable yet", valued on a guess drawn from what
+  the public can know (how much longer real 2018-25 absences with that tag lasted once he had been out this long,
+  `replay_news_lengths.json`, fitted by `python -m services.replay_chart_eval --news-lengths`), never from his
+  return; from then on it names his real week plus an error drawn afresh each week (one week out it is right
+  about four times in five; 2 weeks out 59%, 3 weeks 41%, 4+ 37%), and a few long in-season IR absences first
+  read "out for the season". A preseason IR or PUP move reads "no timetable yet" at the draft (valued on the
+  preseason prior), a suspension shows its length. It never names a week already reached, a returning player's
+  week stays inside the season, and a plain O tag never reads "out for the season". Old saves keep loading; their
+  past weeks' news text (and the values built on it) is recomputed with these rules. Only an IR or PUP tag is ever
   called "out for the season": a plain O tag is week-to-week news (Cam Newton 2019: O from week 3, IR in
   week 10), so it names a return, the next week once the first guess has passed, until he goes to IR. A
   suspension is reported exactly. The commissioner's exempt list reads "out indefinitely" and never names a
