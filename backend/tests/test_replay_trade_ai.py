@@ -508,3 +508,52 @@ def test_about_half_of_the_cpus_offers_favour_the_user_and_the_rest_come_close(s
     assert all(v.value_get >= (1 + replay_personas.CLOSE_EDGE[0] - ai.EDGE_SLACK) * v.value_give for v in shown)
 
 
+
+
+# ---------------- speed without a change ----------------
+
+def _reference_greedy(modeled, points, counts):
+    """The lineup as my_team.best_lineup picks it (its scan of the pool per slot), in its slot order."""
+    from types import SimpleNamespace
+
+    from services import my_team as mt
+    own, flex, superflex = counts
+    starters = {**dict(zip(mt.MODELED, own)), "FLEX": flex, "SUPERFLEX": superflex}
+    pool = [SimpleNamespace(player_id=v.player_id, position=v.position, projection=points[v.player_id])
+            for v in modeled]
+    best = mt.best_lineup(pool, SimpleNamespace(starters=starters, superflex=False))
+    return [pid for ids in best.values() for pid in ids]
+
+
+@pytest.mark.parametrize("counts", [((1, 2, 2, 1), 1, 0), ((1, 2, 2, 1), 2, 1), ((2, 1, 3, 1), 0, 1), ((1, 2, 3, 1), 0, 0)])
+def test_the_lineup_solver_picks_what_the_slot_scan_picks_in_its_order(counts):
+    import random
+    from types import SimpleNamespace
+
+    from services import lineup_gain
+    rng = random.Random(7)
+    for _ in range(300):
+        size = rng.randint(0, 18)
+        modeled = sorted((SimpleNamespace(player_id=rng.randint(1, 60), position=rng.choice(("QB", "RB", "WR", "TE")))
+                          for _ in range(size)), key=lambda v: v.player_id)
+        modeled = list({v.player_id: v for v in modeled}.values())
+        points = {v.player_id: rng.choice((0.0, -0.0, 5.0, 10.0, round(rng.uniform(-2, 25), 1))) for v in modeled}
+        assert lineup_gain._greedy(modeled, points, counts) == _reference_greedy(modeled, points, counts)
+
+
+def test_slot_counts_read_the_leagues_lineup():
+    from services import lineup_gain
+    league = rv.league_settings(replace(SETTINGS, starters={**SETTINGS.starters, "SUPERFLEX": 1}))
+    counts = lineup_gain._slot_counts(league)
+    assert counts == (tuple(league.starters.get(p, 0) for p in ("QB", "RB", "WR", "TE")),
+                      league.starters.get("FLEX", 0), 1)
+
+
+@pytest.mark.parametrize("seed", [0, 3, 5])
+def test_cpu_trades_make_the_same_offers_with_the_old_lineup_solver(seed, seasons, monkeypatch):
+    """The faster lineup solver (lineup_gain._greedy) changes no offer: every week of a seed's season, again with
+    the slot-scan solver my_team.best_lineup, gives the same offers."""
+    from services import lineup_gain
+    monkeypatch.setattr(lineup_gain, "_greedy", _reference_greedy)
+    replayed = play(seed)
+    assert [w.after.offers for w in replayed] == [w.after.offers for w in seasons[seed]]

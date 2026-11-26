@@ -25,7 +25,7 @@ Used for waiver pickups (with the named drop), trade offers on real rosters, and
 import math
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from types import SimpleNamespace
+from functools import lru_cache
 
 from services import my_team as mt
 from services.injury_recovery import games_to_weeks
@@ -141,24 +141,64 @@ def week_lineup(values: Sequence, week: int, projector: Projector, settings) -> 
     """(points, starter ids) of the best QB/RB/WR/TE lineup that week. Cached on the projector, whose points
     never change, by (week, players, settings): CPU waiver plans ask about the same rosters thousands of times.
     Players are taken in id order, so ties never depend on the roster's order."""
-    modeled = sorted((v for v in values if v.position in mt.MODELED), key=lambda v: v.player_id)
-    key = (week, tuple(v.player_id for v in modeled), settings)
+    modeled = _modeled(values)
+    return _week_lineup(modeled, tuple(v.player_id for v in modeled), week, projector, settings)
+
+
+def _modeled(values: Sequence) -> list:
+    return sorted((v for v in values if v.position in mt.MODELED), key=lambda v: v.player_id)
+
+
+def _week_lineup(modeled: Sequence, ids: tuple[int, ...], week: int, projector: Projector,
+                 settings) -> tuple[float, frozenset[int]]:
+    """`week_lineup` for players already filtered and in id order (`_modeled`), `ids` their ids."""
+    key = (week, ids, settings)
     cache = projector.__dict__.setdefault("_lineups", {})    # also a stand-in projector that skips __init__
     cached = cache.get(key)
     if cached is None:
         if len(cache) >= MAX_LINEUPS:
             cache.clear()               # shortcut: drop all, not least recent; a waiver plan refills it fast
-        pool = [SimpleNamespace(player_id=v.player_id, position=v.position, projection=projector.points(v, week))
-                for v in modeled]
-        best = mt.best_lineup(pool, settings)
-        by_id = {p.player_id: p.projection for p in pool}
-        starters = frozenset(pid for ids in best.values() for pid in ids)
+        by_id = {v.player_id: projector.points(v, week) for v in modeled}
+        starters = frozenset(_greedy(modeled, by_id, _slot_counts(settings)))
         cached = cache[key] = (sum(by_id[pid] for pid in starters), starters)
     return cached
 
 
+@lru_cache(maxsize=32)
+def _slot_counts(settings) -> tuple[tuple[int, ...], int, int]:
+    """(starting slots of each of my_team.MODELED, FLEX slots, SUPERFLEX slots), as my_team._slots lists them."""
+    slots = mt._slots(settings)
+    return tuple(slots.count(p) for p in mt.MODELED), slots.count("FLEX"), slots.count("SUPERFLEX")
+
+
+def _greedy(modeled: Sequence, points: Mapping[int, float], counts: tuple[tuple[int, ...], int, int]) -> list[int]:
+    """my_team.best_lineup's starters, in its slot order: each slot takes the best remaining player who can play it
+    (ties to the lower id), the QB/RB/WR/TE slots first, then FLEX, then SUPERFLEX (SLOT_ORDER). The same picks
+    as its scan of the whole pool per slot: each position's best, then the best of what is left."""
+    ranked: dict[str, list[tuple[float, int]]] = {position: [] for position in mt.MODELED}
+    for v in modeled:
+        ranked[v.position].append((-points[v.player_id], v.player_id))
+    own, flex, superflex = counts
+    chosen: list[tuple[float, int]] = []
+    left: dict[str, list[tuple[float, int]]] = {}
+    for position, count in zip(mt.MODELED, own):
+        found = sorted(ranked[position])
+        chosen += found[:count]
+        left[position] = found[count:]
+    if flex:
+        pool = sorted(pick for position in mt.FLEX_POSITIONS for pick in left[position])
+        chosen += pool[:flex]
+        left = {"QB": left["QB"], "FLEX": pool[flex:]}
+    if superflex:
+        chosen += sorted(pick for picks in left.values() for pick in picks)[:superflex]
+    return [pid for _, pid in chosen]
+
+
 def season_points(values: Sequence, horizon_: Horizon, projector: Projector, settings) -> float:
-    return sum(weight * week_lineup(values, week, projector, settings)[0] for week, weight in horizon_.weights.items())
+    modeled = _modeled(values)                      # sorted once for every week of the horizon
+    ids = tuple(v.player_id for v in modeled)
+    return sum(weight * _week_lineup(modeled, ids, week, projector, settings)[0]
+               for week, weight in horizon_.weights.items())
 
 
 def gain(roster: Sequence, horizon_: Horizon, projector: Projector, settings,
