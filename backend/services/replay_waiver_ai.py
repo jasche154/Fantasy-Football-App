@@ -419,11 +419,15 @@ def _upgrade(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: _C
     """The free agent with the most trade value who clearly beats (UPGRADE_SHARE x and UPGRADE_GAP more) the least
     valuable player it can drop for him (one of its DROPPABLE_COUNT least valuable, or any it can spare at his
     position) at a position it can use: a manager doesn't leave a 300-point player on
-    the wire (testers added and flipped them for 75-85% of chart). He goes to IR after the move when he is out."""
+    the wire (testers added and flipped them for 75-85% of chart). He goes to IR after the move when he is out; with the
+    IR slot taken an out player is added only when he is worth more than the one on IR (they swap, `_stash_added`)."""
     spare = _spare(roster, ctx.know, ctx.protected, ctx.keep) if len(roster) >= ctx.settings.roster_size else []
     if not spare:
         return None
+    stashed = max((v.chart for v in ctx.stash), default=None)   # IR taken: an out add must beat its player
     for add in sorted((v for v in free if v.position in SKILL), key=lambda v: (-v.chart, v.player_id)):
+        if add.out and stashed is not None and add.chart <= stashed:
+            continue                                              # he would sit on the bench out of reach
         drops = [*spare[:DROPPABLE_COUNT], *(v for v in spare[DROPPABLE_COUNT:] if v.position == add.position)]
         legal = [out for out in _legal_drops(roster, add, drops, ctx)
                  if add.chart >= max(UPGRADE_SHARE * out.chart, out.chart + UPGRADE_GAP)]
@@ -481,8 +485,20 @@ def cpu_free_agency(state: State, settings: Settings, know: Knowledge, seed: int
             if move is None:
                 break
             state = replay_waivers.execute_move(state, settings, know, team_id, *move)
-            if not rs.team(state, team_id).ir and replay_ir.eligible(know, move[0]):
-                state = replay_ir.place(state, know, team_id, move[0])     # a stash frees his spot at once
+            state = _stash_added(state, settings, know, team_id, move[0])
+    return state
+
+
+def _stash_added(state: State, settings: Settings, know: Knowledge, team_id: int, added: int) -> State:
+    """An out player just added goes to IR at once: into an empty slot, or swapped with a less valuable IR player."""
+    if not replay_ir.eligible(know, added):
+        return state
+    team = rs.team(state, team_id)
+    if not team.ir:
+        return replay_ir.place(state, know, team_id, added)
+    held = team.ir[0]
+    if replay_ir.eligible(know, held) and know.by_id[added].chart > know.by_id[held].chart:
+        return replay_ir.activate(state, settings, know, team_id, held, swap=added)
     return state
 
 

@@ -875,3 +875,32 @@ def test_a_cpus_stash_and_free_agency_choices_about_an_injured_player_move_only_
 
     assert moves(data) == moves(later)
     assert any(STAR in team.ir for team in moves(data).teams)
+
+
+def test_with_the_ir_slot_taken_an_out_free_agent_is_added_only_to_swap_with_a_lesser_ir_player():
+    week, team_id = 6, CPUS[0]
+    hurt = tagged_know(week, {(fakes.BREAKOUT_ID, week): fakes.Injury("O")})
+    state = league(week, phase="open")
+    team = rs.team(state, team_id)
+    roster = [hurt.by_id[pid] for pid in team.roster]
+    add = hurt.by_id[fakes.BREAKOUT_ID]
+    base = ai._for_team(ai._context(hurt, SETTINGS, state), team)
+
+    better_on_ir = replace(base, stash=(replace(add, player_id=-1, chart=add.chart + 1),))
+    worse_on_ir = replace(base, stash=(replace(add, player_id=-1, chart=add.chart / 4),))
+
+    assert add.out and ai._upgrade(roster, [add], better_on_ir) is None          # he would sit on the bench
+    assert ai._upgrade(roster, [add], worse_on_ir) is not None
+
+
+def test_an_out_player_added_with_a_lesser_player_on_ir_swaps_places_with_him():
+    week, team_id = 6, CPUS[0]
+    team = rs.team(league(week, phase="open"), team_id)
+    low = min((pid for pid in team.roster if know(week).by_id[pid].position in SKILL), key=lambda p: know(week).by_id[p].chart)
+    hurt = tagged_know(week, {(fakes.BREAKOUT_ID, week): fakes.Injury("O"), (low, week): fakes.Injury("O")})
+    roster = tuple(pid for pid in team.roster if pid != low)
+    state = edited(league(week, phase="open"), team_id, roster=(*roster, fakes.BREAKOUT_ID), ir=(low,))
+
+    after = ai._stash_added(state, SETTINGS, hurt, team_id, fakes.BREAKOUT_ID)
+
+    assert rs.team(after, team_id).ir == (fakes.BREAKOUT_ID,) and low in rs.team(after, team_id).roster
