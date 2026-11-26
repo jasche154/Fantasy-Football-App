@@ -355,8 +355,10 @@ def with_news(data: SeasonData, rows: Mapping[int, dict], fields: Mapping[int, d
 def _filling(data: SeasonData, rows: Mapping[int, dict], fields: Mapping[int, dict], week: int,
              end_week: int, seed: int) -> dict[int, dict]:
     """{id: fields} of the fill-in QBs (replay_fillin): share x the value of his rank without the form bonus +
-    (1 - share) x a backup's (the QB ranked just past one per team), never above his own chart. `share` reads
-    the regular starter's news, so it is the same report his injured chart is priced on."""
+    (1 - share) x a backup's (the QB ranked just past one per team), never above his own chart. A graduate
+    (replay_fillin.graduated: past probation, his regular not expected back) keeps his form: his share of an
+    established starter's starts x his chart + the rest x a backup's. `share` reads the regular starter's news,
+    so it is the same report his injured chart is priced on."""
     found = replay_fillin.fill_ins(data, week)
     if not found:
         return {}
@@ -370,6 +372,10 @@ def _filling(data: SeasonData, rows: Mapping[int, dict], fields: Mapping[int, di
         news = replay_fillin.regular_news(data, fill, week, seed)       # the report his injured chart reads
         played = replay_fillin.share(fill, news, _game_weeks(data, rows[pid]["team"], week, end_week))
         if played is None:                              # past probation, his regular not expected back: the team's QB
+            continue
+        if replay_fillin.graduated(fill, news):         # the team's QB on a slower climb: his form counts
+            chart = played * now["chart"] + (1 - played) * min(backup, now["chart"])
+            out[pid] = {**now, "chart": round(chart, 1), "fill_in": round(played, 3)}
             continue
         rank_value = now["healthy_chart"] - now.get("form_chart", 0.0)
         chart = min(now["chart"], played * rank_value + (1 - played) * min(backup, rank_value))

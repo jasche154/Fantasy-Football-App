@@ -62,13 +62,37 @@ def test_the_backup_fills_in_while_the_regular_is_out_and_hands_back_when_he_ret
 
 
 def test_a_backup_who_takes_the_job_is_a_fill_in_until_his_probation_ends(data):
-    probation = int(replay_fillin.stored()["probation"])
+    probation, graduated = int(replay_fillin.stored()["probation"]), replay_fillin.GRADUATED
     weeks = [w for w, _ in data.team_by_week[_team_qbs(data)[1]] if w >= 5]
     season, team, regular, backup = _season(data, weeks, tagged=())          # the regular healthy, not playing
     started = [w for w in weeks if w < weeks[probation]]
     assert _at(season, weeks[1]) == {backup: replay_fillin.FillIn(team, regular, 1, "taken")}
     assert _at(season, weeks[probation - 1])[backup].starts == len(started) - 1
-    assert backup not in _at(season, weeks[probation])                         # the team's QB now
+    graduate = _at(season, weeks[probation])[backup]                            # the team's QB now, still climbing
+    assert graduate.starts == probation and replay_fillin.graduated(graduate, None)
+    assert _at(season, weeks[probation + graduated - 1])[backup].starts == probation + graduated - 1
+    assert backup not in _at(season, weeks[probation + graduated])              # a starter's full value
+
+
+def test_a_graduates_share_climbs_and_a_drafted_qb_climbs_no_slower_than_a_career_backup():
+    probation, fitted = int(replay_fillin.stored()["probation"]), replay_fillin.stored()["graduated"]
+    games = [14, 15, 16]
+    for prior in (True, False):
+        found = [replay_fillin.share(replay_fillin.FillIn("KC", 1, probation + n, "taken", prior), None, games)
+                 for n in range(replay_fillin.GRADUATED + 1)]
+        assert found[:-1] == [pytest.approx(v) for v in fitted["prior" if prior else "none"]] and found[-1] is None
+        assert all(0 < a <= b < 1 for a, b in zip(found[:-1], found[1:-1]))           # it only climbs
+    assert all(p >= n for p, n in zip(fitted["prior"], fitted["none"]))
+    season_ending = replay_news.Report(9, None, "Out for the season.")
+    out = replay_fillin.FillIn("KC", 1, probation, "out", False)
+    assert replay_fillin.share(out, season_ending, games) == pytest.approx(fitted["none"][0])
+    named = replay_news.Report(9, 16, "Expected back week 16.")
+    assert not replay_fillin.graduated(out, named)                    # his regular expected back: still a fill-in
+
+
+def test_the_climb_pools_a_later_bucket_that_falls_below_an_earlier_one():
+    assert replay_fillin._climb([(9, 10), (6, 10), (9, 10)]) == pytest.approx([0.75, 0.75, 0.9])
+    assert replay_fillin._climb([(5, 10), (8, 10)]) == pytest.approx([0.5, 0.8])
 
 
 def test_probation_ends_only_when_the_regular_is_not_expected_back(data):
@@ -76,7 +100,9 @@ def test_probation_ends_only_when_the_regular_is_not_expected_back(data):
     fill = replay_fillin.FillIn("KC", 1, probation, "out")
     games = [14, 15, 16, 17]
     season_ending = replay_news.Report(9, None, "Out for the season.")
-    assert replay_fillin.share(fill, season_ending, games) is None
+    assert replay_fillin.share(fill, season_ending, games) == pytest.approx(replay_fillin.stored()["graduated"]["none"][0])
+    done = replay_fillin.FillIn("KC", 1, probation + replay_fillin.GRADUATED, "out")
+    assert replay_fillin.share(done, season_ending, games) is None
     named = replay_news.Report(9, 16, "Expected back week 16.")
     shares = replay_fillin.stored()["shares"]
     assert replay_fillin.share(fill, named, games) == pytest.approx(min(shares["named"][-1], 0.5 + 0.5 * shares["keep"][-1]))
@@ -179,3 +205,39 @@ def test_a_fill_ins_chart_reads_nothing_from_the_week_on(data):
         changed = rv.knowledge(fakes.future_changed(season, week), league, week, 16, 3).by_id[backup]
         assert now.fill_in is not None and (now.chart, now.fill_in) == (changed.chart, changed.fill_in)
     rv.clear_cache()
+
+
+def test_a_graduates_chart_keeps_his_form_and_is_his_share_of_his_chart(data, monkeypatch):
+    """A graduate (past probation, the job taken) is priced at share x his chart + the rest x a backup's; the chart
+    at the week reads nothing from that week on; an established starter is untouched."""
+    probation = int(replay_fillin.stored()["probation"])
+    weeks = [w for w, _ in data.team_by_week[_team_qbs(data)[1]] if w >= 5]
+    season, team, regular, backup = _season(data, weeks, tagged=())
+    week, league = weeks[probation], rv.league_settings(fakes.fake_settings())
+    rv.clear_cache()
+    priced = rv.knowledge(season, league, week, 16, 0).by_id[backup]
+    rv.clear_cache()
+    changed = rv.knowledge(fakes.future_changed(season, week), league, week, 16, 0).by_id[backup]
+    others = {v.player_id: v.chart for v in rv.knowledge(season, league, week, 16, 0).values
+              if v.position == "QB" and v.player_id != backup}
+    monkeypatch.setattr(replay_fillin, "_fill_ins", lambda data, week, teams: MappingProxyType({}))
+    rv.clear_cache()
+    know = rv.knowledge(season, league, week, 16, 0)
+    plain = know.by_id[backup]
+    rv.clear_cache()
+    share = replay_fillin.stored()["graduated"]["prior" if season.players[backup].adp is not None
+                                                and season.players[backup].adp < replay_fillin.PRIOR_PICK else "none"][0]
+    backup_value = replay_chart.value_at(replay_chart.slot_curve(season.as_of(week)), "QB", 33)
+    assert priced.fill_in == pytest.approx(share) and priced.form_chart == plain.form_chart
+    assert priced.chart == pytest.approx(share * plain.chart + (1 - share) * min(backup_value, plain.chart), abs=0.1)
+    assert (changed.chart, changed.fill_in) == (priced.chart, priced.fill_in)
+    assert others == {v.player_id: v.chart for v in know.values if v.position == "QB" and v.player_id != backup}
+
+
+def test_without_news_drops_a_taker_at_probation_as_before(data):
+    """The simulator's fill-in set (replay_fillin.without_news) is unchanged by the graduates' climb."""
+    probation = int(replay_fillin.stored()["probation"])
+    weeks = [w for w, _ in data.team_by_week[_team_qbs(data)[1]] if w >= 5]
+    season, team, regular, backup = _season(data, weeks, tagged=())
+    assert backup in replay_fillin.without_news(season.as_of(weeks[probation - 1]), weeks[probation - 1])
+    assert backup not in replay_fillin.without_news(season.as_of(weeks[probation]), weeks[probation])
