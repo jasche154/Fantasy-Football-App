@@ -143,14 +143,15 @@ def price(know: Knowledge, mind: Mind, player_id: int, own: bool = False, attach
     False leaves out the "high on" mark-up, to tell whether it alone sank a deal)."""
     value = know.by_id[player_id]
     worth = replay_personas.private_value(value, mind.pricing, mind.hype)
-    if replay_fans.club(value.team) == mind.fan_of and mind.fan_of is not None:
+    ours = replay_fans.is_club(mind.fan_of, value.team)       # a fan's own team: the bonus, and never worried
+    if ours:
         worth *= 1 + FAN_BONUS
     if mind.contending:
         worth *= 1 + CONTEND_START if player_id in mind.starting else 1 - CONTEND_BENCH
     if not own:
         return worth
     felt = replay_mood.feeling(value, mind.pricing, mind.hype)
-    if felt is not None and felt.kind == "worried":
+    if felt is not None and felt.kind == "worried" and not ours:
         return min(worth, value.chart)
     if felt is not None and felt.kind == "high":
         return max(worth, value.chart) * (1 + (markup(know, mind, player_id) if attach else 0.0))

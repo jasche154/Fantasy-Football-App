@@ -3008,7 +3008,7 @@
    "The rules say {player} has to stay put a little longer."
   ],
   "shark": [
-   "{you}, {player} was traded too recently. Rules. Try in two weeks.",
+   "{you}, {player} was traded too recently. Rules. Try again soon.",
    "{player} can't move yet. The league says so, not me.",
    "Too soon for {player}. He was just dealt.",
    "{player} is locked for now. Come back later.",
@@ -3026,7 +3026,7 @@
    "Too soon for {player}! The league locks him for now!",
    "{player} just got here! Can't spin him again yet!",
    "No dice on {player} yet. Traded too recently!",
-   "League rule on {player}. Try me in two weeks!"
+   "League rule on {player}. Try me again soon!"
   ],
   "fan": [
    "{you}, {player} was just traded. The rules say he stays put for now.",
@@ -3037,7 +3037,7 @@
   ],
   "stasher": [
    "{you}, {player} was just traded. I'm good at waiting. So is the league.",
-   "Too soon for {player}. Two weeks, then we'll talk.",
+   "Too soon for {player}. Give it a bit, then we'll talk.",
    "{player} just moved. The rules want him to stay put.",
    "Can't trade {player} yet. League rule.",
    "{player} is locked for now. Patience."
@@ -3045,7 +3045,7 @@
   "haggler": [
    "{you}, {player} was just traded. Can't sell what I can't move.",
    "{player} is off the market for now. League rules.",
-   "Too soon for {player}. Come back in two weeks with your best number.",
+   "Too soon for {player}. Come back soon with your best number.",
    "No deal on {player} yet: he changed teams too recently.",
    "The rules lock {player} for now. We can haggle later."
   ],
@@ -3060,7 +3060,7 @@
    "{you}, I'd deal, but {player} was just traded. Rules!",
    "{player} is locked for now. Got anything else?",
    "Too soon for {player}. Let's find another deal!",
-   "{player} just changed teams. Two weeks and we talk.",
+   "{player} just changed teams. Give it a bit and we talk.",
    "League says no on {player} for now. Something else?"
   ],
   "tilted": [
