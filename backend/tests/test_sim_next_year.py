@@ -330,7 +330,7 @@ def test_the_preseason_experts_rank_players_the_way_the_preseason_market_drafts_
         agreement.append(sim_metrics.spearman([experts[p] for p in skill], [adp[p] for p in skill]))
         assert all(adp[p] <= 2 * experts[p] + 1 for p in skill if experts[p] <= 12)
         assert all(experts[p] < experts[q] for p in adp for q in experts            # the undrafted rank last
-                   if q not in adp and pool[p].position == pool[q].position)
+                   if q not in adp and pool[p].position == season.players[q].position)
     assert np.mean(agreement) >= REAL_EXPERT_ADP_R - 0.02
 
 

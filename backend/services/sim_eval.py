@@ -172,7 +172,8 @@ def _mid_sim(data: SeasonData, real: SeasonData, weeks: range, established: froz
 
 def _rest(data: SeasonData, weeks: range) -> dict[str, float]:
     return {**sim_metrics.weekly(data, weeks), **sim_metrics.leaderboard(data, weeks),
-            **sim_metrics_games.games(data, weeks), **sim_metrics_games.experts(data, weeks)}
+            **sim_metrics_games.games(data, weeks), **sim_metrics_games.experts(data, weeks),
+            **sim_metrics_games.tails(data, weeks)}
 
 
 def _whole(data: SeasonData, rookies: set[int], real: SeasonData, established: frozenset[int]) -> dict[str, float]:
@@ -180,7 +181,8 @@ def _whole(data: SeasonData, rookies: set[int], real: SeasonData, established: f
     return {**sim_metrics.season(data), **sim_metrics.rookies(data, rookies),
             **sim_metrics.adp_agreement(data, real, rookies), **sim_metrics.expert_agreement(data),
             **sim_metrics.weekly(data, weeks), **sim_depth.metrics(data), **sim_qb.job_metrics(data, 1, established),
-            **sim_metrics_games.games(data, weeks), **sim_metrics_games.experts(data, weeks)}
+            **sim_metrics_games.games(data, weeks), **sim_metrics_games.experts(data, weeks),
+            **sim_metrics_games.tails(data, weeks)}
 
 
 def _full(session, season: int, seeds: list[int], offseason: dict) -> tuple[dict, dict]:

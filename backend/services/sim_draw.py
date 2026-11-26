@@ -11,6 +11,13 @@ spread of results around the pregame line and of team scores). Per-catch
 and per-carry yards are shifted gammas (mean m, standard deviation sd, never below -shift), so a sum over n
 plays is one gamma draw: Gamma(n k, theta) - n shift with k = (m + shift)^2 / sd^2, theta = sd^2 / (m + shift).
 
+A side's yards per catch fall with its game's target volume, x (targets / its expected targets) ** -`game.ypc_volume`
+(real busy passing days are dump-offs: per team game 2021-2025, catches and yards per catch correlate -0.19, and
+without the link simulated team receiving yards spread too wide: sd 81 against 72 a game, 500+ yard passing
+games 3 a season against 0.6). The tuned 0.3 matches the real spread (sd 72, 99th percentile 428 against 423,
+400+ yard passing games 11.7 a season against 10.7) at a stronger link than real (-0.29); it moves mean yards
+by under 1%.
+
 Field-goal tries (`_kicking`) are a binomial over fga_chances around the side's expected tries (sim_game.fga_mean at
 its expected yards and TDs, x its field-goal scale), moved linearly by how far the game's own TDs and yards land
 from their means (the fitted log slopes, so a team that scores fewer TDs kicks more): linear, so the draw's mean
@@ -105,7 +112,7 @@ def _offense(side, n_targets: int, n_carries: int, eff: float, rng: np.random.Ge
     game, league, rates = params()["game"], params()["league"], params()["rates"]
     targets = _split(n_targets, side.target_w, game["share_sd_targets"], rng)
     catches = rng.binomial(targets, np.clip(side.catch, 0, 1))
-    ypc = side.ypc * eff
+    ypc = side.ypc * eff * (max(n_targets, 1) / max(side.targets, 1.0)) ** -game.get("ypc_volume", 0.0)   # busy games: shorter catches
     rec_yds = _yards(catches, ypc, rates["rec_cv"] * np.maximum(ypc, 1.0), rates["rec_shift"], rng)
     rec_rate = np.minimum(side.rec_td * eff ** game["td_power"], MAX_TD_RATE)
     spreads = np.full(len(side.carry_w), game["share_sd_carries"])

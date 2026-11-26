@@ -5,7 +5,7 @@ from types import MappingProxyType
 
 import pytest
 
-from services import replay_game as rg, replay_pool, replay_state, sim_season, sim_talent, sim_world
+from services import replay_game as rg, replay_pool, replay_state, sim_depth, sim_season, sim_talent, sim_world
 from tests import replay_fakes as fakes
 
 FROM = 8
@@ -33,7 +33,10 @@ def test_real_weeks_are_copied_through_untouched(data, simulated):
         return {pid: before for pid, games in season.team_by_week.items()
                 if (before := tuple(g for g in games if g[0] < FROM))}
     assert real(simulated) == real(data)
-    assert simulated.players == data.players and simulated.schedule.opponents == data.schedule.opponents
+    pooled = {pid for pid in simulated.players if pid >= sim_depth.BACKUP_QB_ID_BASE}     # one QB per team, sim_depth
+    assert len(pooled) == len({team for team, _ in data.schedule.opponents})
+    assert {pid: p for pid, p in simulated.players.items() if pid not in pooled} == data.players
+    assert simulated.schedule.opponents == data.schedule.opponents
     # the schedule is the same but for the simulated games' pregame lines (sim_lines), stored as a real season's are
     unlined = [replace(g, spread_line=None, total_line=None) if g.week >= FROM else g for g in simulated.schedule.games]
     assert unlined == [replace(g, spread_line=None, total_line=None) if g.week >= FROM else g for g in data.schedule.games]
@@ -262,7 +265,7 @@ def test_an_open_absence_misses_the_drawn_games_and_no_more(data, monkeypatch, o
 def test_buzz_runs_only_in_the_weeks_a_role_change_can_start(data, simulated):
     """False lines go where true ones can land (sim_talent.change_weeks), or every line outside it is false."""
     first, last = sim_talent.change_weeks(FROM, data.last_week)
-    weeks = {w for _, w in simulated.notes if w >= FROM}
+    weeks = {w for (_, w), note in simulated.notes.items() if w >= FROM and not note.startswith("Expected to start")}
     assert weeks and weeks <= set(range(first, last + 1))
 
 

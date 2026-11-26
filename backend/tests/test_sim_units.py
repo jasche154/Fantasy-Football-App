@@ -1,5 +1,6 @@
 """Small hand-built checks of simulator helpers the season-level tests only reach indirectly (review of #66)."""
-from types import SimpleNamespace
+from dataclasses import replace
+from types import MappingProxyType, SimpleNamespace
 
 import numpy as np
 import pytest
@@ -123,3 +124,27 @@ def test_an_overtime_catch_is_never_the_hurt_starters():
         assert lines[1]["pass_td"] == 0 and lines[2]["pass_td"] == 1
         assert lines[1]["completions"] + lines[2]["completions"] == 10
         assert lines[1]["pass_yds"] + lines[2]["pass_yds"] == 112
+
+
+def test_no_team_plays_a_game_without_a_quarterback(monkeypatch):
+    """Review item 20: every team down to one QB and QBs hurt often: the pooled backup is always under centre."""
+    from services import sim_depth, sim_injuries
+    data = fakes.fake_season()
+    first = {}
+    for pid, p in sorted(data.players.items(), key=lambda kv: (kv[1].adp or 999, kv[0])):
+        if p.position == "QB":
+            first.setdefault(data.team_at(pid, 5), pid)
+    gone = {pid for pid, p in data.players.items() if p.position == "QB" and pid not in first.values()}
+    def keep(table):
+        return MappingProxyType({k: v for k, v in table.items() if k[0] not in gone})
+    one = replace(data, players=MappingProxyType({k: v for k, v in data.players.items() if k not in gone}),
+                  box=keep(data.box), actual=keep(data.actual), projected=keep(data.projected), injuries=keep(data.injuries),
+                  team_by_week=MappingProxyType({k: v for k, v in data.team_by_week.items() if k not in gone}))
+    real_hazard = sim_injuries.hazard
+    monkeypatch.setattr(sim_injuries, "hazard", lambda position: 0.4 if position == "QB" else real_hazard(position))
+    for seed in range(3):
+        sim = sim_season.simulate(one, seed, 6)
+        assert sim_metrics_games.tails(sim, range(6, sim.last_week + 1))["team-games without a QB line"] == 0
+        pooled = [pid for pid in sim.players if pid >= sim_depth.BACKUP_QB_ID_BASE]
+        assert len(pooled) == len({t for t, _ in sim.schedule.opponents})
+        assert any((pid, w) in sim.box and sim.box[(pid, w)].pass_yds > 0 for pid in pooled for w in range(6, 18))

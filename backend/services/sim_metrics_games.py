@@ -8,10 +8,14 @@ season's Vegas closing line; a simulated week's own line, sim_lines, stored ther
   the residual spread, the share of games won by 21+ / 28+ / 35+, the 21+ share in the most lopsided and the
   closest fifth of games by the line, the home win rate, the tie rate, and team points (mean, spread, the share
   that are 0 and the share that are rare in real games: RARE_TOTALS).
+- tails(data, weeks): single games no real season has (team-games with catches but no QB line; 400+ and 500+
+  yard passing games; the season's top single-game passing, rushing and receiving yards, targets and carries;
+  200+ yard receiving and rushing games).
 - experts(data, weeks): expert-rank churn, the mean change from one week to the next of a healthy player's
   position rank among the top CHURN_TOP at his position (no injury tag either week), and the agreement of the
   expert ranks with the week's projections (Spearman over the CHURN_TOP by expert rank who have one), by position.
 """
+from collections import defaultdict
 from collections.abc import Iterable
 
 import numpy as np
@@ -86,3 +90,23 @@ def experts(data: SeasonData, weeks: Iterable[int]) -> dict[str, float]:
         if agree:
             out[f"expert vs proj r {position}"] = float(np.nanmean(agree))
     return out
+
+
+def tails(data: SeasonData, weeks: Iterable[int]) -> dict[str, float]:
+    weeks = set(weeks)
+    lines = [(pid, w, line) for (pid, w), line in data.box.items() if w in weeks]
+    if not lines:
+        return {}
+    received, passed = defaultdict(int), defaultdict(int)
+    for pid, w, line in lines:
+        team = dict(data.team_by_week.get(pid, ())).get(w)
+        received[(team, w)] += line.rec_yds
+        passed[(team, w)] += line.pass_yds if data.players[pid].position == "QB" else 0
+    top = {name: max(getattr(line, name) for _, _, line in lines)
+           for name in ("pass_yds", "rush_yds", "rec_yds", "targets", "carries")}
+    return {"team-games without a QB line": float(sum(y > 0 and not passed[k] for k, y in received.items())),
+            "400+ yd passing games": float(sum(line.pass_yds >= 400 for _, _, line in lines)),
+            "500+ yd passing games": float(sum(line.pass_yds >= 500 for _, _, line in lines)),
+            **{f"top game {name}": float(value) for name, value in top.items()},
+            "200+ yd receiving games": float(sum(line.rec_yds >= 200 for _, _, line in lines)),
+            "200+ yd rushing games": float(sum(line.rush_yds >= 200 for _, _, line in lines))}

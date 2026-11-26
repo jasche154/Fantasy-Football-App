@@ -1234,7 +1234,8 @@
     "rec": 12,
     "rush": 4
    },
-   "fg_power": 1.0
+   "fg_power": 1.0,
+   "ypc_volume": 0.3
   },
   "rates": {
    "rec_cv": 0.68

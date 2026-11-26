@@ -259,6 +259,7 @@ def simulate(base: SeasonData, seed: int, from_week: int, prior: World | None = 
     scoring, last = scoring_of(base), base.last_week
     # later weeks' lines are never read (as_of blanks them); dropping them once spares every week's as_of copy
     base = replace(base, schedule=replay_pool._lines_through(base.schedule, from_week))
+    base = sim_depth.with_backup_qbs(base, from_week)        # no team plays a game without a QB
     tables = _real(base, from_week)
     belief = estimate(base, from_week, prior)
     truth = sim_talent.truth(belief, seed, from_week, last, rookies)
@@ -282,7 +283,7 @@ def simulate(base: SeasonData, seed: int, from_week: int, prior: World | None = 
         tags = _tags(base, public, absences, returning, week, from_week, replay_state.rng(seed, "sim", "tags", week))
         tables.injuries.update({(pid, week): injury for pid, injury in tags.items()})
         public_out = {pid for pid, injury in tags.items() if injury.hard}
-        sitting = public_out | {pid for pid, a in absences.items() if a.left > 0}
+        sitting = sim_depth.emergency(truth.at(week), public_out | {pid for pid, a in absences.items() if a.left > 0})
         known = _known(base, tables, week)
         benched, bench = sim_qb_jobs.decide(jobs, truth.at(week), known, week, sitting, tags, seed)
         # the job holders start in the public belief too, so the line and the projections see the week's QB

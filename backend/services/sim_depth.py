@@ -19,6 +19,13 @@ loser, so sim_market.buzz may hint it). The belief learns the winner only from p
 
 `fill_ins`: the public news line on a backup QB in a week the belief's starter is hard-tagged ("Expected to
 start while Justin Herbert is out (IR, Knee)."), so a league shows why the backup plays (sim_season).
+
+`with_backup_qbs`: every team always has a QB to start. A backup who never played is in no table the pool reads,
+so a team could reach a simulated season with one QB (2027: Cincinnati, Dallas, San Francisco), or lose both, and
+its games then had receivers catching passes nobody threw. Each team gets one pooled QB ("DAL backup QB": the
+QB2 of a one-QB team, else its QB3), with a token projection so the public sees him and a manager can add him;
+the belief makes him a typical backup (no prior: the depth role, the backup's passing quality); `emergency`
+puts him under centre in a week all the team's other QBs sit (sim_season), as a real team signs one.
 """
 import sys
 from pathlib import Path
@@ -29,9 +36,11 @@ if __package__ in (None, ""):
 import json  # noqa: E402
 from collections import defaultdict  # noqa: E402
 from collections.abc import Mapping  # noqa: E402
+from dataclasses import replace  # noqa: E402
+from types import MappingProxyType  # noqa: E402
 from functools import lru_cache  # noqa: E402
 
-from services import replay_state  # noqa: E402
+from services import replay_state, sim_market  # noqa: E402
 from services.replay_pool import Injury, PoolPlayer, SeasonData  # noqa: E402
 from services.sim_constants import fitted_json  # noqa: E402
 from services.sim_world import STARTER_ROLE, RoleChange, World  # noqa: E402
@@ -213,3 +222,31 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+BACKUP_QB_ID_BASE = 2_000_000_000       # pooled QBs: above database rows and rookie ids, below 2^31
+
+
+def with_backup_qbs(base: SeasonData, from_week: int) -> SeasonData:
+    """`base` with one pooled QB per schedule team (module docstring): id BACKUP_QB_ID_BASE + season x 100 + the
+    team's index, the same in every league of a season."""
+    teams = sorted({team for team, _ in base.schedule.opponents})
+    added = {BACKUP_QB_ID_BASE + base.season * 100 + i: team for i, team in enumerate(teams)}
+    added = {pid: PoolPlayer(pid, f"{team} backup QB", "QB", adp_team=team)
+             for pid, team in added.items() if pid not in base.players}
+    if not added:
+        return base
+    return replace(base, players=MappingProxyType({**base.players, **added}),
+                   projected=MappingProxyType({**base.projected,
+                                               **{(pid, from_week): sim_market.MIN_PROJECTION for pid in added}}))
+
+
+def emergency(world: World, sitting: set[int]) -> set[int]:
+    """`sitting` without the pooled QB of any team whose other QBs all sit (he starts: no game without a QB)."""
+    out = set(sitting)
+    for team in world.teams:
+        qbs = [p.player_id for p in world.roster(team) if p.position == "QB"]
+        pooled = [pid for pid in qbs if pid >= BACKUP_QB_ID_BASE]
+        if pooled and all(pid in sitting for pid in qbs if pid < BACKUP_QB_ID_BASE):
+            out.difference_update(pooled)
+    return out
