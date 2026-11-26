@@ -1060,6 +1060,27 @@ that week's games on; only scoring a week reads its real points.
   come back worse than before it (out players produced 0.40 of their pre-injury value per game over
   replacement; the chart keeps 0.63), so the user's targets price injured players above what they realised
   (held-out error of out players 3.185 -> 3.516 with the frozen value, see below).
+- **Fill-in quarterbacks' charts** (`services/replay_fillin.py`): a QB starting while his team's regular starter
+  carries a hard tag (or the backup expected to start), one whose regular has just come back, or one who took the
+  job, is priced at (share of his team's games left he is expected to start) x the value of his rank without the
+  form bonus + (the rest) x a backup's value (the QB ranked just past one per team), never above his own chart.
+  The regular starter is the team's first passing-yards leader, and he changes only when a healthy regular does not
+  play (one definition, shared with the simulator's realism measure, `sim_qb_fillins`). The shares are fitted on
+  every real fill-in situation of 2019-2025 by starts so far and what the regular's news says (the same noisy
+  report his injured chart reads; `python -m services.replay_fillin --fit` -> `replay_fillin.json`): a named
+  return -> the share such fill-ins really started (31-48%), never more than the games before the reported week
+  plus the 17-38% they kept after it; out for the season -> 57-63%; the regular back -> 9-40%; the job taken ->
+  47-72%. A fill-in becomes the team's QB after 5 consecutive starts (real fill-ins who kept the job had a median
+  expert rank of QB23 after 5 starts, QB27 after 4; those who gave it back stayed at 27-29) unless his regular is
+  expected back (a named return week): the return still bounds him. While the regular is out, his availability
+  plus the fill-in's share averages 0.89 (2020-2025, 97 situations), and the fill-in's never passes 0.65, so the
+  two are never both priced as the team's full-time quarterback. A 12-team superflex league, before -> after:
+  Joe Flacco 2023 weeks 14-17 175-403 -> 98-142, Joshua Dobbs 2023 (Minnesota) 208-508 -> 118-204, Cooper
+  Rush 2024 22-165 -> 22-79; Brock Purdy 2022 124-426 -> 72-176 while filling in, 339 at his fifth start; Jacoby Brissett
+  2025 278-291 -> 112-123, then 518 at his fifth start with the job his. On the chart check below (common player-weeks):
+  regular lineup unchanged (Spearman 0.553, held-out error 4.039; QBs 0.321 -> 0.322); superflex QBs rank better
+  (0.591 -> 0.594) but the held-out error rises 5.038 -> 5.048, because superflex QBs are already priced under
+  what they produce (QB bias +5.08 -> +5.13 points a game).
 - **Chart check against real results** (`python -m services.replay_chart_eval [--seasons 2018-2025]
   [--weeks 1,4,7,10,13] [--lineups regular,superflex] [--teams 12] [--bench 6] [--out report.json]`;
   `--compare before.json after.json` scores two saved runs on their common player-weeks; `--absences`
@@ -1762,6 +1783,7 @@ games, home wins, ties, team scores and how often a rare score such as 5 shows u
 
 ```bash
 python -m services.sim_lines_fit [--fit] [--seasons 2018-2025] [--refresh]   # the pregame line model (sim_lines.json)
+python -m services.replay_fillin --fit [--seasons 2019-2025] [--probation 5]  # fill-in QB start shares (replay_fillin.json)
 python -m services.sim_qb_fillins --real 2019-2025                            # fill-in QBs in real seasons
 python -m services.sim_qb_fillins --sim 2027 [--seeds 200] [--set market.fill_in_trust=0.3]   # ... and simulated ones
 ```
