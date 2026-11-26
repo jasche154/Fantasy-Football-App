@@ -1,6 +1,6 @@
 /** Replay League trades: the pieces the offers, the builder and the history share. */
 import { Fragment, useState } from 'react';
-import type { ReplayPlayerRef, ReplayPricedPlayer, ReplayRosterRow, ReplayVerdict } from '../../api/types';
+import type { ReplayPlayerRef, ReplayPricedPlayer, ReplayRosterRow, ReplayTeamRef, ReplayVerdict } from '../../api/types';
 import { formatInteger, formatNumber, formatSigned, pluralize } from '../../lib/format';
 import { BalanceMeter } from '../trade/BalanceMeter';
 import { VERDICT_COPY } from '../trade/TradeResultView';
@@ -159,5 +159,35 @@ export function DropPicker({ rows, count, value, onChange }: DropPickerProps) {
         );
       })}
     </fieldset>
+  );
+}
+
+/** "Needs RB · Deep at WR": where a CPU manager is short and where he has a starter to spare, against the league's
+ * starters there (backend replay_styles.position_needs, what his trade value uses). Nothing when he has neither. */
+export function TeamNeeds({ team }: { team: ReplayTeamRef | undefined }) {
+  if (!team || (team.needs.length === 0 && team.deep.length === 0)) return null;
+  const parts = [team.needs.length > 0 ? `Needs ${team.needs.join(', ')}` : '', team.deep.length > 0 ? `Deep at ${team.deep.join(', ')}` : '']
+    .filter(Boolean);
+  return (
+    <p className="game-mood">
+      <span className="game-mood__label">Roster</span>{' '}
+      {parts.map((part, index) => (
+        <Fragment key={part}>
+          {index > 0 && <><span aria-hidden="true"> · </span><span className="sr-only">; </span></>}
+          {part}
+        </Fragment>
+      ))}
+    </p>
+  );
+}
+
+/** A CPU manager's own words on a trade (why he turned it down), in his team's quote style. `lead`: words only a
+ * screen reader hears first (the history's "said:" after the name shown next to it); his name is never repeated. */
+export function ManagerQuote({ teamId, text, lead }: { teamId: number; text: string | null | undefined; lead?: string }) {
+  if (!text) return null;
+  return (
+    <blockquote className="game-quote" data-team={teamId}>
+      <p>{lead && <span className="sr-only">{lead} </span>}{text}</p>
+    </blockquote>
   );
 }

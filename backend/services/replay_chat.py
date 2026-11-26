@@ -25,9 +25,8 @@ When lines are posted (replay_game calls these; each reads only what is known wh
   (no earlier snap share to compare with, so everyone `might_be_hurt`).
 - `shop_lines`: a worried manager's direct message when he starts shopping a player to the user (replay_mood).
 - `trade_reactions`: a third manager may react to a new trade (at most MAX_REACTIONS a week).
-- `label_offers`: every new CPU offer to the user gets his one-line reason (Offer.message): worried about a
-  player he sends (one he is shopping, or one he feels worried about who nobody could think was hurt), high
-  on a player he asks for, short at a position, a counter, else a plain value pitch.
+- `label_offers` and `decline_reply` (replay_chat_offers, re-exported here): a CPU offer's one line to the user
+  (Offer.message) and a CPU's reply when it turns the user's proposal down (Offer.reply). Neither is in the feed.
 Text is built from team names, player names and numbers only. Pure.
 """
 import json
@@ -39,10 +38,10 @@ from functools import lru_cache
 from pathlib import Path
 from types import MappingProxyType
 
-from services import replay_mood, replay_state as rs
+from services import replay_state as rs
 from services.replay_mood import might_be_hurt      # shared with the shops; re-exported for callers
 from services.replay_pool import SKILL, SeasonData
-from services.replay_state import Chat, Offer, Settings, Shop, State, Team, WeekResult
+from services.replay_state import Chat, Settings, Shop, State, Team, WeekResult
 from services.replay_values import Knowledge
 
 BANK_FILE = Path(__file__).with_name("replay_chat_lines.json")
@@ -57,10 +56,21 @@ PLACEHOLDERS = MappingProxyType({
     "shop": ("me", "you", "player", "week"),
     "offer_worried": ("me", "you", "player"), "offer_high": ("me", "you", "player"),
     "offer_need": ("me", "you", "position"), "offer_value": ("me", "you", "player"), "offer_counter": ("me", "you"),
+    "offer_buy_low": ("me", "you", "player"),
+    "offer_haggle": ("me", "you", "player"), "offer_haggle_counter": ("me", "you", "player"),
+    "decline_rival": ("me", "you", "player", "team"), "decline_room": ("me", "you"),
+    "decline_attached": ("me", "you", "player"), "decline_need": ("me", "you", "position"),
+    "decline_value": ("me", "you", "player"), "decline_close": ("me", "you", "player"),
+    "decline_rule_traded": ("me", "you", "player"), "decline_rule_cap": ("me", "you"), "decline_rule_ir": ("me", "you"),
+    "decline_rule_lineup": ("me", "you", "position"),
 })
 KINDS = tuple(PLACEHOLDERS)
-VOICES = ("balanced", "panicky", "shark", "steady", "gambler")      # replay_personas.PERSONAS
-QUIET = MappingProxyType({"shop": ("shark", "steady")})            # voices that never post that kind (no bucket)
+VOICES = ("balanced", "panicky", "shark", "steady", "gambler",
+          "fan", "stasher", "haggler", "contender", "dealer", "tilted")      # replay_personas.PERSONAS
+PRIVATE = ("offer_", "decline_")        # kinds shown on an offer, never in the feed
+ONLY = MappingProxyType({"decline_rival": "fan", "offer_haggle": "haggler", "offer_haggle_counter": "haggler"})
+QUIET = MappingProxyType({                                           # voices that never post that kind (no bucket)
+    "shop": ("shark", "steady"), **{kind: tuple(v for v in VOICES if v != voice) for kind, voice in ONLY.items()}})
 MIN_LINES = 12                  # per (kind, voice)
 MIN_LINES_COMMON = 20           # for the kinds below, which come up every week
 COMMON = ("blowout_win", "close_win", "close_loss", "blowout_loss", "boom", "bust")
@@ -148,22 +158,6 @@ def _playoff_status(state: State, settings: Settings) -> tuple[set[int], set[int
     return clinched, out
 
 
-def _streak(state: State, team_id: int) -> int:
-    """+n for n straight wins, -n for n straight losses, ending with the latest result (a tie ends it)."""
-    run = 0
-    for result in reversed(state.results):
-        pair = next((p for p in result.matchups if team_id in p), None)
-        if pair is None:
-            continue
-        other = pair[0] if pair[1] == team_id else pair[1]
-        mine, theirs = result.scores[team_id], result.scores[other]
-        step = 1 if mine > theirs else -1 if mine < theirs else 0
-        if step == 0 or (run and (run > 0) != (step > 0)):
-            break
-        run += step
-    return run
-
-
 def thresholds(state: State) -> tuple[float, float, float]:
     """(close margin, blowout margin, boom points) in this league: shares of its median team score so far."""
     typical = statistics.median(score for result in state.results for score in result.scores.values())
@@ -226,7 +220,7 @@ def _big_kinds(week: _Week, pair: tuple[int, int], me_id: int, you_id: int, valu
     upset_on = len(state.results) >= UPSET_FROM_WEEK
     if mine > theirs and not week.result.playoff and upset_on and week.seat[me_id] - week.seat[you_id] >= UPSET_GAP:
         kinds.append(("upset", values, ()))
-    streak = _streak(state, me_id)
+    streak = rs.streak(state, me_id)
     if abs(streak) >= STREAK:
         kinds.append(("streak_win" if streak > 0 else "streak_loss", {**values, "streak": abs(streak)}, ()))
     return kinds
@@ -338,48 +332,9 @@ def trade_reactions(state: State, offer_ids: Sequence[int], know: Knowledge, see
     return state
 
 
-def _offer_kind(state: State, know: Knowledge, played: SeasonData, offer: Offer) -> tuple[str, int | None]:
-    """Why this CPU (offer.from_team) makes the offer: (kind, the player the line names). A shopped player was
-    checked for `might_be_hurt` when his shop opened or renewed this week; any other worry is checked here."""
-    cpu = rs.team(state, offer.from_team)
-    shopped = rs.markdowns(state, cpu.id)
-    worried = [pid for pid in offer.give if pid in shopped or (
-        (felt := replay_mood.feeling(know.by_id[pid], cpu.persona, cpu.hype)) and felt.kind == "worried"
-        and not might_be_hurt(know, played, pid, state.week - 1))]
-    if worried:     # the player he is shopping first, so the offer names the one his shop message did
-        return "offer_worried", min(worried, key=lambda pid: pid not in shopped)
-    if offer.counter_to is not None:
-        return "offer_counter", None
-    loved = [pid for pid in offer.get if (felt := replay_mood.feeling(know.by_id[pid], cpu.persona, cpu.hype))
-             and felt.kind == "high"]
-    if loved:
-        return "offer_high", loved[0]
-    sent = {know.by_id[pid].position for pid in offer.give}
-    needs = [pid for pid in offer.get if know.by_id[pid].position not in sent]
-    if needs:
-        return "offer_need", max(needs, key=lambda pid: (know.by_id[pid].chart, -pid))
-    return "offer_value", max(offer.get, key=lambda pid: (know.by_id[pid].chart, -pid))
-
-
-def label_offers(state: State, know: Knowledge, seed: int, played: SeasonData) -> State:
-    """Every pending CPU offer to the user without a message gets one in its sender's voice (not in the feed).
-    `played` is the season as known now (data.as_of(state.week)), for `might_be_hurt` on last week's game."""
-    user = rs.user_team(state)
-    for offer in state.offers:
-        if offer.to_team != user.id or offer.status != "pending" or offer.message:
-            continue
-        cpu = rs.team(state, offer.from_team)
-        kind, pid = _offer_kind(state, know, played, offer)
-        named = know.by_id[pid] if pid is not None else None
-        values = {"me": cpu.name, "you": user.name, "player": named.name if named else "",
-                  "position": named.position if named else ""}
-        posted = post(state, cpu, kind, values, seed, to_team=user.id, player_ids=() if pid is None else (pid,))
-        text = posted.chat[-1].text
-        # the line is used up in the bucket (kept in chat history as kind offer_*) so offers don't repeat either
-        state = replace(posted, offers=tuple(replace(o, message=text) if o.id == offer.id else o for o in posted.offers))
-    return state
-
-
 def chat_for(state: State) -> tuple[Chat, ...]:
-    """The feed the user reads: everything but offer messages (those show on the offer)."""
-    return tuple(chat for chat in state.chat if not chat.kind.startswith("offer_"))
+    """The feed the user reads: everything but offer messages and trade replies (those show on the offer)."""
+    return tuple(chat for chat in state.chat if not chat.kind.startswith(PRIVATE))
+
+
+from services.replay_chat_offers import decline_reply, label_offers  # noqa: E402, F401 (re-exported; needs `post`)

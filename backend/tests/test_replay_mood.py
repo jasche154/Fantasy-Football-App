@@ -1,5 +1,6 @@
 """Replay League: CPU feelings and shops (services/replay_mood.py), and the shop discount in trades."""
 import json
+import re
 from dataclasses import replace
 from types import MappingProxyType
 
@@ -320,7 +321,7 @@ def test_an_offer_never_says_he_is_worried_about_a_player_who_may_be_hurt():
     state = replace(state, offers=(offer,))
 
     def kind(data) -> str:
-        return replay_chat.label_offers(state, know, 4, data.as_of(WEEK)).chat[-1].kind
+        return replay_chat.label_offers(state, know, 4, data.as_of(WEEK), SETTINGS).chat[-1].kind
 
     assert kind(fakes.fake_season()) == "offer_worried"
     assert kind(left_early(star.player_id)) != "offer_worried"
@@ -441,3 +442,25 @@ def test_an_old_save_shop_without_an_opened_week_loads():
     saved["shops"] = [{key: value for key, value in shop.items() if key != "opened"} for shop in saved["shops"]]
 
     assert rs.state_from_json(json.dumps(saved)).shops == (rs.Shop(cpu.id, star.player_id, WEEK, 0.1),)
+
+
+def test_a_fan_never_shops_or_sells_his_own_teams_player_with_a_worried_line():
+    """A fan prices his team's players 10% higher: worried or not, he never sends a sell line about one."""
+    from services import replay_chat
+    state, know, cpu, star = shop_league()          # panicky feels the slump enough to shop; the rule keys on fan_of
+    plain = rs.with_team(state, replace(cpu, fan_of=None))
+    fan = rs.with_team(state, replace(cpu, fan_of=star.team))
+    user = rs.user_team(state)
+
+    assert any(shops for _, _, shops in open_shops(plain, know))                 # worried enough to shop him...
+    assert not any(shop.player_id == star.player_id for _, after, _ in open_shops(fan, know) for shop in after.shops)
+    offer = rs.Offer(71, WEEK, cpu.id, user.id, (star.player_id,), (user.roster[1],), "pending")
+    kinds = [replay_chat.label_offers(replace(s, offers=(offer,)), know, 4, season_now(), SETTINGS).chat[-1].kind
+             for s in (plain, fan)]
+    assert kinds[0] == "offer_worried" and kinds[1] != "offer_worried"           # ...but not his own team's
+
+
+def test_a_stashers_worried_line_is_about_a_slump_never_about_selling_before_he_fades():
+    from services import replay_chat
+    lines = replay_chat.bank()["offer_worried"]["stasher"]
+    assert not [line for line in lines if re.search(r"still has value|before|fading|while he", line, re.IGNORECASE)]

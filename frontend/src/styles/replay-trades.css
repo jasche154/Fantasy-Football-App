@@ -34,3 +34,5 @@
 .replay-verdict ul { padding-inline-start: var(--space-4); }
 
 .replay-drops { display: grid; gap: var(--space-2); }
+/* A CPU's reply to a declined proposal, under its name in the history table */
+.data-table td .game-quote { margin-block-start: var(--space-1); min-width: min(12rem, 60vw); font-size: var(--text-sm); white-space: normal; }

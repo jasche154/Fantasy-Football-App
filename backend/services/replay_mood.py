@@ -35,7 +35,7 @@ import statistics
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 
-from services import replay_personas, replay_state as rs
+from services import replay_fans, replay_personas, replay_state as rs
 from services.replay_pool import SKILL, SeasonData
 from services.replay_state import Settings, Shop, State, Team
 from services.replay_values import Knowledge, ReplayValue
@@ -50,12 +50,17 @@ EMOTION = {                     # persona -> (multiple on a bad signal, on a goo
     "shark": (1.0, 1.0),
     "steady": (0.3, 1.0),
     "gambler": (1.0, 1.8),
+    # the newer styles feel like balanced (a tilted manager on a skid feels like panicky: replay_personas.now)
+    "fan": (1.0, 1.0), "stasher": (1.0, 1.0), "haggler": (1.0, 1.0), "contender": (1.0, 1.0),
+    "dealer": (1.0, 1.0), "tilted": (1.0, 1.0),
 }
 SHOP_WORRY = 0.15               # worry that makes him shop a player
 SHOP_TOP = 6                    # only one of his SHOP_TOP most valuable skill players
-SHOP_RATE = {"balanced": 0.25, "panicky": 0.75, "gambler": 0.35, "steady": 0.0, "shark": 0.0}
+SHOP_RATE = {"balanced": 0.25, "panicky": 0.75, "gambler": 0.35, "steady": 0.0, "shark": 0.0,     # the user's
+             "fan": 0.25, "stasher": 0.2, "haggler": 0.3, "contender": 0.15, "dealer": 0.4, "tilted": 0.4}
 MAX_SHOPS = 2                   # open in the whole league at once
-DISCOUNT_BASE = {"balanced": 0.06, "panicky": 0.09, "gambler": 0.07}
+DISCOUNT_BASE = {"balanced": 0.06, "panicky": 0.09, "gambler": 0.07,
+                 "fan": 0.06, "stasher": 0.06, "haggler": 0.05, "contender": 0.06, "dealer": 0.07, "tilted": 0.09}
 DISCOUNT_PER_WORRY = 0.20       # extra discount per unit of worry beyond SHOP_WORRY
 DISCOUNT_JITTER = 0.02
 DISCOUNT_RANGE = (0.05, 0.15)
@@ -90,16 +95,18 @@ def feeling(value: ReplayValue, persona: str, hype: float = 1.0) -> Feeling | No
     return None if kind is None else Feeling(value.player_id, kind, round(felt, 3))
 
 
-def feelings(know: Knowledge, team: Team) -> tuple[Feeling, ...]:
-    """A CPU's feelings about his own roster, strongest first."""
+def feelings(know: Knowledge, team: Team, persona: str | None = None) -> tuple[Feeling, ...]:
+    """A CPU's feelings about his own roster, strongest first. `persona`: the one his prices follow now
+    (replay_personas.now: a tilted manager on a skid feels like panicky), default his own."""
     found = [felt for pid in team.roster if pid in know.by_id
-             if (felt := feeling(know.by_id[pid], team.persona, team.hype)) is not None]
+             if (felt := feeling(know.by_id[pid], persona or team.persona, team.hype)) is not None
+             and not (felt.kind == "worried" and replay_fans.cheers_for(team, know.by_id[pid].team))]   # not his own club
     return tuple(sorted(found, key=lambda f: (-abs(f.strength), f.player_id)))
 
 
-def mood_line(know: Knowledge, team: Team) -> str | None:
+def mood_line(know: Knowledge, team: Team, persona: str | None = None) -> str | None:
     """"Worried about X. High on Y." from his strongest feeling each way; None when he has none."""
-    felt = feelings(know, team)
+    felt = feelings(know, team, persona)
     worried = next((f for f in felt if f.kind == "worried"), None)
     high = next((f for f in felt if f.kind == "high"), None)
     parts = [f"{label} {know.by_id[f.player_id].name}." for label, f in (("Worried about", worried),
@@ -140,8 +147,11 @@ def _slumping(value: ReplayValue) -> bool:
 
 def _worry(state: State, value: ReplayValue, team: Team, hurt: Callable[[int], bool]) -> float | None:
     """His worry (> 0) when this manager would shop him now: worried enough, slumping, not trade locked and not
-    maybe hurt (a manager never frets out loud about a player who may be injured); else None."""
-    felt = feeling(value, team.persona, team.hype)
+    maybe hurt (a manager never frets out loud about a player who may be injured), and not a fan's own team's
+    player (he never shops those); else None."""
+    if replay_fans.cheers_for(team, value.team):
+        return None
+    felt = feeling(value, replay_personas.now(state, team), team.hype)
     if felt is None or felt.strength > -SHOP_WORRY or not _slumping(value) or rs.retrade_locked(state, value.player_id):
         return None
     return None if hurt(value.player_id) else -felt.strength

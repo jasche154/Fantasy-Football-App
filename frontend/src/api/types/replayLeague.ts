@@ -310,6 +310,8 @@ export interface ReplayOffer {
   counter_to: number | null;
   /** A CPU offer's one line to the user, in his voice; null otherwise. */
   message: string | null;
+  /** The CPU's one line when it turned the user's proposal down; null otherwise. */
+  reply: string | null;
 }
 
 /** A player a worried CPU is shopping to the user this week (a little under his usual price), with his message. */
@@ -375,6 +377,8 @@ export interface ReplayProposeResult extends ReplayActionResult {
   executed: boolean;
   /** The CPU's counter offer after a decline (pending, for the user to answer), or null. */
   counter: ReplayOffer | null;
+  /** The CPU's one line on why it turned the deal down, or null. */
+  reply: string | null;
 }
 
 export interface ReplayRespondResult extends ReplayActionResult {
@@ -383,4 +387,6 @@ export interface ReplayRespondResult extends ReplayActionResult {
   expired: boolean;
   message: string | null;
   verdict: ReplayVerdict | null;
+  /** After declining a haggler's opening offer: his better offer (pending), else null. */
+  counter: ReplayOffer | null;
 }

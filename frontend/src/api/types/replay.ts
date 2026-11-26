@@ -40,6 +40,10 @@ export interface ReplayTeamRef {
   tendency: string | null;
   /** Who a CPU is down on and high on right now ("Worried about X. High on Y."); null for the user, early on or with no feelings. */
   mood: string | null;
+  /** Positions where a CPU's weakest starter is weak, against the league's starters there; empty for the user. */
+  needs: string[];
+  /** Positions where a CPU has a starter to spare; empty for the user. */
+  deep: string[];
 }
 
 export interface ReplayPlayerRef {
