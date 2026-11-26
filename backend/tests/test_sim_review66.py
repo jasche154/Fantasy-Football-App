@@ -99,3 +99,15 @@ def test_a_future_build_does_not_warn_about_the_cached_draft(session, caplog, mo
     with caplog.at_level("INFO", logger="services.sim_setup"):
         sim_setup.qb_inputs(session, 2027)
     assert "No cached nflverse draft for 2027" in caplog.text
+
+
+def test_a_failed_simulation_still_empties_the_side_cache(monkeypatch):
+    """Review item 8: the belief sides hold a season's Worlds; even a simulation that raises leaves none behind."""
+    from services import sim_season
+    sim_game._sides[("stale",)] = (object(), object())
+    def boom(*args, **kwargs):
+        raise RuntimeError("draw failed")
+    monkeypatch.setattr(sim_season, "_simulate", boom)
+    with pytest.raises(RuntimeError):
+        sim_season.simulate(fakes.fake_season(), 1, 9)
+    assert not sim_game._sides

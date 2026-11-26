@@ -264,6 +264,16 @@ def simulate(base: SeasonData, seed: int, from_week: int, prior: World | None = 
     total)}, real lines already posted, used for from_week's games only."""
     if not 1 <= from_week <= base.last_week:
         raise ValueError(f"Week {from_week} is outside the season (1-{base.last_week}).")
+    try:
+        return _simulate(base, seed, from_week, prior, carried, rookies, qbs, team_prior, posted)
+    finally:
+        sim_game._sides.clear()               # its belief sides hold this season's Worlds: none outlives it
+
+
+def _simulate(base: SeasonData, seed: int, from_week: int, prior: World | None,
+              carried: Mapping[int, sim_injuries.Spell] | None, rookies: Collection[int], qbs: sim_qb_jobs.QbInputs,
+              team_prior: Mapping[str, sim_lines.Rating] | None,
+              posted: Mapping[tuple[str, int], tuple[float, float]] | None) -> SeasonData:
     scoring, last = scoring_of(base), base.last_week
     # later weeks' lines are never read (as_of blanks them); dropping them once spares every week's as_of copy
     base = replace(base, schedule=replay_pool._lines_through(base.schedule, from_week))
@@ -330,7 +340,6 @@ def simulate(base: SeasonData, seed: int, from_week: int, prior: World | None = 
     # an as_of fallback (a real game after the cut) that no simulated game replaced is dropped
     tables.games = {pid: [g for g in games if g[0] < from_week or (pid, g[0]) in tables.actual]
                     for pid, games in tables.games.items()}
-    sim_game._sides.clear()                   # its belief sides hold this season's Worlds: none outlives it
     final = tables.season(base)
     return replace(final, returns=MappingProxyType(hard_tag_returns(final.injuries, final.actual, last)),
                    schedule=_with_lines(base.schedule, lines))
