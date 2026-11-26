@@ -25,4 +25,9 @@ describe('totalsNote', () => {
       .toBe('The totals: what you get is less 50 for the players you would drop.');
     expect(totalsNote(verdict({}))).toBeNull();
   });
+
+  it('says nothing for a tiny premium with nobody dropped, and keeps the old sentence for a response without one', () => {
+    expect(totalsNote(verdict({ value_get: 575.4, premium: 0.3 }))).toBeNull();
+    expect(totalsNote(verdict({ value_get: 597.7 }))).toMatch(/count the best player in the deal a little extra/);
+  });
 });

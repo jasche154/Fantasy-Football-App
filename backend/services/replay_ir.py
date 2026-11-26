@@ -44,8 +44,10 @@ def blocked_reason(state: State, know: Knowledge, team_id: int) -> str | None:
         return None
     team = rs.team(state, team_id)
     if team.is_user:
-        return (f"Activate {_names(know, stale)} from IR to trade or claim: he no longer has an O, IR or PUP tag "
-                "(or drop him).")
+        many = len(stale) > 1
+        return (f"Activate {_names(know, stale)} from IR to add, claim or trade: "
+                + ("they no longer have an O, IR or PUP tag (or drop them)." if many
+                   else "he no longer has an O, IR or PUP tag (or drop him)."))
     return (f"{team.name} can't add, claim or trade for players while {_names(know, stale)} "
             "is on IR without an O, IR or PUP tag: activate or drop him first.")
 

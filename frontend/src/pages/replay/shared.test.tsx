@@ -73,8 +73,8 @@ describe('injury tags', () => {
     rerender(<ReplayIrBlockedNotice game={summary({ ir_blocked: [MOSTERT], phase: 'complete' })} />);
     expect(container).toBeEmptyDOMElement();
     rerender(<ReplayIrBlockedNotice game={summary({ ir_blocked: [MOSTERT, TUCKER] })} />);
-    expect(screen.getByRole('status')).toHaveTextContent('Activate Raheem Mostert and Justin Tucker from IR to trade or claim: '
-      + 'he no longer has an O, IR or PUP tag (or drop him).');
+    expect(screen.getByRole('status')).toHaveTextContent('Activate Raheem Mostert and Justin Tucker from IR to add, claim or trade: '
+      + 'they no longer have an O, IR or PUP tag (or drop them).');
   });
 });
 

@@ -680,7 +680,7 @@ def test_a_blocked_user_cannot_propose_or_accept_but_may_decline():
     blocked = on_ir(state, USER, SCRUB)                     # no tag this week: he blocks the user
     made = on_ir(offered()[0], USER, SCRUB)
 
-    told = f"^Activate {know.by_id[SCRUB].name} from IR to trade or claim"     # names him and the fix
+    told = f"^Activate {know.by_id[SCRUB].name} from IR to add, claim or trade"     # names him and the fix
     with pytest.raises(ValueError, match=told):
         rt.propose(blocked, SETTINGS, know, *FAIR)
     with pytest.raises(ValueError, match=told):

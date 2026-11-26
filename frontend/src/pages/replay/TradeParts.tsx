@@ -109,6 +109,7 @@ export function totalsNote(verdict: ReplayVerdict): string | null {
     dropped > 0.5 && `what you get is less ${formatInteger(dropped)} for the players you would drop`,
   ].filter(Boolean);
   if (parts.length > 0) return `The totals: ${parts.join('; ')}.`;
+  if (verdict.premium !== undefined) return null;          // named above whenever it matters
   const isAdjusted = Math.abs(sumValues(verdict.give) - verdict.value_give) > 0.1
     || Math.abs(sumValues(verdict.get) - verdict.value_get) > 0.1;
   return isAdjusted ? 'The totals count the best player in the deal a little extra and take off anyone you would drop.' : null;

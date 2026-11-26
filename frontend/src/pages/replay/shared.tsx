@@ -205,8 +205,9 @@ export function ReplayOutBadge({ className = '' }: { className?: string }) {
 /** The user's IR players who lost their tag block adds, claims and trades; null when nothing is blocked. */
 export function irBlockedText(game: ReplaySummary): string | null {
   if (game.ir_blocked.length === 0 || !EDIT_PHASES.includes(game.phase)) return null;
-  return `Activate ${game.ir_blocked.map((player) => player.name).join(' and ')} from IR to trade or claim: `
-    + 'he no longer has an O, IR or PUP tag (or drop him).';
+  const many = game.ir_blocked.length > 1;
+  return `Activate ${game.ir_blocked.map((player) => player.name).join(' and ')} from IR to add, claim or trade: `
+    + (many ? 'they no longer have an O, IR or PUP tag (or drop them).' : 'he no longer has an O, IR or PUP tag (or drop him).');
 }
 
 export function ReplayIrBlockedNotice({ game }: { game: ReplaySummary }) {

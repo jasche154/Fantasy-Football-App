@@ -65,6 +65,13 @@ async function row(name: string) {
 }
 
 describe('PlayersView table', () => {
+  it('says a player dropped this week can be claimed only after the games of this week', async () => {
+    renderPlayers(summary(), [{ path: PLAYERS, reply: json(wire([wireRow(COLLINS, { status: 'waivers', after_games: true })])) }]);
+    const collins = await row('Nico Collins');
+    expect(collins.getByTitle('On waivers: claimable after this week’s games')).toHaveTextContent('W');
+  });
+
+
   it('lists the wire with each player\'s status and what can be done while the week is open', async () => {
     const { api, lastQuery } = renderPlayers(summary());
     const mostert = await row('Raheem Mostert');
@@ -74,7 +81,7 @@ describe('PlayersView table', () => {
     expect(mostert.getByText('60.40')).toBeInTheDocument();
 
     const collins = await row('Nico Collins');
-    expect(collins.getByTitle('On waivers')).toHaveTextContent('W');
+    expect(collins.getByTitle('On waivers')).toHaveTextContent('W');       // no after_games field: plain
     expect(collins.getByText('Next week')).toBeInTheDocument();
     expect(collins.queryByRole('button', { name: /Add|Claim/ })).not.toBeInTheDocument();
 
@@ -458,7 +465,7 @@ describe('PlayersView waivers', () => {
 });
 
 describe('PlayersView while an IR player has lost his tag', () => {
-  const BANNER = 'Activate Raheem Mostert from IR to trade or claim: he no longer has an O, IR or PUP tag (or drop him).';
+  const BANNER = 'Activate Raheem Mostert from IR to add, claim or trade: he no longer has an O, IR or PUP tag (or drop him).';
 
   it('shows the banner and disables Add', async () => {
     renderPlayers(summary({ ir_blocked: [MOSTERT] }), [{ path: PLAYERS, reply: json(wire([wireRow(COLLINS)])) }]);

@@ -452,7 +452,7 @@ def to_ir(state: State, team_id: int, player_id: int) -> State:
 def blocked_sentence(team_id: int, player_id: int) -> str:
     name = know().by_id[player_id].name
     if rs.team(league(), team_id).is_user:
-        return f"Activate {name} from IR to trade or claim: he no longer has an O, IR or PUP tag (or drop him)."
+        return f"Activate {name} from IR to add, claim or trade: he no longer has an O, IR or PUP tag (or drop him)."
     return (f"{rs.team(league(), team_id).name} can't add, claim or trade for players while "
             f"{name} is on IR without an O, IR or PUP tag: activate or drop him first.")
 
