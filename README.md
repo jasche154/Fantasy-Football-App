@@ -1138,10 +1138,11 @@ that week's games on; only scoring a week reads its real points.
   rows show, with the public reason ("Hype: role jumped after Puka Nacua went out for the season", "... he
   won the backfield").
 - **Injury news:** a player who is out carries a report of when he is due back (`services/replay_news.py`).
-  Until a seeded 1-7 weeks before his real return it reads "no timetable yet", valued on a guess drawn from what
-  the public can know (how much longer real 2018-25 absences with that tag lasted once he had been out this long,
-  `replay_news_lengths.json`, fitted by `python -m services.replay_chart_eval --news-lengths`), never from his
-  return; from then on it names his real week plus an error drawn afresh each week (one week out it is right
+  Until a seeded 1-7 weeks before his real return it reads "no timetable yet", and his value is the average over
+  what the public can know (how much longer real 2018-25 absences with that tag lasted once he had been out this
+  long, `replay_news_lengths.json`, fitted by `python -m services.replay_chart_eval --news-lengths`): the expected
+  return factor x share kept, the same for every league seed and smooth week to week, never from his return (the
+  report's own week, for lineups, is that spread's median); from then on it names his real week plus an error drawn afresh each week (one week out it is right
   about four times in five; 2 weeks out 59%, 3 weeks 41%, 4+ 37%), and a few long in-season IR absences first
   read "out for the season". A preseason IR or PUP move reads "no timetable yet" at the draft (valued on the
   preseason prior), a suspension shows its length. It never names a week already reached, a returning player's

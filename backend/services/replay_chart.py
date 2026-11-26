@@ -331,6 +331,11 @@ def with_news(data: SeasonData, rows: Mapping[int, dict], fields: Mapping[int, d
     out: dict[int, dict] = {}
     for pid, (expert, model_part, (since, back, tag), missed) in parts.items():
         news = replay_news.report(seed, pid, since, back, week, tag, data.last_week)
+        if news.vague:                                  # "no timetable yet": the market prices the whole spread
+            _, extra = _injured(data, rows[pid], news, week, end_week, expert, model_part)
+            chart = (expert + model_part) * _vague_keep(data, rows[pid], news, tag, week, end_week, missed)
+            out[pid] = {**fields[pid], **extra, "chart": round(chart, 1), "news": news}
+            continue
         if missed is not None:                          # frozen: what he comes back worth after the reported absence
             games = _game_weeks(data, rows[pid]["team"], week, end_week)
             left = len(games) * (1 - replay_news.share_played(news, games)) if news.back else len(games)
@@ -339,6 +344,20 @@ def with_news(data: SeasonData, rows: Mapping[int, dict], fields: Mapping[int, d
         chart, extra = _injured(data, rows[pid], news, week, end_week, expert, model_part)
         out[pid] = {**fields[pid], **extra, "chart": round(chart, 1), "news": news}
     return {**out, **_shocked(data, rows, fields, out, week)}
+
+
+def _vague_keep(data: SeasonData, row: dict, news: "replay_news.Report", tag: str, week: int, end_week: int,
+                missed: int | None) -> float:
+    """The expected share of his (frozen) value kept over the public spread of return weeks (replay_news.vague_odds):
+    the return factor of the whole absence (frozen players only) x (1 - the discount of the games he misses)."""
+    games = _game_weeks(data, row["team"], week, end_week)
+    expected = 0.0
+    for back, chance in replay_news.vague_odds(news.since, week, tag):
+        left = sum(w < back for w in games)
+        keep = 1 - replay_chart_injury.discount(left, len(games)) if games else 1.0
+        factor = replay_chart_injury.return_factor(missed + left) if missed is not None else 1.0
+        expected += chance * factor * keep
+    return expected
 
 
 def healthy_ranks(rows: Mapping[int, dict], healthy: Mapping[int, float]) -> dict[int, float]:

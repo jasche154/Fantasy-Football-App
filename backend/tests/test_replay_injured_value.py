@@ -29,10 +29,17 @@ def hurt(games: int):
     data = replace(DATA, projected=MappingProxyType(projected), actual=MappingProxyType(actual),
                    injuries=MappingProxyType(injuries),
                    returns=MappingProxyType(hard_tag_returns(injuries, actual, DATA.last_week)))
-    back = data.returns[(PID, START)]
-    seed = next(s for s in range(500) if all(
-        replay_news.report(s, PID, START, back, w, "O", data.last_week).back == back for w in range(START, back)))
-    return data, seed, back
+    return data, 0, data.returns[(PID, START)]
+
+
+@pytest.fixture(autouse=True)
+def exact_news(monkeypatch):
+    """This module prices the chart's discount curve on news that names the real week (the news noise is
+    test_replay_news's)."""
+    def exact(seed, pid, since, back, week, tag, last=None):
+        week_named = back if back and (last is None or back <= last) else None
+        return replay_news.Report(since, week_named, "Out; expected back." if week_named else "Out for the season.")
+    monkeypatch.setattr(replay_news, "report", exact)
 
 
 def value(data, week: int, seed: int, pid: int = PID) -> rv.ReplayValue:

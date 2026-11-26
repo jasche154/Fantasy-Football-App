@@ -8,11 +8,11 @@ Pure: no database, no Knowledge.
 - The commissioner's exempt list (EXE) is indefinite: the text never names a week, and the week valuations read
   (`back`) is a guess made without the real return (FAKE_RETURN_WEEKS after he went on the list, then always
   the next week).
-- Otherwise, until a seeded FIRM_LEAD (1-7) weeks before the real return, the report reads "no timetable yet" and the
-  week valuations use is a guess drawn from what the public can know: how much longer real absences with that
-  tag group lasted given how long he has been out already (NEWS_LENGTHS, fitted on 2018-25 hard-tag streaks:
-  `python -m services.replay_chart_eval --news-lengths`), never the real return; a guess that passes is drawn again
-  the same way. From the firm week on it names the real week plus an error drawn afresh for each report week from
+- Otherwise, until a seeded FIRM_LEAD (1-7) weeks before the real return, the report reads "no timetable yet": the
+  public knows only how much longer real absences with that tag group lasted given how long he has been out already
+  (`vague_odds`, from NEWS_LENGTHS, fitted on 2018-25 hard-tag streaks: `python -m services.replay_chart_eval
+  --news-lengths`), never the real return. The chart prices that whole spread (replay_chart.with_news: the expected
+  return factor x keep), the same for every seed; the report's `back` is its median (lineups, availability). From the firm week on it names the real week plus an error drawn afresh for each report week from
   NAMED_ERRORS, narrowing as the return nears (one week out right four times in five), so no revision pattern pins
   the date. A report never names a week he has already missed, nor (for a player who does return) one after the
   season's last week. At the draft a preseason IR or PUP move (replay_pool.PRESEASON_TAGS) reads "no timetable
@@ -84,27 +84,25 @@ def news_lengths() -> Mapping[str, tuple[tuple[int, int], ...]]:
                              for group, counts in raw.items()})
 
 
-def _length(group: str, done: int, u: float) -> int:
-    """Weeks from the first tag to the return, drawn (quantile `u`) from the absences that lasted longer than `done`
-    and ended that season: a vague report is not a season-ending one, so the public expects him back."""
-    longer = ([(weeks, n) for weeks, n in news_lengths()[group] if done < weeks < NO_RETURN_WEEKS]
-              or [(NO_RETURN_WEEKS, 1)])
-    target, total = u * sum(n for _, n in longer), 0
-    for weeks, n in longer:
-        total += n
-        if total >= target:
-            return weeks
-    return longer[-1][0]
-
-
-def _guess(seed: int, player_id: int, since: int, week: int, tag: str, last_week: int | None) -> int:
-    """The vague report's valuation week: a public draw, moved on by a fresh draw each time it passes."""
-    rng = replay_state.rng(seed, "news-guess", player_id, since)
+def vague_odds(since: int, week: int, tag: str) -> tuple[tuple[int, float], ...]:
+    """((return week, chance), ...): what the public can expect of a player out since `since` and still out in `week`,
+    from the absences of his tag group (NEWS_LENGTHS) that lasted longer and ended that season (a vague report is
+    not a season-ending one). Seed-free and never the real return: the market prices the whole spread
+    (replay_chart.with_news) and the report names its median."""
     group = "preseason" if since == 1 and "preseason" in news_lengths() else "long" if tag in SEASON_TAGS else "short"
-    guess = since + _length(group, 0, float(rng.random()))
-    while guess <= week:                    # passed: he has been out longer, and not "next week" twice in a row
-        guess = since + _length(group, max(guess, week + 1) - since, float(rng.random()))
-    return guess if last_week is None else min(guess, max(last_week, week + 1))
+    done = max(week, since) - since
+    longer = [(weeks, n) for weeks, n in news_lengths()[group] if done < weeks < NO_RETURN_WEEKS] or [(done + 1, 1)]
+    total = sum(n for _, n in longer)
+    return tuple((since + weeks, n / total) for weeks, n in longer)
+
+
+def _median(odds: tuple[tuple[int, float], ...]) -> int:
+    total = 0.0
+    for back, chance in odds:
+        total += chance
+        if total >= 0.5:
+            return back
+    return odds[-1][0]
 
 
 def _named(seed: int, player_id: int, since: int, true_return: int, week: int) -> int:
@@ -135,7 +133,7 @@ def report(seed: int, player_id: int, since: int, true_return: int, week: int, t
     elif tag == "EXE":
         back = since + fake_weeks
     elif week < since:                                  # the draft, before a preseason move's season starts:
-        back, vague = _guess(seed, player_id, since, week, tag, last_week), True    # he starts on IR, never how long
+        back, vague = _median(vague_odds(since, week, tag)), True    # he starts on IR, never how long
     elif not true_return:
         hopeful = not long_tag or (fake_return and week < since + revised_after)
         back = since + fake_weeks if hopeful else None
@@ -143,12 +141,14 @@ def report(seed: int, player_id: int, since: int, true_return: int, week: int, t
           and week < true_return - CORRECTION_LEAD):                                         # report is the draft's
         back = None
     elif week < true_return - firm_lead:
-        back, vague = _guess(seed, player_id, since, week, tag, last_week), True
+        back, vague = _median(vague_odds(since, week, tag)), True
     else:
         named = _named(seed, player_id, since, true_return, week)
         back = named if last_week is None else min(named, max(last_week, true_return))
     if back is not None:
         back = max(back, week + 1)
+    if vague and last_week is not None and back is not None:
+        back = min(back, max(last_week, week + 1))     # a returning player's median stays inside the season
     if back is not None and last_week is not None and back > last_week:
         back, vague = None, vague or tag not in (*SEASON_TAGS, "SUS")   # an O tag never reads "out for the season"
     return Report(since=since, back=back, text=_text(tag, since, back, vague), vague=vague)
