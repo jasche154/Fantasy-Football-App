@@ -14,7 +14,9 @@ score = in + premium + spot + 0.5 x lineup + need - out x multiple x 1.03 (a sha
 - premium: the best player in the deal is worth more than parts: rate x (B - v2), B the best chart in the
   deal and v2 the other side's best. Signed: + when the CPU gets B, - when it sends him.
 - spot: SPOT_VALUE per roster spot the deal frees.
-- lineup: LINEUP_PER_WEEK x its lineup gain a week, clamped to +- LINEUP_CAP x out.
+- lineup: LINEUP_PER_WEEK x its lineup gain a week, clamped to +- LINEUP_CAP x out; no loss when it sends the user a
+  player it is shopping to him (a manager who shops a starter has chosen to lose him: testers saw "I'll probably
+  say yes" refuse near-full value because the lineup loss cancelled the discount).
 - need: `replay_styles.need_bonus` for players at positions it needs, cut so that it and the weighted lineup
   gain together add at most replay_styles.NEED_CAP x out.
 The multiple is 1.00 (normal) or 1.08 (hard) against the user and 0.95 between CPUs; for a CPU's own offer to
@@ -58,6 +60,8 @@ class Tally:
     lineup: float              # before LINEUP_WEIGHT / LINEUP_LOSS_WEIGHT
     score: float               # accept at >= 0
     need: float = 0.0          # its need bonus, after the cap
+    cut: float = 0.0           # its price of its own players it must cut (already taken off `received`)
+    extra: float = 0.0         # what it wants on top of `out` (its multiple and margin; below 0 for its own offer)
 
 
 def fresh(know: Knowledge, picked: Iterable[int]) -> frozenset[int]:
@@ -94,12 +98,13 @@ def depth_counted(worth: Sequence[float], sent: Sequence[float]) -> float:
 def tally(know: Knowledge, persona: str | Mind, sends: Sequence[int], kept: Sequence[int], drops: Sequence[int],
           gain_per_week: float, multiple: float, to_user: bool, hype: float = 1.0,
           markdown: Mapping[int, float] | None = None, just_added: Collection[int] = (),
-          offered: bool = False, attach: bool = True) -> Tally:
+          offered: bool = False, attach: bool = True, floor: bool = True) -> Tally:
     """The CPU sends `sends`, keeps `kept` of what it receives and cuts `drops` (its own players).
     `persona`: its Mind (replay_styles.mind_for), or a persona name priced with `hype` and no state.
     `markdown`: {player id: discount} it is shopping to the user (only applied when `to_user`); `just_added`:
     players who count PICKUP_SHARE (`fresh`); `offered`: its own offer to the user (no shark margin); `attach`
-    False leaves out its "high on" mark-ups (replay_trade_reasons asks whether they alone sank a deal)."""
+    False leaves out its "high on" mark-ups (replay_trade_reasons asks whether they alone sank a deal), `floor`
+    False its OUT_SELL_SHARE floor (likewise)."""
     mind = persona if isinstance(persona, Mind) else replay_styles.plain(persona, hype)
     cut = (markdown or {}) if to_user else {}
 
@@ -109,16 +114,18 @@ def tally(know: Knowledge, persona: str | Mind, sends: Sequence[int], kept: Sequ
 
     def sell(pid: int, off: float = 0.0, attach: bool = True) -> float:
         value = know.by_id[pid]
-        floor = OUT_SELL_SHARE * value.healthy_chart if to_user and value.out else 0.0
-        return max(private(pid, True, attach) * (1.0 - off), floor)
+        least = OUT_SELL_SHARE * value.healthy_chart if floor and to_user and value.out else 0.0
+        return max(private(pid, True, attach) * (1.0 - off), least)
 
     kept_worth = {pid: private(pid) for pid in kept}
-    received = (depth_counted(list(kept_worth.values()), [private(pid, True, attach) for pid in sends])
-                - sum(private(pid, True, attach) for pid in drops))
+    own_cut = sum(private(pid, True, attach) for pid in drops)
+    received = depth_counted(list(kept_worth.values()), [private(pid, True, attach) for pid in sends]) - own_cut
     bonus = premium(know, mind.persona, sends, kept, just_added)
     spot = SPOT_VALUE * max(0, len(sends) - len(kept))
     cap = LINEUP_CAP * sum(sell(pid, attach=attach) for pid in sends)    # undiscounted: a shop moves his price by its discount only
     lineup = min(max(LINEUP_PER_WEEK * gain_per_week, -cap), cap)
+    if lineup < 0 and any(pid in cut for pid in sends):
+        lineup = 0.0                   # he chose to shop him: losing him from the lineup is no cost to him
     weight = LINEUP_WEIGHT if lineup > 0 else LINEUP_LOSS_WEIGHT
 
     sent = sum(sell(pid, cut.get(pid, 0.0), attach) for pid in sends)
@@ -127,9 +134,10 @@ def tally(know: Knowledge, persona: str | Mind, sends: Sequence[int], kept: Sequ
     sent_worth = {pid: private(pid, True, attach) for pid in sends}
     need = min(replay_styles.need_bonus(know, mind, sends, kept_worth, sent_worth), room)
     margin = SHARK_MARGIN * out if mind.persona == "shark" and not offered else 0.0
-    score = received + max(0.0, bonus) + spot + weight * lineup + need - out * multiple * OUT_MARGIN - margin
+    extra = out * multiple * OUT_MARGIN + margin - out
+    score = received + max(0.0, bonus) + spot + weight * lineup + need - out - extra
     return Tally(round(sent, 2), round(received, 2), round(bonus, 2), spot, round(lineup, 2), round(score, 2),
-                 round(need, 2))
+                 round(need, 2), round(own_cut, 2), round(extra, 2))
 
 
 def market_ok(know: Knowledge, sends: Sequence[int], kept: Sequence[int], drops: Sequence[int],

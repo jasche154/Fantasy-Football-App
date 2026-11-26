@@ -218,3 +218,17 @@ def test_a_tag_during_his_bye_week_is_news_at_once(season_out):
 
 def test_the_week_before_the_injury_shows_nothing(season_out):
     assert not _mine(season_out, HURT - 1) and _value(season_out, BACKUP, HURT - 1).shock is None
+
+
+@pytest.mark.parametrize("anchor, starred", [(30.0, True), (10.0, False)])
+def test_won_the_backfield_is_never_said_of_an_established_starter(monkeypatch, season_out, anchor, starred):
+    """Testers: "He won the backfield" on James Cook, Jonathan Taylor, Derrick Henry and Aaron Jones."""
+    from services import replay_chart
+    week = HURT
+    shock = rs.Shock(BACKUP, "RB", "role_won", week, anchor, 5.0, True)
+    monkeypatch.setattr(rs, "moves", lambda *args: {BACKUP: (60.0, shock)})     # season_out has live events
+
+    value = _value(fakes.patched(season_out, projected={}), BACKUP, week)     # a fresh object: no cached build
+
+    assert (value.hype_reason == "he won the backfield") is starred
+    assert replay_chart.HYPE_ESTABLISHED == 24

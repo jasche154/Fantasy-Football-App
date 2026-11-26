@@ -171,7 +171,7 @@ export function LeaguePlayoffs({ game, version }: ReplayViewProps) {
             {data.pools.length > 0 && (
               <section aria-labelledby="consolation-title">
                 <h2 id="consolation-title" className="section-title">Consolation</h2>
-                <p className="hint">Everyone else plays on for the places below the title games: each week a pool is ranked by its own wins, then points, and paired 1 v 2, 3 v 4.</p>
+                <p className="hint">Everyone else plays on for the places below the title games: each week a pool is ranked by its own wins, then points, and paired 1 v 2, 3 v 4. Final places in a pool go by that table after its last week (pool wins, then points in pool weeks, then seed), not by who beat whom: a team can win a consolation game and still finish behind the team it beat.</p>
                 {data.pools.map((pool) => <Pool key={pool.name} pool={pool} link={link} />)}
               </section>
             )}

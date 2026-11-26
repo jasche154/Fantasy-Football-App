@@ -153,10 +153,12 @@ export interface ReplayPlayerRow {
   defense: ReplayDefenseRating | null;
 }
 
-/** An injury report: back = the week he is said to return (null = out for the season). */
+/** An injury report: back = the week he is said to return (null = out for the season, or no timetable yet). */
 export interface ReplayNews {
   back: number | null;
   text: string;
+  /** "No timetable yet": no week is named; back is null and the player counts as out every week to come. */
+  vague?: boolean;
 }
 
 export interface ReplayRecord {
@@ -235,6 +237,8 @@ export interface ReplayVerdict {
   your_drops: ReplayPlayerRef[];
   their_drops: ReplayPlayerRef[];
   suggestion: string | null;
+  /** The best-player premium in the totals: above 0 it is in what you get, below 0 in what you give. */
+  premium?: number;
 }
 
 /** Usage averaged over `games` games: snap_pct 0-100, targets and carries per game, target_share a 0-1 fraction. */

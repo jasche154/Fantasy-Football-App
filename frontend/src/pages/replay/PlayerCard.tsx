@@ -9,7 +9,8 @@ import { formatPoints, hypeLabel, injuryLabel, ReplayHypeStar, ReplayInjuryBadge
 
 function statusText(player: ReplayWireRow): string {
   if (player.owner) return player.owner.is_user ? 'On your team' : `Rostered by ${player.owner.name}`;
-  return player.status === 'waivers' ? 'On waivers' : 'Free agent';
+  if (player.status !== 'waivers') return 'Free agent';
+  return player.after_games ? 'On waivers: claimable after this week’s games' : 'On waivers';
 }
 
 function Header({ row }: { row: ReplayWireRow }) {

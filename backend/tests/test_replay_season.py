@@ -88,7 +88,19 @@ def test_scores_are_the_sum_of_each_teams_starters_real_points():
         for team_id, lineup in result.starters.items():
             total = sum(data.points(pid, result.week) for ids in lineup.values() for pid in ids)
             assert result.scores[team_id] == pytest.approx(total, abs=0.005)
-            assert {slot: len(ids) for slot, ids in lineup.items()} == dict(_settings().starters)
+            sitting = {slot: n - len(lineup[slot]) for slot, n in _settings().starters.items() if len(lineup[slot]) < n}
+            assert set(sitting) <= {"K", "DST"} and all(n == 1 for n in sitting.values())   # only a lone K/DST on bye
+
+
+def test_a_lone_kicker_or_defense_on_a_bye_sits_and_his_slot_stays_empty():
+    """Oracle: the auto-lineup started a defense on its bye."""
+    data, state = fakes.fake_season(), _played(12, FINAL)
+    bye = next((t, w) for t in state.teams for w in range(1, 13) for pid in t.roster
+               if data.players[pid].position == "DST" and data.on_bye(pid, w))
+    team, week = bye
+    lineup = next(r.starters[team.id] for r in state.results if r.week == week)
+
+    assert lineup["DST"] == () or all(not data.on_bye(pid, week) for pid in lineup["DST"])
 
 
 def test_play_week_is_deterministic_and_leaves_its_input_alone():
@@ -432,3 +444,82 @@ def test_season_through_week_seven_is_identical_when_only_the_future_differs():
     played = _play(fakes.drafted_state(settings), settings, 7, changed)
 
     assert played == _played(12, 7)
+
+
+def test_a_kicker_whose_team_plays_starts_even_without_a_projection():
+    """Reviewer: a late signing or a data gap leaves a K with no projection; only a bye sits him."""
+    data, settings = fakes.fake_season(), _settings()
+    state = fakes.drafted_state(settings)
+    week = 3
+    team = next(t for t in state.teams if not t.is_user)
+    kicker = next(pid for pid in team.roster if data.players[pid].position == "K")
+    assert not data.on_bye(kicker, week)
+    gap = fakes.patched(data, projected={(kicker, week): None})
+    know = fakes.fake_knowledge(week, settings, gap)
+
+    lineup = season.starters_for(replace(state, week=week), settings, know, team.id)
+
+    assert lineup["K"] == (kicker,)
+
+
+def test_a_kicker_whose_team_plays_fills_his_slot_for_the_empty_slot_check_too():
+    from services import replay_values as rv
+    data, settings = fakes.fake_season(), _settings()
+    state, week = fakes.drafted_state(settings), 3
+    team = next(t for t in state.teams if not t.is_user)
+    kicker = next(pid for pid in team.roster if data.players[pid].position == "K")
+    know = fakes.fake_knowledge(week, settings, fakes.patched(data, projected={(kicker, week): None}))
+
+    assert "K" not in rv.idle_slots(know, team.roster, settings)
+
+
+def _with_bye(position: str, backup: bool):
+    """A CPU team at a week where its lone `position` player's team is on a bye; with `backup`, a second one whose
+    team plays is on the bench."""
+    data, settings = fakes.fake_season(), _settings()
+    state = fakes.drafted_state(settings)
+    team = next(t for t in state.teams if not t.is_user)
+    own = next(pid for pid in team.roster if data.players[pid].position == position)
+    week = next(w for w in range(1, 15) if data.on_bye(own, w))
+    roster = team.roster
+    if backup:
+        spare = next(pid for pid, pl in data.players.items() if pl.position == position and not data.on_bye(pid, week)
+                     and pid not in rs.rostered(state) and data.projection(pid, week))
+        roster = (*roster, spare)
+    team = replace(team, roster=roster)
+    state = rs.with_team(replace(state, week=week), team)
+    return season.starters_for(state, settings, fakes.fake_knowledge(week, settings, data), team.id), own, roster
+
+
+def test_a_lone_kicker_on_a_bye_sits_and_the_slot_stays_empty():
+    lineup, kicker, _ = _with_bye("K", backup=False)
+
+    assert lineup["K"] == ()
+
+
+def test_a_defense_on_a_bye_with_a_backup_who_plays_starts_the_backup():
+    lineup, defense, roster = _with_bye("DST", backup=True)
+
+    assert len(lineup["DST"]) == 1 and lineup["DST"][0] != defense and lineup["DST"][0] in roster
+
+
+@pytest.mark.parametrize("case", ["hard tag", "bye", "no team"])
+def test_a_kicker_with_no_projection_leaves_his_slot_empty_when_he_cannot_play(case):
+    from dataclasses import replace as copy
+    from types import MappingProxyType
+
+    from services import replay_values as rv
+    data, settings = fakes.fake_season(), _settings()
+    state = fakes.drafted_state(settings)
+    team = next(t for t in state.teams if not t.is_user)
+    kicker = next(pid for pid in team.roster if data.players[pid].position == "K")
+    week = next(w for w in range(1, 15) if data.on_bye(kicker, w)) if case == "bye" else 3
+    know = fakes.fake_knowledge(week, settings, fakes.patched(data, projected={(kicker, week): None}))
+    value = know.by_id[kicker]
+    if case == "hard tag":
+        value = copy(value, injury=fakes.Injury("O"))
+    elif case == "no team":
+        value = copy(value, team=None)
+    know = copy(know, by_id=MappingProxyType({**know.by_id, kicker: value}))
+
+    assert value.projection == 0 and "K" in rv.idle_slots(know, team.roster, settings)

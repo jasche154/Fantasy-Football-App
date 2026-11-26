@@ -7,6 +7,7 @@ chart built here from each week's healthy values, so these tests do not depend o
 """
 import itertools
 import math
+import re
 import time
 from collections.abc import Mapping
 from dataclasses import replace
@@ -188,16 +189,29 @@ def test_hard_difficulty_needs_more_back_than_normal():
     normal_verdict, hard_verdict = judge(*deal), judge(*deal, settings=hard)
 
     assert normal_verdict.accepted and not hard_verdict.accepted
-    assert said(hard_verdict, "They want 11% more than they give.")              # 1.08 x the 3% margin
+    assert said(hard_verdict, "They want 11% more than they give (")              # 1.08 x the 3% margin
 
 
 def test_a_value_decline_names_the_margin_and_a_lineup_loss():
     verdict = judge(RICH, [SCRUB], [P("RB", 2)])                         # a scrub for its starting back
 
-    assert said(verdict, "They want 3% more than they give.")
+    assert said(verdict, "They want 3% more than they give (")
     assert said(verdict, "It would weaken their starting lineup")
     assert not said(judge(8, [RB14], [P("QB", 4)], settings=fakes.fake_settings(difficulty="hard")),
                     "weaken their starting lineup")
+
+
+def test_a_value_decline_adds_up_to_the_shortfall_the_suggestion_quotes():
+    """Testers: "They want 3% more" beside a suggestion asking for 39-406 more; "add about 49" for a gap of 32."""
+    for deal in ((RICH, [SCRUB], [P("RB", 2)]), (8, [RB14], [P("QB", 4)])):
+        verdict = judge(*deal, settings=fakes.fake_settings(difficulty="hard"))
+        sentence = next(r for r in verdict.reasons if r.startswith(rt.VALUE_REASONS))
+        gives, gets = (int(re.search(rf"{word} (\d+)", sentence).group(1)) for word in ("give", "get"))
+        parts = sum(int(n) for n in re.findall(r"\((\d+)\)", sentence))       # lineup loss, the share on top
+        need = int(re.search(r"They need about (\d+) more", sentence).group(1))
+
+        assert abs(gives + parts - gets - need) <= 2 and "-" not in sentence
+        assert verdict.suggestion == f"Add about {need} points of value to make this fair." or verdict.suggestion.startswith("Add ")
 
 
 def test_asking_again_gives_the_same_verdict_and_a_declined_proposal_is_kept_once():
@@ -210,6 +224,16 @@ def test_asking_again_gives_the_same_verdict_and_a_declined_proposal_is_kept_onc
     assert not verdict.accepted and verdict == same_verdict and judge(*FAIR) == judge(*FAIR)
     assert [(o.status, o.from_team, o.to_team, o.give) for o in declined.offers] == [("declined", USER, RICH, (SCRUB,))]
     assert declined.teams == state.teams and declined.events == () and again is declined
+
+
+def test_a_declined_proposal_resent_in_another_order_is_kept_once():
+    state, know = league()
+    give, get = [SCRUB, SCRUB3], list(rs.team(state, RICH).roster[:2])
+
+    declined, _ = rt.propose(state, SETTINGS, know, RICH, give, get)
+    again, _ = rt.propose(declined, SETTINGS, know, RICH, give[::-1], get[::-1])
+
+    assert len(declined.offers) == 1 and again is declined
 
 
 def test_kickers_and_defenses_count_for_little_and_cannot_balance_a_lopsided_deal():
@@ -656,9 +680,10 @@ def test_a_blocked_user_cannot_propose_or_accept_but_may_decline():
     blocked = on_ir(state, USER, SCRUB)                     # no tag this week: he blocks the user
     made = on_ir(offered()[0], USER, SCRUB)
 
-    with pytest.raises(ValueError, match=B1):
+    told = f"^Activate {know.by_id[SCRUB].name} from IR to add, claim or trade"     # names him and the fix
+    with pytest.raises(ValueError, match=told):
         rt.propose(blocked, SETTINGS, know, *FAIR)
-    with pytest.raises(ValueError, match=B1):
+    with pytest.raises(ValueError, match=told):
         rt.respond(made, SETTINGS, know, made.offers[0].id, accept=True)
     assert rt.evaluate(blocked, SETTINGS, know, USER, *FAIR).accepted       # asking is still allowed
     assert rt.respond(made, SETTINGS, know, made.offers[0].id, accept=False).offers[0].status == "declined"
@@ -735,3 +760,42 @@ def test_a_suggested_player_really_makes_the_deal_go_through():
         assert after.accepted, (named, after.reasons)
         followed += 1
     assert followed >= 5
+
+
+def test_a_suggestion_never_names_the_users_only_healthy_starter_at_a_position(monkeypatch):
+    """Tester: "Add Patrick Mahomes" when Mahomes was the user's only quarterback."""
+    state, know = league()
+    user = rs.user_team(state)
+    qb, backup = sorted((p for p in user.roster if know.by_id[p].position == "QB"), key=lambda p: -know.by_id[p].chart)
+    alone = rs.with_team(state, replace(user, roster=tuple(p for p in user.roster if p != backup)))
+    deal = (5, [SCRUB], [P("RB", 27)])
+
+    with monkeypatch.context() as patched:                  # as before: any spare player could be named
+        patched.setattr(rt.rv, "can_field_lineup", lambda *args: True)
+        before = rt.evaluate(alone, SETTINGS, know, USER, *deal)
+    now = rt.evaluate(alone, SETTINGS, know, USER, *deal)
+
+    assert know.by_id[qb].name in (before.suggestion or "")
+    assert know.by_id[qb].name not in (now.suggestion or "")
+
+
+def test_after_the_deadline_a_blocked_user_is_told_about_the_deadline_not_his_ir():
+    state, know = league()
+    late = replace(on_ir(state, USER, SCRUB), week=SETTINGS.trade_deadline_week + 1)
+    late_know = league(SETTINGS.trade_deadline_week + 1)[1]
+
+    with pytest.raises(ValueError, match="^The trade deadline has passed"):
+        rt.propose(late, SETTINGS, late_know, *FAIR)
+
+
+def test_after_the_deadline_an_offer_cannot_be_accepted_and_stays_pending_but_can_be_declined():
+    state, _ = offered()
+    late_week = SETTINGS.trade_deadline_week + 1
+    late, late_know = replace(state, week=late_week), league(late_week)[1]
+    offer_id = late.offers[-1].id
+
+    with pytest.raises(ValueError, match="^The trade deadline has passed"):
+        rt.respond(late, SETTINGS, late_know, offer_id, accept=True)
+
+    assert late.offers[-1].status == "pending"
+    assert rt.respond(late, SETTINGS, late_know, offer_id, accept=False).offers[-1].status == "declined"

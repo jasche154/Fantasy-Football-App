@@ -23,7 +23,7 @@ SEED = 7
 USER = SETTINGS.draft_slot
 PLAYER_ROW = {"player", "opponent", "bye", "out", "projection", "points", "ros_ppg", "value", "rank", "pos_rank",
               "adp", "pre_rank", "expert_rank", "news", "buzz", "games", "ppg", "trade_locked", "defense"}
-WIRE_ROW = PLAYER_ROW | {"status", "owner", "season_points", "last_points", "usage", "line"}
+WIRE_ROW = PLAYER_ROW | {"status", "after_games", "owner", "season_points", "last_points", "usage", "line"}
 TEAM_REF = {"team_id", "name", "is_user", "tendency", "mood", "needs", "deep"}
 SIDE = TEAM_REF | {"projected", "points", "record"}
 RECORD = {"wins", "losses", "ties", "rank", "points_for", "points_against", "place"}
@@ -140,7 +140,7 @@ def test_a_week_not_reached_yet_cannot_be_opened():
 
     for build in (lambda: views.team(shown, week=6), lambda: views.matchup(shown, week=6),
                   lambda: shown.know_at(6), lambda: views.team(shown, week=0)):
-        with pytest.raises(ValueError, match="week 5"):
+        with pytest.raises(ValueError, match="(week|to) 5"):
             build()
     future = views.scoreboard(shown, 6)
     assert future["played"] is False and len(future["results"]) == 6
@@ -187,7 +187,7 @@ def test_moods_are_worked_out_once_per_team_per_request(monkeypatch):
     Game works each team's mood out once."""
     calls: list[int] = []
     real = views.replay_mood.mood_line
-    monkeypatch.setattr(views.replay_mood, "mood_line", lambda know, team, persona=None: (calls.append(team.id), real(know, team, persona))[1])
+    monkeypatch.setattr(views.replay_mood, "mood_line", lambda know, team, persona=None, fresh=(): (calls.append(team.id), real(know, team, persona, fresh))[1])
     shown = game(at(8))
     for screen in (views.summary, league.trades, league.activity, league.chat, league.standings):
         screen(shown)
@@ -205,8 +205,12 @@ def test_a_player_row_carries_his_injury_news_only_while_a_report_exists():
     out = replace(healthy, news=Report(since=2, back=6, text="Expected back in week 6."))
     gone = replace(healthy, news=Report(since=2, back=None, text="Out for the season."))
 
-    assert views.news(healthy) is None and views.news(out) == {"back": 6, "text": "Expected back in week 6."}
-    assert views.news(gone) == {"back": None, "text": "Out for the season."}
+    vague = replace(healthy, news=Report(since=2, back=9, text="Out (IR) since week 2; no timetable yet.", vague=True))
+
+    assert views.news(healthy) is None
+    assert views.news(out) == {"back": 6, "text": "Expected back in week 6.", "vague": False}
+    assert views.news(gone) == {"back": None, "text": "Out for the season.", "vague": False}
+    assert views.news(vague) == {"back": None, "text": "Out (IR) since week 2; no timetable yet.", "vague": True}
 
 
 def test_draft_board_lists_who_is_left_in_rank_order_with_filters_and_paging():
@@ -558,7 +562,7 @@ def test_verdict_is_told_from_the_users_side():
     shown = league.verdict(game(state), found)
 
     assert set(shown) == {"accepted", "reasons", "fair_label", "value_give", "value_get", "percent", "your_gain",
-                          "their_gain", "give", "get", "your_drops", "their_drops", "suggestion"}
+                          "their_gain", "give", "get", "your_drops", "their_drops", "suggestion", "premium"}
     assert [row["player"]["id"] for row in shown["give"]] == give and [r["player"]["id"] for r in shown["get"]] == get
     assert shown["give"][0]["value"] == shown["value_give"] and shown["accepted"] == found.accepted
     assert isinstance(shown["reasons"], list) and (shown["accepted"] or shown["reasons"])

@@ -163,6 +163,19 @@ describe('TradeVerdictView: the headline is trade value, the lineup is called ou
     expect(within(card).queryByText(/Just picked up/)).not.toBeInTheDocument();
   });
 
+  it('names the best-player premium, and the premium beside a drop', async () => {
+    const premium = verdict({ value_give: 31.5, value_get: 38, premium: 3, get: [{ player: MOSTERT, value: 35 }] });
+    const dropped = verdict({ value_give: 31.5, value_get: 28, premium: 3, get: [{ player: MOSTERT, value: 35 }],
+      your_drops: [ETIENNE] });
+    renderTrades(trades({ offers: [offer({ verdict: premium }), offer({ id: 62, verdict: dropped })] }));
+    const [first, second] = await screen.findAllByRole('listitem', { name: 'Offer from Blitz Brigade' });
+
+    expect(within(first).getByText(/The totals: what you get includes \+3 for the best player in the deal\./)).toBeInTheDocument();
+    expect(within(second).getByText(/includes \+3 for the best player in the deal; what you get is less 10 for the players you would drop\./))
+      .toBeInTheDocument();
+    expect(within(first).queryByText(/a little extra/)).not.toBeInTheDocument();
+  });
+
   it('notes a player who counts half because he was just picked up', async () => {
     const note = 'Just picked up: counts 50% of his value in trades this week';
     const fresh = verdict({ value_give: 15.8, give: [{ player: ETIENNE, value: 15.8, note }] });

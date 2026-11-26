@@ -1,5 +1,4 @@
 """Replay League injury news (services/replay_news.py): noisy, seeded, never naming a week already missed."""
-from collections import Counter
 
 import pytest
 
@@ -22,19 +21,23 @@ def test_a_report_never_names_a_week_already_missed(since, true_return):
         assert all(r.back is None or r.back > week for r in reports(since, true_return, week))
 
 
-def test_the_first_report_misses_by_at_most_two_weeks_with_the_planned_odds():
-    misses = Counter(r.back - 10 for r in reports(4, 10, 4) if r.back is not None)
+def test_a_vague_reports_guess_never_reads_the_real_return():
+    """Reviewer: every vague guess sat within 2 weeks of the truth. Now it is a public draw (NEWS_LENGTHS)."""
+    early = [[news.report(seed, 7, 2, back, 3, "IR", 18) for seed in SEEDS] for back in (14, 16, 18)]
 
-    assert set(misses) <= set(news.ERRORS)
-    assert misses[0] == max(misses.values())                     # 35%: the most common
-    assert 0.25 < misses[0] / sum(misses.values()) < 0.45 and misses[-1] > misses[2]
+    assert all(r.vague or r.back is None for group in early for r in group)   # 3 < every return - 7 (or a false
+                                                                          # "out for the season", seeded the same)
+    assert [r.back for r in early[0]] == [r.back for r in early[1]] == [r.back for r in early[2]]
+    assert sum(r.back is not None and abs(r.back - 16) <= 2 for r in early[1]) < 0.5 * len(SEEDS)
 
 
-def test_the_miss_shrinks_to_nothing_as_he_nears_his_return():
-    first = [abs(r.back - 12) for r in reports(4, 12, 4) if r.back is not None]
-    near = [abs(r.back - 12) for r in reports(4, 12, 11) if r.back is not None]
+def test_a_named_week_narrows_as_the_return_nears_and_is_right_about_four_times_in_five_a_week_out():
+    def exact(week: int) -> float:
+        named = [r for r in reports(4, 12, week, "IR") if not r.vague and r.back is not None]
+        return sum(r.back == 12 for r in named) / len(named)
 
-    assert max(first) == 2 and max(near) == 0
+    assert 0.7 < exact(11) < 0.9                                             # one week out: not always
+    assert exact(11) > exact(10) > exact(8) * 0.9
 
 
 def test_a_long_absence_is_sometimes_first_called_season_ending_then_corrected():
@@ -45,7 +48,7 @@ def test_a_long_absence_is_sometimes_first_called_season_ending_then_corrected()
     for seed in called_off:
         assert news.report(seed, 7, 3, 11, 8, "IR").back is None              # still wrong 3 weeks out
         corrected = news.report(seed, 7, 3, 11, 9, "IR")                       # 2 weeks before he returns
-        assert corrected.back is not None and corrected.back >= 10 and "expected back" in corrected.text
+        assert corrected.back is not None and corrected.back >= 10 and ("expected back" in corrected.text or corrected.vague)
 
 
 def test_a_short_absence_is_never_called_season_ending():
@@ -86,10 +89,12 @@ def test_the_exempt_list_reads_indefinite_and_its_guess_never_uses_the_real_retu
         assert all(back is None or back > week for back in by_return[0])
 
 
-def test_the_same_seed_gives_the_same_report_and_seeds_differ():
-    assert news.report(3, 7, 4, 10, 5, "O") == news.report(3, 7, 4, 10, 5, "O")
+def test_the_same_seed_gives_the_same_report_in_any_order_and_seeds_differ():
+    forward = [news.report(3, 7, 4, 12, week, "IR", 18) for week in range(4, 12)]
+    backward = [news.report(3, 7, 4, 12, week, "IR", 18) for week in reversed(range(4, 12))][::-1]
+
+    assert forward == backward
     assert len({r.back for r in reports(4, 10, 4)}) > 1
-    assert news.report(3, 7, 4, 10, 4, "O").back == news.report(3, 7, 4, 10, 4, "IR").back
 
 
 def test_share_played_counts_his_teams_games_from_the_reported_week():
@@ -121,4 +126,60 @@ def test_a_report_never_names_a_week_after_the_season(since, true_return, week, 
         report = news.report(seed, 7, since, true_return, week, tag, END)
 
         assert report.back is None or week < report.back <= END
-        assert report.back is not None or report.text.startswith("Out for the season")
+        season_words = report.back is None and report.text.startswith("Out for the season")
+        assert report.back is not None or season_words or (tag == "O" and "no timetable" in report.text)
+        assert not (tag == "O" and season_words)                  # an O tag never reads season-ending
+
+
+def test_when_no_timetable_ends_says_nothing_exact_about_the_return():
+    """Reviewer: the text firmed up exactly 3 weeks before the real return, every time."""
+    gaps = set()
+    for seed in range(300):
+        for back in range(8, 17):
+            vague = [news.report(seed, 7, 2, back, week, "IR", 18).vague for week in range(2, back)]
+            switch = next((week for week, (was, now) in enumerate(zip(vague, vague[1:]), start=3) if was and not now), None)
+            if switch is not None:
+                gaps.add(back - switch)
+
+    assert len(gaps) >= 5                                   # spread over several weeks, not one constant lead
+
+
+def test_a_long_vague_absence_never_reads_back_next_week_week_after_week():
+    """Reviewer's seed-3 case: a 16-week IR absence read "back next week" from week 8 to 13."""
+    for seed in range(200):
+        rows = [news.report(seed, 5, 1, 17, week, "IR", 18) for week in range(1, 17)]
+        next_week = [week for week, r in enumerate(rows, start=1) if r.back == week + 1 and week + 1 != 17]
+        runs = sum(1 for a, b in zip(next_week, next_week[1:]) if b == a + 1)
+        assert runs == 0, (seed, next_week)
+
+
+def test_a_vague_report_shows_no_week_and_never_one_already_missed():
+    reports = [news.report(seed, 1, 2, 10, week, "IR", 18) for seed in range(60) for week in range(2, 10)]
+
+    assert any(r.vague and "no timetable" in r.text for r in reports)
+    assert all(r.back is None or r.back > week for r, week in zip(reports, [w for _ in range(60) for w in range(2, 10)]))
+    week_out = [news.report(seed, 1, 2, 10, 9, "IR", 18).back for seed in range(60)]
+    assert all(back in (10, 11) for back in week_out) and week_out.count(10) > 40     # a week out: mostly right
+
+
+def _table(group: str, since: int, week: int) -> tuple[tuple[int, float], ...]:
+    """vague_odds rebuilt straight from one NEWS_LENGTHS table."""
+    rows = [(weeks, n) for weeks, n in news.news_lengths()[group] if week - since < weeks < news.NO_RETURN_WEEKS]
+    total = sum(n for _, n in rows)
+    return tuple((since + weeks, n / total) for weeks, n in rows)
+
+
+def test_each_streak_is_priced_on_the_table_it_was_fitted_in():
+    """Review: a week-1 O tag was priced as a preseason IR move (a median nine weeks out instead of four)."""
+    assert news.vague_odds(1, 1, "O") == _table("short", 1, 1)
+    assert news.vague_odds(1, 0, "IR") == _table("preseason", 1, 0)
+    assert news.vague_odds(3, 5, "IR") == _table("long", 3, 5) != news.vague_odds(3, 5, "O") == _table("short", 3, 5)
+    assert [news.news_group(1, t) for t in ("IR", "PUP", "O")] == ["preseason", "preseason", "short"]
+
+
+def test_a_streak_that_starts_out_and_moves_to_ir_keeps_its_starting_group():
+    """The fit groups a streak by its first tag, so the price does too (the vague median doesn't jump on the move)."""
+    moved = [news.report(seed, 7, 3, 16, 6, "IR", 18, first_tag="O") for seed in SEEDS]
+    stayed = [news.report(seed, 7, 3, 16, 6, "O", 18) for seed in SEEDS]
+
+    assert {r.back for r in moved if r.vague} == {r.back for r in stayed if r.vague}

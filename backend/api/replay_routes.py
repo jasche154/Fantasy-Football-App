@@ -8,13 +8,14 @@ build_locks.key_lock, whose bounded dict can hand two requests different locks f
 import logging
 import secrets
 import threading
+import unicodedata
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from api.deps import DbId, Scoring
@@ -162,9 +163,60 @@ class RulesBody(BaseModel):
                             le=max(replay_scoring.TURNOVERS), multiple_of=1)
 
 
+BLANK_LETTERS = frozenset("\u115f\u1160\u3164\uffa0\u2800")   # letters that display as nothing (Hangul fillers, Braille blank)
+BLANK_MARKS = frozenset("\u034f\u17b4\u17b5")                 # marks that display as nothing (grapheme joiner, Khmer)
+ZWJ = "\u200d"                                                 # joins two emoji: kept only between two of them
+EMOJI_RANGES = ((0x1F000, 0x1FFFF), (0x2300, 0x23FF), (0x2600, 0x27BF), (0x2B00, 0x2BFF))
+
+
+def _invisible(ch: str) -> bool:
+    # Cc control, Cf format (bidi, zero-width), Cs surrogate, Co private use; not Cn: an emoji newer than this
+    # runtime's Unicode data is unassigned to it, not invisible
+    return ch in BLANK_LETTERS or ch in BLANK_MARKS or unicodedata.category(ch) in ("Cc", "Cf", "Cs", "Co", "Zl", "Zp")
+
+
+def _emoji(ch: str | None) -> bool:
+    return ch is not None and any(low <= ord(ch) <= high for low, high in EMOJI_RANGES)
+
+
+def _selector(ch: str) -> bool:
+    return 0xFE00 <= ord(ch) <= 0xFE0F or 0xE0100 <= ord(ch) <= 0xE01EF
+
+
+def clean_name(name: str | None) -> str | None:
+    """A league name without control, format (bidi overrides, zero-width), line or paragraph separators, blank
+    letters or marks with nothing to sit on: a zero-width joiner stays only between two emoji (never beside another
+    joiner), a variation selector only after an emoji, another combining mark only after a visible character.
+    Blank afterwards: the default name is used."""
+    if name is None:
+        return None
+    kept: list[str] = []
+    for n, ch in enumerate(name):
+        before, after = (kept[-1] if kept else None), (name[n + 1] if n + 1 < len(name) else None)
+        if ch == ZWJ:                                   # the emoji before may carry a selector (the rainbow flag)
+            base = next((c for c in reversed(kept) if not _selector(c)), None)
+            keep = (n == 0 or name[n - 1] != ZWJ) and _emoji(base) and _emoji(after)   # never a run of joiners
+        elif _invisible(ch):
+            keep = False
+        elif _selector(ch):
+            keep = _emoji(before)
+        elif unicodedata.category(ch) in ("Mn", "Me"):
+            keep = before is not None and not before.isspace() and before != ZWJ
+        else:
+            keep = True
+        if keep:
+            kept.append(ch)
+    return "".join(kept).strip()
+
+
 class CreateBody(BaseModel):
     season: int | Literal["random"]
     name: str | None = Field(None, max_length=MAX_NAME_LENGTH)
+
+    @field_validator("name")
+    @classmethod
+    def _visible(cls, name: str | None) -> str | None:
+        return clean_name(name)
     teams: int = Field(12, ge=min(rs.VALID_TEAMS), le=max(rs.VALID_TEAMS))
     playoff_end_week: Literal[16, 17, 18] = 17            # the championship week
     playoff_teams: int | None = Field(None, ge=rs.PLAYOFF_TEAMS_RANGE[0], le=rs.PLAYOFF_TEAMS_RANGE[1])  # None: default

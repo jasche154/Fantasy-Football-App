@@ -5,7 +5,7 @@ from types import MappingProxyType
 
 import pytest
 
-from services import replay_news, replay_values as rv
+from services import replay_chart_injury as injury, replay_news, replay_values as rv
 from services.replay_pool import Injury, hard_tag_returns
 from tests import replay_fakes as fakes
 
@@ -29,10 +29,17 @@ def hurt(games: int):
     data = replace(DATA, projected=MappingProxyType(projected), actual=MappingProxyType(actual),
                    injuries=MappingProxyType(injuries),
                    returns=MappingProxyType(hard_tag_returns(injuries, actual, DATA.last_week)))
-    back = data.returns[(PID, START)]
-    seed = next(s for s in range(500) if all(
-        replay_news.report(s, PID, START, back, w, "O", data.last_week).back == back for w in range(START, back)))
-    return data, seed, back
+    return data, 0, data.returns[(PID, START)]
+
+
+@pytest.fixture(autouse=True)
+def exact_news(monkeypatch):
+    """This module prices the chart's discount curve on news that names the real week (the news noise is
+    test_replay_news's)."""
+    def exact(seed, pid, since, back, week, tag, last=None, first_tag=None):
+        week_named = back if back and (last is None or back <= last) else None
+        return replay_news.Report(since, week_named, "Out; expected back." if week_named else "Out for the season.")
+    monkeypatch.setattr(replay_news, "report", exact)
 
 
 def value(data, week: int, seed: int, pid: int = PID) -> rv.ReplayValue:
@@ -63,17 +70,26 @@ def test_three_of_thirteen_cost_five_to_twelve_percent():
     assert 0.05 <= loss(data, START, seed, before) <= 0.12
 
 
-def test_eight_of_thirteen_cost_35_to_45_percent_then_less_every_week_and_nothing_on_return():
+def test_eight_of_thirteen_cost_35_to_45_percent_then_less_every_week_and_comes_back_at_the_return_factor():
     data, seed, back = hurt(8)
     before = value(data, START - 1, seed).healthy_chart
     weeks = [w for w in range(START, back) if w in GAMES]
     losses = [loss(data, w, seed, before) for w in weeks]
+    factor = injury.return_factor(8)
 
-    assert 0.35 <= losses[0] <= 0.45
+    assert factor == injury.RETURN_LONG < 1
+    assert 0.35 <= 1 - (1 - losses[0]) / factor <= 0.45            # the user's discount alone, on frozen x factor
     assert all(later < earlier for earlier, later in zip(losses, losses[1:]))
-    frozen = value(data, weeks[-1], seed).healthy_chart / before                  # frozen all along,
-    assert frozen in (pytest.approx(1.0, abs=1e-3), pytest.approx(rv.replay_chart.BYE_BUMP, abs=1e-3))  # bye bump as for anyone
-    assert abs(loss(data, back, seed, before)) <= 0.05                              # the week he returns
+    frozen = value(data, weeks[-1], seed).healthy_chart / before                  # frozen all along (x the factor),
+    assert frozen / factor in (pytest.approx(1.0, abs=1e-3), pytest.approx(rv.replay_chart.BYE_BUMP, abs=1e-3))
+    returned = value(data, back, seed)                                             # the week he returns:
+    assert returned.chart / before in (pytest.approx(factor, abs=0.02), pytest.approx(factor * rv.replay_chart.BYE_BUMP, abs=0.02))
+    assert returned.chart < before                                                 # below his pre-injury value
+
+
+def test_a_short_absence_comes_back_at_full_value():
+    assert [injury.return_factor(games) for games in (1, 2, 3, 4)] == [1.0] * 4
+    assert injury.return_factor(5) == pytest.approx(0.9) and injury.return_factor(12) == injury.RETURN_LONG
 
 
 def test_the_frozen_value_sees_no_hindsight():

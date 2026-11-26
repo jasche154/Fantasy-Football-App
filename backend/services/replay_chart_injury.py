@@ -5,11 +5,11 @@ player's availability and expected games missed (lineups, waivers) stay the real
 included) out of his team's `left` remaining games takes off:
 - the user's targets (the user's choice), interpolated linearly between DISCOUNT_ANCHORS: out 1-4 weeks about
   5-12% off, 6+ weeks 35-45%, falling back each week as the return nears;
-- never less than SHARE_SLOPE x (share of his remaining games he misses - SHARE_START), a ramp that matters
-  once he misses most of what is left (about 55% on): out 2 of the last 3 games 19%, 4 of the last 5 27%, 5 of
-  the last 6 29%, while one game missed stays 6% however late (he loses one of several games). The ramp is as
-  steep as the user's targets allow: one more game missed, or one more game left, never moves the discount by
-  more than 15 points, and for a fixed return week it never rises from one week to the next;
+- never less than (share of his remaining games he misses) ^ SHARE_POWER (the user's choice, 1.8), so a player
+  who misses most of what is left is priced for it: 1 of the last 2 games 29%, 3 of 6 29%, 4 of 6 48%, 5 of 6
+  72%, while the mid-season targets stand (1 of 13: 6%, 3 of 13: 10%, 8 of 13: 45%). The maximum of two
+  continuous curves is continuous; it rises with the games missed and, for a fixed return week, never rises
+  from one week to the next;
 - all of the remaining games (or a return after the league's last week): the whole chart. An "out for the season" report (replay_news) may be wrong (its
   noise reads some long absences as season-ending first), so it keeps SEASON_REPORT_KEEP of the chart by the
   games left: what such reports were really worth, the user's discount of the games missed when he came back
@@ -35,12 +35,24 @@ left 84% (never all: some play after all). A plain O tag's first week, for compa
 3.0, 7% never back (604 player-weeks); it always has a news report, so a star newly out on an O tag reported
 back in a week or two loses 6-8%.
 
+`return_factor(games)`: the share of his pre-absence value a player comes back worth after missing `games` of his
+team's games (replay_chart: frozen value x this while he is out and the week he returns; live once he plays).
+Measured (`.scratch`-style one-off, 2018-25 real hard-tag absences, PPR): his points per game over his first 2-4
+games back against his last 2-4 before, for players at or above replacement before, divided by the same ratio for
+healthy players with the same recent rate (regression to the mean, 0.869): 1-2 games missed 0.885 (n=114), 3-5
+0.862 (n=60), 6-9 0.80 (n=13, 90% interval 0.68-0.93); no in-season absence of 10+ games came back with two games
+to measure. The user's short-absence targets stay exact (out 1-4 games: factor 1, the anchors already price it),
+then the factor falls to RETURN_LONG at 6 games and holds there. A long absence's first report so costs
+1 - 0.80 x (1 - 0.45) = 56% in all. The factor is already in his `healthy_chart` while he is frozen, so everything that
+reads it carries it too: the 50% floor a CPU sells an out player at (replay_trade_value.OUT_SELL_SHARE) is about 40%
+of his pre-injury value once he has missed 6+ games.
+
 Pure: no database.
 """
 from bisect import bisect_right
 
 DISCOUNT_ANCHORS = ((0.0, 0.0), (1.0, 0.06), (4.0, 0.12), (6.0, 0.40), (8.0, 0.45), (12.0, 0.45))
-SHARE_SLOPE, SHARE_START = 0.6, 0.35  # the floor ramp (module docstring)
+SHARE_POWER = 1.8              # the floor: (share of the remaining games missed) ^ this (the user's choice)
 # (team games missed counting this week, None = never back that season) -> share of unreported absences
 NO_REPORT_ODDS = ((0, 0.1565), (1, 0.2321), (2, 0.1303), (3, 0.0812), (4, 0.0559), (5, 0.0418), (6, 0.0277),
                   (7, 0.0264), (8, 0.0209), (9, 0.0157), (10, 0.0101), (11, 0.0052), (12, 0.0043), (13, 0.0028),
@@ -48,6 +60,17 @@ NO_REPORT_ODDS = ((0, 0.1565), (1, 0.2321), (2, 0.1303), (3, 0.0812), (4, 0.0559
 IR_OUT_SHARE = 0.80            # tagged IR or PUP: at least this share of the remaining games (replay_values)
 # chart kept on an "out for the season" report, by the games left // 4 (0-3, 4-7, 8-11, 12+): measured (module docstring)
 SEASON_REPORT_KEEP = (0.003, 0.018, 0.065, 0.167)
+
+
+RETURN_SHORT, RETURN_LONG, RETURN_LONG_GAMES = 4, 0.80, 6     # factor 1 up to 4 games missed, 0.80 from 6 (measured)
+
+
+def return_factor(games: float) -> float:
+    """The share of his pre-absence value he comes back worth after missing `games` team games (module docstring)."""
+    if games <= RETURN_SHORT:
+        return 1.0
+    reach = min(1.0, (games - RETURN_SHORT) / (RETURN_LONG_GAMES - RETURN_SHORT))
+    return 1.0 - (1.0 - RETURN_LONG) * reach
 
 
 def _anchored(missed: float) -> float:
@@ -65,7 +88,7 @@ def discount(missed: float, left: float) -> float:
         return 0.0
     if missed >= left:
         return 1.0
-    return max(_anchored(missed), SHARE_SLOPE * (missed / left - SHARE_START))
+    return max(_anchored(missed), (missed / left) ** SHARE_POWER)
 
 
 def season_report_discount(left: int) -> float:

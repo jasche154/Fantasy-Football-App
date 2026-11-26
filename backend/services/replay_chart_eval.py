@@ -186,6 +186,19 @@ def absences_unreported(data: SeasonData) -> Counter:
     return found
 
 
+def news_lengths(data: SeasonData) -> dict[str, Counter]:
+    """{replay_news.news_group of the streak's first tag ("preseason": IR / PUP from week 1, "long": other IR / PUP,
+    "short": other hard tags): {weeks from the first hard tag to the return ("never": not back that season):
+    absences}} over the skill players' hard-tag streaks (replay_news.NEWS_LENGTHS)."""
+    found: dict[str, Counter] = {"long": Counter(), "short": Counter(), "preseason": Counter()}
+    for (pid, since), back in data.returns.items():
+        tag = data.injuries[(pid, since)].tag
+        if data.players[pid].position not in SKILL or tag in ("SUS", "EXE"):
+            continue
+        found[replay_news.news_group(since, tag)][str(back - since) if back else "never"] += 1
+    return found
+
+
 REPORT_SEEDS = 20              # season_reports: news noise draws per absence
 
 
@@ -276,6 +289,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--db", type=Path, default=DEFAULT_DB, help="the database, read through a read-only copy")
     parser.add_argument("--season-reports", action="store_true",
                         help="measure what an 'out for the season' report was worth (SEASON_REPORT_KEEP)")
+    parser.add_argument("--news-lengths", action="store_true",
+                        help="fit how long hard-tag absences last by tag group (replay_news_lengths.json)")
     parser.add_argument("--absences", action="store_true",
                         help="measure games missed by unreported absences (replay_chart_injury.NO_REPORT_ODDS)")
     parser.add_argument("--compare", nargs=2, metavar=("BEFORE", "AFTER"),
@@ -292,6 +307,17 @@ def main(argv: list[str] | None = None) -> None:
                     totals[bucket][1] += worth
         log.info("Season-ending reports, chart kept by games left // 4: %s",
                  {b: (n, round(w / n, 4)) for b, (n, w) in sorted(totals.items())})
+        return
+    if args.news_lengths:
+        from services import replay_pool
+        totals: dict[str, Counter] = {"long": Counter(), "short": Counter(), "preseason": Counter()}
+        with _session(args.db) as session:
+            for season in parse_seasons(args.seasons):
+                for group, found in news_lengths(replay_pool.load_season_data(session, season, args.scoring)).items():
+                    totals[group].update(found)
+        replay_news.NEWS_LENGTHS_PATH.write_text(json.dumps({g: dict(sorted(c.items())) for g, c in totals.items()},
+                                                            indent=1) + chr(10), encoding="utf-8")
+        log.info("News lengths: %s", {g: sum(c.values()) for g, c in totals.items()})
         return
     if args.absences:
         from services import replay_pool
