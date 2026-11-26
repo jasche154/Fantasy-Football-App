@@ -471,3 +471,33 @@ def test_a_kicker_whose_team_plays_fills_his_slot_for_the_empty_slot_check_too()
     know = fakes.fake_knowledge(week, settings, fakes.patched(data, projected={(kicker, week): None}))
 
     assert "K" not in rv.idle_slots(know, team.roster, settings)
+
+
+def _with_bye(position: str, backup: bool):
+    """A CPU team at a week where its lone `position` player's team is on a bye; with `backup`, a second one whose
+    team plays is on the bench."""
+    data, settings = fakes.fake_season(), _settings()
+    state = fakes.drafted_state(settings)
+    team = next(t for t in state.teams if not t.is_user)
+    own = next(pid for pid in team.roster if data.players[pid].position == position)
+    week = next(w for w in range(1, 15) if data.on_bye(own, w))
+    roster = team.roster
+    if backup:
+        spare = next(pid for pid, pl in data.players.items() if pl.position == position and not data.on_bye(pid, week)
+                     and pid not in rs.rostered(state) and data.projection(pid, week))
+        roster = (*roster, spare)
+    team = replace(team, roster=roster)
+    state = rs.with_team(replace(state, week=week), team)
+    return season.starters_for(state, settings, fakes.fake_knowledge(week, settings, data), team.id), own, roster
+
+
+def test_a_lone_kicker_on_a_bye_sits_and_the_slot_stays_empty():
+    lineup, kicker, _ = _with_bye("K", backup=False)
+
+    assert lineup["K"] == ()
+
+
+def test_a_defense_on_a_bye_with_a_backup_who_plays_starts_the_backup():
+    lineup, defense, roster = _with_bye("DST", backup=True)
+
+    assert len(lineup["DST"]) == 1 and lineup["DST"][0] != defense and lineup["DST"][0] in roster

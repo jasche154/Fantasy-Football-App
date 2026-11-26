@@ -786,3 +786,16 @@ def test_after_the_deadline_a_blocked_user_is_told_about_the_deadline_not_his_ir
 
     with pytest.raises(ValueError, match="^The trade deadline has passed"):
         rt.propose(late, SETTINGS, late_know, *FAIR)
+
+
+def test_after_the_deadline_an_offer_cannot_be_accepted_and_stays_pending_but_can_be_declined():
+    state, _ = offered()
+    late_week = SETTINGS.trade_deadline_week + 1
+    late, late_know = replace(state, week=late_week), league(late_week)[1]
+    offer_id = late.offers[-1].id
+
+    with pytest.raises(ValueError, match="^The trade deadline has passed"):
+        rt.respond(late, SETTINGS, late_know, offer_id, accept=True)
+
+    assert late.offers[-1].status == "pending"
+    assert rt.respond(late, SETTINGS, late_know, offer_id, accept=False).offers[-1].status == "declined"
