@@ -49,9 +49,8 @@ from services.replay_chart_eval_stats import (  # noqa: F401 (re-exported)
     BANDS, MIN_CHART, TIERS, Row, band, calibration, evaluate, held_out_error, realised_share, spearman,
     tier,
 )
-from services.replay_data import parse_seasons
 from services.replay_pool import SKILL, SeasonData
-from services.replay_value_eval import DEFAULT_DB
+from services.replay_value_eval import DEFAULT_DB, read_only_copy
 
 log = logging.getLogger(__name__)
 
@@ -213,14 +212,12 @@ def season_reports(data: SeasonData, end_week: int) -> dict[int, list[float]]:
 
 def _session(db: Path):
     """A read-only in-memory copy of the database (replay_value_eval.read_only_copy): the check never writes."""
-    from services.replay_value_eval import read_only_copy
     return read_only_copy(db)
 
 
 def run(seasons: Sequence[int], weeks: Sequence[int], scoring: str, teams: int,
         lineups: Sequence[str], bench: int = 6, db: Path | None = None) -> dict:
     from services import replay_pool
-    from services.replay_value_eval import DEFAULT_DB
 
     rows: dict[str, list[Row]] = defaultdict(list)
     counts: dict[str, Counter] = defaultdict(Counter)
@@ -266,6 +263,7 @@ def _log_report(report: Mapping[str, dict]) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
+    from services.replay_data import parse_seasons        # the CLI's season lists ("2018-2025", "2019,2023")
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--seasons", default="2018-2025")

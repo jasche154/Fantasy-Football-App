@@ -99,7 +99,8 @@ def feelings(know: Knowledge, team: Team, persona: str | None = None) -> tuple[F
     """A CPU's feelings about his own roster, strongest first. `persona`: the one his prices follow now
     (replay_personas.now: a tilted manager on a skid feels like panicky), default his own."""
     found = [felt for pid in team.roster if pid in know.by_id
-             if (felt := feeling(know.by_id[pid], persona or team.persona, team.hype)) is not None]
+             if (felt := feeling(know.by_id[pid], persona or team.persona, team.hype)) is not None
+             and not (felt.kind == "worried" and replay_fans.cheers_for(team, know.by_id[pid].team))]   # not his own club
     return tuple(sorted(found, key=lambda f: (-abs(f.strength), f.player_id)))
 
 

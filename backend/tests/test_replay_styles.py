@@ -348,7 +348,8 @@ def test_the_mark_up_raises_what_he_asks_from_any_buyer_and_the_feeling_and_pric
     mind = replace(st.plain("contender"), contending=True)
     assert st.price(know, mind, 1, own=True) >= 500.0 * (1 + st.ATTACH_LOW)
     worried = values(p1=star(500.0, form_chart=-0.3 * 500.0, team="CHI"))
-    assert st.price(worried, replace(st.plain("fan"), fan_of="CHI"), 1, own=True) <= 500.0
+    assert st.price(worried, replace(st.plain("fan"), fan_of="GB"), 1, own=True) <= 500.0
+    assert st.price(worried, replace(st.plain("fan"), fan_of="CHI"), 1, own=True) > 500.0     # never worried about his own club
 
 
 # ---------------- need bonus ----------------
