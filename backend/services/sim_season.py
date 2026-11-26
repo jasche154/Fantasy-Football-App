@@ -194,13 +194,14 @@ def _market(tables: _Tables, base: SeasonData, belief: World, truth: World, seed
             false_rate: float, ranks: Mapping[int, int], lines: Mapping[str, sim_lines.Line] | None = None,
             opinions: dict[str, dict[int, float]] | None = None,
             team_prior: Mapping[str, sim_lines.Rating] | None = None, known: SeasonData | None = None,
-            benched: tuple = (), bench: Mapping[int, float] | None = None) -> None:
+            benched: tuple = (), bench: Mapping[int, float] | None = None, filling: Collection[int] = ()) -> None:
     """The week's public tables (projections, expert ranks, buzz). `opinions`: the experts' memory, carried from
     week to week and updated here: {"z": each player's opinion (sim_market.opinion), "worth": the value each is
     ranked on (sim_market.held), "out": who was believed out}; `team_prior`: last season's team ratings (the expert values' scoring edges,
     sim_lines.edges, are worked out only in a week whose expert ranks are drawn here); `known`: the season as
     known before the week, when already built; `benched`: the week's QB benchings (true buzz); `bench`: each
-    holder's chance to lose the job (the false buzz's weights, sim_qb_jobs.decide)."""
+    holder's chance to lose the job (the false buzz's weights, sim_qb_jobs.decide); `filling`: the fill-in QBs
+    (sim_market.fill_ins), ranked no better than sim_market.FILL_IN_BEST."""
     scoring, last = scoring_of(base), base.last_week
     known = known if known is not None else _known(base, tables, week)
     snapshot = sorted(pid for pid, w in tables.projected if w == week)      # the snapshot's own (from_week only)
@@ -233,7 +234,7 @@ def _market(tables: _Tables, base: SeasonData, belief: World, truth: World, seed
                 opinions["out"] = {pid: 1.0 for pid, p in belief.players.items() if p.out_weeks > 0}
             tables.expert_ranks.update(sim_market.expert_ranks(
                 belief, ids, rank_week, dice, scoring, last - max(1, rank_week) + 1, market, weekly,
-                edges if rank_week else None, worth))
+                edges if rank_week else None, worth, filling if rank_week else ()))
             tables.expert_age[rank_week] = sim_market.EXPERT_AGE["ros" if rank_week else "pre"]
     tables.notes.update(sim_market.buzz((*truth.changes, *benched), belief, week, replay_state.rng(seed, "sim", "buzz", week),
                                         false_rate, out, sim_talent.rumors(belief, ranks, bench) if false_rate else None))
@@ -268,6 +269,7 @@ def simulate(base: SeasonData, seed: int, from_week: int, prior: World | None = 
     ranks = sim_market.position_ranks(belief)                      # the public's ranks the rumours lean on
     established = sim_qb_jobs.established_of(base, belief, from_week == 1 and prior is not None, qbs)
     jobs = sim_qb_jobs.start(base, belief, from_week, established, qbs)    # who holds each QB job (sim_qb_jobs)
+    regulars = frozenset(jobs.holders.values())          # a QB who takes a job later is priced as a fill-in
     expected = sim_talent.expected_changes(belief)
     false_rate = sim_market.expected_hints(expected + sim_qb_jobs.expected_benchings(jobs, buzz_weeks[1] - buzz_weeks[0] + 1),
                                            buzz_weeks[1] - buzz_weeks[0] + 1)
@@ -283,13 +285,15 @@ def simulate(base: SeasonData, seed: int, from_week: int, prior: World | None = 
         known = _known(base, tables, week)
         benched, bench = sim_qb_jobs.decide(jobs, truth.at(week), known, week, sitting, tags, seed)
         # the job holders start in the public belief too, so the line and the projections see the week's QB
-        public = sim_market.fill_in_view(sim_qb_jobs.apply(estimate(known, week, prior), jobs))
+        public = sim_qb_jobs.apply(estimate(known, week, prior), jobs)
+        filling = sim_market.fill_ins(public, regulars)     # fill-ins and QBs who took a job during the simulation
+        public = sim_market.fill_in_view(public, filling)
         # a posted line only for the first simulated week: a later one knows nothing of the simulated games before it
         pregame = sim_lines.week_lines(known, week, public, public_out, team_prior, posted if week == from_week else None)
         lines.update({(home, week): line for home, line in pregame.items()})
         _market(tables, base, public, truth, seed, week, public_out,
                 false_rate if buzz_weeks[0] <= week <= buzz_weeks[1] else 0.0, ranks, pregame, opinions, team_prior,
-                known, tuple(benched), bench)
+                known, tuple(benched), bench, filling)
         world = sim_qb_jobs.apply(truth.at(week), jobs)
         played_teams, fresh = set(), set()
         for game in sorted((g for g in base.schedule.games if g.week == week), key=lambda g: g.home_team):

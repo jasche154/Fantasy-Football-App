@@ -125,25 +125,30 @@ def values(belief: World, scoring: ScoringSettings, games_left: int = SEASON_GAM
     return dict(found)
 
 
-def fill_ins(belief: World) -> set[int]:
+def fill_ins(belief: World, regulars: Collection[int] = ()) -> set[int]:
     """The QBs filling in: on a team whose job holder (the most starts weight, sim_qb_jobs.apply) is believed out,
-    the healthy QB with the most starts weight."""
-    found = set()
+    the healthy QB with the most starts weight; and a healthy holder who is not one of `regulars` (the holders the
+    simulation started from: a QB who took the job during it, by a benching, a takeover or keeping it from a
+    holder back from injury)."""
+    found, regulars = set(), set(regulars)
     for team in belief.teams:
         qbs = sorted((p for p in belief.roster(team) if p.position == "QB"), key=lambda p: (-p.starts, p.player_id))
-        if qbs and qbs[0].out_weeks > 0:
+        if not qbs:
+            continue
+        if qbs[0].out_weeks > 0:
             healthy = [p for p in qbs[1:] if p.out_weeks == 0]
             if healthy:
                 found.add(healthy[0].player_id)
+        elif regulars and qbs[0].player_id not in regulars:
+            found.add(qbs[0].player_id)
     return found
 
 
-def fill_in_view(belief: World) -> World:
-    """The public belief with each fill-in's (`fill_ins`) passing quality above a backup's keeping only
+def fill_in_view(belief: World, chosen: Collection[int]) -> World:
+    """The public belief with each of `chosen` (`fill_ins`) keeping only, of his passing quality above a backup's,
     `market.fill_in_trust` of its lead: a few games behind another QB's job do not make him a starter's passer
     in the public's eyes (see the module docstring). Never applied to the truth."""
     trust, backup = float(opinion_knob("fill_in_trust")), params()["league"]["backup_quality"]
-    chosen = fill_ins(belief)
     if not chosen or trust >= 1.0:
         return belief
     players = dict(belief.players)
@@ -195,11 +200,12 @@ def expert_ranks(belief: World, known: Iterable[int], week: int, dice: np.random
                  games_left: int, market: Mapping[int, float] | None = None,
                  opinions: Mapping[int, float] | None = None,
                  edges: Mapping[str, float] | None = None,
-                 worth: Mapping[int, float] | None = None) -> dict[tuple[int, int], int]:
+                 worth: Mapping[int, float] | None = None, filling: Collection[int] = ()) -> dict[tuple[int, int], int]:
     """{(player, week): position rank} among the `known` players the belief places on a team. `market`: {player:
     ADP} of a preseason market the experts share (see the module docstring), else they rank on the belief.
     `opinions`: {player: z} carried from last week (`opinion`); None: fresh ones. `edges`: each team's scoring
-    edge (`values`), as experts know which offenses score. `worth`: the values to rank on (`held`), else `values`."""
+    edge (`values`), as experts know which offenses score. `worth`: the values to rank on (`held`), else `values`.
+    `filling`: the fill-in QBs (`fill_ins`), ranked no better than FILL_IN_BEST."""
     worth = worth if worth is not None else values(belief, scoring, games_left, edges)
     ids = sorted(pid for pid in set(known) if pid in belief.players)
     if market:
@@ -214,7 +220,7 @@ def expert_ranks(belief: World, known: Iterable[int], week: int, dice: np.random
     def view(pid: int) -> tuple:              # sorts best first: the listed by noisy pick, then the rest by value
         return (False, market[pid] * noise[pid]) if pid in market else (True, -worth.get(pid, 0.0) * noise[pid])
 
-    filling = fill_ins(belief) if not market else set()
+    filling = set(filling)
     ranks = {}
     for position in ("QB", "RB", "WR", "TE", "K", "DST"):
         order = sorted((pid for pid in ids if belief.players[pid].position == position), key=lambda pid: (view(pid), pid))
