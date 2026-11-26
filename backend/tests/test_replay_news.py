@@ -1,5 +1,4 @@
 """Replay League injury news (services/replay_news.py): noisy, seeded, never naming a week already missed."""
-from collections import Counter
 
 import pytest
 

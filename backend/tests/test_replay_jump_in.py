@@ -138,7 +138,7 @@ def test_the_draft_is_held_in_the_start_week_on_what_was_known_before_it():
 def test_a_jump_in_draft_follows_the_current_market_not_the_preseason_adp():
     preseason, current = drafted(K8, HURT), drafted(K8)
 
-    assert overall(preseason, fakes.BREAKOUT_ID) > 100 and overall(current, fakes.BREAKOUT_ID) <= 12
+    assert overall(preseason, fakes.BREAKOUT_ID) > 100 and overall(current, fakes.BREAKOUT_ID) <= 16   # 5-game form: a little slower
     assert overall(current, fakes.BUST_ID) > 60
     # On IR with no news: drafted at his chart (45% off his healthy value), not skipped as the market's ADP would
     know = views.Game(1, "x", K8, rg.create_game(K8, MARKET8, SEED), MARKET8, None, SEED).know
