@@ -201,6 +201,9 @@ class Offer(_Record):                         # every executed trade (CPU-CPU to
     status: str                               # "pending" | "accepted" | "declined" | "expired" | "countered"
     counter_to: int | None = None             # the Offer id this one answers with a counter
     message: str = ""                         # a CPU's one line to the user about it (replay_chat); "" = none
+    kind: str = ""                            # a CPU offer to the user: "want" (for his player, at its edge; a
+                                              # haggler's opening lowball), "shop", "counter" (to his declined
+                                              # proposal) or "haggle" (a haggler's counter); "" = saved before kinds
     reply: str | None = None                  # the CPU's one line when it turned the user's proposal down
                                               # (replay_chat_offers.decline_reply); None = none, and in old saves
 

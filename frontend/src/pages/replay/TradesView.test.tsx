@@ -638,6 +638,24 @@ describe('TradesView manager voices', () => {
     expect(screen.queryByText('Not enough for Raheem Mostert.')).not.toBeInTheDocument();
   });
 
+  it('keeps the partner fixed while a proposal is in flight, so its answer lands under that manager', async () => {
+    let finish: () => void = () => {};
+    const no = verdict({ accepted: false, reasons: ['Value is too far apart.'] });
+    const answer = json({ ...actionResult(), verdict: no, executed: false, counter: null, reply: 'Not enough for Raheem Mostert.' });
+    const { user } = renderTrades(trades(), [
+      { method: 'POST', path: EVALUATE_PATH, reply: json({ verdict: no }) },
+      { method: 'POST', path: PROPOSE_PATH, reply: () => new Promise<MockReply>((resolve) => { finish = () => resolve(answer); }) },
+    ]);
+    await tickBothSides(user);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Propose trade' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Propose trade' }));
+
+    expect(await screen.findByRole('combobox', { name: 'Trade with' })).toBeDisabled();
+    finish();
+    expect(await screen.findByText('Gridiron Ghosts turned it down.')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Trade with' })).toBeEnabled());
+  });
+
   it('shows no quote when the CPU gave no reply', async () => {
     await proposeDeclined(null);
     const status = screen.getByText('Gridiron Ghosts turned it down.').closest('[role="status"]') as HTMLElement;

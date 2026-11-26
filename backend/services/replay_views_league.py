@@ -145,8 +145,7 @@ def offer_row(game: Game, offer: Offer) -> dict:
 def _preview(game: Game, offer: Offer) -> dict:
     """A CPU's pending offer judged from the user's side (the user would send `offer.get`)."""
     try:
-        found = replay_trades.evaluate(game.state, game.settings, game.know, game.user.id, offer.from_team,
-                                       offer.get, offer.give, offered=True)
+        found = replay_trades.accept_verdict(game.state, game.settings, game.know, offer)
     except ValueError as exc:               # e.g. the user's roster would overflow: accepting needs a drop
         return {"verdict": None, "note": str(exc)}
     return {"verdict": verdict(game, found), "note": None}

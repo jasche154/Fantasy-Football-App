@@ -170,3 +170,30 @@ def test_as_of_of_an_as_of_copy_is_the_seasons_own_copy_and_never_regains_weeks(
     assert early.as_of(9) is early and max(w for _, w in early.actual) < 5
     replay_pool.clear_cache()
     assert not replay_pool._SOURCE                                                # no stale season kept
+
+
+def test_a_frozen_value_takes_the_bye_bump_once_and_never_tops_the_scale(monkeypatch):
+    back = fakes.player_id("RB", 5)                                             # his bye is week 7
+    for frozen, expected in ((500.0, 500.0 * rv.replay_chart.BYE_BUMP), (999.0, rv.replay_chart.CHART_MAX)):
+        monkeypatch.setattr(rv, "_frozen", lambda *a, frozen=frozen, **k: {back: frozen})
+        rv.clear_cache()
+        assert rv.knowledge(DATA, LEAGUE, 9, END, 0).by_id[back].healthy_chart == pytest.approx(expected, abs=0.05)
+    rv.clear_cache()
+
+
+def test_a_player_frozen_before_his_bye_is_bumped_once_after_it():
+    back = fakes.player_id("RB", 5)                                             # bye week 7, out weeks 5-9
+    data = spell(DATA, back, tagged=range(5, 10), gone=range(5, 10))
+    before = value(data, 4, 0, back).healthy_chart                              # no bye behind him yet
+
+    for week in (6, 8, 9):
+        bump = rv.replay_chart.BYE_BUMP if week > 7 else 1.0
+        expected = min(rv.replay_chart.CHART_MAX, before * bump)
+        assert value(data, week, 0, back).healthy_chart == pytest.approx(expected, abs=0.05)
+
+
+def test_a_player_hurt_in_a_game_he_played_is_frozen_from_that_week():
+    pid = fakes.player_id("WR", 3)
+    data = spell(DATA, pid, tagged=range(5, 8), gone=range(6, 8))                # keeps his week-5 stat line
+
+    assert rv._absences(data.as_of(7), 7)[pid] == 5                              # out from week 6, not week 5

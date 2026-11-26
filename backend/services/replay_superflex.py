@@ -100,8 +100,8 @@ def one_qb(data: SeasonData) -> SeasonData:
     """The season on the league-scoring 1-QB list (see the module docstring); cached per season object."""
     if data.adp_format != TWO_QB:
         return data
-    converted = _converted(data)                    # non-QBs; a QB keeps his: view() moves him
-    if data.scoring_adp:                            # a non-QB the 1-QB list lacks: his converted pick
+    converted = _converted(data)                    # non-QBs only (view() places the QBs)
+    if data.scoring_adp:        # a QB takes his 1-QB pick (None if it leaves him out), a missing non-QB his converted one
         return _with_adp(data, {pid: data.scoring_adp.get(pid, converted.get(pid)) for pid in data.players})
     qbs = {pid: p.adp for pid, p in data.players.items() if p.position == "QB"}
     return _with_adp(data, {**qbs, **converted})
@@ -161,10 +161,11 @@ def clear_cache() -> None:
 # ---------------- fit ----------------
 
 def fit(session, seasons: Sequence[int] | None = None) -> dict:
-    """The average QB slots per list over the stored seasons that have the 2-QB list and that 1-QB list
-    (every QB n that all of them list), read from FFC's own rows only: a borrowed row was placed by this fit
-    (`as_two_qb`) and MFL's tail is not on FFC's scale. ValueError when a list is stored for no season:
-    `fitted()` needs all four."""
+    """The average QB slots per list, each 1-QB list over the seasons that store it and the 2-QB list (the 2-QB
+    list over the seasons that store any 1-QB list too), read from FFC's own rows only: a borrowed row was placed
+    by this fit (`as_two_qb`) and MFL's tail is not on FFC's scale. A season listing fewer QBs than the longest
+    is extended past its end by the other seasons' average step (as `_extend` does at read time), so no list is
+    cut to the shortest season's. ValueError when a list is stored for no season: `fitted()` needs all four."""
     from sqlalchemy import select
 
     from database.models import Player, ReplayAdp
@@ -181,9 +182,19 @@ def fit(session, seasons: Sequence[int] | None = None) -> dict:
         curves = [qb_slots(boards[(s, fmt)]) for s in both if (s, fmt) in boards]
         if not curves:
             raise ValueError(f"No season stores both the 2-QB list and the {fmt} list: nothing written.")
-        length = min(len(c) for c in curves)
-        out[fmt] = [round(sum(c[n] for c in curves) / len(curves), 2) for n in range(length)]
+        out[fmt] = [round(slot, 2) for slot in _average(curves)]
     return out
+
+
+def _average(curves: Sequence[Sequence[float]]) -> list[float]:
+    """The mean curve, a short one extended by the average step of those that go on."""
+    padded = [list(c) for c in curves]
+    for n in range(1, max(map(len, curves))):
+        steps = [c[n] - c[n - 1] for c in curves if len(c) > n]
+        for c in padded:
+            if len(c) == n:
+                c.append(c[-1] + sum(steps) / len(steps))
+    return [sum(c[n] for c in padded) / len(padded) for n in range(len(padded[0]))]
 
 
 def main(argv: list[str] | None = None) -> None:

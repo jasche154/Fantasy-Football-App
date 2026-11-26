@@ -197,7 +197,7 @@ def _user_offer(state: State, settings: Settings, know: Knowledge, dice: np.rand
                     and not _offered_since(state, team.id, user.id, shop.player_id, shop.opened)]:
             deal = _best_deal(state, settings, know, user, team, need=pid)
             if deal is not None:
-                return rt.record_offer(state, team.id, user.id, deal[1], deal[0], "pending")
+                return rt.record_offer(state, team.id, user.id, deal[1], deal[0], "pending", kind="shop")
     rolls = dice.random(len(free))
     order = dice.permutation(len(free))
 
@@ -208,7 +208,8 @@ def _user_offer(state: State, settings: Settings, know: Knowledge, dice: np.rand
     if partner is None:
         return state
     deal = _best_deal(state, settings, know, user, partner, want=True)
-    return state if deal is None else rt.record_offer(state, partner.id, user.id, deal[1], deal[0], "pending")
+    return state if deal is None else rt.record_offer(state, partner.id, user.id, deal[1], deal[0], "pending",
+                                                     kind="want")
 
 
 def cpu_trades(state: State, settings: Settings, know: Knowledge, seed: int) -> State:
