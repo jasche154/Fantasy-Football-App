@@ -18,8 +18,8 @@ truth's dated role changes into a noisy hint.
   moves only `market.worth_step` of the way to this week's (`held`: experts revise slowly), except on injury
   news: a player believed out now, or whose own or a same-position teammate's status (out or not) changed since
   last week, is valued afresh at once (a backup whose starter just went on IR, a star back from injury). A
-  fill-in QB (`fill_ins`: the healthy QB starting while his team's job holder is believed out) is ranked no
-  better than FILL_IN_BEST, the best rank real experts gave a fill-in after 2-4 starts (`held_back`; his value
+  fill-in QB (`fill_ins`: the healthy QB starting while his team's job holder is believed out, or one who took
+  the job during the simulation) is ranked no better than FILL_IN_BEST, the best rank real experts gave a fill-in after 2-4 starts (`held_back`; his value
   already counts only the games he is expected to start, until the holder's believed absence ends). The
   three knobs live in sim_params.json's tuned `market` section (`sim_eval --set market.worth_step=...`); they
   were set by hand against the real weeks' rank churn and expert-vs-projection agreement in sim_eval's report

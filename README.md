@@ -1558,7 +1558,25 @@ read the belief, so, as in a real season, the public learns the truth only from 
   has one (out if he did not play the last real game), else the last real starter, unless he only filled in
   for a holder who was tagged hurt; today's injury status then sits whoever is hurt. Nothing is decided in a
   team's bye week. `python -m services.sim_qb_fit --check --season 2027 --seeds 200` simulates leagues the way
-  they are built and reports the job losses.
+  they are built and reports the job losses. A QB who has just taken a job can lose it straight back: real teams
+  undo a healthy benching (the old starter sat untagged that week and the two after) within four weeks about one
+  time in five (2019-2025: 15.1 such benchings a season, 3.0 undone; 6 of the 19 rookies who took over gave the
+  job back, as Tua Tagovailoa and Ryan Fitzpatrick traded it twice in 2020), and simulated seasons undo
+  fewer (200 seeds: 2027, 12.5 a season and 1.0 undone, 7.7%; 2026 from week 12, 7.9 and 0.2), so no grace period is added (`sim_qb.swap_backs`, reported by
+  the check).
+- **Fill-in quarterbacks** (`sim_market.fill_ins`: the healthy QB starting while his team's job holder is
+  believed out, or a QB who took the job during the simulated weeks, by a benching, a rookie takeover or
+  keeping it from a holder back from injury): the public trusts only 15% of a fill-in's passing-quality lead over a typical backup
+  (`market.fill_in_trust`, applied to the public belief, never to the truth), and the weekly experts never rank
+  him above QB16 (`FILL_IN_BEST`); his rest-of-season value already counts only the games he is expected to
+  start. Both come from real fill-ins (runs of 3+ starts behind a tagged holder, 2019-2025, `python -m
+  services.sim_qb_fillins --real 2019-2025`): after 2, 3 and 4 starts their projection was top-12 3.3%, 2.3% and
+  6.7% of the time (best tenth QB14-16), their median expert rank 32, 30.5 and 28, and no real fill-in reached the
+  expert top 15 (best QB16: Joe Flacco and Joshua Dobbs, 2023); they scored 13.1 half-PPR points a game. Simulated
+  (`--sim 2027|2026 --seeds 200`): top-12 projections 8.9%, 8.4% and 9.4% in 2027 and 11.3%, 7.5% and 10.6% in
+  2026 from week 12 (best tenth QB12-14), median expert ranks 33 and 30, expert top 15 after four starts 0.4% of
+  runs (one run in each season, a QB the engine has as his team's regular holder whom the measure, which has no job bookkeeping, reads as a fill-in), and 13.6-13.9 points a game: about 0.7 more than real, the same lean as the simulated skill
+  points as a whole (see the game section), and within the real spread (sd 3.8 over 61 real runs).
 - **Buzz:** before the week a breakout, bust or benching starts, a news line is published for 60% of
   them ("Beat reporters say his role is growing; expect more work.", "Reports say his snaps and touches are
   shrinking.", "Reports say his starting job is in danger."), and false lines are added so only about 60% of
@@ -1725,6 +1743,8 @@ games, home wins, ties, team scores and how often a rare score such as 5 shows u
 
 ```bash
 python -m services.sim_lines_fit [--fit] [--seasons 2018-2025] [--refresh]   # the pregame line model (sim_lines.json)
+python -m services.sim_qb_fillins --real 2019-2025                            # fill-in QBs in real seasons
+python -m services.sim_qb_fillins --sim 2027 [--seeds 200] [--set market.fill_in_trust=0.3]   # ... and simulated ones
 ```
 
 ## API reference
