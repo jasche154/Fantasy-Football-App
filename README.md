@@ -1544,9 +1544,9 @@ read the belief, so, as in a real season, the public learns the truth only from 
   gets shorter catches (yards per catch x (targets / the team's usual) ^ -0.3, `game.ypc_volume`, matched to
   the real spread of single-game passing yards): with volume and efficiency drawn apart, 2027 leagues had 21.6
   400-yard passing games a season against a real 8.8, 3.25 500-yard ones against 0.4, and a 716-yard game (the
-  real record is 554); now (full-mode gate, 2021-2025) 16.7 and 1.5, the season's top game 531 yards against a
-  real 491: still too many big passing days, as whole simulated seasons still have too many 4,000-yard passers
-  (12.9 against 8.2; starters miss fewer games by the user's injury setting). `sim_eval` reports these tails beside real seasons (400+ and 500+ yard passing games, the
+  real record is 554); now (full-mode gate, 2021-2025, 3 seeds) 15.9 and 1.5, the season's top game 522 yards
+  against a real 491: still too many big passing days, as whole simulated seasons still have too many 4,000-yard
+  passers (12.3 against 8.2; starters miss fewer games by the user's injury setting). `sim_eval` reports these tails beside real seasons (400+ and 500+ yard passing games, the
   season's top single-game passing, rushing and receiving yards, targets and carries, 200+ yard games, and
   team-games without a QB line, real 0), and in full mode the season's shape (sim_metrics_shape: 4,000-yard
   passers, 1,000-yard receivers and rushers, the WR and TE leaders, target and carry shares, yards per target
@@ -1591,15 +1591,16 @@ read the belief, so, as in a real season, the public learns the truth only from 
   unexplained from one season to the next, `role_sd` in `sim_next_year.json`: about 0.43 on the log scale for a
   receiver, a quarter of it used, `talent.season_roles`; a rookie's around the role a player taken at his pick
   had, what the rookie role line leaves unexplained, 0.65-0.75: rookie top-24 finishes on the gate 6.6 -> 7.4
-  against a real 8.4), and its belief takes 15% of the targets (20% of the
+  against a real 8.4; 7.1 on the final 3-seed run), and its belief takes 15% of the targets (20% of the
   carries) from each team's depth beyond its top five receivers (top two backs) to give to them
   (`talent.depth_targets` / `depth_carries`): a belief carried over from the end of a season spreads a team's
   work too thinly. With the whole-season efficiency spread halved (`talent.season_spread` 0.5), on the
-  full-mode gate (2021-2025, real / before / after): 1,000-yard receivers 24.0 / 16.1 / 21.2, rushers 13.6 /
-  11.0 / 12.5, top five receivers' share of a team's targets 0.74 / 0.71 / 0.74, top TE yards 1,230 / 1,157 /
-  1,259, the spread of yards per target 1.34 / 1.74 / 1.59, WR / RB / TE top-12 points a game 14.8 / 16.1 / 9.7
-  against 14.7 / 15.1 / 9.0 before and 15.5 / 16.0 / 9.7 after. Still short: the simulated whole season is
-  more predictable than a real one (ADP against finish, WRs 0.73 against 0.60; breakouts 6.8 against 10.6):
+  full-mode gate (2021-2025, 3 seeds; real / before / after): 1,000-yard receivers 24.0 / 16.1 / 19.4, rushers
+  13.6 / 11.0 / 12.5, top five receivers' share of a team's targets 0.74 / 0.71 / 0.74, top WR yards 1,811 /
+  1,870 / 1,887, top TE yards 1,230 / 1,157 / 1,175, the spread of yards per target 1.34 / 1.74 / 1.55, WR / RB /
+  TE top-12 points a game 14.8 / 16.1 / 9.7 against 14.7 / 15.1 / 9.0 before and 15.4 / 16.0 / 9.6 after. Still
+  short: the simulated whole season is more predictable than a real one (ADP against finish, WRs 0.73 against
+  0.60; breakouts 7.1 against 10.6):
   more role noise brings that closer but sends the top receivers past real leaders' seasons.
 - **Who starts at quarterback** (`services/sim_qb.py`, `sim_qb_jobs.py`): each team has a **job holder**.
   He starts whenever he is healthy; when he is hurt the next quarterback in line fills in, and when he is
