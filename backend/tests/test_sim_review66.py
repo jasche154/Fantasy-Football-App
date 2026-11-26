@@ -87,3 +87,15 @@ def test_without_news_keeps_a_fill_in_until_a_season_tag_and_probation_say_other
         late = weeks[-1]
         assert backup in replay_fillin.without_news(season.as_of(weeks[1]), weeks[1])       # early: a fill-in
         assert (backup in replay_fillin.without_news(season.as_of(late), late)) is kept      # past probation
+
+
+def test_a_future_build_does_not_warn_about_the_cached_draft(session, caplog, monkeypatch):
+    """Review item 7: the seeded draft replaces this season's picks, so its build asks for no warning."""
+    from services import sim_draft_picks
+    monkeypatch.setattr(sim_draft_picks, "_cached_picks", lambda: {"rows": []})
+    with caplog.at_level("INFO", logger="services.sim_setup"):
+        sim_setup.qb_inputs(session, 2027, warn=False)
+    assert "nflverse draft" not in caplog.text
+    with caplog.at_level("INFO", logger="services.sim_setup"):
+        sim_setup.qb_inputs(session, 2027)
+    assert "No cached nflverse draft for 2027" in caplog.text

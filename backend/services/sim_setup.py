@@ -236,11 +236,11 @@ SLEEPER_TAGS = {"OUT": "O", "DOUBTFUL": "O", "DNR": "O", "NA": "O", "COV": "O", 
 LONG_TAGS = {"IR", "PUP", "SUS"}     # absences of weeks: still news when the status sync is a few days old
 
 
-def qb_inputs(session: Session, season: int, picks: list[dict] | None = None):
+def qb_inputs(session: Session, season: int, picks: list[dict] | None = None, warn: bool = True):
     """sim_qb_jobs.QbInputs for `season`: the QBs whose real preseason QB ADP rank (the "ppr" list, 2018 on) was
     sim_qb.PAST_RANK or better in one of the sim_qb.PAST_SEASONS seasons before, and this season's drafted QBs
     with their picks (nflverse rows `picks`, else the cached download only: building a league never downloads;
-    without the cache the live season has no rookie takeovers, logged)."""
+    without the cache the live season has no rookie takeovers, logged unless `warn` is False)."""
     from sqlalchemy import select
 
     from database.models import Player, ReplayAdp
@@ -254,8 +254,10 @@ def qb_inputs(session: Session, season: int, picks: list[dict] | None = None):
         past.update(listed)
     cached = sim_draft_picks._cached_picks() if not picks else {}
     history = picks or cached.get("rows", [])
-    if picks is None:
+    cached_used = picks is None
+    if cached_used:
         picks = history
+    if cached_used and warn:                        # warn=False: the caller replaces this season's picks (seeded draft)
         if not any(r.get("season") == season for r in picks):
             log.info("No cached nflverse draft for %s: its rookie QBs take no job from a starter", season)
         elif season not in sim_draft_picks._settled(cached):        # a summer download: some gsis ids still empty
@@ -403,7 +405,7 @@ def _future_base(session: Session, season: int, settings: Settings, seed: int = 
     played = tuple(replace(g, home_score=data.scores.get((g.home_team, g.week)),
                            away_score=data.scores.get((g.away_team, g.week))) for g in data.schedule.games)
     starts = sim_next_year.starts_by_team(data)
-    inputs = qb_inputs(session, season)
+    inputs = qb_inputs(session, season, warn=False)            # its picks are the seeded draft's, below
     by_name = {r.name: r for r in sim_rookie_draft.run(rookies, played, world, moved, seed, starts, inputs.young)}
     drafted = {pid: by_name[r.name] for pid, r in sim_next_year.rookie_ids(season, rookies).items()}  # ids: file picks
     mine = {pid: r.pick for pid, r in drafted.items() if r.position == "QB"}       # the seeded draft's picks
