@@ -35,7 +35,8 @@ def _settings(teams: int, playoff_teams: int) -> Settings:
 
 def _week(state: State, settings: Settings, per_team: dict[int, float]) -> State:
     """Play the current week with every rostered skill player scoring his team's number (default 1.0); kickers and
-    defenses score 0, so a lone K or DST sitting out his bye (replay_season.starters_for) changes no result."""
+    defenses score 0: the fake schedule has real byes in these weeks (LV, CLE, CIN in week 5), and a lone K or DST on
+    a bye sits (replay_season.starters_for), which would change the scripted totals."""
     data = fakes.fake_season()
     actual = {(pid, state.week): 0.0 if data.players[pid].position in ("K", "DST") else per_team.get(team.id, 1.0)
               for team in state.teams for pid in team.roster}

@@ -444,3 +444,19 @@ def test_season_through_week_seven_is_identical_when_only_the_future_differs():
     played = _play(fakes.drafted_state(settings), settings, 7, changed)
 
     assert played == _played(12, 7)
+
+
+def test_a_kicker_whose_team_plays_starts_even_without_a_projection():
+    """Reviewer: a late signing or a data gap leaves a K with no projection; only a bye sits him."""
+    data, settings = fakes.fake_season(), _settings()
+    state = fakes.drafted_state(settings)
+    week = 3
+    team = next(t for t in state.teams if not t.is_user)
+    kicker = next(pid for pid in team.roster if data.players[pid].position == "K")
+    assert not data.on_bye(kicker, week)
+    gap = fakes.patched(data, projected={(kicker, week): None})
+    know = fakes.fake_knowledge(week, settings, gap)
+
+    lineup = season.starters_for(replace(state, week=week), settings, know, team.id)
+
+    assert lineup["K"] == (kicker,)
