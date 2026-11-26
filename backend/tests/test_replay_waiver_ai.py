@@ -305,7 +305,8 @@ def test_a_cpu_covers_every_slot_nobody_plays_in_however_many_there_are(phase):
     week, team_id = 7, CPUS[3]
     resting = [pid for position in ("QB", "TE", "K", "DST") for pid in at(league(week), team_id, position, week)]
     data = fakes.patched(fakes.fake_season(), projected={(pid, week): None for pid in resting})
-    knowledge = fakes.fake_knowledge(week, SETTINGS, data)
+    data = fakes.tagged(data, {(pid, week): fakes.Injury("O") for pid in resting})      # out (a K with no projection
+    knowledge = fakes.fake_knowledge(week, SETTINGS, data)                              # whose team plays still starts)
     state = league(week, phase)
 
     after = ai.cpu_free_agency(state, SETTINGS, knowledge, SEED)

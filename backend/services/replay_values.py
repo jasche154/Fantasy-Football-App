@@ -48,7 +48,8 @@ IR_OUT_SHARE = replay_chart_injury.IR_OUT_SHARE      # least share missed when t
 FLEX_POSITIONS = replay_slots.FLEX_POSITIONS
 eligible = replay_slots.eligible                      # slot -> the positions that can play there
 BACKUPS = {"QB": 1, "RB": 3, "WR": 4, "TE": 1}        # most a CPU carries behind its starters (no spare K or DST)
-RECENT_GAMES = 3                                      # recent_points: his last games before this week
+RECENT_GAMES = 5                                      # recent_points: his last games before this week (the chart's form window;
+                                                      # other readers slice their own: replay_claim_ai, replay_mood)
 
 
 @dataclass(frozen=True)
@@ -412,10 +413,20 @@ def starters(know: Knowledge, player_ids: Iterable[int], settings) -> frozenset[
 
 def idle_slots(know: Knowledge, player_ids: Iterable[int], settings) -> list[str]:
     """The starting slots (FLEX, K and DST included) this roster cannot fill with a projected player this
-    week (bye, out or nobody there), once per missing starter."""
+    week (bye, out or nobody there; a K or DST counts whenever his team plays), once per missing starter."""
     lineup = best_lineup(know, player_ids, settings)
     return [slot for slot, wanted in settings.starters.items()
-            for _ in range(wanted - sum(know.by_id[pid].projection > 0 for pid in lineup.get(slot, ())))]
+            for _ in range(wanted - sum(_fills(know, pid, slot) for pid in lineup.get(slot, ())))]
+
+
+def _fills(know: Knowledge, player_id: int, slot: str) -> bool:
+    """Does he fill his slot this week? A projection, or a K or DST whose team plays (replay_season.starters_for
+    starts him: a late signing has no projection yet)."""
+    value = know.by_id[player_id]
+    if value.projection > 0:
+        return True
+    return (slot in ("K", "DST") and value.team is not None and not (value.injury is not None and value.injury.hard)
+            and know.schedule.opponent(value.team, know.week) is not None)
 
 
 def lineup_points(know: Knowledge, player_ids: Iterable[int]) -> float:
