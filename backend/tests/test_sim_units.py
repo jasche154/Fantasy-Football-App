@@ -148,3 +148,75 @@ def test_no_team_plays_a_game_without_a_quarterback(monkeypatch):
         pooled = [pid for pid in sim.players if pid >= sim_depth.BACKUP_QB_ID_BASE]
         assert len(pooled) == len({t for t, _ in sim.schedule.opponents})
         assert any((pid, w) in sim.box and sim.box[(pid, w)].pass_yds > 0 for pid in pooled for w in range(6, 18))
+
+
+def test_a_teams_real_qbs_join_the_pool_and_only_a_short_team_gets_a_generic():
+    """The user's ruling on item 20: today's real QB rooms first (moves and retirements on top), then a generic
+    backup only where a team is still short of two."""
+    from services import sim_depth
+    data = fakes.fake_season()
+    qbs = {}
+    for pid, p in data.players.items():
+        if p.position == "QB":
+            qbs.setdefault(data.team_at(pid, 5), []).append(pid)
+    one = replace(data, players=MappingProxyType({pid: p for pid, p in data.players.items()
+                                                  if p.position != "QB" or pid == qbs[data.team_at(pid, 5)][0]}))
+    teams = sorted({t for t, _ in data.schedule.opponents})
+    rooms = {teams[0]: [(qbs[teams[0]][0], "Starter"), (900001, "Real Backup")],
+             teams[1]: [(900002, "Retired Backup")], teams[2]: [(900003, "Moved Backup")]}
+    added = sim_depth.with_real_qbs(one, rooms, 5, {900002: None, 900003: teams[0]})
+    assert {pid: (p.name, p.adp_team) for pid, p in added.players.items() if pid >= 900000} == {
+        900001: ("Real Backup", teams[0]), 900003: ("Moved Backup", teams[0])}
+    assert added.projected[(900001, 5)] > 0                                     # on the board: a manager can add him
+    pooled = sim_depth.with_backup_qbs(added, 5)
+    generic = {p.adp_team for pid, p in pooled.players.items() if pid >= sim_depth.BACKUP_QB_ID_BASE}
+    assert teams[0] not in generic and set(teams[1:]) <= generic
+
+
+def test_an_emergency_start_is_the_pooled_qb_else_the_one_due_back_soonest():
+    from services import sim_depth
+    world = sim_world.World(MappingProxyType({1: sim_world.Player(1, "QB", "AAA"), 2: sim_world.Player(2, "QB", "AAA"),
+                                              3: sim_world.Player(3, "QB", "BBB"),
+                                              sim_depth.BACKUP_QB_ID_BASE: sim_world.Player(sim_depth.BACKUP_QB_ID_BASE, "QB", "BBB")}),
+                            MappingProxyType({t: sim_world.Team(t, 30.0, 25.0, 0.0, 0.0) for t in ("AAA", "BBB")}))
+    assert sim_depth.emergency(world, {1, 2, 3}, {1: 4, 2: 1, 3: 2}) == {1, 3}
+    assert sim_depth.emergency(world, {1}, {1: 4}) == {1}                         # a healthy QB left: nobody called
+
+
+def test_the_depth_discount_moves_work_to_a_teams_top_receivers_and_keeps_its_total(monkeypatch):
+    from services import sim_constants, sim_next_year
+    monkeypatch.setitem(sim_constants._overrides, "talent", {"depth_targets": 0.5})
+    sim_constants.params.cache_clear()
+    new = {i: sim_world.Player(i, "WR", "AAA", targets=w) for i, w in enumerate((0.3, 0.2, 0.15, 0.1, 0.1, 0.1, 0.05), 1)}
+    before = dict(new)
+    sim_next_year._concentrate(new)
+    assert sum(p.targets for p in new.values()) == pytest.approx(sum(p.targets for p in before.values()))
+    assert new[6].targets == pytest.approx(0.05) and new[7].targets == pytest.approx(0.025)
+    assert new[1].targets / new[2].targets == pytest.approx(1.5)                 # the top five in proportion
+    monkeypatch.undo()
+    sim_constants.params.cache_clear()
+
+
+def test_a_whole_season_draws_a_veterans_role_but_not_a_rookies(monkeypatch):
+    knobs = {**sim_talent.settings(), "season_roles": 1.0}
+    veteran, rookie = sim_world.Player(1, "WR", "AAA", targets=0.2, games=17), sim_world.Player(2, "WR", "AAA", targets=0.2)
+    assert sim_talent._season_role(veteran, 1.0, knobs).targets > 0.2 > sim_talent._season_role(veteran, -1.0, knobs).targets
+    assert sim_talent._season_role(rookie, 1.0, knobs) == rookie
+
+
+def test_season_shape_and_standings_read_the_box_and_the_scores():
+    from services import sim_metrics_shape
+    from services.replay_box import BoxLine
+    players = {1: SimpleNamespace(position="WR"), 2: SimpleNamespace(position="TE"), 3: SimpleNamespace(position="RB")}
+    box = {(1, w): BoxLine(targets=10, rec=7, rec_yds=70) for w in range(1, 18)}
+    box |= {(2, w): BoxLine(targets=6, rec=4, rec_yds=40) for w in range(1, 18)}
+    box |= {(3, w): BoxLine(carries=20, rush_yds=60, targets=4, rec=3, rec_yds=20) for w in range(1, 18)}
+    data = SimpleNamespace(box=box, players=players, team_at=lambda pid, w: "AAA")
+    out = sim_metrics_shape.shape(data)
+    assert out["1000-yd receivers"] == 1 and out["1000-yd rushers"] == 1 and out["WR rec yds #1"] == 1190
+    assert out["top WR target share"] == pytest.approx(0.5) and out["top-5 target share"] == pytest.approx(1.0)
+    games = [_game(1, "H", "A", 0, 40), _game(2, "A", "H", 0, 40)]
+    scores = {("H", 1): 20, ("A", 1): 17, ("H", 2): 30, ("A", 2): 10}
+    table = sim_metrics_shape.standings(SimpleNamespace(schedule=SimpleNamespace(games=games), scores=scores))
+    assert table["best record (wins)"] == 2 and table["worst record (wins)"] == 0
+    assert table["games by 1-3 %"] == 50 and table["games by 8 or fewer %"] == 50

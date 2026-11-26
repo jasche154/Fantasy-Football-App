@@ -187,6 +187,36 @@ def _veterans(world: World, experience: Mapping[int, int], moves: Mapping[int, s
     return aged
 
 
+DEPTH_TOP = {"targets": 5, "carries": 2}    # a team's top receivers and backs: the rest are its depth
+
+
+def _concentrate(new: dict[int, Player]) -> None:
+    """Within each team, the depth's targets (beyond its DEPTH_TOP receivers) and carries (beyond its top two
+    non-QB rushers) x the tuned talent `depth_targets` / `depth_carries`, the rest going to the top ones in
+    proportion (the team's total kept). A belief carried over from the end of a season spreads a team's work
+    too thinly (late-season fill-ins, depth guesses, rookies joining): real teams' top five receivers see 74% of
+    the targets, a whole simulated season built without it 71%, and too few receivers reach 1,000 yards
+    (sim_metrics_shape, sim_eval full mode)."""
+    talent = params().get("talent", {})
+    for field, top in DEPTH_TOP.items():
+        scale = talent.get(f"depth_{field}", 1.0)
+        if scale == 1.0:
+            continue
+        rooms: dict[str, list[int]] = defaultdict(list)
+        for pid, p in new.items():
+            if p.position in POSITIONS and p.position != "QB" and getattr(p, field) > 0:
+                rooms[p.team].append(pid)
+        for pids in rooms.values():
+            ranked = sorted(pids, key=lambda pid: (-getattr(new[pid], field), pid))
+            lead = sum(getattr(new[pid], field) for pid in ranked[:top])
+            depth = sum(getattr(new[pid], field) for pid in ranked[top:])
+            if not depth or not lead:
+                continue
+            up = 1.0 + depth * (1.0 - scale) / lead
+            for i, pid in enumerate(ranked):
+                new[pid] = replace(new[pid], **{field: getattr(new[pid], field) * (up if i < top else scale)})
+
+
 def _line(position: str, field: str, pick: int) -> float:
     fit = stored()["rookies"].get(position, {}).get(field)
     pick = pick if position == "QB" else max(pick, ROOKIE_PICK_FLOOR)
@@ -338,6 +368,7 @@ def next_year(world: World, players: Mapping[int, PoolPlayer], experience: Mappi
     for pid in sorted(rookies):
         if pid in new and new[pid].position == "QB":
             _qb_competition(new, new[pid], secure)
+    _concentrate(new)
     teams = _with_passers(new, teams)
     belief = World(MappingProxyType(new), MappingProxyType(teams))
     pool = {}

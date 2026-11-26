@@ -18,6 +18,13 @@ reputation, plus dated role changes. Nothing in a simulated SeasonData reads it 
   The keep here is the rate's own (unscaled: sim_next_year.keep_of), what a season leaves unexplained even
   though the belief applies only part of the regression. `season_spread` (tuned with `role_sd` on the
   leave-season-out full-mode gate: whole seasons' leaderboards and big games, WR leaders not overshooting).
+  A veteran's role x its own lognormal draw too, sd = what his position's role curve leaves unexplained from one
+  season to the next (sim_next_year.json `role_sd`, about 0.43 for a WR) x `season_roles`. Tuned together with
+  sim_next_year's depth discount (`depth_targets` / `depth_carries`) on the full-mode season-shape rows
+  (sim_metrics_shape): 2021-2025, 2 seeds, real / before / after: 1,000-yard receivers 24.0 / 16.1 / 21.2,
+  rushers 13.6 / 11.0 / 12.5, top five receivers' share of targets 0.74 / 0.71 / 0.74, yards per target sd
+  1.34 / 1.74 / 1.59, WR / RB / TE top-12 points a game 14.8 / 16.1 / 9.7 against 14.7 / 15.1 / 9.0 before and
+  15.5 / 16.0 / 9.7 after (season_spread 1.0 -> 0.5, season_roles 0.25, depth 0.85 / 0.8).
 - Teams: volume (targets and carries together) x lognormal `volume_sd`; pass defense, run defense and
   takeaways each x lognormal `defense_sd`.
 - Dated changes (from a uniform week after from_week to CHANGE_LAST_WEEKS before the end): per team and
@@ -62,7 +69,7 @@ MAX_CATCH = 0.95
 DEFAULTS = {"role_sd": 0.30, "eff_sd": 0.12, "quality_sd": 0.08, "evidence": 6.0, "floor": 0.35,
             "team_share": 0.4, "volume_sd": 0.05, "defense_sd": 0.05,
             "breakout_rate": 0.25, "breakout_gain": [1.6, 2.6], "bust_rate": 0.15, "bust_cut": [0.4, 0.7],
-            "season_spread": 1.0}
+            "season_spread": 1.0, "season_roles": 0.0}
 
 
 def settings() -> dict:
@@ -103,6 +110,17 @@ def _offseason(player: Player, z: np.ndarray, knobs: dict) -> Player:
     if "catch" in rates:
         rates["catch"] = min(MAX_CATCH, rates["catch"])
     return replace(player, **rates)
+
+
+def _season_role(player: Player, z: float, knobs: dict) -> Player:
+    """A veteran's whole-season role: x lognormal, sd = what his position's role curve leaves unexplained from one
+    season to the next (sim_next_year.json `role_sd`) x the tuned `season_roles`. A rookie's role spread is
+    `_level`'s (no games of evidence)."""
+    sd = sim_next_year.stored().get("role_sd", {}).get(player.position, 0.0) * knobs["season_roles"]
+    if player.games <= 0 or sd <= 0:
+        return player
+    x = _lognormal(sd, z)
+    return replace(player, targets=player.targets * x, carries=player.carries * x)
 
 
 def _team(team: Team, z: np.ndarray, knobs: dict) -> Team:
@@ -200,7 +218,9 @@ def truth(belief: World, seed: int, from_week: int, last_week: int, rookies: Col
                for i, pid in enumerate(ids)}
     if from_week == 1:
         season = replay_state.rng(seed, "sim", "offseason").standard_normal((len(ids), len(SEASON_RATES)))
-        players = {pid: _offseason(players[pid], season[i], knobs) for i, pid in enumerate(ids)}
+        roles = replay_state.rng(seed, "sim", "offseason", "role").standard_normal(len(ids))
+        players = {pid: _season_role(_offseason(players[pid], season[i], knobs), float(roles[i]), knobs)
+                   for i, pid in enumerate(ids)}
     first, last = change_weeks(from_week, last_week)
     ranks = sim_market.position_ranks(belief)
     changes = []

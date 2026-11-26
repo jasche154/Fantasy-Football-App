@@ -1244,9 +1244,12 @@
    "role_sd": 0.2,
    "evidence": 2,
    "floor": 0.2,
-   "season_spread": 1.0,
+   "season_spread": 0.5,
    "strength_sd": 2,
-   "edge_scale": 1.05
+   "edge_scale": 1.05,
+   "depth_targets": 0.85,
+   "depth_carries": 0.8,
+   "season_roles": 0.25
   },
   "market": {
    "two_qb_replacement": 30,

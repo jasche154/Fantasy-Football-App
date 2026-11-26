@@ -176,7 +176,7 @@ def _relevant(row: dict) -> bool:
     return min(row["games"]) >= GAMES_MIN and min(row["volume"]) >= VOLUME_MIN[row["position"]]
 
 
-def _age_fit(rows: list[dict], position: str) -> tuple[dict, float, float]:
+def _age_fit(rows: list[dict], position: str) -> tuple[dict, float, float, float]:
     mine = [r for r in rows if r["position"] == position and r["games"][0] >= GAMES_MIN
             and r["volume"][0] >= VOLUME_MIN[position] and r["games"][1] >= NEXT_GAMES_MIN]
     x = np.log([r["volume"][0] for r in mine])
@@ -189,9 +189,11 @@ def _age_fit(rows: list[dict], position: str) -> tuple[dict, float, float]:
     effects = dict(zip(used, solved[:-1].tolist()))
     middle = float(np.mean(list(effects.values())))
     change = [round(effects.get(g, effects[max(used)]) - middle, 4) for g in range(len(EXPERIENCE_EDGES))]
+    residual = (y - x) - design @ solved                     # what the curve and the regression leave unexplained
     return ({"edges": list(EXPERIENCE_EDGES), "log_change": change,
              "n": [int((groups == g).sum()) for g in range(len(EXPERIENCE_EDGES))]},
-            round(min(1.0, 1.0 + float(solved[-1])), 4), round(center, 4))      # never anti-regression
+            round(min(1.0, 1.0 + float(solved[-1])), 4), round(center, 4),      # never anti-regression
+            round(float(residual.std(ddof=design.shape[1])), 4))
 
 
 def _passer_scale(row: dict, name: str, which: int) -> float:
@@ -328,12 +330,12 @@ def _premium_fit(cases: list[dict]) -> dict[str, list[float]]:
 
 
 def summarize(rows: Mapping[str, list[dict]], seasons: list[int]) -> dict:
-    age, keep, center = {}, {}, {}
+    age, keep, center, role = {}, {}, {}, {}
     for position in POSITIONS:
-        age[position], keep[position], center[position] = _age_fit(rows["veterans"], position)
+        age[position], keep[position], center[position], role[position] = _age_fit(rows["veterans"], position)
     efficiency = _efficiency_fit(rows["veterans"])
     return {"seasons": seasons, "rookies": _rookie_fit(rows["rookies"]), "age": age, "keep": keep,
-            "center": center, "efficiency_keep": efficiency,
+            "center": center, "role_sd": role, "efficiency_keep": efficiency,
             "efficiency_sd": _spread_fit(rows["veterans"], efficiency), "team_keep": _team_fit(rows["teams"])}
 
 

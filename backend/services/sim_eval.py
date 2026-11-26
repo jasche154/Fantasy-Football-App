@@ -49,7 +49,7 @@ from functools import partial
 from pathlib import Path
 
 from services import (replay_pool, sim_carryover, sim_depth, sim_fit, sim_injuries, sim_market, sim_metrics,
-                      sim_metrics_games, sim_qb, sim_qb_jobs, sim_season, sim_setup, sim_world)
+                      sim_metrics_games, sim_metrics_shape, sim_qb, sim_qb_jobs, sim_season, sim_setup, sim_world)
 from services.replay_adp_format import TWO_QB
 from services.replay_pool import SeasonData
 from services.sim_world import World
@@ -182,7 +182,8 @@ def _whole(data: SeasonData, rookies: set[int], real: SeasonData, established: f
             **sim_metrics.adp_agreement(data, real, rookies), **sim_metrics.expert_agreement(data),
             **sim_metrics.weekly(data, weeks), **sim_depth.metrics(data), **sim_qb.job_metrics(data, 1, established),
             **sim_metrics_games.games(data, weeks), **sim_metrics_games.experts(data, weeks),
-            **sim_metrics_games.tails(data, weeks)}
+            **sim_metrics_games.tails(data, weeks), **sim_metrics_shape.shape(data),
+            **sim_metrics_shape.standings(data)}
 
 
 def _full(session, season: int, seeds: list[int], offseason: dict) -> tuple[dict, dict]:
