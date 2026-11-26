@@ -50,7 +50,7 @@ from services import (replay_fillin, replay_pool, replay_state, sim_depth, sim_g
                       sim_qb_jobs, sim_talent)
 from services.replay_pool import Injury, SeasonData, hard_tag_returns
 from services.sim_game import on_field, play
-from services.sim_world import World, estimate, scoring_of
+from services.sim_world import RoleChange, World, estimate, scoring_of
 
 FULL_EXPOSURE_SNAP = 20.0        # a player who really plays (a recorded game) carries the full injury hazard
 PHANTOM_MIN_SNAP = 50.0          # healthy regulars this involved may be listed Q/D (the fit counted relevant ones)
@@ -242,6 +242,9 @@ def _market(tables: _Tables, base: SeasonData, belief: World, truth: World, seed
             tables.expert_age[rank_week] = sim_market.EXPERT_AGE["ros" if rank_week else "pre"]
     tables.notes.update(sim_market.buzz(truth.changes, belief, week, replay_state.rng(seed, "sim", "buzz", week),
                                         false_rate, out, sim_talent.rumors(belief, ranks, bench) if false_rate else None))
+    if jobs is not None and jobs.in_danger:                    # next week's likely benchings: their true hint
+        tables.notes.update(sim_market.buzz([RoleChange(week, pid, kind="bench") for pid in sorted(jobs.in_danger)],
+                                            belief, week, replay_state.rng(seed, "sim", "buzz", "bench", week), 0.0, out))
     if jobs is not None:                                       # the week's job changes: their true lines
         tables.notes.update(sim_qb_jobs.news(benched, jobs, truth.at(week), known, week,
                                              {pid: p.name for pid, p in base.players.items()}))

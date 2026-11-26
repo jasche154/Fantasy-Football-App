@@ -1686,7 +1686,10 @@ read the belief, so, as in a real season, the public learns the truth only from 
   shrinking."); a quarterback benching gets its true line the week it happens (above), never a rumour that
   week or after, and a top-12 player at his position never breaks out or reads that his role is growing (a star
   back whose role weight dipped while he was hurt is still a star). "Reports say his starting job is in
-  danger." is the false line about a quarterback whose job really is at risk, and false lines are added so only about 60% of
+  danger." comes the week before a benching for 60% of the holders whom next week's seeded draw benches at this
+  week's chance (form and record move little in a week), and as a false line about a quarterback whose job really
+  is at risk: over 40 2027 leagues 66% of those lines were followed by the benching within two weeks (all were
+  false before). False lines are added so only about 60% of
   all lines are true, in the same weeks a change can start (never the first simulated week or the last two).
   A false line is only about a change that could plausibly happen to him, as often as it really does: a
   backup's role growing, a lead player who is not a top-12 star losing work, or a starting quarterback whose

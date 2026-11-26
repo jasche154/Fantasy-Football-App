@@ -57,6 +57,7 @@ class Jobs:                      # mutable bookkeeping inside one simulate() cal
     established: frozenset[int] = frozenset()
     picks: Mapping[int, int] = field(default_factory=dict)             # drafted rookie QB -> pick
     young: Mapping[int, int] = field(default_factory=dict)             # young QB -> draft season (sim_qb.YOUNG_DRAFTS)
+    in_danger: set[int] = field(default_factory=set)   # decide: holders next week's draw benches at today's chance
 
 
 def _qbs(world: World, team: str) -> list[Player]:
@@ -129,11 +130,14 @@ def _challenger(jobs: Jobs, world: World, team: str, holder: int, sitting: Colle
 def decide(jobs: Jobs, world: World, known: SeasonData, week: int, sitting: Collection[int],
            tags: Mapping[int, Injury], seed: int) -> tuple[list[RoleChange], dict[int, float]]:
     """(the week's benchings as "bench" RoleChanges of the old holder, {holder: his chance to lose the job over the
-    change weeks left} for the rumours). Updates `jobs`. `known`: the season as known before `week`; `world`: the
+    change weeks left} for the rumours). Updates `jobs`, `jobs.in_danger` included: the holders whom next week's
+    seeded die would bench at this week's chance (form and record move little in a week), so a job-danger line can
+    come the week before a benching, as a breakout's true hint comes before it. `known`: the season as known before `week`; `world`: the
     truth at `week`; `sitting`: who does not play it; `tags`: its tags."""
     starts = sim_qb.starters(known)
     last_change = known.last_week - sim_qb.CHANGE_LAST_WEEKS
     changes, rumors = [], {}
+    jobs.in_danger = set()
     for team in sorted(jobs.holders):
         if not known.schedule.opponent(team, week):
             continue                                           # a bye: nothing to decide
@@ -158,6 +162,9 @@ def decide(jobs: Jobs, world: World, known: SeasonData, week: int, sitting: Coll
             new = new if draw < chance else None
             if new is not None:
                 rumors.pop(holder, None)                       # the week of the change gets the true line, no rumour
+            elif (week < last_change and known.schedule.opponent(team, week + 1)
+                  and replay_state.rng(seed, "sim", "qb", week + 1, team).random() < chance):
+                jobs.in_danger.add(holder)                     # next week's die benches him at today's chance
         if new is None:
             continue
         jobs.holders[team] = new

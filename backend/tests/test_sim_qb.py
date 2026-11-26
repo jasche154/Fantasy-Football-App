@@ -191,6 +191,23 @@ def test_the_benched_holder_is_never_rumoured_the_week_he_loses_the_job(data, mo
         assert not (changes and A in rumors)
 
 
+def test_a_job_danger_hint_comes_the_week_before_the_benching_it_foretells(data, monkeypatch):
+    """Review item 3: the holders decide marks in danger are the ones next week's die benches (at a steady chance)."""
+    monkeypatch.setattr(sim_qb, "raw_hazard", lambda rank, form, record: 0.3)
+    warned = foretold = benched_unwarned = 0
+    for seed in range(300):
+        held = _jobs()
+        sim_qb_jobs.decide(held, _world(), data.as_of(WEEK), WEEK, set(), {}, seed)
+        if held.holders[TEAM] != A:
+            continue                                         # benched this week already
+        danger = A in held.in_danger
+        changes, _ = sim_qb_jobs.decide(held, _world(), data.as_of(WEEK + 1), WEEK + 1, set(), {}, seed)
+        warned += danger
+        foretold += danger and bool(changes)
+        benched_unwarned += (not danger) and bool(changes)
+    assert warned > 10 and foretold == warned and benched_unwarned == 0
+
+
 def test_a_hurt_holder_sits_then_gets_the_job_back_unless_a_weak_one_loses_it(data, monkeypatch):
     known = data.as_of(WEEK + 1)
     monkeypatch.setattr(sim_qb, "starters", lambda known: {(TEAM, WEEK): B})
