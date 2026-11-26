@@ -1623,7 +1623,12 @@ read the belief, so, as in a real season, the public learns the truth only from 
   named over one). A **young first-rounder** (drafted in round 1 in this season's draft or one of the three before)
   never loses the job to a rookie, and as a rookie holder is not benched healthy at all: real 2019-2025, such a QB
   holding the job in his first season was never benched healthy (0 of 197 weeks), in his second 3 of 268, and no
-  team with one had a QB drafted in the first two rounds behind him. A **fill-in keeps the job** from a starter back from injury at the real chance in his ADP
+  team with one had a QB drafted in the first two rounds behind him. Over 200 2027 seeds, healthy job changes to a
+  rookie: Cam Ward 91 -> 0 (4 before the return path was closed too), Jaxson Dart 88 -> 0; Tyler Shough (a
+  second-rounder) and Drew Allar (third) still can lose theirs (95 -> 101, 75 -> 92). Teams changing their
+  healthy starter twice in a season: real 2019-2025 4.4 a season, simulated 0.45 -> 0.28; three times or more:
+  real 1.4, simulated 0.22 -> 0.03 (the real counts include untagged rests and game-day scratches the
+  simulation does not have), so no damping of repeated changes is added. A **fill-in keeps the job** from a starter back from injury at the real chance in his ADP
   rank, halved (13 of 57 returns), and both of them get the true line that week ("Healthy again, but X stays the
   starter; he is the backup." / "Stays the starter: ... is healthy again and the backup."; a benching: "Benched:
   X starts in his place." / "Named the starter over ..."). Starts over the last three seasons, production, draft pick, years since
