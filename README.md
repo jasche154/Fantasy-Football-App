@@ -1824,6 +1824,16 @@ read the belief, so, as in a real season, the public learns the truth only from 
   by hand, not fitted on past drafts.
 - The rookies and moves in the 2027 file are a snapshot of mock drafts and reports (dated in the file), not
   facts.
+- Top passing seasons run high in 2027 leagues: the season leader averaged 5,460 yards over 8 fresh leagues
+  (real 2021-2025: 4,963, at most 5,316), one league 6,558 (Caleb Williams: Chicago's receivers carry 2026's
+  yards per catch into the belief unregressed, as the fitted `efficiency_scale` for receivers is 0, and its
+  shared offense draw, his passing draw and its volume all landed high). The fix is a regression of a
+  receiver's yards per catch of its own in the August belief, judged on the whole-season gate.
+- Games are not decided by late scores: real margins land on exactly 3 in 14.6% of games, simulated ones in 8.0%
+  (7: 7.7% against 5.9%), so games decided by 1-3 points are 17.5% against 24.9% and records run more extreme
+  (best 14.9 wins against 13.8, worst 2.1 against 2.8). The hidden team strength is not the cause (with none,
+  the best record stays 15.3); it would take a closing possession played on the score (kick to win when tied,
+  chase a touchdown when behind by 4-8) in `sim_draw`.
 
 **Commands** (all read-only on the database; the fits rewrite the JSON files the simulator reads;
 `sim_next_year_fit` and `sim_eval`'s full mode need nflverse draft picks, downloaded once into
