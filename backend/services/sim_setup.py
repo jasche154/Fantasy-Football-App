@@ -422,10 +422,12 @@ def _future_base(session: Session, season: int, settings: Settings, seed: int = 
                                      settings.adp_format, record,
                                      sim_next_year.rookie_premium(drafted),
                                      sim_next_year.rookie_qb_share(belief, qbs.picks, protected))
-    base = replace(base, notes=MappingProxyType({(pid, 0): sim_carryover.note(c) for pid, c in carries.items()}))
+    drawn = sim_carryover.draw(carries, seed)
+    base = replace(base, notes=MappingProxyType({**{(pid, 0): sim_carryover.note(c) for pid, c in carries.items()},
+                                                 **sim_carryover.cleared(carries, drawn)}))
     base = sim_depth.with_real_qbs(base, qb_rooms(session), 1, moved)
     scores = [(g.week, g.home_team, g.away_team, g.home_score, g.away_score) for g in played if g.is_final]
-    return Future(base, belief, sim_carryover.draw(carries, seed), qbs,
+    return Future(base, belief, drawn, qbs,
                   sim_lines.carry_over(scores) if scores else {})
 
 
