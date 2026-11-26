@@ -121,3 +121,32 @@ def test_cover_drops_by_healthy_chart_so_a_false_out_for_season_report_costs_nob
     held = rs.team(covered, cpu).roster
     assert len(held) == SETTINGS.roster_size and len(_position(know, covered, cpu, "TE")) == 1
     assert reported.player_id in held and lowest.player_id not in held
+
+
+def test_a_roster_spot_a_trade_cut_left_open_is_refilled_with_the_best_valid_free_agent(monkeypatch):
+    """Review: the refill after a trade's forced cut had no test. A spare receiver gone (no starting slot lost):
+    the best free agent who is not out, not of the fan's rival club and within the position limits comes in."""
+    week, team_id = 3, CPUS[0]
+    knowledge, state = know(week), league(week, phase="open")
+    receivers = at(state, team_id, "WR")
+    bench = min(receivers, key=lambda pid: knowledge.by_id[pid].chart)
+    short = without(state, team_id, bench)
+    free = [v for v in knowledge.values if v.player_id not in rs.rostered(short) | set(short.locked) and not v.out
+            and v.position in SKILL]
+    best = max(free, key=lambda v: (v.chart, v.healthy_value, -v.player_id))
+    from services import replay_cover
+    monkeypatch.setattr(replay_cover.replay_fans, "banned", lambda team, nfl: nfl == best.team)   # his rival's club
+    fan = short
+    team = rs.team(fan, team_id)
+    assert len(team.roster) == SETTINGS.roster_size - 1 and not rv.missing_slots(
+        [knowledge.by_id[pid].position for pid in team.roster], SETTINGS)
+
+    after = rs.team(ai.cpu_cover(fan, SETTINGS, knowledge, [team_id]), team_id)
+
+    added = next(pid for pid in after.roster if pid not in team.roster)
+    kept = [knowledge.by_id[pid] for pid in rs.held(team)]
+    valid = [v for v in knowledge.values if v.player_id not in rs.rostered(fan) | set(fan.locked) and not v.out
+             and v.position in SKILL and v.team != best.team
+             and not rv.crowded(kept, [v], v.position, SETTINGS)]
+    assert len(after.roster) == SETTINGS.roster_size and added != best.player_id
+    assert added == max(valid, key=lambda v: (v.chart, v.healthy_value, -v.player_id)).player_id
