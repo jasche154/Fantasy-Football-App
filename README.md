@@ -1589,7 +1589,9 @@ read the belief, so, as in a real season, the public learns the truth only from 
   simulated season reshuffles like a real one (preseason rank against final rank, breakouts, busts).
   A season simulated whole also draws each veteran's role for the year (what his position's role curve leaves
   unexplained from one season to the next, `role_sd` in `sim_next_year.json`: about 0.43 on the log scale for a
-  receiver, a quarter of it used, `talent.season_roles`), and its belief takes 15% of the targets (20% of the
+  receiver, a quarter of it used, `talent.season_roles`; a rookie's around the role a player taken at his pick
+  had, what the rookie role line leaves unexplained, 0.65-0.75: rookie top-24 finishes on the gate 6.6 -> 7.4
+  against a real 8.4), and its belief takes 15% of the targets (20% of the
   carries) from each team's depth beyond its top five receivers (top two backs) to give to them
   (`talent.depth_targets` / `depth_carries`): a belief carried over from the end of a season spreads a team's
   work too thinly. With the whole-season efficiency spread halved (`talent.season_spread` 0.5), on the
@@ -1723,9 +1725,11 @@ read the belief, so, as in a real season, the public learns the truth only from 
   (1-3, default 1) for a prospect rated beyond his pick: the market's rookie premium and his expected role
   are both multiplied by it (his talent is still drawn around that role, with a rookie's wide spread, so he
   can still bust). Jeremiah Smith carries 1.2, set so his average ADP across leagues lands near where Marvin
-  Harrison Jr.'s did as a rookie (14.5 in 2024's PPR ADP): over 20 league seeds (the seeded draft put him on
-  13 different teams) his ADP averaged 12.3 (1-30), and he finished a top-12 receiver 35% of the time,
-  top-24 55% and outside the top 36 20%. `moves`: `name` (as the app spells him),
+  Harrison Jr.'s did as a rookie (14.5 in 2024's PPR ADP): over 20 league seeds his ADP averaged 12.3 (1-30),
+  and he finished a top-12 receiver 35% of the time, top-24 55% and outside the top 36 20% (measured when the
+  2026 standings were still open: the seeded draft put him on 13 different teams; with 2026 real through week 11
+  the bottom of the standings is clear, and the consensus first pick goes 1st-3rd to Tennessee, Miami, the
+  Chargers or Atlanta, 8, 5, 5 and 2 of 20 seeds). `moves`: `name` (as the app spells him),
   `position`, `team` (the new team, or `null` for retired / out of the league) and a `note`. Names must be
   unique across both lists; everyone else stays on his team. A bad entry greys out the 2027 card with the
   file name and the problem; a move whose name matches nobody is skipped (logged as a warning). Saved

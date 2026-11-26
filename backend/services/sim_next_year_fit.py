@@ -161,12 +161,31 @@ def _line(rows: list[dict], field: str) -> list[float]:
     return [round(float(a), 5), round(float(b), 5)]
 
 
+def _log_residual(rows: list[dict]) -> float:
+    """sd of log(volume) around the rookie lines' volume at his pick (targets and carries together, as the
+    league's volume weighs them): how far a rookie's real role lands from his pick's (sim_talent._season_role)."""
+    if len(rows) < MIN_ROOKIES:
+        return 0.0
+    league = sim_world.params()["league"]
+    fit = {field: _line(rows, field) for field in ("targets", "carries")}
+    pairs = []
+    for r in rows:
+        x = math.log(r["pick"])
+        line = sum(max(0.0, fit[f][0] + fit[f][1] * x) * league[f] for f in fit)
+        real = sum(float(r[f]) * league[f] for f in fit)
+        if line > 0 and real > 0:
+            pairs.append(math.log(real / line))
+    return round(float(np.std(pairs, ddof=2)), 4) if len(pairs) > 2 else 0.0
+
+
 def _rookie_fit(rows: list[dict]) -> dict:
     out: dict = {}
     for position in (*POSITIONS, "K"):
         mine = [r for r in rows if r["position"] == position]
         fields = {"QB": ("carries", "week1"), "K": ("starts",)}.get(position, ("targets", "carries"))
         out[position] = {field: _line(mine, field) for field in fields} | {"n": len(mine)}
+        if position in ("RB", "WR", "TE"):
+            out[position]["role_sd"] = _log_residual(mine)
     played = [r["quality"] for r in rows if r["position"] == "QB" and r["started"] >= 3 and r["quality"]]
     out["qb_quality"] = round(float(np.mean(played)), 4) if played else 0.9
     return out

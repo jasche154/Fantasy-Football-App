@@ -114,11 +114,16 @@ def _offseason(player: Player, z: np.ndarray, knobs: dict) -> Player:
 
 
 def _season_role(player: Player, z: float, knobs: dict) -> Player:
-    """A veteran's whole-season role: x lognormal, sd = what his position's role curve leaves unexplained from one
-    season to the next (sim_next_year.json `role_sd`) x the tuned `season_roles`. A rookie's role spread is
-    `_level`'s (no games of evidence)."""
-    sd = sim_next_year.stored().get("role_sd", {}).get(player.position, 0.0) * knobs["season_roles"]
-    if player.games <= 0 or sd <= 0:
+    """A whole-season role: x lognormal, sd = what his position's role curve leaves unexplained from one season to
+    the next (sim_next_year.json `role_sd`), for a rookie what the rookie role line at his pick leaves
+    (`rookies.<position>.role_sd`), x the tuned `season_roles`."""
+    model = sim_next_year.stored()
+    if player.games > 0:
+        sd = model.get("role_sd", {}).get(player.position, 0.0)
+    else:                                          # a rookie: around the role a player taken at his pick had
+        sd = model.get("rookies", {}).get(player.position, {}).get("role_sd", 0.0)
+    sd *= knobs["season_roles"]
+    if sd <= 0:
         return player
     x = _lognormal(sd, z)
     return replace(player, targets=player.targets * x, carries=player.carries * x)
