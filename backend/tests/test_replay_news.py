@@ -22,19 +22,23 @@ def test_a_report_never_names_a_week_already_missed(since, true_return):
         assert all(r.back is None or r.back > week for r in reports(since, true_return, week))
 
 
-def test_the_first_report_misses_by_at_most_two_weeks_with_the_planned_odds():
-    misses = Counter(r.back - 10 for r in reports(4, 10, 4) if r.back is not None)
+def test_a_vague_reports_guess_never_reads_the_real_return():
+    """Reviewer: every vague guess sat within 2 weeks of the truth. Now it is a public draw (NEWS_LENGTHS)."""
+    early = [[news.report(seed, 7, 2, back, 3, "IR", 18) for seed in SEEDS] for back in (14, 16, 18)]
 
-    assert set(misses) <= set(news.ERRORS)
-    assert misses[0] == max(misses.values())                     # 35%: the most common
-    assert 0.25 < misses[0] / sum(misses.values()) < 0.45 and misses[-1] > misses[2]
+    assert all(r.vague or r.back is None for group in early for r in group)   # 3 < every return - 7 (or a false
+                                                                          # "out for the season", seeded the same)
+    assert [r.back for r in early[0]] == [r.back for r in early[1]] == [r.back for r in early[2]]
+    assert sum(r.back is not None and abs(r.back - 16) <= 2 for r in early[1]) < 0.5 * len(SEEDS)
 
 
-def test_the_miss_shrinks_to_nothing_as_he_nears_his_return():
-    first = [abs(r.back - 12) for r in reports(4, 12, 4) if r.back is not None]
-    near = [abs(r.back - 12) for r in reports(4, 12, 11) if r.back is not None]
+def test_a_named_week_narrows_as_the_return_nears_and_is_right_about_four_times_in_five_a_week_out():
+    def exact(week: int) -> float:
+        named = [r for r in reports(4, 12, week, "IR") if not r.vague and r.back is not None]
+        return sum(r.back == 12 for r in named) / len(named)
 
-    assert max(first) == 2 and max(near) == 0
+    assert 0.7 < exact(11) < 0.9                                             # one week out: not always
+    assert exact(11) > exact(10) > exact(8) * 0.9
 
 
 def test_a_long_absence_is_sometimes_first_called_season_ending_then_corrected():
@@ -86,10 +90,12 @@ def test_the_exempt_list_reads_indefinite_and_its_guess_never_uses_the_real_retu
         assert all(back is None or back > week for back in by_return[0])
 
 
-def test_the_same_seed_gives_the_same_report_and_seeds_differ():
-    assert news.report(3, 7, 4, 10, 5, "O") == news.report(3, 7, 4, 10, 5, "O")
+def test_the_same_seed_gives_the_same_report_in_any_order_and_seeds_differ():
+    forward = [news.report(3, 7, 4, 12, week, "IR", 18) for week in range(4, 12)]
+    backward = [news.report(3, 7, 4, 12, week, "IR", 18) for week in reversed(range(4, 12))][::-1]
+
+    assert forward == backward
     assert len({r.back for r in reports(4, 10, 4)}) > 1
-    assert news.report(3, 7, 4, 10, 4, "O").back == news.report(3, 7, 4, 10, 4, "IR").back
 
 
 def test_share_played_counts_his_teams_games_from_the_reported_week():
@@ -121,7 +127,9 @@ def test_a_report_never_names_a_week_after_the_season(since, true_return, week, 
         report = news.report(seed, 7, since, true_return, week, tag, END)
 
         assert report.back is None or week < report.back <= END
-        assert report.back is not None or report.text.startswith("Out for the season")
+        season_words = report.back is None and report.text.startswith("Out for the season")
+        assert report.back is not None or season_words or (tag == "O" and "no timetable" in report.text)
+        assert not (tag == "O" and season_words)                  # an O tag never reads season-ending
 
 
 def test_when_no_timetable_ends_says_nothing_exact_about_the_return():
@@ -151,4 +159,5 @@ def test_a_vague_report_shows_no_week_and_never_one_already_missed():
 
     assert any(r.vague and "no timetable" in r.text for r in reports)
     assert all(r.back is None or r.back > week for r, week in zip(reports, [w for _ in range(60) for w in range(2, 10)]))
-    assert all(r.back == 10 for r in (news.report(seed, 1, 2, 10, 9, "IR", 18) for seed in range(60)))  # a week out
+    week_out = [news.report(seed, 1, 2, 10, 9, "IR", 18).back for seed in range(60)]
+    assert all(back in (10, 11) for back in week_out) and week_out.count(10) > 40     # a week out: mostly right

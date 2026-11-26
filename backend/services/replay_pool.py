@@ -192,7 +192,8 @@ def _as_of(data: SeasonData, week: int) -> SeasonData:
         scores=MappingProxyType({key: v for key, v in data.scores.items() if key[1] < week}),
         expert_ranks=MappingProxyType({key: v for key, v in data.expert_ranks.items() if key[1] <= week}),
         expert_age=MappingProxyType({w: v for w, v in data.expert_age.items() if w <= week}),
-        returns=MappingProxyType({key: v for key, v in data.returns.items() if key[1] <= week}))
+        returns=MappingProxyType({key: v for key, v in data.returns.items() if key[1] <= week or (
+            key in data.injuries and _preseason(key, data.injuries[key], week))}))   # read only through replay_news
     _SOURCE[copy] = ref(data)
     return copy
 
