@@ -14,7 +14,9 @@ score = in + premium + spot + 0.5 x lineup + need - out x multiple x 1.03 (a sha
 - premium: the best player in the deal is worth more than parts: rate x (B - v2), B the best chart in the
   deal and v2 the other side's best. Signed: + when the CPU gets B, - when it sends him.
 - spot: SPOT_VALUE per roster spot the deal frees.
-- lineup: LINEUP_PER_WEEK x its lineup gain a week, clamped to +- LINEUP_CAP x out.
+- lineup: LINEUP_PER_WEEK x its lineup gain a week, clamped to +- LINEUP_CAP x out; no loss when it sends the user a
+  player it is shopping to him (a manager who shops a starter has chosen to lose him: testers saw "I'll probably
+  say yes" refuse near-full value because the lineup loss cancelled the discount).
 - need: `replay_styles.need_bonus` for players at positions it needs, cut so that it and the weighted lineup
   gain together add at most replay_styles.NEED_CAP x out.
 The multiple is 1.00 (normal) or 1.08 (hard) against the user and 0.95 between CPUs; for a CPU's own offer to
@@ -121,6 +123,8 @@ def tally(know: Knowledge, persona: str | Mind, sends: Sequence[int], kept: Sequ
     spot = SPOT_VALUE * max(0, len(sends) - len(kept))
     cap = LINEUP_CAP * sum(sell(pid, attach=attach) for pid in sends)    # undiscounted: a shop moves his price by its discount only
     lineup = min(max(LINEUP_PER_WEEK * gain_per_week, -cap), cap)
+    if lineup < 0 and any(pid in cut for pid in sends):
+        lineup = 0.0                   # he chose to shop him: losing him from the lineup is no cost to him
     weight = LINEUP_WEIGHT if lineup > 0 else LINEUP_LOSS_WEIGHT
 
     sent = sum(sell(pid, cut.get(pid, 0.0), attach) for pid in sends)

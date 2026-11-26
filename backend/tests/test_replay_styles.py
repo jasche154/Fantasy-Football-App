@@ -789,6 +789,9 @@ def test_every_kind_of_cpu_offer_stands_when_accepted_and_its_preview_says_so(pe
         state, know, built = _offers_built_like_the_game(persona, settings, week, monkeypatch)
         for offer in built:
             owned = replace(state, offers=(*state.offers, offer), next_id=offer.id + 1)
+            if offer.kind == "shop":                    # answered the week it is made, while his shop is open
+                shopped = next(pid for pid in offer.give if rs.team(state, CPU).roster.count(pid))
+                owned = replace(owned, shops=(rs.Shop(CPU, shopped, week, 0.1, opened=week),))
             if offer.kind == "haggle":                  # its opening offer must be in the state it answers
                 owned = replace(owned, offers=(*state.offers, replace(offer, id=offer.counter_to, kind="want",
                                                                       status="declined", counter_to=None), offer))

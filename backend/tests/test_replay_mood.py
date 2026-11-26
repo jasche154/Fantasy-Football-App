@@ -161,7 +161,8 @@ def _deal(state: rs.State, know: rv.Knowledge, star: rv.ReplayValue) -> tuple[in
     return (mine[0].player_id,)
 
 
-def test_the_discount_moves_his_price_for_the_user_by_exactly_the_discount():
+def test_the_discount_moves_his_price_for_the_user_by_exactly_the_discount(monkeypatch):
+    monkeypatch.setattr(rt.tv, "LINEUP_CAP", 0.0)           # no lineup term: the shop also waives a lineup loss
     state, know, cpu, star = shop_league()
     give = _deal(state, know, star)
     shop = rs.Shop(cpu.id, star.player_id, WEEK, 0.10)
@@ -174,6 +175,23 @@ def test_the_discount_moves_his_price_for_the_user_by_exactly_the_discount():
 
     assert shopped.score - plain.score == pytest.approx(0.10 * price * bar, abs=0.05)
     assert shopped.value_give == plain.value_give and shopped.value_get == plain.value_get   # the chart never moves
+
+
+def test_a_shopped_starter_goes_for_an_equal_chart_one_for_one_at_a_position_he_can_use():
+    """Testers: "I'll probably say yes" shops refused offers near full value: the lineup loss cancelled the discount."""
+    state, know, cpu, star = shop_league()
+    user = rs.user_team(state)
+    shop = rs.Shop(cpu.id, star.player_id, WEEK, 0.05)
+    assert star.player_id in rv.starters(know, cpu.roster, SETTINGS)
+    same = sorted((know.by_id[pid] for pid in user.roster if know.by_id[pid].position == star.position
+                   and know.by_id[pid].chart >= star.chart), key=lambda v: v.chart)
+    give = (same[0].player_id,) if same else _deal(state, know, star)
+    with_shop = replace(state, shops=(shop,))
+
+    verdict = rt.evaluate(with_shop, SETTINGS, know, user.id, cpu.id, give, (star.player_id,))
+
+    assert know.by_id[give[0]].chart >= 0.97 * star.chart
+    assert verdict.accepted, verdict.reasons
 
 
 def test_the_discount_is_for_the_user_only_and_only_while_he_holds_the_player():
@@ -271,8 +289,9 @@ def test_a_shop_leaves_the_state_when_his_player_leaves_the_active_roster():
     assert rs.with_team(state, cpu).shops == state.shops
 
 
-def test_the_trade_eval_tally_counts_a_shop_discount_like_replay_trades():
+def test_the_trade_eval_tally_counts_a_shop_discount_like_replay_trades(monkeypatch):
     from services import replay_trade_eval as te
+    monkeypatch.setattr(rt.tv, "LINEUP_CAP", 0.0)           # no lineup term: the shop also waives a lineup loss
     state, know, cpu, star = shop_league()
     give, get = _deal(state, know, star), (star.player_id,)
     user = rs.user_team(state).id

@@ -1273,7 +1273,9 @@ that week's games on; only scoring a week reads its real points.
   tab, and for you only he asks a seeded 5-15% less for that player (panicky 9%, gambler 7%, balanced 6%,
   plus more the more worried he is). The discount is applied once, in the CPU's value test
   (`replay_trade_value.tally` via `replay_state.markdowns`), so evaluate, propose, counters and his own offer
-  all see it; it never moves the chart, and the re-trade lock stops you flipping the player. While the shop is
+  all see it; it never moves the chart, and the re-trade lock stops you flipping the player. A manager who
+  shops a starter has chosen to lose him, so a deal for him carries no lineup-loss cost for the CPU: an
+  equal-value one-for-one at a position he can use goes through. While the shop is
   open the player is yours to buy: no other CPU can trade for him, and the shopping CPU sends you his offer
   first, once per shop (decline it or let it expire and he doesn't send it again while that shop stays open,
   though you can still propose at the discount; other CPUs' offers come through as usual; if the shop closes
