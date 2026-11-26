@@ -62,9 +62,10 @@ OFFER_EDGE = {                 # (least, most) extra value a CPU gives in its ow
     "tilted": (0.06, 0.08), "haggler": (-0.15, -0.10),     # the haggler's opening lowball: 10-15% less
 }
 # A CPU's own offer to the user (want or shop) favours him on the chart with this chance, seeded per offer; else it
-# is close: CLOSE_EDGE (up to 4% short). The user's choice: "something like 50/50", generous styles more, sharks less.
-FAVOUR_SHARE = {"panicky": 0.65, "gambler": 0.6, "tilted": 0.6, "shark": 0.35}
-FAVOUR_DEFAULT = 0.5
+# is close: CLOSE_EDGE (up to 4% short). The user's choice: "something like 50/50", generous styles more, sharks less;
+# measured over 3 seasons x 6 seeds: 51% of non-haggler offers favour the user (shops 56%, want offers 45%).
+FAVOUR_SHARE = {"panicky": 0.65, "gambler": 0.65, "tilted": 0.65, "shark": 0.4}
+FAVOUR_DEFAULT = 0.55
 CLOSE_EDGE = (-0.04, 0.0)
 SHOP_EDGE = (0.0, 0.10)                 # a shop offer that favours the user: up to 10% more back
 HAGGLE_COUNTER_EDGE = (0.05, 0.07)      # the haggler's counter (and any counter of his): his normal edge

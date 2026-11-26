@@ -157,7 +157,9 @@ def _best_deal(state: State, settings: Settings, know: Knowledge, sender: Team, 
     found = _candidates(state, settings, know, sender, receiver, edge)
     for give, get in [deal for deal in found if (need is None or need in deal[1])
                       and (wanted is None or wanted in deal[0])][:scored]:
-        verdict = rt.evaluate(state, settings, know, sender.id, receiver.id, give, get, offered=want, counter=counter)
+        shop = lean is not None and not want            # judged as accept_verdict judges a shop: its own offer
+        verdict = rt.evaluate(state, settings, know, sender.id, receiver.id, give, get, offered=want or shop,
+                              counter=counter or shop)
         if (not verdict.accepted or (not sender.is_user and verdict.score < SEEK_SCORE)
                 or rt.cuts_an_arrival(verdict, give, get)):
             continue

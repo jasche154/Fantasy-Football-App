@@ -1202,11 +1202,12 @@ that week's games on; only scoring a week reads its real points.
   contender and a calm tilted manager 6-8%, panicky and gambler 8-10%; the haggler's opening offer is the
   exception, see below), judged as its own offer (`replay_trades.offer_multiple`) both when made and when you accept
   it; a shop's offer is priced as before, at the shop discount. How a CPU's own offer leans is drawn per offer
-  (`replay_personas.favours`, the user's "about 50/50"): with FAVOUR_SHARE (panicky 65%, gambler and tilted
-  60%, shark 35%, everyone else 50%) it favours you on the numbers the preview shows (a want offer by the edge
-  above, a shop offer by 0-10%), otherwise it comes close (up to 4% short); "a good deal, I promise" lines
-  only go with an offer that favours you. Measured over 3 seasons x 3 seeds: 40% of non-haggler offers favour
-  you and 96% of all offers are within 5% (before: 35%; every want offer favoured you, shop offers rarely did). After a deal each starting slot
+  (`replay_personas.favours`, the user's "about 50/50"): with FAVOUR_SHARE (panicky, gambler and tilted 65%,
+  shark 40%, everyone else 55%) it favours you on the numbers the preview shows (a want offer by the edge
+  above, a shop offer by 0-10%, judged at the same own-offer bar accepting it uses), otherwise it comes close
+  (up to 4% short); "a good deal, I promise" lines only go with an offer that favours you. Measured over 3
+  seasons x 6 seeds (135 non-haggler offers): 51% favour you (shops 56%, want offers 45%) and 98% of all offers
+  are within 5% (before this round: 35%; every want offer favoured you, shop offers rarely did). After a deal each starting slot
   the CPU can no longer fill needs a player it can add (unrostered, not out, not on waivers; in the waiver
   phase, when everyone unrostered is on waivers, anyone you haven't claimed), and it adds him
   (`replay_cover.cpu_cover`): right away, or in the waiver phase once waivers clear. Each CPU has a hidden **persona**
