@@ -163,25 +163,50 @@ class RulesBody(BaseModel):
                             le=max(replay_scoring.TURNOVERS), multiple_of=1)
 
 
-BLANK_LETTERS = frozenset("ᅟᅠㅤﾠ⠀")   # letters that display as nothing (Hangul fillers, Braille blank)
-ZWJ = "‍"                                                       # joins emoji: kept between two of them
+BLANK_LETTERS = frozenset("\u115f\u1160\u3164\uffa0\u2800")   # letters that display as nothing (Hangul fillers, Braille blank)
+BLANK_MARKS = frozenset("\u034f\u17b4\u17b5")                 # marks that display as nothing (grapheme joiner, Khmer)
+ZWJ = "\u200d"                                                 # joins two emoji: kept only between two of them
+EMOJI_RANGES = ((0x1F000, 0x1FFFF), (0x2300, 0x23FF), (0x2600, 0x27BF), (0x2B00, 0x2BFF))
 
 
 def _invisible(ch: str) -> bool:
     # Cc control, Cf format (bidi, zero-width), Cs surrogate, Co private use; not Cn: an emoji newer than this
     # runtime's Unicode data is unassigned to it, not invisible
-    return ch in BLANK_LETTERS or unicodedata.category(ch) in ("Cc", "Cf", "Cs", "Co", "Zl", "Zp")
+    return ch in BLANK_LETTERS or ch in BLANK_MARKS or unicodedata.category(ch) in ("Cc", "Cf", "Cs", "Co", "Zl", "Zp")
+
+
+def _emoji(ch: str | None) -> bool:
+    return ch is not None and any(low <= ord(ch) <= high for low, high in EMOJI_RANGES)
+
+
+def _selector(ch: str) -> bool:
+    return 0xFE00 <= ord(ch) <= 0xFE0F or 0xE0100 <= ord(ch) <= 0xE01EF
 
 
 def clean_name(name: str | None) -> str | None:
-    """A league name without control, format (bidi overrides, zero-width), line or paragraph separators or blank
-    letters, keeping a zero-width joiner between two emoji. Blank afterwards: the default name is used."""
+    """A league name without control, format (bidi overrides, zero-width), line or paragraph separators, blank
+    letters or marks with nothing to sit on: a zero-width joiner stays only between two emoji (never beside another
+    joiner), a variation selector only after an emoji, another combining mark only after a visible character.
+    Blank afterwards: the default name is used."""
     if name is None:
         return None
-    kept = [ch for ch in name if ch == ZWJ or not _invisible(ch)]
-    joined = [ch for n, ch in enumerate(kept) if ch != ZWJ or (
-        0 < n < len(kept) - 1 and ord(kept[n - 1]) > 0x2000 and ord(kept[n + 1]) > 0x2000)]
-    return "".join(joined).strip()
+    kept: list[str] = []
+    for n, ch in enumerate(name):
+        before, after = (kept[-1] if kept else None), (name[n + 1] if n + 1 < len(name) else None)
+        if ch == ZWJ:                                   # the emoji before may carry a selector (the rainbow flag)
+            base = next((c for c in reversed(kept) if not _selector(c)), None)
+            keep = (n == 0 or name[n - 1] != ZWJ) and _emoji(base) and _emoji(after)   # never a run of joiners
+        elif _invisible(ch):
+            keep = False
+        elif _selector(ch):
+            keep = _emoji(before)
+        elif unicodedata.category(ch) in ("Mn", "Me"):
+            keep = before is not None and not before.isspace() and before != ZWJ
+        else:
+            keep = True
+        if keep:
+            kept.append(ch)
+    return "".join(kept).strip()
 
 
 class CreateBody(BaseModel):

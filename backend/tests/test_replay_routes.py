@@ -932,3 +932,18 @@ def test_a_nan_nested_in_a_list_is_echoed_as_text_in_a_422(client):
 
     assert response.status_code == 422
     assert _safe([1, [float("nan"), float("inf")]]) == [1, ["nan", "inf"]]
+
+
+@pytest.mark.parametrize("raw, cleaned", [
+    ("‍‍‍", ""),                                               # joiners only: blank
+    ("\U0001F468‍‍\U0001F469", "\U0001F468\U0001F469"),             # a double joiner breaks the pair
+    ("️︎͏឴", ""),                                         # selectors and blank marks only
+    ("Team \U0001F468‍\U0001F469‍\U0001F467", "Team \U0001F468‍\U0001F469‍\U0001F467"),
+    ("\U0001F3F3️‍\U0001F308 Flags", "\U0001F3F3️‍\U0001F308 Flags"),   # selector then joiner
+    ("一‍二", "一二"),                                   # no joiner between CJK
+    ("Café", "Café"),                                             # a real combining accent stays
+])
+def test_a_league_name_keeps_joiners_and_selectors_only_inside_emoji(raw, cleaned):
+    from api.replay_routes import clean_name
+
+    assert clean_name(raw) == cleaned
