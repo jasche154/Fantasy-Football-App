@@ -256,7 +256,7 @@ def _propose(state: State, settings: Settings, data: SeasonData, seed: int, to_t
         return replay_waiver_ai.cpu_cover(state, settings, know, [to_team]), verdict, None
     if len(state.offers) == before:                 # the same proposal was already declined this week: same reply
         same = next((o for o in reversed(state.offers) if o.status == "declined" and o.to_team == to_team
-                     and (o.give, o.get) == (tuple(give), tuple(get)) and o.week == state.week), None)
+                     and replay_trades.same_players(o, give, get) and o.week == state.week), None)
         return state, replace(verdict, reply=same.reply if same else None), None
     state = replay_chat.decline_reply(state, know, seed, state.offers[-1].id, verdict)
     declined = state.offers[-1]

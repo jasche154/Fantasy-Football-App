@@ -351,8 +351,13 @@ def propose(state: State, settings: Settings, know: Knowledge, to_team: int, giv
         return _apply(state, settings, know, user.id, to_team, give, get, verdict, counter_to=counter_to), verdict
     asked = counter_to is None and any(
         o.week == state.week and o.status == "declined" and (o.from_team, o.to_team) == (user.id, to_team)
-        and (o.give, o.get) == (give, get) for o in state.offers)
+        and same_players(o, give, get) for o in state.offers)
     return (state if asked else record_offer(state, user.id, to_team, give, get, "declined", counter_to)), verdict
+
+
+def same_players(offer: Offer, give: Sequence[int], get: Sequence[int]) -> bool:
+    """The offer moves these players (as sets: re-sending a proposal in another order is the same proposal)."""
+    return (set(offer.give), set(offer.get)) == (set(give), set(get))
 
 
 def offers_for_user(state: State) -> tuple[Offer, ...]:

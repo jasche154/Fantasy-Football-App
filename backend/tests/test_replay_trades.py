@@ -212,6 +212,16 @@ def test_asking_again_gives_the_same_verdict_and_a_declined_proposal_is_kept_onc
     assert declined.teams == state.teams and declined.events == () and again is declined
 
 
+def test_a_declined_proposal_resent_in_another_order_is_kept_once():
+    state, know = league()
+    give, get = [SCRUB, SCRUB3], list(rs.team(state, RICH).roster[:2])
+
+    declined, _ = rt.propose(state, SETTINGS, know, RICH, give, get)
+    again, _ = rt.propose(declined, SETTINGS, know, RICH, give[::-1], get[::-1])
+
+    assert len(declined.offers) == 1 and again is declined
+
+
 def test_kickers_and_defenses_count_for_little_and_cannot_balance_a_lopsided_deal():
     plain = judge(RICH, [SCRUB3], [P("WR", 11)])
     padded = judge(RICH, [SCRUB3, P("K", 5), P("DST", 8)], [P("WR", 11)])
