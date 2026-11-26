@@ -332,8 +332,10 @@ def week_of(game: Game, week: int | None) -> int:
     league that jumped in) one before its start_week."""
     current = game.state.week
     chosen = current if week is None else week
-    if not min(game.settings.start_week, current) <= chosen <= current:
-        raise ValueError(f"Week {chosen} can't be shown: this league is in week {current}.")
+    first = min(game.settings.start_week, current)
+    if not first <= chosen <= current:
+        raise ValueError(f"Week {chosen} can't be shown: pick a week from {first} to {current}."
+                         if first < current else f"Week {chosen} can't be shown: this league is in week {current}.")
     return chosen
 
 

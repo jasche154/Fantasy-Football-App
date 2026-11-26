@@ -777,3 +777,12 @@ def test_a_suggestion_never_names_the_users_only_healthy_starter_at_a_position(m
 
     assert know.by_id[qb].name in (before.suggestion or "")
     assert know.by_id[qb].name not in (now.suggestion or "")
+
+
+def test_after_the_deadline_a_blocked_user_is_told_about_the_deadline_not_his_ir():
+    state, know = league()
+    late = replace(on_ir(state, USER, SCRUB), week=SETTINGS.trade_deadline_week + 1)
+    late_know = league(SETTINGS.trade_deadline_week + 1)[1]
+
+    with pytest.raises(ValueError, match="^The trade deadline has passed"):
+        rt.propose(late, SETTINGS, late_know, *FAIR)

@@ -121,7 +121,7 @@ def mood_line(know: Knowledge, team: Team, persona: str | None = None, fresh: Co
     high = next((f for f in felt if f.kind == "high"), None)
     parts = [f"{label} {know.by_id[f.player_id].name}." for label, f in (("Worried about", worried),
                                                                          ("High on", high)) if f is not None]
-    return " ".join(parts) or None
+    return rs.tidy(" ".join(parts)) or None
 
 
 def moods_known(week: int) -> bool:

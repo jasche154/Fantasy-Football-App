@@ -8,13 +8,14 @@ build_locks.key_lock, whose bounded dict can hand two requests different locks f
 import logging
 import secrets
 import threading
+import unicodedata
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from api.deps import DbId, Scoring
@@ -162,9 +163,21 @@ class RulesBody(BaseModel):
                             le=max(replay_scoring.TURNOVERS), multiple_of=1)
 
 
+def clean_name(name: str | None) -> str | None:
+    """A league name without control, format (bidi overrides, zero-width) or other invisible characters."""
+    if name is None:
+        return None
+    return "".join(ch for ch in name if not unicodedata.category(ch).startswith("C")).strip()
+
+
 class CreateBody(BaseModel):
     season: int | Literal["random"]
     name: str | None = Field(None, max_length=MAX_NAME_LENGTH)
+
+    @field_validator("name")
+    @classmethod
+    def _visible(cls, name: str | None) -> str | None:
+        return clean_name(name)
     teams: int = Field(12, ge=min(rs.VALID_TEAMS), le=max(rs.VALID_TEAMS))
     playoff_end_week: Literal[16, 17, 18] = 17            # the championship week
     playoff_teams: int | None = Field(None, ge=rs.PLAYOFF_TEAMS_RANGE[0], le=rs.PLAYOFF_TEAMS_RANGE[1])  # None: default

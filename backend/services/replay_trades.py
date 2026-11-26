@@ -115,13 +115,18 @@ def _chart(know: Knowledge, player_ids: Sequence[int], just_added: frozenset[int
     return sum(tv.chart(know, pid, just_added) for pid in player_ids)
 
 
-def _check(state: State, settings: Settings, know: Knowledge, from_team: int, to_team: int,
-           give: tuple[int, ...], get: tuple[int, ...]) -> tuple[Team, Team]:
-    """(sender, receiver), or ValueError when this cannot be a trade at all."""
+def trading(state: State, settings: Settings) -> None:
+    """ValueError unless trades are open now (checked before anything else, so the deadline is the reason given)."""
     if state.phase not in TRADE_PHASES:
         raise ValueError("Trades are open from the end of the draft to the end of the season.")
     if not rs.trades_open(state, settings):
         raise ValueError(f"The trade deadline has passed: no trades after week {settings.trade_deadline_week}.")
+
+
+def _check(state: State, settings: Settings, know: Knowledge, from_team: int, to_team: int,
+           give: tuple[int, ...], get: tuple[int, ...]) -> tuple[Team, Team]:
+    """(sender, receiver), or ValueError when this cannot be a trade at all."""
+    trading(state, settings)
     if know.week != state.week:
         raise ValueError(f"These player values are for week {know.week}, but the league is in week {state.week}.")
     sender, receiver = rs.team(state, from_team), rs.team(state, to_team)
@@ -282,7 +287,7 @@ def evaluate(state: State, settings: Settings, know: Knowledge, from_team: int, 
                if reasons and explain else (None, None, None))
     scores = [side.tally.score for side in (mine, theirs) if side.tally is not None]
     return Verdict(
-        accepted=not reasons, reasons=tuple(reasons), value_give=value_give, value_get=value_get,
+        accepted=not reasons, reasons=tuple(rs.tidy(reason) for reason in reasons), value_give=value_give, value_get=value_get,
         percent=trade.percent_difference(value_give, value_get), their_gain=theirs.gain, your_gain=mine.gain,
         their_drops=theirs.drops or (), fair_label=fair_label(value_give, value_get),
         your_drops=mine.drops or (),
@@ -352,6 +357,7 @@ def propose(state: State, settings: Settings, know: Knowledge, to_team: int, giv
     with status "declined" (once per identical proposal per week). With `counter_to` (a pending CPU offer from
     to_team) it is a counter: that offer becomes "countered" and the new Offer carries counter_to."""
     user, give, get = rs.user_team(state), tuple(give), tuple(get)
+    trading(state, settings)
     replay_ir.require_unblocked(state, know, user.id)
     verdict = evaluate(state, settings, know, user.id, to_team, give, get, user_drops, explain=True)
     if counter_to is not None:
@@ -404,6 +410,7 @@ def respond(state: State, settings: Settings, know: Knowledge, offer_id: int, ac
         raise ValueError(f"That offer is already {offer.status}.")
     if not accept:
         return _with_status(state, offer_id, "declined")
+    trading(state, settings)
     replay_ir.require_unblocked(state, know, user.id)              # B1: the offer stays pending
     expired = _with_status(state, offer_id, "expired")
     deal = (user.id, offer.from_team, offer.get, offer.give)        # mirrored: the user is the proposer

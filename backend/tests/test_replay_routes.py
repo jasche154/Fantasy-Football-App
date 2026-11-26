@@ -853,3 +853,29 @@ def test_a_nan_or_infinity_in_a_body_is_a_422_that_says_so(client, raw):
 
     assert response.status_code == 422
     assert any(error["msg"] == "Input should be a finite number" for error in response.json()["detail"])
+
+
+def test_a_league_name_loses_control_bidi_and_zero_width_characters(client):
+    name = "Bad\x00 Bell\x07 ‮Kings​"
+
+    created = post(client, "/games", {"season": SEASON, "seed": 3, "name": name})
+
+    assert created["game"]["name"] == "Bad Bell Kings"
+
+
+def test_roster_moves_and_weeks_out_of_range_say_what_is_wrong(client):
+    game = "/games/%d" % post(client, "/games", {"season": SEASON, "seed": 3})["game"]["id"]
+    one = get(client, game + "/players", limit=1)["results"][0]["player"]["id"]
+
+    claim = refused(client, game + "/claims", {"add": one})
+    add = refused(client, game + "/add-drop", {"add": one})
+
+    assert claim == add == (422, "Waiver claims and free-agent adds open once the draft is over.")
+
+
+def test_a_matchup_for_week_zero_names_the_weeks_that_can_be_shown(client):
+    game = "/games/%d" % post(client, "/games", {"season": SEASON, "seed": 3})["game"]["id"]
+    post(client, game + "/draft/auto", whole_draft="true")
+    post(client, game + "/advance", {"step": "play", "week": 1})
+
+    assert refused(client, game + "/matchup", method="GET", week=0) == (422, "Week 0 can't be shown: pick a week from 1 to 2.")

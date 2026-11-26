@@ -133,6 +133,7 @@ def post(state: State, team: Team, kind: str, values: Mapping[str, object], seed
             used[chat.line] += 1
     order = rs.rng(seed, "chat-line", len(state.chat), team.id, kind).permutation(len(lines))
     line, text = _render(lines, used, kind, values, order)
+    text = rs.tidy(text)
     chat = Chat(id=len(state.chat) + 1, week=state.week if week is None else week, team_id=team.id, to_team=to_team,
                 kind=kind, text=text, player_ids=tuple(player_ids), line=line)
     return replace(state, chat=(*state.chat, chat))
