@@ -432,7 +432,9 @@ def _future_base(session: Session, season: int, settings: Settings, seed: int = 
         _NO_DRAFT_LOGGED.add(season)
         log.info("No cached nflverse draft QBs for %s: a depth-chart QB with no stats on a team with a seeded rookie "
                  "QB is taken for that rookie", season)
-    base = sim_depth.with_real_qbs(base, qb_rooms(session), 1, moved, rookies=set(inputs.picks), seen=set(data.players),
+    # with the real class cached, `rookies` already leaves the draftee out: a real backup with no stats stays
+    base = sim_depth.with_real_qbs(base, qb_rooms(session), 1, moved, rookies=set(inputs.picks),
+                                   seen=None if inputs.picks else set(data.players),
                                    rookie_teams={r.team for r in drafted.values() if r.position == "QB"})
     scores = [(g.week, g.home_team, g.away_team, g.home_score, g.away_score) for g in played if g.is_final]
     return Future(base, belief, drawn, qbs,

@@ -206,10 +206,15 @@ def test_a_job_danger_hint_comes_the_week_before_the_benching_it_foretells(data,
         foretold += danger and bool(changes)
         benched_unwarned += (not danger) and bool(changes)
     assert warned > 10 and foretold == warned and benched_unwarned == 0
+    hinted = 0
     for seed in range(100):                                  # review item 1: nobody healthy to take over, no danger
+        held = _jobs()
+        sim_qb_jobs.decide(held, _world(), data.as_of(WEEK), WEEK, set(), {}, seed)
+        hinted += bool(held.in_danger)
         held = _jobs()
         sim_qb_jobs.decide(held, _world(), data.as_of(WEEK), WEEK, {B}, {}, seed)
         assert not held.in_danger
+    assert hinted                                            # the same seeds do warn when B is healthy
 
 
 def test_a_hurt_holder_sits_then_gets_the_job_back_unless_a_weak_one_loses_it(data, monkeypatch):
