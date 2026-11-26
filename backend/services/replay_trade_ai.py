@@ -125,20 +125,23 @@ def _candidates(state: State, settings: Settings, know: Knowledge, sender: Team,
     theirs = _packages(know, _tradable(state, know, receiver, look(receiver, sender), shopped), just_added)
     edge = sum(want) / 2 if want else 0.0
     swaps = receiver.persona == "dealer" or sender.persona == "dealer"
+    # a fan's rival is checked once per package, not once per pair (the search's hot loop)
+    theirs = [get for get in theirs if not _hated(know, sender, get[1])]
+    guard, to_user, room = tv.MARKET_GUARD, sender.is_user, settings.roster_size - len(sender.roster)
     found = []
     for give in mine:
         if _hated(know, receiver, give[1]):
             continue
         for get in theirs:
-            if give[0] < tv.MARKET_GUARD * get[0] or _hated(know, sender, get[1]):    # the receiving CPU's guard
+            if give[0] < guard * get[0]:                                              # the receiving CPU's guard
                 continue
-            if sender.is_user:
-                fits = len(sender.roster) - len(give[1]) + len(get[1]) <= settings.roster_size
+            if to_user:
+                fits = len(get[1]) - len(give[1]) <= room
                 looks_right = (generous(want, give[0], get[0], EDGE_SLACK) if want
                                else fair_for_user(settings, know, give[0], get[0]))
                 if not fits or not looks_right:
                     continue
-            elif get[0] < tv.MARKET_GUARD * give[0]:
+            elif get[0] < guard * give[0]:
                 continue
             size = len(give[1]) + len(get[1])
             found.append((swaps and size != 4, abs(give[0] * (1 + edge) - get[0]), size, give[1], get[1]))
