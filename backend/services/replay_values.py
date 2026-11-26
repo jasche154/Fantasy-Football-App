@@ -213,31 +213,44 @@ class _Base:
     parts: replay_chart.Parts                       # what replay_chart.with_news needs, hard-tagged players only
     replacement: Mapping[str, float]
     source: str
+    live: Mapping[int, float]                       # healthy chart before the freeze, frozen players only
 
 
 def _absences(data: SeasonData, week: int) -> dict[int, int]:
-    """{player: the last week before his open injury absence} for every player hard-tagged at some week up to
-    `week` since his last real game (0 = preseason: hurt before week 1); `data` is as of `week`."""
-    last: dict[int, int] = defaultdict(int)
-    for pid, played in data.actual:
-        last[pid] = max(last[pid], played)
-    starts: dict[int, int] = {}
-    for (pid, tagged), tag in data.injuries.items():
-        if tag.hard and last[pid] < tagged <= week:
-            starts[pid] = min(tagged, starts.get(pid, tagged))
-    return {pid: start - 1 for pid, start in starts.items()}
+    """{player: the last week before his open injury absence} (0 = preseason: hurt before week 1); `data` is as
+    of `week`. An absence starts with a hard tag and ends at the first earlier week he was available for a game:
+    he played, or his team played and he carried no hard tag (a healthy scratch or a backup with no stat line
+    is back too, so nobody stays frozen by never recording a stat again)."""
+    tagged: dict[int, set[int]] = defaultdict(set)
+    for (pid, w), tag in data.injuries.items():
+        if tag.hard and w <= week:
+            tagged[pid].add(w)
+    found: dict[int, int] = {}
+    for pid, weeks in tagged.items():
+        start = None
+        for w in range(min(weeks), week + 1):
+            if w in weeks and start is None:
+                start = w
+            if w < week and ((pid, w) in data.actual or (w not in weeks and data.schedule.opponent(
+                    data.team_at(pid, w), w) is not None)):
+                start = None                                # available that week: the absence is over
+        if start is not None:
+            found[pid] = start - 1
+    return found
 
 
 def _frozen(data: SeasonData, league: LeagueSettings, week: int, end_week: int, drafted: int) -> dict[int, float]:
-    """{player: healthy chart} frozen at the last week before his open injury absence, until he has played a
-    game since: the expert and model ranks of a hurt player fall while he is out (the experts price the
+    """{player: healthy chart, without the bye bump} frozen at the last week before his open injury absence, until
+    he is available for a game again (`_absences`): the expert and model ranks of a hurt player fall while he is out (the experts price the
     injury), and the chart's discount (replay_chart_injury) is the one price of it. Point in time: the frozen
     week's values are built from data.as_of(that week). A player listed nowhere that week keeps his live value."""
     found: dict[int, float] = {}
     for pid, before in _absences(data, week).items():
-        row = _base(data.as_of(before), league, before, end_week, min(drafted, before)).rows.get(pid)
-        if row is not None:
-            found[pid] = row["healthy_chart"]
+        base = _base(data.as_of(before), league, before, end_week, min(drafted, before))
+        if pid in base.rows:                        # back that week from an earlier absence: his live value then
+            row = base.rows[pid]
+            bumped = replay_chart._bye_done(data, row["team"], before)     # replay_chart re-applies today's bump
+            found[pid] = base.live.get(pid, row["healthy_chart"]) / (replay_chart.BYE_BUMP if bumped else 1.0)
     return found
 
 
@@ -259,12 +272,13 @@ def _base(data: SeasonData, league: LeagueSettings, week: int, end_week: int, dr
     two_qb = replay_slots.two_qb(league.starters)
     chart_data = replay_chart.superflex_view(data) if two_qb else regular        # QBs go where 2-QB drafts take them
     frozen = _frozen(data, league, week, end_week, drafted)
+    live: dict[int, float] = {}
     charts, parts, source = replay_chart.base_charts(chart_data, rows, priors, week, end_week, drafted,
-                                                     regular if two_qb else None, frozen)
+                                                     regular if two_qb else None, frozen, live)
     rows = [{**row, **charts[row["player_id"]]} for row in rows]
     replacement = replacement_levels(((r["position"], r["ros_ppg"]) for r in rows if r["position"] in SKILL), league)
     return _Base(MappingProxyType({r["player_id"]: _valued(r, replacement) for r in rows}), chart_data, parts,
-                 MappingProxyType(replacement), source)
+                 MappingProxyType(replacement), source, MappingProxyType(live))
 
 
 @lru_cache(maxsize=32)

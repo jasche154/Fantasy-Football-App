@@ -22,7 +22,7 @@ from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from threading import Lock
 from types import MappingProxyType
-from weakref import WeakKeyDictionary
+from weakref import WeakKeyDictionary, ref
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
@@ -132,7 +132,8 @@ class SeasonData:
             raise ValueError(f"Week {week} is not a valid week.")
         if self.known_before is not None and self.known_before <= week:
             return self                                       # already holds no more than that
-        return _as_of(_SOURCE.get(self, self), week)          # a copy's copy is the season's own copy
+        source = _SOURCE.get(self)                            # a copy's copy is the season's own copy
+        return _as_of((source and source()) or self, week)
 
     def team_at(self, player_id: int, week: int) -> str | None:
         """His team as known before `week`: the team of his last game before it, else of his first game of
@@ -168,7 +169,7 @@ def _preseason(key: PlayerWeek, tag: Injury, week: int) -> bool:
     return week == 0 and key[1] == 1 and tag.tag in PRESEASON_TAGS
 
 
-_SOURCE: WeakKeyDictionary = WeakKeyDictionary()       # as_of copy -> the season it was cut from
+_SOURCE: WeakKeyDictionary = WeakKeyDictionary()       # as_of copy -> weak ref to the season it was cut from
 
 
 @lru_cache(maxsize=256)
@@ -192,7 +193,7 @@ def _as_of(data: SeasonData, week: int) -> SeasonData:
         expert_ranks=MappingProxyType({key: v for key, v in data.expert_ranks.items() if key[1] <= week}),
         expert_age=MappingProxyType({w: v for w, v in data.expert_age.items() if w <= week}),
         returns=MappingProxyType({key: v for key, v in data.returns.items() if key[1] <= week}))
-    _SOURCE[copy] = data
+    _SOURCE[copy] = ref(data)
     return copy
 
 
@@ -218,6 +219,7 @@ def clear_cache() -> None:
     with _cache_lock:
         _cache.clear()
     _as_of.cache_clear()
+    _SOURCE.clear()
     replay_defense.ratings.cache_clear()
     for hook in CLEAR_HOOKS:
         hook()
@@ -226,6 +228,7 @@ def clear_cache() -> None:
 def free_dependents() -> None:
     """Empty every cache keyed on a SeasonData: call when a season is dropped, or they would keep it alive."""
     _as_of.cache_clear()
+    _SOURCE.clear()
     replay_defense.ratings.cache_clear()
     for hook in EVICT_HOOKS:
         hook()
