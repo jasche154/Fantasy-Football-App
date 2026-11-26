@@ -27,8 +27,9 @@ bye is behind him.
   ros_ppg (the sites' slow consensus) stand in at EXPERT_WEIGHT from week 1 (STAND_IN_EXPERTS): the model
   alone swung QBs 124 -> 495 -> 633 in three weeks; this halves the weekly moves and ranks no worse.
 - chart: healthy_chart x (1 - replay_chart_injury.discount(games he misses, games left)): with a news report
-  (replay_news) the games before the reported return (0 if out for the season; from his second week out only
-  the model half is discounted, the experts already price it); out without one, unreported_discount. The
+  (replay_news) the games before the reported return (a season-ending report, or a return after the league's
+  last week, keeps replay_chart_injury.SEASON_REPORT_KEEP); out without one, unreported_discount. The whole
+  chart is discounted: while he is out it is his frozen pre-absence value (replay_values._frozen). The
   discount follows the user's targets (out 1-4 weeks 5-12% off, 6+ weeks 35-45%), not the share of games
   missed: availability and expected_missed (lineups, waivers) stay the real expected games.
 
