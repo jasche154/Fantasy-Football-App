@@ -133,8 +133,11 @@ def test_close_and_low_scoring_games_get_the_window_and_overtime_their_cut_margi
     rows, ties = cm._tables()
     points = np.array([points_of(dict(zip(stored()["events"], row))) for row in rows])
     index = np.clip(margins, -cm.SPAN, cm.SPAN) + cm.SPAN
-    assert points[index].mean() == pytest.approx(ends[0].window, abs=0.03)        # home leads by the margin
-    assert points[2 * cm.SPAN - index].mean() == pytest.approx(ends[1].window, abs=0.03)
+    # 0.04 at 10-13: that game's cut margin spreads 7% less than cut_sd (test_sim_closing's cut spread test: the
+    # fixture's low scorers kick more than real ones at the same points), which moves the trailer's window by 0.035
+    tolerance = 0.04 if sum(wanted) < 30 else 0.03
+    assert points[index].mean() == pytest.approx(ends[0].window, abs=tolerance)        # home leads by the margin
+    assert points[2 * cm.SPAN - index].mean() == pytest.approx(ends[1].window, abs=tolerance)
     assert cm.tie_chance(ends[0].lead, ends[0].sd) == pytest.approx(ties[index].mean(), rel=0.3)
 
 

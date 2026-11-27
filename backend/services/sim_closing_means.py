@@ -62,10 +62,10 @@ class Ending:
         return tie_chance(self.lead, self.sd) * (1.0 - float(sim_closing.ot()["tie"])) * self.share
 
 
-def cut_sd(total: float) -> float:
+def cut_sd(pre_a: float, pre_b: float) -> float:
     """The spread of a game's margin at the cut, from its two sides' expected points before the cut."""
     a, b = sim_closing.stored()["cut_var"]
-    return math.sqrt(a * max(1.0, total) ** b)
+    return math.sqrt(a * (max(1.0, pre_a) ** b + max(1.0, pre_b) ** b))
 
 
 @lru_cache(maxsize=1)
@@ -139,7 +139,7 @@ def regulation(a: float, b: float, floor: float = 1.0) -> tuple[float, float, En
 
 def endings(pre_a: float, pre_b: float) -> tuple[Ending, Ending]:
     """Both sides' Endings from their mean points before the cut."""
-    s, share = cut_sd(pre_a + pre_b), pre_a / (pre_a + pre_b) if pre_a + pre_b > 0 else 0.5
+    s, share = cut_sd(pre_a, pre_b), pre_a / (pre_a + pre_b) if pre_a + pre_b > 0 else 0.5
     return Ending(pre_a - pre_b, s, share), Ending(pre_b - pre_a, s, 1.0 - share)
 
 

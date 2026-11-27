@@ -16,7 +16,8 @@ sim_closing plays the last WINDOW seconds of regulation from the score with what
   leader runs and kneels, the trailer throws (sim_script).
 - `ot`: overtime from the same play-by-play: the share of overtimes that end tied, the share of decided ones the
   winner ends with a field goal, and the mean yards of an overtime-winning TD play by a catch and by a run.
-- `cut_var`: the spread of a simulated game's margin at the cut as a x its expected points before the cut ^ b
+- `cut_var`: the spread of a simulated game's margin at the cut, a x (pa ^ b + pb ^ b) of its two sides' expected
+  points before the cut
   (`cut_spread`, measured on the simulator's own draws, CUT_SEASON's belief; re-measure when the draw changes);
 - `check`: leave-season-out, each season's real cut scores played forward with the other seasons' table, against
   that season's real end of regulation (shares of margins 1-3, 3, 7, 4-8 and ties).
@@ -59,7 +60,7 @@ TRIES = ("xp", "xp_miss", "two")
 CUT_SEASON, CUT_WEEK, CUT_GAMES = 2024, 9, 3          # the belief the cut margin's spread is measured on
 CUT_TARGETS = ((10, 13), (14, 10), (17, 17), (24, 20), (28, 28), (31, 13), (38, 10), (21, 21), (35, 30))
 CUT_DRAWS = 1500
-CUT_VAR_START = (11.7, 0.69)     # stored until `write` measures it, when the file has none
+CUT_VAR_START = (12.0, 0.6)      # stored until `write` measures it, when the file has none
 MAX_MARGIN = 16                  # margins above this share one row set (a two-score-plus lead plays alike)
 SEASONS = range(2018, 2026)
 SHUFFLE_SEED = 7                 # the random order of a tied game's two teams (reproducible fits)
@@ -235,7 +236,9 @@ def line_script(session, seasons: Iterable[int]) -> dict[str, float]:
 
 
 def cut_spread(world, games: Iterable[tuple[str, str]], draws: int = CUT_DRAWS, seed: int = 0) -> list[float]:
-    """[a, b] of the cut margin's variance a x (the two sides' expected points before the cut) ^ b, least squares on logs over
+    """[a, b] of the cut margin's variance a x (pa ^ b + pb ^ b), pa and pb the two sides' expected points before the
+    cut (each side's points spread with its own; a lopsided game's margin spreads less than an even one's at the same
+    total), fitted on logs (b on a grid, a its best then) over
     `games` ((home, away) under `world`) at each of CUT_TARGETS: the margin at the cut (sim_draw.draw_game's
     until_cut) around its expected value, over `draws` draws each (sim_closing_means.cut_sd reads it)."""
     from services.scoring import scoring_for
@@ -251,10 +254,20 @@ def cut_spread(world, games: Iterable[tuple[str, str]], draws: int = CUT_DRAWS, 
             before = (_mean_points(m[home], m[away]), _mean_points(m[away], m[home]))
             cuts = np.array([draw_game((sides[home], sides[away]), rng, scoring_for("half"), until_cut=True)
                              for _ in range(draws)], dtype=float)
-            rows.append((sum(before), float(np.var(cuts[:, 0] - cuts[:, 1] - (before[0] - before[1])))))
-    totals, variances = np.array(rows).T
-    b, log_a = np.polyfit(np.log(totals), np.log(variances), 1)
-    return [round(float(np.exp(log_a)), 3), round(float(b), 4)]
+            rows.append((*before, float(np.var(cuts[:, 0] - cuts[:, 1] - (before[0] - before[1])))))
+    return fit_cut_var(np.array(rows))
+
+
+def fit_cut_var(rows: np.ndarray) -> list[float]:
+    """[a, b] of var = a x (pa ^ b + pb ^ b) over rows of (pa, pb, variance), least squares on logs."""
+    pa, pb, var = (np.maximum(rows[:, j], 1.0) for j in range(3))
+
+    def misfit(b: float) -> tuple[float, float]:
+        shape = np.log(pa ** b + pb ** b)
+        log_a = float(np.mean(np.log(var) - shape))
+        return float(np.sum((np.log(var) - shape - log_a) ** 2)), log_a
+    best = min(np.arange(0.2, 1.5001, 0.005), key=lambda b: misfit(b)[0])
+    return [round(float(np.exp(misfit(best)[1])), 3), round(float(best), 4)]
 
 
 def _cut_var(session) -> list[float]:
@@ -351,7 +364,7 @@ def main(argv: list[str] | None = None) -> None:
     log.info("%d games, window %ds", result["games"], result["window"])
     log.info("overtime %s", result["ot"])
     log.info("volume per point of expected margin %s", result["line_script"])
-    log.info("cut margin variance%s = %s x (expected points before the cut) ^ %s",
+    log.info("cut margin variance%s = %s x (pa ^ %s + pb ^ b), pa / pb a side's expected points before the cut",
              "" if args.fit else " (stored, not re-measured)", *result["cut_var"])
     for name, row in result["check"].items():
         log.info("%-15s %s", name, "  ".join(f"{k} {100 * v:.1f}%" for k, v in row.items()))

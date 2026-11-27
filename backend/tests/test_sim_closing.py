@@ -53,7 +53,8 @@ def test_a_trailer_scores_more_in_the_window_than_a_leader_and_close_games_tie_m
     tie = sim_closing_means.tie_chance
     assert tie(0, 8.0) > tie(0, 11.0) > tie(7, 11.0) > tie(20, 11.0) > 0
     assert tie(3, 11.0) == tie(-3, 11.0)
-    assert sim_closing_means.cut_sd(14.0) < sim_closing_means.cut_sd(36.0) < sim_closing_means.cut_sd(56.0)
+    assert sim_closing_means.cut_sd(7.0, 7.0) < sim_closing_means.cut_sd(18.0, 18.0) < sim_closing_means.cut_sd(28.0, 28.0)
+    assert sim_closing_means.cut_sd(32.0, 4.0) < sim_closing_means.cut_sd(18.0, 18.0)          # a lopsided game spreads less
 
 
 def test_the_draw_before_the_cut_plus_window_and_overtime_average_the_wanted_points():
@@ -218,7 +219,11 @@ def test_the_cut_margins_spread_matches_the_measured_one(wanted):
     before = (sim_game._mean_points(m[home], m[away]), sim_game._mean_points(m[away], m[home]))
     rng = np.random.default_rng(6)
     cuts = np.array([sim_draw.draw_game((sides[home], sides[away]), rng, HALF, until_cut=True) for _ in range(1500)])
-    assert np.std(cuts[:, 0] - cuts[:, 1]) == pytest.approx(sim_closing_means.cut_sd(sum(before)), rel=0.06)       # the sd of 1,500 draws: se about 1.8%
+    # the sd of 1,500 draws: se about 1.8%. The fixture's 10-13 game makes its points with more field goals than a
+    # real one at the same points (0.58 tries for 0.41 TDs against 0.44 for 0.47), so it spreads about 7% less than
+    # cut_sd, which reads only the points (5% on main's straight-line spread)
+    tolerance = 0.08 if sum(wanted) < 30 else 0.06
+    assert np.std(cuts[:, 0] - cuts[:, 1]) == pytest.approx(sim_closing_means.cut_sd(*before), rel=tolerance)
 
 
 def test_an_overtime_that_ends_tied_without_a_score_still_counts():
