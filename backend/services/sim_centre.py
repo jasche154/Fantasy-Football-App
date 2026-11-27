@@ -159,10 +159,10 @@ def centred(sides: dict, target: Mapping[str, float] | None = None, shift: Mappi
     week, whose pass / run mix it plays with (sim_calendar; None: the season's average)."""
     if len(sides) == 2 and not target and not shift and not factors:
         shift = {team: 0.0 for team in sides}
-    if not target and not shift and not factors:
-        return sides
     if week is not None:
         sides = {team: _in_week(side, week) for team, side in sides.items()}
+    if not target and not shift and not factors:
+        return sides
     from services import sim_closing_means
     from services.sim_game import _side_means
     from services.sim_lines import yards_power

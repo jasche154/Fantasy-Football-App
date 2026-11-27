@@ -298,8 +298,7 @@ def test_projections_follow_the_line_only_partly(belief, monkeypatch):
     home, away, scoring = game.home_team, game.away_team, sim_world.scoring_of(fakes.fake_season())
     line = {home: sim_lines.Line(margin=10.0, total=50.0)}
     full = sim_game.expected(belief, home, away, set(), scoring, target={home: 30.0, away: 20.0}, week=9)
-    typical = sim_game.expected(belief, home, away, set(), scoring, week=9, target={
-        team: sim_market.typical_points(belief, team, set()) for team in (home, away)})
+    typical = sim_game.expected(belief, home, None, set(), scoring, week=9)   # its own points, no matchup, no line
     monkeypatch.setitem(sim_constants._overrides, "market", {"line_follow": {"QB": 0.5}})
     sim_constants.params.cache_clear()
     got = sim_market.projections(belief, SimpleNamespace(games=(game,)), 9, set(), scoring, line)

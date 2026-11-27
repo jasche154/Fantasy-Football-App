@@ -24,11 +24,15 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import lru_cache
 from types import MappingProxyType, SimpleNamespace
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from services import kdst_model, sim_closing
 from services.sim_closing import BANDS
+
+if TYPE_CHECKING:
+    from services.sim_game import _Side
 
 CUT_VAR = (32.5, 2.41)           # cut margin variance = a + b x pre-window expected total (see the docstring)
 SPAN = 70                        # whole-point cut margins averaged over (-SPAN..SPAN)
@@ -138,7 +142,7 @@ def endings(pre_a: float, pre_b: float) -> tuple[Ending, Ending]:
 
 # ---------------- crediting the means, for projections ----------------
 
-def credit_means(lines: dict[int, dict[str, float]], side, m: dict, end: Ending) -> None:
+def credit_means(lines: dict[int, dict[str, float]], side: "_Side", m: dict, end: Ending) -> None:
     """Add the window's mean TDs and overtime's mean winning TD to `side`'s players' mean lines
     (sim_game._expected_players' dicts, by player), as the draw credits them (sim_closing.score_td): window TDs by
     kind, by expected TDs among the players the draw credits, with their catches, targets and yards; an overtime TD

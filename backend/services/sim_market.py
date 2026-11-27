@@ -6,7 +6,8 @@ truth's dated role changes into a noisy hint.
 - `projections`: each active player's mean points in his game that week (sim_game.expected) under the
   belief, with the week's hard-tagged players out, so their teammates' projections rise, centred on the game's
   pregame line (sim_lines) as the game itself is, then pulled toward his projection at his team's typical points
-  (`typical_points`: against a league-average opponent, no line): a position's tuned `market.line_follow` share of
+  (the team alone against a league-average opponent, uncentred, the week's pass / run mix in: no matchup, no line,
+  so no centring solve): a position's tuned `market.line_follow` share of
   the line's move is kept, as real ESPN / Sleeper projections follow a team's implied total only partly
   (sim_metrics_join.line_follow, real 2021-2025 weeks 12-18: QB 0.47, RB 0.33, WR 0.16, TE 0.17; the full
   expectation followed it at 0.79 / 0.78 / 0.43 / 0.43, so its weekly projections churned more than real ones).
@@ -113,13 +114,6 @@ BUZZ = {"breakout": "Beat reporters say his role is growing; expect more work.",
         "bench": "Reports say his starting job is in danger."}
 
 
-def typical_points(belief: World, team: str, out: Collection[int]) -> float:
-    """`team`'s mean points against a league-average opponent under `belief` with `out` out: what its line would
-    say with no matchup in it (a whole game's mean, as the centring reads an uncentred side's)."""
-    from services.sim_game import _mean_points, _side_means, _side_of
-    return _mean_points(_side_means(_side_of(belief, team, None, out)), None)
-
-
 def projections(belief: World, schedule: Schedule, week: int, out: Collection[int],
                 scoring: ScoringSettings, lines: Mapping | None = None) -> dict[int, float]:
     """{player: projected points} for every game of `week` (see the module docstring). `lines`: {home team:
@@ -131,8 +125,10 @@ def projections(belief: World, schedule: Schedule, week: int, out: Collection[in
         pregame = (lines or {}).get(game.home_team)
         target = {game.home_team: pregame.home, game.away_team: pregame.away} if pregame is not None else None
         full = expected(belief, game.home_team, game.away_team, out, scoring, target=target, week=week)
-        own = (expected(belief, game.home_team, game.away_team, out, scoring, week=week,
-                        target={team: typical_points(belief, team, out) for team in target}) if target else full)
+        own = full                                   # each team at its typical points: no matchup, no line, no centring
+        if target:
+            own = {**expected(belief, game.home_team, None, out, scoring, week=week),
+                   **expected(belief, game.away_team, None, out, scoring, week=week)}
         follow = opinion_knob("line_follow")
         for pid, line in full.items():
             share = follow.get(belief.players[pid].position, 1.0) if pid in belief.players else 1.0
