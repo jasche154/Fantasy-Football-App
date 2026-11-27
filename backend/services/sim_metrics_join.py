@@ -7,6 +7,7 @@ a real season measured the same way shows how much a normal week moves.
   change.
 - churn(data, weeks): the week-to-week change of a healthy top player's projection (points, absolute; median and
   90th percentile), the expert-rank churn's 90th percentile beside sim_metrics_games' mean.
+- line_follow(data, weeks): how far a weekly projection follows the team's implied total (elasticity, by position).
 - absences(data, weeks): no-shows a week (a QB, RB, WR or TE projected PLAYING_PROJECTION+ whose team played, no box line
   and no tag at all), zero projections a week (a player projected PLAYING_PROJECTION+ the week before, no tag,
   projected ZERO_PROJECTION or less, and he played), and the share of team scores of 6 or fewer.
@@ -70,6 +71,33 @@ def churn(data: SeasonData, weeks: Iterable[int]) -> dict[str, float]:
             out[f"proj churn {position} p90"] = float(np.percentile(moves, 90))
         if ranks:
             out[f"expert churn {position} p90"] = float(np.percentile(ranks, 90))
+    return out
+
+
+def line_follow(data: SeasonData, weeks: Iterable[int]) -> dict[str, float]:
+    """How far a player's weekly projection follows his team's implied total (from the line), within player-season:
+    the slope of log projection on log implied total, healthy players projected PLAYING_PROJECTION+ (real ESPN /
+    Sleeper 2022-2024: QB 0.55, RB 0.28, WR 0.22, TE 0.12)."""
+    weeks, totals = set(weeks), {}
+    for g in data.schedule.games:
+        if g.week in weeks and g.spread_line is not None and g.total_line is not None and g.total_line > abs(g.spread_line):
+            totals[(g.home_team, g.week)] = (g.total_line + g.spread_line) / 2
+            totals[(g.away_team, g.week)] = (g.total_line - g.spread_line) / 2
+    rows: dict[str, dict[int, list]] = {position: {} for position in TOP}
+    for (pid, week), projection in data.projected.items():
+        player = data.players.get(pid)
+        if (week not in weeks or projection < PLAYING_PROJECTION or player is None or player.position not in TOP
+                or (pid, week) in data.injuries):
+            continue
+        total = totals.get((data.team_at(pid, week + 1), week))
+        if total:
+            rows[player.position].setdefault(pid, []).append((np.log(total), np.log(projection)))
+    out = {}
+    for position, by in rows.items():
+        parts = [np.array(r) - np.mean(r, axis=0) for r in by.values() if len(r) >= 3]
+        if parts:
+            x, y = np.concatenate(parts).T
+            out[f"proj follows line {position}"] = float(x @ y / (x @ x)) if x @ x > 0 else float("nan")
     return out
 
 

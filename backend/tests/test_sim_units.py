@@ -277,6 +277,38 @@ def test_published_projections_take_the_positions_scale(belief, monkeypatch):
     sim_constants.params.cache_clear()
 
 
+def test_published_projections_start_at_the_join_level_and_fade_to_the_season_scale(belief, monkeypatch):
+    """Item 5: the first simulated week after real ones continues the real sources' level, then fades."""
+    from services import sim_constants, sim_market
+    monkeypatch.setitem(sim_constants._overrides, "market", {"projection_scale": {"QB": 1.0}, "join_scale": {"QB": 1.2},
+                                                             "join_fade": 0.5})
+    sim_constants.params.cache_clear()
+    qb = next(p for p in belief.players.values() if p.position == "QB").player_id
+    levels = [sim_market.published({qb: 10.0}, belief, weeks)[qb] for weeks in (0, 1, 2)]
+    assert levels == pytest.approx([12.0, 11.0, 10.5])
+    assert sim_market.published({qb: 10.0}, belief)[qb] == pytest.approx(10.0)     # a season simulated whole
+    monkeypatch.undo()
+    sim_constants.params.cache_clear()
+
+
+def test_projections_follow_the_line_only_partly(belief, monkeypatch):
+    """Item 5: a weekly projection keeps line_follow of the line's move away from the team's typical points."""
+    from services import sim_constants, sim_game, sim_lines, sim_market, sim_world
+    game = next(g for g in fakes.fake_season().schedule.games if g.week == 9)
+    home, away, scoring = game.home_team, game.away_team, sim_world.scoring_of(fakes.fake_season())
+    line = {home: sim_lines.Line(margin=10.0, total=50.0)}
+    full = sim_game.expected(belief, home, away, set(), scoring, target={home: 30.0, away: 20.0}, week=9)
+    typical = sim_game.expected(belief, home, away, set(), scoring, week=9, target={
+        team: sim_market.typical_points(belief, team, set()) for team in (home, away)})
+    monkeypatch.setitem(sim_constants._overrides, "market", {"line_follow": {"QB": 0.5}})
+    sim_constants.params.cache_clear()
+    got = sim_market.projections(belief, SimpleNamespace(games=(game,)), 9, set(), scoring, line)
+    qb = next(pid for pid in full if belief.players[pid].position == "QB" and belief.players[pid].team == home)
+    assert got[qb] == pytest.approx((typical[qb].points + full[qb].points) / 2, abs=0.01)
+    monkeypatch.undo()
+    sim_constants.params.cache_clear()
+
+
 def test_passing_rates_regress_by_their_measured_keep_whatever_the_calibrated_share(monkeypatch):
     """The passing lead: receivers' yards per catch and catch rate and a QB's quality regress in full in August."""
     from services import sim_next_year

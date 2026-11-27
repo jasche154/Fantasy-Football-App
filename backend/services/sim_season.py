@@ -195,7 +195,7 @@ def _market(tables: _Tables, base: SeasonData, belief: World, truth: World, seed
             opinions: dict[str, dict[int, float]] | None = None,
             team_prior: Mapping[str, sim_lines.Rating] | None = None, known: SeasonData | None = None,
             benched: tuple = (), bench: Mapping[int, float] | None = None, filling: Collection[int] = (),
-            jobs: sim_qb_jobs.Jobs | None = None) -> None:
+            jobs: sim_qb_jobs.Jobs | None = None, since_join: int | None = None) -> None:
     """The week's public tables (projections, expert ranks, buzz). `opinions`: the experts' memory, carried from
     week to week and updated here: {"z": each player's opinion (sim_market.opinion), "worth": the value each is
     ranked on (sim_market.held), "out": who was believed out}; `team_prior`: last season's team ratings (the expert values' scoring edges,
@@ -209,7 +209,8 @@ def _market(tables: _Tables, base: SeasonData, belief: World, truth: World, seed
     snapshot = sorted(pid for pid, w in tables.projected if w == week)      # the snapshot's own (from_week only)
     for pid in snapshot:
         del tables.projected[(pid, week)]
-    fresh = sim_market.published(sim_market.projections(belief, base.schedule, week, out, scoring, lines), belief)
+    fresh = sim_market.published(sim_market.projections(belief, base.schedule, week, out, scoring, lines), belief,
+                                 since_join)
     tables.projected.update({(pid, week): p for pid, p in fresh.items()})
     if snapshot:
         # a player the snapshot alone admits (a backup QB, a WR6: no ADP, no game, no earlier projection) keeps a
@@ -315,7 +316,7 @@ def _simulate(base: SeasonData, seed: int, from_week: int, prior: World | None,
         lines.update({(home, week): line for home, line in pregame.items()})
         _market(tables, base, public, truth, seed, week, public_out,
                 false_rate if buzz_weeks[0] <= week <= buzz_weeks[1] else 0.0, ranks, pregame, opinions, team_prior,
-                known, tuple(benched), bench, filling, jobs)
+                known, tuple(benched), bench, filling, jobs, week - from_week if from_week > 1 else None)
         world = sim_qb_jobs.apply(truth.at(week), jobs)
         played_teams, fresh = set(), set()
         for game in sorted((g for g in base.schedule.games if g.week == week), key=lambda g: g.home_team):

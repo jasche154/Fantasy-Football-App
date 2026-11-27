@@ -5,8 +5,12 @@ truth's dated role changes into a noisy hint.
 
 - `projections`: each active player's mean points in his game that week (sim_game.expected) under the
   belief, with the week's hard-tagged players out, so their teammates' projections rise, centred on the game's
-  pregame line (sim_lines) as the game itself is. Kept above
-  MIN_PROJECTION, like the real tables (a player out or on bye has none).
+  pregame line (sim_lines) as the game itself is, then pulled toward his projection at his team's typical points
+  (`typical_points`: against a league-average opponent, no line): a position's tuned `market.line_follow` share of
+  the line's move is kept, as real ESPN / Sleeper projections follow a team's implied total only partly
+  (sim_metrics_join.line_follow, real 2021-2025 weeks 12-18: QB 0.47, RB 0.33, WR 0.16, TE 0.17; the full
+  expectation followed it at 0.79 / 0.78 / 0.43 / 0.43, so its weekly projections churned more than real ones).
+  Kept above MIN_PROJECTION, like the real tables (a player out or on bye has none).
 - `values`: mean points a game over the games left against a league-average opponent: a player believed out
   (`out_weeks`) scores nothing in his first out_weeks games and his active teammates share his work meanwhile.
 - `expert_ranks`: position ranks by value (in a simulated week, with each team's scoring edge from the line
@@ -66,22 +70,33 @@ FILL_IN_BEST = 16                # the best weekly expert rank of a fill-in QB: 
                                  # 2-4 starts, never ranked better (Flacco 2023, Dobbs 2023: QB16; median 29-32)
 OPINION_DEFAULTS = {"opinion_spread": {"QB": 0.35, "RB": 1.0, "WR": 1.0, "TE": 1.0, "K": 1.0, "DST": 1.0},
                     "opinion_keep": 0.9, "worth_step": 0.4, "fill_in_trust": 1.0,
-                    "projection_scale": {}}                       # defaults of the tuned `market` knobs
+                    "projection_scale": {}, "join_scale": {}, "join_fade": 0.6,
+                    "line_follow": {}}                            # defaults of the tuned `market` knobs
 
 
-def published(fresh: Mapping[int, float], belief: World) -> dict[int, float]:
-    """The week's projections as the public reads them: each x its position's tuned `market.projection_scale`.
-    Real sources project high (2021-2025 weeks 12-17: actual - projection QB -0.48, RB -0.61, WR -0.27; the
-    belief's own are unbiased), so without it a mid-season league's projections dropped 5-8% at the first
-    simulated week (sim_eval mid's "join proj ratio"). The public's table only, never the truth or the values
-    experts and the market rank on."""
-    scale = opinion_knob("projection_scale")
-    return {pid: p * scale.get(belief.players[pid].position, 1.0) if pid in belief.players else p
-            for pid, p in fresh.items()}
+def published(fresh: Mapping[int, float], belief: World, since_join: int | None = None) -> dict[int, float]:
+    """The week's projections as the public reads them: each x its position's scale. Real sources project high
+    (2019-2025: actual - projection QB -0.49, RB -0.50, WR -0.19, TE +0.03, a near-constant 2-6% at every level; the
+    belief's own are unbiased): `market.projection_scale` is set so the published table misses results by as much.
+    At a real/simulated join (`since_join`: weeks since the first simulated one of a season that began real; None
+    for a season simulated whole) the first simulated week continues the real sources' level for the players at
+    the top, about 9% above the belief's (sim_eval mid's "join proj ratio"; `market.join_scale`), and the scale
+    fades from there to `projection_scale` by `market.join_fade` a week: one scale for both overshot the results
+    by 0.66 a projection against a real 0.35. The public's table only, never the truth or the values experts and
+    the market rank on."""
+    scale, join, fade = (opinion_knob(name) for name in ("projection_scale", "join_scale", "join_fade"))
+    weight = float(fade) ** since_join if since_join is not None else 0.0
+    out = {}
+    for pid, p in fresh.items():
+        position = belief.players[pid].position if pid in belief.players else ""
+        base = float(scale.get(position, 1.0))
+        out[pid] = p * (base + (float(join.get(position, base)) - base) * weight)
+    return out
 
 
 def opinion_knob(name: str):
-    """A tuned `market` knob (opinion_spread, opinion_keep, worth_step, fill_in_trust, projection_scale)."""
+    """A tuned `market` knob (opinion_spread, opinion_keep, worth_step, fill_in_trust, projection_scale, join_scale,
+    join_fade, line_follow)."""
     return params()["market"].get(name, OPINION_DEFAULTS[name])
 EXPERT_AGE = {"pre": 6, "ros": 2}     # days before the Sunday, as the real snapshots are (week 0 / later weeks)
 SEASON_GAMES = 17
@@ -98,6 +113,13 @@ BUZZ = {"breakout": "Beat reporters say his role is growing; expect more work.",
         "bench": "Reports say his starting job is in danger."}
 
 
+def typical_points(belief: World, team: str, out: Collection[int]) -> float:
+    """`team`'s mean points against a league-average opponent under `belief` with `out` out: what its line would
+    say with no matchup in it (a whole game's mean, as the centring reads an uncentred side's)."""
+    from services.sim_game import _mean_points, _side_means, _side_of
+    return _mean_points(_side_means(_side_of(belief, team, None, out)), None)
+
+
 def projections(belief: World, schedule: Schedule, week: int, out: Collection[int],
                 scoring: ScoringSettings, lines: Mapping | None = None) -> dict[int, float]:
     """{player: projected points} for every game of `week` (see the module docstring). `lines`: {home team:
@@ -108,10 +130,15 @@ def projections(belief: World, schedule: Schedule, week: int, out: Collection[in
             continue
         pregame = (lines or {}).get(game.home_team)
         target = {game.home_team: pregame.home, game.away_team: pregame.away} if pregame is not None else None
-        for pid, line in expected(belief, game.home_team, game.away_team, out, scoring, target=target,
-                                  week=week).items():
-            if line.points >= MIN_PROJECTION:
-                found[pid] = round(line.points, 2)
+        full = expected(belief, game.home_team, game.away_team, out, scoring, target=target, week=week)
+        own = (expected(belief, game.home_team, game.away_team, out, scoring, week=week,
+                        target={team: typical_points(belief, team, out) for team in target}) if target else full)
+        follow = opinion_knob("line_follow")
+        for pid, line in full.items():
+            share = follow.get(belief.players[pid].position, 1.0) if pid in belief.players else 1.0
+            points = own[pid].points + share * (line.points - own[pid].points) if pid in own else line.points
+            if points >= MIN_PROJECTION:
+                found[pid] = round(points, 2)
     return found
 
 

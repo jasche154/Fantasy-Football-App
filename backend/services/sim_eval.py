@@ -187,7 +187,7 @@ def _rest(data: SeasonData, weeks: range) -> dict[str, float]:
     return {**sim_metrics.weekly(data, weeks), **sim_metrics.leaderboard(data, weeks),
             **sim_metrics_games.games(data, weeks), **sim_metrics_games.experts(data, weeks),
             **sim_metrics_games.tails(data, weeks), **sim_metrics_join.churn(data, weeks),
-            **sim_metrics_join.absences(data, weeks)}
+            **sim_metrics_join.line_follow(data, weeks), **sim_metrics_join.absences(data, weeks)}
 
 
 def _whole(data: SeasonData, rookies: set[int], real: SeasonData, established: frozenset[int]) -> dict[str, float]:
@@ -198,7 +198,7 @@ def _whole(data: SeasonData, rookies: set[int], real: SeasonData, established: f
             **sim_metrics_games.games(data, weeks), **sim_metrics_games.experts(data, weeks),
             **sim_metrics_games.tails(data, weeks), **sim_metrics_shape.shape(data),
             **sim_metrics_shape.standings(data), **sim_metrics_join.churn(data, weeks),
-            **sim_metrics_join.absences(data, weeks)}
+            **sim_metrics_join.line_follow(data, weeks), **sim_metrics_join.absences(data, weeks)}
 
 
 def _full(session, season: int, seeds: list[int], offseason: dict) -> tuple[dict, dict]:

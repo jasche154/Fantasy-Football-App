@@ -1271,12 +1271,25 @@
    "opinion_keep": 0.9,
    "worth_step": 0.4,
    "fill_in_trust": 0.15,
+   "line_follow": {
+    "QB": 0.5,
+    "RB": 0.3,
+    "WR": 0.25,
+    "TE": 0.25
+   },
    "projection_scale": {
-    "QB": 1.05,
-    "RB": 1.09,
-    "WR": 1.09,
-    "TE": 1.06
-   }
+    "QB": 1.04,
+    "RB": 1.05,
+    "WR": 1.03,
+    "TE": 0.99
+   },
+   "join_scale": {
+    "QB": 1.1,
+    "RB": 1.1,
+    "WR": 1.1,
+    "TE": 1.07
+   },
+   "join_fade": 0.5
   }
  }
 }
