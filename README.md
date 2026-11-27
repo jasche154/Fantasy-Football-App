@@ -1998,7 +1998,8 @@ how its preseason expert ranks agree with its ADP). Both modes end with an injur
 ADP skill players, new injuries per game played (he played and missed his team's next game with any injury
 tag: a real player ruled out on game day often keeps his Q or D, while a simulated one is always O or IR, so
 counting only O/IR would undercount the real rate by about a third) and the share of team games missed,
-with the real value, the target and the simulated one. Both modes also report whole games
+with the real value, the target and the simulated one. Both modes report the starting quarterbacks' completion %,
+attempts a start and interceptions a start (`sim_metrics.passing`). Both modes also report whole games
 (`sim_metrics_games`: the pregame line against the result, a real season's Vegas line and a simulated one's own,
 the spread of margins, blowouts of 21+, 28+ and 35+, blowouts in the most lopsided and the closest fifth of
 games, home wins, ties, team scores and how often a rare score such as 5 shows up) and the expert ranks
