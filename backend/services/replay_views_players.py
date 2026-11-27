@@ -15,7 +15,9 @@ GET  .../players?position=&search=&status=&sort=&dir=&stats=&stat_week=&limit=&o
       otherwise); players without the number come last either way. Sorting never changes `total`.
       stats: season (default) | last4 | week; stat_week: 1..current (default current, only with "week"; the
       response's stat_week is null otherwise). 422 on an unknown sort / dir / stats or a stat_week out of range.
-  BoxLine   {pass_yds, pass_td, pass_int, carries, rush_yds, rush_td, targets, rec, rec_yds, rec_td}
+  BoxLine   {pass_cmp, pass_att, pass_yds, pass_td, pass_int, carries, rush_yds, rush_td, targets, rec, rec_yds,
+             rec_td} (services/replay_box.py): pass_cmp / pass_att (completions / attempts) are null on a passing
+      line that never recorded them (a simulated league saved before they were kept), so they sort last
   StatLine  {span: season | last4 | week, week: number | null, games, points, projection, box: BoxLine | null,
              adv: AdvLine | null}
       season        games and points before now, box totals; projection null
@@ -25,12 +27,13 @@ GET  .../players?position=&search=&status=&sort=&dir=&stats=&stat_week=&limit=&o
                     that week's pre-game number (0 when out or on a bye), null when he wasn't in the pool yet
       box, adv      null for K/DST and when he has no game in the span
   AdvLine   {snap_pct, target_share, targets_pg, carries_pg, touches_pg, ypc, ypr, ypt, catch_rate, total_td,
-             td_rate, pass_ypg, td_int} (services/replay_advanced.py): rates over the span's games from their box
+             td_rate, pass_ypg, td_int, cmp_pct} (services/replay_advanced.py): rates over the span's games from their box
       lines and usage; each null when its denominator is 0 or its data is missing; 1 decimal (td_int 2).
       snap_pct / target_share: means over the games that have them (0-100). *_pg: per game (touches = carries +
       rec). ypc, ypr, ypt, catch_rate (rec / targets, 0-100) from the span's totals. total_td: rush + rec + pass
       TDs (season / week: total; last4: per game). td_rate: rush + rec TDs per touch (0-100). pass_ypg: null
-      without a pass yard, TD or INT. td_int: pass TD / INT; the TDs when no INT; null with neither.
+      without a pass yard, TD or INT. td_int: pass TD / INT; the TDs when no INT; null with neither. cmp_pct:
+      completions / attempts (0-100), null without a recorded attempt.
 GET  .../players/{player_id}      {player: WireRow, weeks: [{week, played, team, opponent, away, bye, out, projection,
                                    points, ros_ppg, value, rank, pos_rank, expert_rank, news, defense,
                                    injury: Injury | null, usage: Usage | null, box: BoxLine | null}],
@@ -49,7 +52,6 @@ GET  .../players/{player_id}      {player: WireRow, weeks: [{week, played, team,
 """
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict
 from statistics import mean
 
 from services import replay_advanced, replay_box, replay_defense, replay_state as rs, replay_waivers
@@ -114,7 +116,7 @@ def _played_weeks(game: Game) -> dict[int, list[int]]:
 
 
 def _box(box: replay_box.BoxLine | None) -> dict | None:
-    return asdict(box) if box is not None else None
+    return replay_box.shown(box) if box is not None else None
 
 
 def stat_line(game: Game, value: ReplayValue, weeks: Sequence[int], stats: str = "season",

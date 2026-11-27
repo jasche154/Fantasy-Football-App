@@ -24,6 +24,8 @@ export interface SeasonSummary {
   catchPct: number | null;
   ydsPerTarget: number | null;
   ydsPerCarry: number | null;
+  /** 0-1; null without a recorded attempt. */
+  cmpPct: number | null;
 }
 
 /** num / den, or null when there is nothing to divide by (no targets, no carries). */
@@ -42,13 +44,13 @@ export function gamesPlayed(weeks: readonly ReplayPlayerWeek[]): ReplayPlayerWee
   return weeks.filter((week) => week.played && week.usage !== null);
 }
 
-const ZERO_BOX: ReplayBoxLine = { pass_yds: 0, pass_td: 0, pass_int: 0, carries: 0, rush_yds: 0, rush_td: 0, targets: 0, rec: 0, rec_yds: 0, rec_td: 0 };
+const ZERO_BOX: ReplayBoxLine = { pass_cmp: 0, pass_att: 0, pass_yds: 0, pass_td: 0, pass_int: 0, carries: 0, rush_yds: 0, rush_td: 0, targets: 0, rec: 0, rec_yds: 0, rec_td: 0 };
 
-/** Box lines added up stat by stat. */
+/** Box lines added up stat by stat (completions and attempts never recorded count as none). */
 export function boxTotals(boxes: readonly ReplayBoxLine[]): ReplayBoxLine {
   return boxes.reduce((sum, box) => {
     const next = { ...sum };
-    for (const key of Object.keys(ZERO_BOX) as (keyof ReplayBoxLine)[]) next[key] = sum[key] + box[key];
+    for (const key of Object.keys(ZERO_BOX) as (keyof ReplayBoxLine)[]) next[key] = (sum[key] ?? 0) + (box[key] ?? 0);
     return next;
   }, ZERO_BOX);
 }
@@ -67,6 +69,7 @@ export function seasonSummary(weeks: readonly ReplayPlayerWeek[]): SeasonSummary
     catchPct: rate(total.rec, total.targets),
     ydsPerTarget: rate(total.rec_yds, total.targets),
     ydsPerCarry: rate(total.rush_yds, total.carries),
+    cmpPct: rate(total.pass_cmp ?? 0, total.pass_att ?? 0),
   };
 }
 

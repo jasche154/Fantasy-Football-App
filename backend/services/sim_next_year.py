@@ -435,12 +435,16 @@ def season_base(season: int, belief: World, pool: Mapping[int, PoolPlayer], sche
 def with_market_adp(data: SeasonData, belief: World, games_left: int = sim_market.SEASON_GAMES,
                     record: Mapping[int, float] | None = None,
                     premium: Mapping[int, float] | None = None,
-                    qb_share: Mapping[int, float] | None = None) -> SeasonData:
+                    qb_share: Mapping[int, float] | None = None, lean_week: int | None = None) -> SeasonData:
     """`data` with every player's ADP the market's under `belief` with `games_left` games to play (none for a
     player it does not list), priced for data's scoring and its ADP list (data.adp_format "2qb": superflex),
     leaning on each player's `record` (sim_market.track_record) and paying the rookies' `premium`
-    (rookie_premium) when given. A 2-QB list also records the 1-QB board of the same scoring as
+    (rookie_premium) when given; `lean_week`: a market held mid-season also leans on the experts' opinion of that
+    week's snapshot (sim_market.expert_lean). A 2-QB list also records the 1-QB board of the same scoring as
     `scoring_adp` (replay_superflex values non-QBs on it)."""
+    if lean_week is not None:
+        lean = sim_market.expert_lean(belief, data.as_of(lean_week), lean_week, scoring_of(data), games_left)
+        premium = {pid: lean.get(pid, 1.0) * (premium or {}).get(pid, 1.0) for pid in {*lean, *(premium or {})}}
     two_qb = data.adp_format == TWO_QB
     market = sim_market.adp(belief, scoring_of(data), two_qb, games_left, record, premium, qb_share)
     players = {pid: replace(player, adp=market[pid][0] if pid in market else None,

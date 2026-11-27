@@ -5,8 +5,8 @@ from types import MappingProxyType
 import numpy as np
 import pytest
 
-from services import replay_blob, sim_centre, sim_draw, sim_game, sim_lines, sim_market, sim_season, sim_world
-from tests import replay_fakes as fakes
+from services import replay_blob, sim_centre, sim_closing_means, sim_draw, sim_game, sim_lines, sim_market, sim_season, sim_world
+from tests import replay_fakes as fakes, sim_draws
 
 WEEK = 9
 SEED = 5
@@ -78,15 +78,18 @@ def test_the_line_reads_nothing_from_the_week_on(data):
 
 
 def test_a_centred_side_hits_any_reasonable_target(data, belief):
-    """The closed-form solve reaches every target from a weak offense to a blowout (overtime points included)."""
+    """The closed-form solve reaches every target from a weak offense to a blowout (overtime and the closing window
+    included; the window alone averages about 3 points, so 6 is the lowest target)."""
     worst = 0.0
     for game in (g for g in data.schedule.games if g.week == WEEK):
         home, away = game.home_team, game.away_team
-        for wanted in (3.0, 6.0, 10.0, 14.0, 21.0, 28.0, 35.0, 45.0, 60.0):
+        for wanted in (6.0, 10.0, 14.0, 21.0, 28.0, 35.0, 45.0, 60.0):
             sides = sim_centre.centred({home: sim_game._side(belief, home, away, set(), {}),
                                         away: sim_game._side(belief, away, home, set(), {})}, {home: wanted, away: 20.0})
             means = {t: sim_game._side_means(s) for t, s in sides.items()}
-            got = sim_game._mean_points(means[home], means[away]) + sim_centre.ot_points()
+            before = (sim_game._mean_points(means[home], means[away]), sim_game._mean_points(means[away], means[home]))
+            end = sim_closing_means.endings(*before)[0]
+            got = before[0] + end.window + end.overtime      # the draw before the cut + the window + overtime
             worst = max(worst, abs(got - wanted))
     assert worst < 0.05
 
@@ -102,10 +105,37 @@ def test_a_centred_game_averages_its_target_and_projections_follow(data, belief)
     centred = sim_game.expected(belief, home, away, set(), scoring, target=target)
     qb_home, qb_away = sides[home].qb, sides[away].qb
     assert centred[qb_home].points > plain[qb_home].points and centred[qb_away].points < plain[qb_away].points
-    rng = np.random.default_rng(3)
-    drawn = np.array([[r.points[home], r.points[away]] for r in
-                      (sim_game.play(belief, home, away, set(), rng, scoring, None, target) for _ in range(4000))])
-    assert drawn.mean(axis=0) == pytest.approx([31.0, 13.0], abs=0.3)        # unbiased, overtime included
+    drawn = np.array([[r.points[home], r.points[away]] for r in sim_draws.games(belief, home, away, scoring, 4000, 3,
+                                                                               target)])
+    # unbiased, overtime included: se 0.17 / 0.13, so 0.3 is 1.8 / 2.3 se (9ec0677 drew +0.33 here)
+    assert drawn.mean(axis=0) == pytest.approx([31.0, 13.0], abs=0.3)
+
+
+@pytest.mark.parametrize("wanted", [(17.0, 17.0), (10.0, 13.0)])
+def test_close_and_low_scoring_games_get_the_window_and_overtime_their_cut_margins_give(data, belief, wanted):
+    """The window and overtime add the most in close games (both sides kick, ties go to overtime), and the cut
+    margin spreads less in a low-scoring game: the centring's window points and tie chance (sim_closing_means, at the
+    game's own expected lead and total) must be what the real endings give over the margins the draw reaches at
+    the cut, read exactly from the table, so the window's own noise is out. With one spread (11.1) for every game
+    the window was 0.11 a side too low at 17-17 (17 se of this test) and more at 10-13; se here 0.005-0.008 a
+    side, so 0.03 is about 4 se. The tie chance is a normal spread's, and real cut margins are lumpier (3s and 7s):
+    it runs 9% under the drawn one at 17-17 and 24% under at 10-13 (0.01-0.04 overtime points a side); a fixed
+    4.2% for every game was 33% / 46% under, so 30% catches that."""
+    from services import sim_closing_means as cm
+    from services.sim_closing import points_of, stored
+    game = next(g for g in data.schedule.games if g.week == WEEK)
+    home, away = game.home_team, game.away_team
+    sides = sim_draws.centred_sides(belief, home, away, {home: wanted[0], away: wanted[1]})
+    means = [sim_game._side_means(s) for s in sides]
+    ends = cm.endings(sim_game._mean_points(means[0], means[1]), sim_game._mean_points(means[1], means[0]))
+    rng, scoring = np.random.default_rng(5), sim_world.scoring_of(data)
+    margins = np.array([np.subtract(*sim_draw.draw_game(sides, rng, scoring, until_cut=True)) for _ in range(2500)])
+    rows, ties = cm._tables()
+    points = np.array([points_of(dict(zip(stored()["events"], row))) for row in rows])
+    index = np.clip(margins, -cm.SPAN, cm.SPAN) + cm.SPAN
+    assert points[index].mean() == pytest.approx(ends[0].window, abs=0.03)        # home leads by the margin
+    assert points[2 * cm.SPAN - index].mean() == pytest.approx(ends[1].window, abs=0.03)
+    assert cm.tie_chance(ends[0].lead, ends[0].sd) == pytest.approx(ties[index].mean(), rel=0.3)
 
 
 def test_touchdowns_are_drive_limited_and_never_outnumber_the_plays():
@@ -123,7 +153,7 @@ def test_touchdowns_are_drive_limited_and_never_outnumber_the_plays():
 
 
 def test_a_tied_game_goes_to_overtime_and_the_box_score_still_adds_up(data, belief, monkeypatch):
-    monkeypatch.setattr(sim_draw, "OT_TIE", 0.0)
+    monkeypatch.setattr(sim_draw, "ot_tie", lambda: 0.0)
     game = next(g for g in data.schedule.games if g.week == WEEK)
     home, away = game.home_team, game.away_team
     scoring = sim_world.scoring_of(data)
@@ -209,7 +239,7 @@ def test_experts_take_injury_news_in_full_for_the_player_and_his_position_group(
 
 
 def test_a_player_who_left_hurt_never_scores_the_overtime_touchdown_and_attempts_keep_up(data, belief, monkeypatch):
-    monkeypatch.setattr(sim_draw, "OT_TIE", 0.0)
+    monkeypatch.setattr(sim_draw, "ot_tie", lambda: 0.0)
     monkeypatch.setattr(sim_draw, "ot_field_goal", lambda: 0.0)
     game = next(g for g in data.schedule.games if g.week == WEEK)
     home, away = game.home_team, game.away_team
@@ -223,7 +253,7 @@ def test_a_player_who_left_hurt_never_scores_the_overtime_touchdown_and_attempts
     home_wins = 0
     for _ in range(300):
         after, _, points, _, _ = sim_draw._overtime(sides, offense, [(20, {}), (20, {})], [20, 20],
-                                                    np.array([33, 33]), np.array([27, 27]), rng, means)
+                                                    np.array([33, 33]), np.array([27, 27]), rng, means, [20.0, 20.0])
         if points[0] > points[1]:
             home_wins += 1
             o, before = after[0], offense[0]
@@ -231,3 +261,30 @@ def test_a_player_who_left_hurt_never_scores_the_overtime_touchdown_and_attempts
                 assert all(n == 0 for pid, n in zip(ids, gained) if pid == star)
             assert o.attempts - before.attempts == int((o.catches - before.catches).sum())
     assert home_wins > 0                                   # the checks above ran
+
+
+def test_a_nan_target_is_refused_not_floored(data, belief):
+    game = next(g for g in data.schedule.games if g.week == WEEK)
+    home, away = game.home_team, game.away_team
+    with pytest.raises(ValueError, match="not a number"):
+        sim_centre.centred({home: sim_game._side(belief, home, away, set(), {}),
+                            away: sim_game._side(belief, away, home, set(), {})}, {home: float("nan"), away: 20.0})
+
+
+@pytest.mark.parametrize("week", [2, 16])
+def test_the_calendar_moves_the_mix_not_a_shifted_games_points(data, belief, week):
+    """A game centred on its own mean + a shift (how the truth's games are centred on the line) plays the week's pass /
+    run mix at the week-free mean points: on 36ae0dc the shift was taken after the week, so week 2 landed up to 0.07
+    above and week 16 0.09 below (fake season, worst side); now within 0.005."""
+    worst = 0.0
+    for game in (g for g in data.schedule.games if g.week == WEEK):
+        home, away = game.home_team, game.away_team
+        raw = {home: sim_game._side(belief, home, away, set(), {}), away: sim_game._side(belief, away, home, set(), {})}
+        m = {t: sim_game._side_means(s) for t, s in raw.items()}
+        free = (sim_game._mean_points(m[home], m[away]), sim_game._mean_points(m[away], m[home]))
+        sides = sim_centre.centred(raw, shift={home: 0.0, away: 0.0}, week=week)
+        c = [sim_game._side_means(sides[t]) for t in (home, away)]
+        before = (sim_game._mean_points(c[0], c[1]), sim_game._mean_points(c[1], c[0]))
+        ends = sim_closing_means.endings(*before)
+        worst = max(worst, *(abs(before[i] + ends[i].window + ends[i].overtime - free[i]) for i in range(2)))
+    assert worst < 0.05

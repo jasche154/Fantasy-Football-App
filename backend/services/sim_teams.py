@@ -15,6 +15,7 @@ From the played games of an as_of copy (sim_world._Seen), each team's:
 from collections import defaultdict
 from collections.abc import Mapping
 
+from services import sim_calendar
 from services.replay_pool import SeasonData
 from services.sim_world import DECAY, TEAM_PRIOR_GAMES, Player, Team, World, _Seen, _shrink, params
 
@@ -47,9 +48,10 @@ def team_forms(known: SeasonData, week: int, seen: _Seen, prior: World | None) -
         decay = _decay(week, game_week)
         own, against = sums[team], sums[known.schedule.opponent(team, game_week) or ""]
         targets = seen.targets[(team, game_week)]
+        season_targets, season_carries, _ = sim_calendar.factors(game_week)   # learned without the calendar
         own["games"] += decay
-        own["targets"] += decay * targets
-        own["carries"] += decay * sum(line.carries for line in lines.values())
+        own["targets"] += decay * targets / season_targets
+        own["carries"] += decay * sum(line.carries for line in lines.values()) / season_carries
         against["d_games"] += decay
         against["d_targets"] += decay * targets
         against["d_rec_yds"] += decay * sum(line.rec_yds for line in lines.values())

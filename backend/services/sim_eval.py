@@ -23,6 +23,7 @@
 - both modes report whole games (sim_metrics_games.games: the pregame line, a real season's Vegas line and a
   simulated one's own, against the result; blowouts, home wins, ties, odd team scores) and the expert ranks
   (sim_metrics_games.experts: week-to-week churn and agreement with the projections), by position.
+- both modes report the starting QBs' completion %, attempts a start and interceptions a start (sim_metrics.passing).
 - both modes report injuries (sim_metrics.injuries: new injuries per game played, missed share, by position)
   against the real rate and the target, real x sim_injuries.INJURY_SCALE (simulated seasons have fewer on purpose).
 - --set overrides a sim_params.json value for this run (section.key=value, JSON value); --save-tuned writes
@@ -47,6 +48,8 @@ from concurrent.futures import ProcessPoolExecutor
 from dataclasses import replace
 from functools import partial
 from pathlib import Path
+
+import numpy as np
 
 from services import (replay_pool, sim_carryover, sim_depth, sim_fit, sim_injuries, sim_market, sim_metrics,
                       sim_metrics_games, sim_metrics_join, sim_metrics_shape, sim_qb, sim_qb_jobs, sim_season, sim_setup,
@@ -136,13 +139,23 @@ def next_season(session, real: SeasonData, offseason: dict) -> tuple[SeasonData,
     return replace(base, players=priced.players), belief, set(rookies) & set(base.players), carries
 
 
-def _mean(rows: list[dict[str, float]]) -> dict[str, float]:
+def _mean(rows: list[dict]) -> dict:
+    """Each metric's mean over `rows`; a list-valued metric (a per-season value for a percentile row) keeps every
+    value, for `_percentiles` to read at the end."""
     sums: dict[str, list[float]] = defaultdict(list)
+    pooled: dict[str, list[float]] = defaultdict(list)
     for row in rows:
         for key, value in row.items():
-            if not math.isnan(value):
+            if isinstance(value, list):
+                pooled[key].extend(value)
+            elif not math.isnan(value):
                 sums[key].append(value)
-    return {key: sum(v) / len(v) for key, v in sums.items()}
+    return {**{key: sum(v) / len(v) for key, v in sums.items()}, **dict(pooled)}
+
+
+def _percentiles(row: dict) -> dict[str, float]:
+    """`row` with each pooled metric ("... p95") as the 95th percentile of its values."""
+    return {key: float(np.quantile(value, 0.95)) if isinstance(value, list) else value for key, value in row.items()}
 
 
 def _offseason(session, seasons: list[int], refresh: bool = False) -> dict:
@@ -175,7 +188,7 @@ def _rest(data: SeasonData, weeks: range) -> dict[str, float]:
     return {**sim_metrics.weekly(data, weeks), **sim_metrics.leaderboard(data, weeks),
             **sim_metrics_games.games(data, weeks), **sim_metrics_games.experts(data, weeks),
             **sim_metrics_games.tails(data, weeks), **sim_metrics_join.churn(data, weeks),
-            **sim_metrics_join.absences(data, weeks)}
+            **sim_metrics_join.line_follow(data, weeks), **sim_metrics_join.absences(data, weeks)}
 
 
 def _whole(data: SeasonData, rookies: set[int], real: SeasonData, established: frozenset[int]) -> dict[str, float]:
@@ -186,7 +199,7 @@ def _whole(data: SeasonData, rookies: set[int], real: SeasonData, established: f
             **sim_metrics_games.games(data, weeks), **sim_metrics_games.experts(data, weeks),
             **sim_metrics_games.tails(data, weeks), **sim_metrics_shape.shape(data),
             **sim_metrics_shape.standings(data), **sim_metrics_join.churn(data, weeks),
-            **sim_metrics_join.absences(data, weeks)}
+            **sim_metrics_join.line_follow(data, weeks), **sim_metrics_join.absences(data, weeks)}
 
 
 def _full(session, season: int, seeds: list[int], offseason: dict) -> tuple[dict, dict]:
@@ -287,7 +300,8 @@ def run(seasons: list[int], seeds: list[int], mode: str, workers: int = 1, overr
     report = {}
     for kind in kinds:
         pairs = [results[(kind, season)] for season in seasons]
-        report[kind] = {"real": _mean([real for real, _ in pairs]), "sim": _mean([sim for _, sim in pairs])}
+        report[kind] = {"real": _percentiles(_mean([real for real, _ in pairs])),
+                        "sim": _percentiles(_mean([sim for _, sim in pairs]))}
         report[kind]["target"] = injury_targets(report[kind]["real"])
         for line in _table(f"{kind} ({seasons[0]}-{seasons[-1]}, {len(seeds)} seeds)", report[kind]["real"],
                            report[kind]["sim"]) + _injury_table(*(report[kind][k] for k in ("real", "target", "sim"))):

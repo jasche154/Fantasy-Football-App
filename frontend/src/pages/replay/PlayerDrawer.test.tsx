@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { json, mockFetch } from '../../test/mockFetch';
 import { META_ROUTE, renderWithProviders } from '../../test/render';
 import type { ReplayBoxScore, ReplayPlayerDetail } from '../../api/types';
-import { GAME_ID, MOSTERT, OPPONENT_TEAM_ID, playerDetail, tagged, teamRef, TUCKER, usage } from './fixtures';
+import { GAME_ID, MAHOMES, MOSTERT, OPPONENT_TEAM_ID, playerDetail, tagged, teamRef, TUCKER, usage } from './fixtures';
 import { advancedDetail, boxLine, cardDetail } from './fixturesPlayers';
 import { PlayerDrawer } from './PlayerDrawer';
 
@@ -27,6 +27,19 @@ describe('PlayerDrawer card', () => {
     expect(dialog.getByText(/Rostered by Sunday Scaries/)).toBeInTheDocument();
     expect(dialog.getAllByRole('term').map((term) => term.textContent)).toEqual(['Games', 'Points', 'Per game', 'Rest of season', 'Trade value']);
     expect(dialog.getAllByRole('definition').map((value) => value.textContent)).toEqual(['4', '60.40', '15.10', '13.80', '32']);
+  });
+
+  it('logs a quarterback\'s completions and attempts, a dash where a saved league never recorded them', async () => {
+    const detail = cardDetail(MAHOMES);
+    renderCard({ ...detail, weeks: detail.weeks.map((week) => (week.box
+      ? { ...week, box: boxLine({ pass_cmp: week.week === 1 ? null : 20 + week.week, pass_att: week.week === 1 ? null : 30 + week.week, pass_yds: 250 }) }
+      : week)) });
+    const log = within(await screen.findByRole('table', { name: 'Patrick Mahomes game log' }));
+    expect(log.getAllByRole('columnheader').map((header) => header.textContent))
+      .toEqual(['Wk', 'Opp', 'Proj', 'Pts', 'Cmp', 'Att', 'PaYd', 'PaTD', 'INT', 'RuYd', 'RuTD']);
+    const rows = log.getAllByRole('row');
+    expect(cellsOf(rows[1]).slice(3, 6)).toEqual(['—', '—', '250']);
+    expect(cellsOf(rows[2]).slice(3, 6)).toEqual(['22', '32', '250']);
   });
 
   it('logs box scores for played weeks only, with @ for away games', async () => {
@@ -182,7 +195,9 @@ describe('PlayerDrawer box score', () => {
     teams: [
       { team: 'DEN', home: false, score: hasScore ? 17 : null, players: [
         { id: 301, name: 'Russell Wilson', position: 'QB', points: 18.4,
-          box: boxLine({ pass_yds: 250, pass_td: 2, pass_int: 1, carries: 3, rush_yds: 12, rush_td: 0, targets: 0, rec: 0, rec_yds: 0 }) },
+          box: boxLine({ pass_cmp: 22, pass_att: 34, pass_yds: 250, pass_td: 2, pass_int: 1, carries: 3, rush_yds: 12, rush_td: 0, targets: 0, rec: 0, rec_yds: 0 }) },
+        { id: 304, name: 'Old Save Backup', position: 'QB', points: 1.6,     // a league saved before attempts were kept
+          box: boxLine({ pass_cmp: null, pass_att: null, pass_yds: 40, carries: 0, rush_yds: 0, rush_td: 0, targets: 0, rec: 0, rec_yds: 0 }) },
         { id: 302, name: 'Broncos Kicker', position: 'K', points: 8, box: null }] },
       { team: 'MIA', home: true, score: hasScore ? 20 : null, players: [
         { id: MOSTERT.id, name: 'Raheem Mostert', position: 'RB', points: 11, box: boxLine() },
@@ -216,7 +231,9 @@ describe('PlayerDrawer box score', () => {
     tabs[1].focus();
     await user.keyboard('{ArrowLeft}');
     expect(screen.getByRole('tab', { name: 'DEN' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('table', { name: 'Passing, DEN' })).toHaveTextContent('Russell Wilson25021');
+    const passing = within(screen.getByRole('table', { name: 'Passing, DEN' }));
+    expect(passing.getAllByRole('columnheader').map((header) => header.textContent)).toEqual(['Player', 'C/ATT', 'YDS', 'TD', 'INT']);
+    expect(passing.getAllByRole('row').slice(1).map((row) => row.textContent)).toEqual(['Russell Wilson22/3425021', 'Old Save Backup—4000']);
     expect(screen.getByRole('table', { name: 'Fantasy points, DEN' })).toHaveTextContent('Broncos Kicker');
 
     await user.click(screen.getByRole('button', { name: '← Back to Raheem Mostert' }));

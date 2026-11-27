@@ -81,7 +81,8 @@ def engine_stand_in(monkeypatch):
     monkeypatch.setattr(services, "sim_season", SimpleNamespace(simulate=fake_simulate), raising=False)
     monkeypatch.setattr(services, "sim_world", SimpleNamespace(estimate=lambda data, week, prior=None: data.as_of(week)),
                         raising=False)
-    monkeypatch.setattr(sim_next_year, "sim_market", SimpleNamespace(adp=lambda world, *format: fake_market(world)))
+    monkeypatch.setattr(sim_next_year, "sim_market", SimpleNamespace(adp=lambda world, *format: fake_market(world),
+                                                                      expert_lean=lambda *args: {}))
 
 
 def _app(url: str) -> Iterator[tuple[TestClient, Engine]]:

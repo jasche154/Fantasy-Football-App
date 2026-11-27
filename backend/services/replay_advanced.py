@@ -10,7 +10,7 @@ from services.replay_box import BoxLine
 from services.replay_pool import Usage
 
 KEYS = ("snap_pct", "target_share", "targets_pg", "carries_pg", "touches_pg", "ypc", "ypr", "ypt", "catch_rate",
-        "total_td", "td_rate", "pass_ypg", "td_int")
+        "total_td", "td_rate", "pass_ypg", "td_int", "cmp_pct")
 
 
 def _ratio(part: float, whole: float, scale: float = 1) -> float | None:
@@ -36,4 +36,5 @@ def line(boxes: Sequence[BoxLine], usages: Sequence[Usage], per_game_td: bool = 
             "total_td": _ratio(tds, games) if per_game_td else tds,
             "td_rate": _ratio(t.rush_td + t.rec_td, touches, 100),
             "pass_ypg": _ratio(t.pass_yds, games) if passed else None,
-            "td_int": round(t.pass_td / t.pass_int, 2) if t.pass_int else (t.pass_td if t.pass_td > 0 else None)}
+            "td_int": round(t.pass_td / t.pass_int, 2) if t.pass_int else (t.pass_td if t.pass_td > 0 else None),
+            "cmp_pct": _ratio(t.pass_cmp, t.pass_att, 100)}

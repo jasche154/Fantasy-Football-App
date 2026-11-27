@@ -97,3 +97,59 @@ def test_rookie_qbs_and_kickers_never_grow(belief):
     assert rookies
     assert not [c for seed in range(30) for c in sim_talent.truth(belief, seed, 1, 17, rookies).changes
                 if c.kind == "growth"]
+
+
+def test_a_rookies_season_role_spreads_by_the_measured_rookie_spread_whatever_the_veterans_knob():
+    """Item 4: the belief knows only a rookie's pick, so the whole measured spread around the pick's role is hidden."""
+
+
+    from services import sim_next_year
+    from services.sim_world import Player
+    sd = sim_next_year.stored()["rookies"]["WR"]["role_sd"]
+    rookie, veteran = Player(1, "WR", "AAA", targets=0.1, games=0.0), Player(2, "WR", "AAA", targets=0.1, games=17.0)
+    knobs = {"season_roles": 0.0}
+    assert sim_talent._season_role(veteran, 1.0, knobs) == veteran
+    assert sim_talent._season_role(rookie, 1.0, knobs).targets == pytest.approx(0.1 * math.exp(sd - sd ** 2 / 2))
+
+
+def test_a_top_ranked_rookie_never_collapses_on_the_season_role_draw():
+    """L2: stars never bust (sim_talent.STAR_RANK), on the season role draw either: a top-ranked player keeps at
+    least bust_cut's top of his role, whatever the draw; anyone else can fall far."""
+    from services.sim_world import Player
+    rookie = Player(1, "RB", "AAA", carries=0.5, games=0.0)
+    knobs = {**sim_talent.settings(), "season_roles": 0.25}
+    floor = knobs["bust_cut"][1]
+    assert sim_talent._season_role(rookie, -3.0, knobs, star=True).carries == pytest.approx(0.5 * floor)
+    assert sim_talent._season_role(rookie, -3.0, knobs).carries < 0.5 * 0.2
+
+
+@pytest.mark.parametrize("position", ["RB", "WR", "TE"])
+def test_the_floored_draw_still_averages_one(position):
+    """H1: the floor is paid for by the rest of the draw, so a top-ranked rookie is not worth more than his price,
+    and he never falls below the floor (an even grid of the normal's quantiles through `_season_role` itself)."""
+    from statistics import NormalDist
+
+    from services.sim_world import Player
+    rookie = Player(1, position, "AAA", targets=1.0, carries=1.0, games=0.0)
+    knobs, n = sim_talent.settings(), 4000
+    roles = [sim_talent._season_role(rookie, NormalDist().inv_cdf((i + 0.5) / n), knobs, star=True).carries
+             for i in range(n)]
+    assert np.mean(roles) == pytest.approx(1.0, abs=0.004) and min(roles) == pytest.approx(knobs["bust_cut"][1])
+
+
+def test_a_whole_season_flags_the_publics_top_players_for_the_floor(monkeypatch):
+    """H1: truth() passes star=True for the public's top STAR_RANK at each position, and only for them."""
+    data = fakes.fake_season()
+    belief = sim_world.estimate(data, 1)
+    flagged = {}
+    real = sim_talent._season_role
+
+    def spy(player, z, knobs, star=False):
+        flagged[player.player_id] = star
+        return real(player, z, knobs, star)
+
+    monkeypatch.setattr(sim_talent, "_season_role", spy)
+    sim_talent.truth(belief, 3, 1, data.last_week)
+    ranks = sim_market.position_ranks(belief)
+    assert flagged and all(star == (ranks.get(pid, 99) <= sim_talent.STAR_RANK) for pid, star in flagged.items())
+    assert any(flagged.values())

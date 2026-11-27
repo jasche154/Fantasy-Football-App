@@ -1229,13 +1229,12 @@
    "share_sd_carries": 0.15,
    "share_sd_qb_carries": 0.45,
    "td_drives": 5,
-   "ot_field_goal": 0.5,
-   "ot_td_yards": {
-    "rec": 12,
-    "rush": 4
-   },
    "fg_power": 1.0,
-   "ypc_volume": 0.3
+   "ypc_volume": 0.3,
+   "line_script_extra": {
+    "targets": -0.0013,
+    "carries": 0.0024
+   }
   },
   "rates": {
    "rec_cv": 0.68
@@ -1246,7 +1245,7 @@
    "floor": 0.2,
    "season_spread": 0.5,
    "strength_sd": 2,
-   "edge_scale": 1.12,
+   "edge_scale": 1.08,
    "depth_targets": 0.78,
    "depth_carries": 0.8,
    "season_roles": 0.25,
@@ -1272,12 +1271,25 @@
    "opinion_keep": 0.9,
    "worth_step": 0.4,
    "fill_in_trust": 0.15,
+   "line_follow": {
+    "QB": 0.6,
+    "RB": 0.42,
+    "WR": 0.3,
+    "TE": 0.3
+   },
    "projection_scale": {
-    "QB": 1.05,
+    "QB": 1.04,
+    "RB": 1.05,
+    "WR": 1.03,
+    "TE": 0.99
+   },
+   "join_scale": {
+    "QB": 1.08,
     "RB": 1.09,
-    "WR": 1.09,
+    "WR": 1.1,
     "TE": 1.06
-   }
+   },
+   "join_fade": 0.5
   }
  }
 }

@@ -5,8 +5,8 @@
   and rushers; receiving yards of the #1/#3/#5/#10 WR and TE; receptions #5 and #10; the share of a team's
   targets its top WR, top TE and top five receivers got, its top RB's share of the carries; the
   spread (sd) of yards per target among receivers with MIN_TARGETS or more (real seasons ~1.3).
-- standings(data): best and worst record (wins, a tie half), the spread of team season points, and the share
-  of games decided by 1-3 points and by 8 or fewer (one score).
+- standings(data): best and worst record (wins, a tie half), the spread of wins, the teams at 10+ wins and at 4 or fewer, the spread
+  of team season points, and the share of games decided by 1-3 points and by 8 or fewer (one score).
 """
 from collections import defaultdict
 
@@ -16,6 +16,7 @@ from services.replay_pool import SeasonData
 
 LEADER_RANKS = (1, 3, 5, 10)
 MIN_TARGETS = 80                 # yards per target spread: receivers with a starter's season of targets
+GOOD_RECORD, BAD_RECORD = 10, 4   # wins: a strong team's season and a weak one's
 MIN_TEAM_TARGETS = 300           # a team with fewer box targets (a partial season) is left out of the shares
 
 
@@ -36,9 +37,11 @@ def _nth(values: list[float], n: int) -> float:
     return sorted(values, reverse=True)[n - 1] if len(values) >= n else 0.0
 
 
-def passing(data: SeasonData) -> dict[str, float]:
-    """The season's passing leader, and the spread of team passing: a team's season yards (sd, max) and a
-    team-game's yards (sd), from the QB lines."""
+def passing(data: SeasonData) -> dict[str, float | list[float]]:
+    """The season's passing leader (his yards, his lead over the 5th passer), and the spread of team passing: a
+    team's season yards (sd, max) and a team-game's yards (sd), from the QB lines. "... p95" rows are one-value
+    lists: sim_eval reports the 95th percentile over every season and seed (the passing and the receiving leader:
+    one league in twenty has a leader past it; real 2018-2025 maxima 5,316 and 1,947)."""
     leader: dict[int, float] = defaultdict(float)
     games: dict[tuple[str, int], float] = defaultdict(float)
     targets: dict[str, float] = defaultdict(float)
@@ -62,7 +65,12 @@ def passing(data: SeasonData) -> dict[str, float]:
     both = [t for t in teams if targets.get(t, 0) > 0]
     volume = np.array([targets[t] / len(played[t]) for t in both])
     per_target = np.array([teams[t] / targets[t] for t in both])
-    return {"pass yds #1": max(leader.values()),
+    receiving: dict[int, float] = defaultdict(float)
+    for (pid, _), line in data.box.items():
+        receiving[pid] += line.rec_yds
+    top = sorted(leader.values(), reverse=True)
+    return {"pass yds #1": top[0], "pass yds #1 - #5": top[0] - top[4] if len(top) > 4 else float("nan"),
+            "passing leader p95": [top[0]], "receiving leader p95": [max(receiving.values())],
             "team volume vs yds/target r": float(np.corrcoef(volume, per_target)[0, 1]) if len(both) > 2 else float("nan"), "team pass yds sd": float(np.std(list(teams.values()))),
             "team pass yds max": max(teams.values()), "team-game pass yds sd": float(np.std(list(games.values()))),
             "team-game pass yds mean": float(np.mean(list(games.values())))}
@@ -121,6 +129,9 @@ def standings(data: SeasonData) -> dict[str, float]:
         return {}
     margins = np.array(margins)
     return {"best record (wins)": max(wins.values()), "worst record (wins)": min(wins.values()),
+            "wins sd": float(np.std(list(wins.values()))),
+            "teams at 10+ wins": float(sum(w >= GOOD_RECORD for w in wins.values())),
+            "teams at 4 or fewer wins": float(sum(w <= BAD_RECORD for w in wins.values())),
             "team season points sd": float(np.std(list(points.values()))),
             "games by 1-3 %": float(100 * np.mean((margins >= 1) & (margins <= 3))),
             "games by 8 or fewer %": float(100 * np.mean(margins <= 8))}
