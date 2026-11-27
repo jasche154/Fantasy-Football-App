@@ -214,3 +214,33 @@ def test_the_cut_margins_spread_matches_the_measured_one(wanted):
     rng = np.random.default_rng(6)
     cuts = np.array([sim_draw.draw_game((sides[home], sides[away]), rng, HALF, until_cut=True) for _ in range(1500)])
     assert np.std(cuts[:, 0] - cuts[:, 1]) == pytest.approx(sim_closing_means.cut_sd(sum(before)), rel=0.06)       # the sd of 1,500 draws: se about 1.8%
+
+
+def test_an_overtime_that_ends_tied_without_a_score_still_counts():
+    """Item 2: `plays` holds scoring plays and kicks only, so a scoreless tied overtime shows only in the final
+    score (the fit counted 6 of the 8 real ties 2018-2025 before)."""
+    scoreless = _game([[1, 3000, "AAA", "fg_0_39", 0], [2, 1500, "BBB", "fg_0_39", 0]], 3, 3)
+    won = _game([[1, 3000, "AAA", "fg_0_39", 0], [2, 1500, "BBB", "fg_0_39", 0], [5, 300, "AAA", "fg_40_49", 0]], 6, 3)
+    regulation = _game([[1, 3000, "AAA", "fg_0_39", 0]], 3, 0)
+    ot = sim_closing_fit.overtime([scoreless, won, regulation])
+    assert ot["games"] == 2 and ot["tie"] == 0.5 and ot["field_goal"] == 1.0
+
+
+def test_a_fit_measures_the_cut_spread_on_the_table_it_just_stored(monkeypatch, tmp_path):
+    """Item 2: write() stores the new table before measuring cut_var, so one --fit is enough (the measurement
+    centres games through the stored file)."""
+    import json
+
+    from services import sim_closing_means
+    good = json.loads(sim_closing.CLOSING_PATH.read_text(encoding="utf-8"))
+    path = tmp_path / "sim_closing.json"
+    monkeypatch.setattr(sim_closing, "CLOSING_PATH", path)
+    monkeypatch.setattr(sim_closing_fit, "CLOSING_PATH", path)
+    monkeypatch.setattr(sim_closing_fit, "_cut_var", lambda session: [float(sim_closing.stored()["games"]), 1.0])
+    monkeypatch.setattr("database.db.SessionLocal", lambda: __import__("contextlib").nullcontext())
+    written = sim_closing_fit.write({**good, "games": 12345})
+    assert written["cut_var"] == [12345.0, 1.0]
+    assert json.loads(path.read_text(encoding="utf-8"))["cut_var"] == [12345.0, 1.0]
+    monkeypatch.undo()
+    for cache in (sim_closing.stored, sim_closing_means._tables, sim_closing_means._at):
+        cache.cache_clear()

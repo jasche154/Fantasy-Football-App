@@ -1550,8 +1550,8 @@ read the belief, so, as in a real season, the public learns the truth only from 
   independent plays made scores too spread out once team strength was right. A game tied after regulation
   goes to **overtime**: one side wins it with a field goal or a touchdown (credited to a receiver or a
   rusher, never one who left the game hurt, so the box score still adds up); the share of overtimes that end
-  tied (5.2%), that the winner ends with a field goal (58%) and the winning TD play's yards are measured on
-  2018-2025 play-by-play (115 overtimes). **The last ten minutes are played from the score**
+  tied (6.8%: all 8 real ties), that the winner ends with a field goal (57%) and the winning TD play's yards are measured on
+  2018-2025 play-by-play (118 overtimes). **The last ten minutes are played from the score**
   (`services/sim_closing.py`): the game is drawn up to ten minutes before the end of regulation, then a real
   game's ending is drawn from the real games (2018-2025 play-by-play, `sim_closing_fit`, cached in
   `backend/data/cache/scoring_plays.json`) that stood at the same margin then, the trailing team's scoring going
@@ -1562,8 +1562,8 @@ read the belief, so, as in a real season, the public learns the truth only from 
   touchdown catch to a receiver, with the passer's line still his receivers' sum, a run to a rusher, field goals
   and extra points to the kicker, return TDs and safeties to the defense), and the draw before the cut is
   centred without the window's and overtime's mean points (`services/sim_closing_means.py`), worked out from the
-  game's own expected lead and total: the margin at the cut spreads more in a high-scoring game (sd^2 = 42.2 +
-  2.16 x the two sides' expected points before the cut, `cut_var`, measured by the fit: 8.5 at 14 points, 12.8 at 56), and over that
+  game's own expected lead and total: the margin at the cut spreads more in a high-scoring game (sd^2 = 44.5 +
+  2.12 x the two sides' expected points before the cut, `cut_var`, measured by the fit: 8.6 at 14 points, 12.8 at 56), and over that
   spread the real endings give each side's mean window points (a trailer scores more in it, and the closer the
   cut the more both kick) and the chance regulation ends tied, which sets each side's overtime points. So
   projections stay unbiased: over 12,000 draws a game averages its target within 0.12 points from 10-13 to 38-10

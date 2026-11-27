@@ -31,7 +31,7 @@ Overtime (`_overtime`): a game tied after regulation stays tied with sim_closing
 of the time, a made kick in a distance band drawn like any other) or a touchdown (no try: it ends the game),
 credited like a closing-window TD (sim_closing.score_td: never to one who left the game hurt, the passer's line
 still his receivers' sum); a field goal is the kicker's unless he left hurt (then a fill-in's: points, no kick on
-his line). All three rates are measured on 2018-2025 regular-season overtimes (sim_closing_fit: 115 games).
+his line). All three rates are measured on 2018-2025 regular-season overtimes (sim_closing_fit: 118 games, 8 of them tied).
 """
 import math
 from collections.abc import Sequence

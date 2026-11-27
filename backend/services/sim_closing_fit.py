@@ -52,6 +52,7 @@ TRIES = ("xp", "xp_miss", "two")
 CUT_SEASON, CUT_WEEK, CUT_GAMES = 2024, 9, 3          # the belief the cut margin's spread is measured on
 CUT_TARGETS = ((10, 13), (14, 10), (17, 17), (24, 20), (28, 28), (31, 13), (38, 10), (21, 21), (35, 30))
 CUT_DRAWS = 1500
+CUT_VAR_START = (42.0, 2.2)      # stored until `write` measures it, when the file has none
 MAX_MARGIN = 16                  # margins above this share one row set (a two-score-plus lead plays alike)
 SEASONS = range(2018, 2026)
 SHUFFLE_SEED = 7                 # the random order of a tied game's two teams (reproducible fits)
@@ -199,7 +200,8 @@ def overtime(games: Iterable[Mapping]) -> dict:
     tied, field_goal, decided = 0, 0, 0
     yards: dict[str, list[int]] = {"rec": [], "rush": []}
     for g in games:
-        if not any(p[0] > 4 for p in g["plays"]):
+        # `plays` holds scoring plays and kicks only: an overtime with neither, ended tied, shows only in the score
+        if g["home_score"] != g["away_score"] and not any(p[0] > 4 for p in g["plays"]):
             continue
         if g["home_score"] == g["away_score"]:
             tied += 1
@@ -307,8 +309,7 @@ def cut_spread(world, games: Iterable[tuple[str, str]], draws: int = CUT_DRAWS, 
 
 def _cut_var(session) -> list[float]:
     """cut_spread on CUT_SEASON's belief before CUT_WEEK, the week's first CUT_GAMES games. Its games are centred
-    through sim_closing_means, which reads the stored sim_closing.json: after a fit that moves the table, run --fit
-    a second time (and a file without `cut_var` cannot be refit: restore the checked-in one first)."""
+    through sim_closing_means on the stored sim_closing.json: `write` stores the new table first, then measures."""
     from services import replay_pool, sim_world
     data = replay_pool.load_season_data(session, CUT_SEASON, "half")
     games = [(g.home_team, g.away_team) for g in data.schedule.games if g.week == CUT_WEEK][:CUT_GAMES]
@@ -320,15 +321,35 @@ def fit(seasons: Iterable[int], window: int = WINDOW, refresh: bool = False) -> 
 
     with SessionLocal() as session:
         script = line_script(session, seasons)
-        cut_var = _cut_var(session)
-    games = [g for g in scoring_games(seasons, refresh) if consistent(g)]
+    try:
+        from services import sim_closing
+        cut_var = list(sim_closing.stored()["cut_var"])      # the stored one, re-measured by `write` on the new table
+    except RuntimeError:
+        cut_var = list(CUT_VAR_START)
+    every = scoring_games(seasons, refresh)
+    games = [g for g in every if consistent(g)]      # the endings need every scoring play; overtime only the score
     table = endings(games, window)
     return {"seasons": [min(g["season"] for g in games), max(g["season"] for g in games)], "games": len(games),
             "window": window, "events": list(EVENTS), "max_margin": MAX_MARGIN,
             "td_yards": td_yards(games, window),
             "table": {str(k): sorted([[n, list(t), list(lead)] for (t, lead), n in rows.items()], reverse=True)
                       for k, rows in sorted(table.items())},
-            "ot": overtime(games), "line_script": script, "cut_var": cut_var, "check": check(games, window)}
+            "ot": overtime(every), "line_script": script, "cut_var": cut_var, "check": check(games, window)}
+
+
+def write(result: dict) -> dict:
+    """Store `result`, then measure its cut_var on the table just stored (the measurement centres games through
+    it) and store it again: one --fit is enough, and a file without cut_var can be refit."""
+    from database.db import SessionLocal
+    from services import sim_closing, sim_closing_means
+    CLOSING_PATH.write_text(dumps(result), encoding="utf-8")
+    for cache in (sim_closing.stored, sim_closing_means._tables, sim_closing_means._at):
+        cache.cache_clear()
+    with SessionLocal() as session:
+        result = {**result, "cut_var": _cut_var(session)}
+    CLOSING_PATH.write_text(dumps(result), encoding="utf-8")
+    sim_closing.stored.cache_clear()
+    return result
 
 
 def dumps(result: Mapping) -> str:
@@ -350,15 +371,15 @@ def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     first, _, last = args.seasons.partition("-")
     result = fit(range(int(first), int(last or first) + 1), args.window, args.refresh)
+    if args.fit:
+        result = write(result)
+        log.info("wrote %s", CLOSING_PATH.name)
     log.info("%d games, window %ds", result["games"], result["window"])
     log.info("overtime %s", result["ot"])
     log.info("volume per point of expected margin %s", result["line_script"])
     log.info("cut margin variance = %s + %s x expected points before the cut", *result["cut_var"])
     for name, row in result["check"].items():
         log.info("%-15s %s", name, "  ".join(f"{k} {100 * v:.1f}%" for k, v in row.items()))
-    if args.fit:
-        CLOSING_PATH.write_text(dumps(result), encoding="utf-8")
-        log.info("wrote %s", CLOSING_PATH.name)
 
 
 if __name__ == "__main__":
