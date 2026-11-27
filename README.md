@@ -1075,7 +1075,11 @@ that week's games on; only scoring a week reads its real points.
   lost 31%). Measured honestly: real results say a known absence costs at least its share of games, and players
   come back worse than before it (out players produced 0.40 of their pre-injury value per game over
   replacement; the chart keeps 0.63), so the user's targets price injured players above what they realised
-  (held-out error of out players 3.185 -> 3.516 with the frozen value, see below).
+  (held-out error of out players 3.185 -> 3.516 with the frozen value, see below). The frozen values are built
+  for the frozen players' positions only, from each absence's last week before it (`replay_values._live`, no
+  nested freeze; the same values as a full build of that week, tested): a league's first trade evaluation after a
+  restart (league 9 at week 11, through the API) 1.07 -> 0.95 s, the week's values 0.65 -> 0.52 s; later calls
+  0.07 s.
 - **Fill-in quarterbacks' charts** (`services/replay_fillin.py`): a QB starting while his team's regular starter
   carries a hard tag (or the backup expected to start), one whose regular has just come back, or one who took the
   job, is priced at (share of his team's games left he is expected to start) x the value of his rank without the
@@ -1097,6 +1101,41 @@ that week's games on; only scoring a week reads its real points.
   regular lineup unchanged (Spearman 0.553, held-out error 4.039; QBs 0.321 -> 0.322); superflex QBs rank better
   (0.591 -> 0.594) but the held-out error rises 5.038 -> 5.048, because superflex QBs are already priced under
   what they produce (QB bias +5.08 -> +5.13 points a game).
+  **Past probation the price climbs over two more starts** instead of jumping to a starter's: a graduate (5+
+  starts, his regular not expected back, or the job taken) is priced at s x his chart (his form counts) + (1 - s)
+  x a backup's, where s is the share of the remaining games real graduates started over an established starter's
+  (0.805 of the games left, 2019-2025): a career backup 0.80 at his 5th start, 0.93 at his 6th; a QB the market
+  drafted (a preseason ADP before pick 200: a high-pick rookie, a veteran starter) 0.89 and 0.93 (`graduated` in
+  `replay_fillin.json`; per group the share only climbs, and a drafted QB never climbs slower than a career
+  backup); from his 7th start (0.79 of the games, as often as an established starter) he is the team's QB at full
+  value. Measured on every real graduate of 2019-2025 (6 players in a 12-team 1-QB league, 16 in superflex):
+  they scored at least as well over replacement as established QBs at the same chart (superflex 13.3 points a
+  game against 10.9) and their charts matched their expert ranks as established QBs' do (median chart over
+  the expert rank's value 0.96-0.99 against 0.97-0.98), so the data supports no further markdown. League 9
+  ("Super", 14-team superflex 2026): J.J. McCarthy at his 5th start 684 -> 556, 6th 601 -> 563, then 584-768 as
+  the team's QB, priced off a simulated expert rank of QB6-13; a fill-in whose regular returns (Drew Lock there, back
+  to the bench in week 15) never reaches probation: 374 in week 14, 118 in week 15. Chart check: regular 0.564 (QBs 0.349 -> 0.351), held-out error 4.015; superflex 0.577, 5.011 -> 5.012.
+- **Chart by league size** (`services/replay_league_size.py`): the chart's ADP lists are drafted in 12-team
+  leagues. Under 12 teams each position's starters keep their rank and the ranks from the last starter to the
+  first player the league leaves unrostered stretch onto the 12-team league's (starters and rostered players
+  counted as the replacement level does, on the average points per game by rank of real 2018-2025 seasons:
+  `python -m services.replay_league_size --fit` -> `replay_league_size.json`), so a waiver player is priced like
+  a 12-team waiver player. An 8-team superflex league starts 16 QBs and rosters about 28: its QB24 is valued like
+  a 12-team QB33. Only the value curve moves: the draft board's order, `pre_rank` and `star` read the
+  unsized season (the CPU draft drafts on raw ADP), a fill-in's "drafted" group reads the raw 1-QB list, and the CPU
+  draft prices an out player off the chart without the taper, next to everyone else's raw ADP. The order holds per
+  rank, not per blended value: a player whose expert and model ranks disagree can swap places with a neighbour.
+  After a jump-in draft (2026, PPR; each new league draws its own simulated future, so these are samples) the free
+  agents worth 300+ went from 2 and 3 (all QBs, 325-412) in two 8-team superflex leagues to no healthy one in eight;
+  twice an injured QB stayed on the wire (Malik Willis on IR, 678 healthy, 313; Jalen Hurts 412) because every CPU
+  was at its QB limit. 10-, 12- and 14-team leagues had none before or after.
+  Chart check at 8 teams (common player-weeks): regular Spearman 0.463 -> 0.474, held-out error 4.021 -> 4.000,
+  out players 2.927 -> 2.890; superflex 0.523 -> 0.522, 4.165 -> 4.155, out players 2.925 -> 2.920. At 10 teams:
+  regular 0.518 -> 0.524, 4.012 -> 3.989, out players 2.975 -> 2.957; superflex 0.549 -> 0.550, 4.743 -> 4.729, out
+  players 3.477 -> 3.490 (the one number that got worse, by 0.4%). Mapping
+  every rank by equal points over replacement instead scored worse in superflex (0.540 -> 0.422): it marks down
+  the starting QBs, whom the 12-team chart already prices below their points. 12 teams and more are unchanged
+  (the same rule would lift a 14-team QB25 to about a 12-team QB22).
 - **Chart check against real results** (`python -m services.replay_chart_eval [--seasons 2018-2025]
   [--weeks 1,4,7,10,13] [--lineups regular,superflex] [--teams 12] [--bench 6] [--out report.json]`;
   `--compare before.json after.json` scores two saved runs on their common player-weeks; `--absences`

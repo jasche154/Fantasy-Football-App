@@ -47,8 +47,8 @@ from collections.abc import Mapping, Sequence
 from functools import lru_cache
 from types import MappingProxyType
 
-from services import (replay_chart_injury, replay_fillin, replay_news, replay_pool, replay_role, replay_shocks,
-                      replay_superflex)
+from services import (replay_chart_injury, replay_fillin, replay_league_size, replay_news, replay_pool, replay_role,
+                      replay_shocks, replay_superflex)
 from services.replay_pool import SeasonData
 
 TAU = 40.0                     # pick_value decay: 1 -> 1000, 12 -> 760, 24 -> 563, 50 -> 294, 100 -> 84
@@ -97,6 +97,7 @@ def clear_cache() -> None:
     replay_shocks.clear_cache()
     replay_fillin.history.cache_clear()
     replay_fillin.fill_ins.cache_clear()
+    replay_league_size.sized.cache_clear()
 
 
 replay_pool.EVICT_HOOKS.append(clear_cache)
@@ -262,16 +263,21 @@ def charts(data: SeasonData, rows: Sequence[dict], priors: Mapping[int, float], 
 def base_charts(data: SeasonData, rows: Sequence[dict], priors: Mapping[int, float], week: int,
                 end_week: int, drafted: int = 0, regular: SeasonData | None = None,
                 frozen: Mapping[int, float] | None = None, live: dict[int, float] | None = None,
-                since: Mapping[int, int] | None = None) -> tuple[dict[int, dict], Parts, str]:
+                since: Mapping[int, int] | None = None,
+                board: SeasonData | None = None) -> tuple[dict[int, dict], Parts, str]:
     """`charts` without the seeded news: (fields with news None, the parts `with_news` needs for players
     with an open hard-tag streak, rank_source). `drafted`: the league's draft week (see `pre_picks`).
     `regular`: a superflex league's season on the 1-QB list (replay_superflex.one_qb), whose overall ranks
     set a non-QB's `star`, so the SUPERFLEX slot changes only the QBs. `frozen`: {id: healthy chart} for the
     players in an injury absence (replay_values), standing in for the expert and model parts; their live
     healthy chart goes into `live` when given; `since`: the first week of each frozen absence, so the frozen value
-    is scaled by `replay_chart_injury.return_factor` of the games missed (`with_news` uses the reported length)."""
+    is scaled by `replay_chart_injury.return_factor` of the games missed (`with_news` uses the reported length).
+    `board`: the season whose ADP sets the preseason order (pre_rank, `star`) when `data` is a view that moves
+    ADP only to change the value curve (replay_league_size.sized); default `data`. `pre_chart` stays on `data`'s
+    scale: replay_personas and replay_mood subtract `chart` from it."""
     frozen, since = frozen or {}, since or {}
-    curve, picks = slot_curve(data), pre_picks(data, drafted)
+    curve, picks = slot_curve(data), pre_picks(board or data, drafted)
+    priced = picks if board is None or board is data else pre_picks(data, drafted)
     overall = pre_ranks(picks)
     star_ranks = overall if regular is None else {
         **pre_ranks(pre_picks(regular, drafted)),
@@ -319,7 +325,7 @@ def base_charts(data: SeasonData, rows: Sequence[dict], priors: Mapping[int, flo
             chart, _ = _injured(data, row, None, week, end_week, expert, model_part)
             fields[pid] = {
                 "chart": round(chart, 1), "healthy_chart": round(expert + model_part, 1),
-                "pre_chart": round(pick_value(picks[pid]), 1) if pid in picks else 0.0,
+                "pre_chart": round(pick_value(priced[pid]), 1) if pid in priced else 0.0,
                 "expert_rank": listed.get(pid), "pre_rank": overall.get(pid), "star": round(stars[pid], 3),
                 "form_chart": round((1 - w) * (model_value - value_at(curve, position, plain[pid])) * bump, 1),
                 "news": None,
@@ -328,9 +334,10 @@ def base_charts(data: SeasonData, rows: Sequence[dict], priors: Mapping[int, flo
 
 
 def with_news(data: SeasonData, rows: Mapping[int, dict], fields: Mapping[int, dict], parts: Parts, week: int,
-              end_week: int, seed: int) -> dict[int, dict]:
+              end_week: int, seed: int, regular: SeasonData | None = None) -> dict[int, dict]:
     """{id: fields} for the players in `parts` (their seeded news report and the chart it gives) and the
-    players an opportunity shock moves (replay_shocks: the market's reaction, which reads that news)."""
+    players an opportunity shock moves (replay_shocks: the market's reaction, which reads that news).
+    `regular`: the 1-QB season the fill-ins are read on (`_filling`); default `data`."""
     out: dict[int, dict] = {}
     for pid, (expert, model_part, (since, back, tag), missed) in parts.items():
         started = data.injuries.get((pid, since))          # the streak's first tag sets its news group
@@ -349,15 +356,19 @@ def with_news(data: SeasonData, rows: Mapping[int, dict], fields: Mapping[int, d
         chart, extra = _injured(data, rows[pid], news, week, end_week, expert, model_part)
         out[pid] = {**fields[pid], **extra, "chart": round(chart, 1), "news": news}
     shocked = {**out, **_shocked(data, rows, fields, out, week)}
-    return {**shocked, **_filling(data, rows, {**fields, **shocked}, week, end_week, seed)}
+    return {**shocked, **_filling(data, rows, {**fields, **shocked}, week, end_week, seed, regular)}
 
 
 def _filling(data: SeasonData, rows: Mapping[int, dict], fields: Mapping[int, dict], week: int,
-             end_week: int, seed: int) -> dict[int, dict]:
+             end_week: int, seed: int, regular: SeasonData | None = None) -> dict[int, dict]:
     """{id: fields} of the fill-in QBs (replay_fillin): share x the value of his rank without the form bonus +
-    (1 - share) x a backup's (the QB ranked just past one per team), never above his own chart. `share` reads
-    the regular starter's news, so it is the same report his injured chart is priced on."""
-    found = replay_fillin.fill_ins(data, week)
+    (1 - share) x a backup's (the QB ranked just past one per team), never above his own chart. A graduate
+    (replay_fillin.graduated: past probation, his regular not expected back) keeps his form: his share of an
+    established starter's starts x his chart + the rest x a backup's. `share` reads the regular starter's news,
+    so it is the same report his injured chart is priced on. Who fills in, and his `prior` group, are read on
+    `regular` (the 1-QB season, unmoved by the superflex view or the league-size taper: what the fit read); only
+    the backup's value comes off `data`'s curve."""
+    found = replay_fillin.fill_ins(regular or data, week)
     if not found:
         return {}
     curve = slot_curve(data)
@@ -370,6 +381,10 @@ def _filling(data: SeasonData, rows: Mapping[int, dict], fields: Mapping[int, di
         news = replay_fillin.regular_news(data, fill, week, seed)       # the report his injured chart reads
         played = replay_fillin.share(fill, news, _game_weeks(data, rows[pid]["team"], week, end_week))
         if played is None:                              # past probation, his regular not expected back: the team's QB
+            continue
+        if replay_fillin.graduated(fill, news):         # the team's QB on a slower climb: his form counts
+            chart = played * now["chart"] + (1 - played) * min(backup, now["chart"])
+            out[pid] = {**now, "chart": round(chart, 1), "fill_in": round(played, 3)}
             continue
         rank_value = now["healthy_chart"] - now.get("form_chart", 0.0)
         chart = min(now["chart"], played * rank_value + (1 - played) * min(backup, rank_value))

@@ -181,7 +181,7 @@ def rosters(session: Session, league: League) -> dict[int, list[RosterSpot]]:
     return out
 
 
-def _slots(settings: LeagueSettings) -> list[str]:
+def lineup_slots(settings: LeagueSettings) -> list[str]:
     slots = []
     for key in SLOT_ORDER:
         count = settings.starters.get(key, 0) if key != "SUPERFLEX" else superflex_slots(settings)
@@ -208,7 +208,7 @@ def best_lineup(players: Sequence[WeeklyPlayer], settings: LeagueSettings,
     pool = sorted((p for p in players if available is None or p.player_id in available), key=lambda p: -key(p))
     used: set[int] = set()
     lineup: dict[str, list[int]] = defaultdict(list)
-    for slot in _slots(settings):
+    for slot in lineup_slots(settings):
         pick = next((p for p in pool if p.player_id not in used and _eligible(slot, p.position)), None)
         if pick is not None:
             used.add(pick.player_id)
