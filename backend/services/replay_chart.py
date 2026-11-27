@@ -47,8 +47,8 @@ from collections.abc import Mapping, Sequence
 from functools import lru_cache
 from types import MappingProxyType
 
-from services import (replay_chart_injury, replay_fillin, replay_news, replay_pool, replay_role, replay_shocks,
-                      replay_superflex)
+from services import (replay_chart_injury, replay_fillin, replay_league_size, replay_news, replay_pool, replay_role,
+                      replay_shocks, replay_superflex)
 from services.replay_pool import SeasonData
 
 TAU = 40.0                     # pick_value decay: 1 -> 1000, 12 -> 760, 24 -> 563, 50 -> 294, 100 -> 84
@@ -97,6 +97,7 @@ def clear_cache() -> None:
     replay_shocks.clear_cache()
     replay_fillin.history.cache_clear()
     replay_fillin.fill_ins.cache_clear()
+    replay_league_size.sized.cache_clear()
 
 
 replay_pool.EVICT_HOOKS.append(clear_cache)

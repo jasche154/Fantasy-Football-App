@@ -34,7 +34,7 @@ from functools import lru_cache
 from types import MappingProxyType, SimpleNamespace
 
 from services import (
-    lineup_gain, my_team as mt, replay_chart, replay_chart_injury, replay_slots, replay_state, replay_superflex,
+    lineup_gain, my_team as mt, replay_chart, replay_chart_injury, replay_league_size, replay_slots, replay_state, replay_superflex,
 )
 from services.league import LeagueSettings, replacement_levels
 from services.replay_news import Report
@@ -274,7 +274,7 @@ def _live(data: SeasonData, league: LeagueSettings, week: int, end_week: int, dr
     teams = {pid: data.team_at(pid, week) for pid, p in data.players.items() if p.position in positions}
     rows = [_row(data, data.players[pid], priors[pid], week, team, 0) for pid, team in teams.items()]
     two_qb = replay_slots.two_qb(league.starters)
-    chart_data = replay_chart.superflex_view(data) if two_qb else regular
+    chart_data = replay_league_size.sized(replay_chart.superflex_view(data) if two_qb else regular, league)
     live: dict[int, float] = {}
     replay_chart.base_charts(chart_data, rows, priors, week, end_week, drafted, regular if two_qb else None,
                              dict.fromkeys(teams, 0.0), live)
@@ -298,6 +298,7 @@ def _base(data: SeasonData, league: LeagueSettings, week: int, end_week: int, dr
             for pid, player in data.players.items()]
     two_qb = replay_slots.two_qb(league.starters)
     chart_data = replay_chart.superflex_view(data) if two_qb else regular        # QBs go where 2-QB drafts take them
+    chart_data = replay_league_size.sized(chart_data, league)                     # under 12 teams: its replacement
     frozen = _frozen(data, league, week, end_week, drafted)
     since = {pid: before + 1 for pid, before in _absences(data, week).items() if pid in frozen}
     live: dict[int, float] = {}
