@@ -30,9 +30,17 @@ describe('seasonSummary', () => {
     expect(summary.ydsPerCarry).toBe(5);
   });
 
+  it('takes the completion rate from the games that recorded attempts', () => {
+    const [first, second] = gamesPlayed(advancedDetail().weeks);
+    const recorded = { ...first, box: boxLine({ pass_cmp: 22, pass_att: 34, pass_yds: 250 }) };
+    const unrecorded = { ...second, box: boxLine({ pass_cmp: null, pass_att: null, pass_yds: 300 }) };
+    expect(seasonSummary([recorded, unrecorded]).cmpPct).toBeCloseTo(22 / 34);
+    expect(seasonSummary([unrecorded]).cmpPct).toBeNull();
+  });
+
   it('is all empty before he has played', () => {
     expect(seasonSummary([])).toEqual({ games: 0, snapPct: null, targetShare: null, targetsPerGame: null, carriesPerGame: null,
-      catchPct: null, ydsPerTarget: null, ydsPerCarry: null });
+      catchPct: null, ydsPerTarget: null, ydsPerCarry: null, cmpPct: null });
   });
 
   it('adds box lines stat by stat', () => {

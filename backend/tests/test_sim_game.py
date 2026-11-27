@@ -54,6 +54,8 @@ def test_the_passers_line_is_the_sum_of_his_receivers_lines():
             passers = [b for p, b in lines.items() if p in qbs]
             assert sum(b.rec_yds for b in catches) == sum(b.pass_yds for b in passers)
             assert sum(b.rec_td for b in catches) == sum(b.pass_td for b in passers)
+            assert sum(b.rec for b in catches) == sum(b.pass_cmp for b in passers)
+            assert all(b.pass_att >= b.pass_cmp + b.pass_int for b in passers)
             assert all(b.rec <= b.targets for b in lines.values())
             assert all(isinstance(v, (int, np.integer)) for b in lines.values() for v in b.__dict__.values())
 
@@ -67,6 +69,10 @@ def test_a_starter_who_leaves_hurt_hands_the_rest_of_the_game_to_the_backup_and_
         receiving = sum(b.rec_yds for p, b in lines.items() if p not in (pid("AAA", "QB"), pid("AAA", "QB2")))
         passing = lines[pid("AAA", "QB")].pass_yds + (lines[pid("AAA", "QB2")].pass_yds if pid("AAA", "QB2") in lines else 0)
         assert receiving == passing
+        passers = [b for p, b in lines.items() if p in (pid("AAA", "QB"), pid("AAA", "QB2"))]
+        caught = sum(b.rec for p, b in lines.items() if p not in (pid("AAA", "QB"), pid("AAA", "QB2")))
+        assert caught == sum(b.pass_cmp for b in passers)
+        assert all(b.pass_att >= b.pass_cmp + b.pass_int for b in passers)
         backup_threw += pid("AAA", "QB2") in lines
         assert result.players[pid("AAA", "QB")].usage.snap_pct == 40.0
     assert backup_threw > 90
@@ -201,11 +207,11 @@ def test_each_passer_is_credited_only_touchdowns_among_the_catches_he_threw():
     side = SimpleNamespace(qb=1, backup=2, qb_share=0.5)
     catches = np.array([1, 1, 2])
     offense = SimpleNamespace(catches=catches, rec_yds=np.array([30, 5, 20]), rec_td=np.array([1, 0, 1]), ints=0,
-                              sack_fumbles=0)
+                              sack_fumbles=0, attempts=7)
     rng = np.random.default_rng(9)
     for _ in range(300):
         lines = sim_draw._passers(side, offense, rng)
-        assert all(line["pass_td"] <= line["completions"] for line in lines.values())
+        assert all(line["pass_td"] <= line["pass_cmp"] for line in lines.values())
         assert sum(line["pass_td"] for line in lines.values()) == 2
 
 
@@ -230,3 +236,37 @@ def test_a_qb_carry_share_with_no_spread_is_his_weights_share():
     drawn = np.array([sim_draw._split(30, weights, 0.15, rng, (2, 0.0)) for _ in range(4000)])
     assert (drawn.sum(axis=1) == 30).all()
     assert drawn[:, 2].mean() == pytest.approx(30 * 0.3, rel=0.02)      # se 0.04 carries: about 4.5 se
+
+
+@pytest.mark.parametrize("exits", [{}, {pid("AAA", "QB"): 0.4}])
+def test_passers_completions_and_attempts_add_up_after_the_closing_window_and_overtime(exits):
+    """Late TD catches (sim_closing.score_td: the closing window's and overtime's) are completions and attempts
+    too; each passer throws at least his completions + interceptions, and the two add up to the team's."""
+    from services import sim_closing, sim_draw
+    side = sim_game._side(world(), "AAA", "BBB", set(), exits)
+    means = sim_game._side_means(side)
+    rng = np.random.default_rng(11)
+    for _ in range(300):
+        regulation = sim_draw._offense(side, int(rng.integers(0, 45)), 25, 1.0, rng)
+        final = regulation
+        for _ in range(int(rng.integers(0, 3))):
+            final = sim_closing.score_td(side, means, final, "rec", {"rec": 12.0, "rush": 3.0}, rng)[0]
+        lines = sim_draw._passers(side, final, rng, regulation).values()
+        assert sum(line["pass_cmp"] for line in lines) == final.catches.sum()
+        assert sum(line["pass_att"] for line in lines) == final.attempts
+        assert sum(line["pass_int"] for line in lines) == final.ints
+        assert all(line["pass_att"] >= line["pass_cmp"] + line["pass_int"] for line in lines)
+        assert len(lines) == (2 if exits else 1)
+
+
+def test_interceptions_are_incomplete_attempts_and_keep_their_mean():
+    """An interception is drawn among the incomplete attempts, at the rate that keeps rate x attempts its mean."""
+    from services import sim_draw
+    side = sim_game._side(world(), "AAA", "BBB", set(), {})
+    rng = np.random.default_rng(12)
+    offenses = [sim_draw._offense(side, 34, 25, 1.0, rng) for _ in range(4000)]
+    assert all(o.ints <= o.attempts - o.catches.sum() for o in offenses)
+    tiny = [sim_draw._offense(side, 1, 25, 1.0, rng) for _ in range(500)]
+    assert all(o.ints <= o.attempts - o.catches.sum() for o in tiny)
+    mean_ints, mean_attempts = np.mean([o.ints for o in offenses]), np.mean([o.attempts for o in offenses])
+    assert mean_ints == pytest.approx(mean_attempts * side.int_rate, rel=0.06)

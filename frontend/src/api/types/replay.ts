@@ -65,6 +65,10 @@ export interface ReplayHype {
 
 /** One game's (or a sum or average of games') box score; K/DST have none. Whole numbers, averages 1 decimal. */
 export interface ReplayBoxLine {
+  /** Completions and attempts (sacks are not attempts); null on a passing line that never recorded them
+   *  (a simulated league saved before they were kept). */
+  pass_cmp: number | null;
+  pass_att: number | null;
   pass_yds: number;
   pass_td: number;
   pass_int: number;
@@ -100,6 +104,8 @@ export interface ReplayAdvLine {
   pass_ypg: number | null;
   /** Pass TD / INT; just the TDs when he threw no INT; null without a TD or INT. */
   td_int: number | null;
+  /** Completions per attempt, 0-100; null without a recorded attempt. */
+  cmp_pct: number | null;
 }
 export type ReplayAdvKey = keyof ReplayAdvLine;
 

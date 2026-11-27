@@ -38,10 +38,23 @@ describe('PlayerAdvanced', () => {
   });
 
   it('shows a quarterback\'s passing and rushing, and asks for more games before a trend', () => {
-    const weeks = playerDetail(MAHOMES).weeks.map((week) => (week.usage ? { ...week, box: boxLine({ pass_yds: 280, pass_td: 2, pass_int: 1, carries: 4, rush_yds: 22 }) } : week));
+    const weeks = playerDetail(MAHOMES).weeks.map((week) => (week.usage
+      ? { ...week, box: boxLine({ pass_cmp: 22, pass_att: 34, pass_yds: 280, pass_td: 2, pass_int: 1, carries: 4, rush_yds: 22 }) } : week));
     render(<PlayerAdvanced name="Patrick Mahomes" position="QB" weeks={weeks} />);
     const rows = within(screen.getByRole('table')).getAllByRole('row');
-    expect(cellsOf(rows[1])).toEqual(['DEN', '61%', '280', '2:1', '4', '22', '5.5']);
+    expect(within(rows[0]).getAllByRole('columnheader').map((header) => header.textContent))
+      .toEqual(['Wk', 'Opp', 'Snap', 'C/ATT', 'PaYd', 'TD:INT', 'Car', 'RuYd', 'Y/Car']);
+    expect(cellsOf(rows[1])).toEqual(['DEN', '61%', '22/34', '280', '2:1', '4', '22', '5.5']);
+    expect(tiles()['Cmp %']).toBe('65%');
     expect(screen.getByText('Trends show once he has played more than 3 games.')).toBeInTheDocument();
+  });
+
+  it('shows a dash for completions and attempts a saved league never recorded', () => {
+    const weeks = playerDetail(MAHOMES).weeks.map((week) => (week.usage
+      ? { ...week, box: boxLine({ pass_cmp: null, pass_att: null, pass_yds: 280, pass_td: 2, pass_int: 1 }) } : week));
+    render(<PlayerAdvanced name="Patrick Mahomes" position="QB" weeks={weeks} />);
+    const rows = within(screen.getByRole('table')).getAllByRole('row');
+    expect(cellsOf(rows[1]).slice(0, 3)).toEqual(['DEN', '61%', '—']);
+    expect(tiles()['Cmp %']).toBe('—');
   });
 });

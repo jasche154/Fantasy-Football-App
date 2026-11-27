@@ -116,14 +116,29 @@ def test_an_overtime_catch_is_never_the_hurt_starters():
     """Review item 12: with the starter gone (qb_share < 1), only regulation passing is split between the QBs."""
     side = SimpleNamespace(qb=1, backup=2, qb_share=0.7)
     regulation = SimpleNamespace(catches=np.array([5, 4, 0]), rec_yds=np.array([60, 40, 0]), rec_td=np.array([0, 0, 0]),
-                                 ints=1, sack_fumbles=0)
+                                 ints=1, sack_fumbles=0, attempts=16)
     after = SimpleNamespace(**{**vars(regulation), "catches": np.array([6, 4, 0]), "rec_yds": np.array([72, 40, 0]),
-                               "rec_td": np.array([1, 0, 0])})
+                               "rec_td": np.array([1, 0, 0]), "attempts": 17})       # the overtime TD: a catch, an attempt
     for seed in range(40):
         lines = sim_draw._passers(side, after, np.random.default_rng(seed), regulation)
         assert lines[1]["pass_td"] == 0 and lines[2]["pass_td"] == 1
-        assert lines[1]["completions"] + lines[2]["completions"] == 10
+        assert lines[1]["pass_cmp"] + lines[2]["pass_cmp"] == 10 and lines[1]["pass_att"] + lines[2]["pass_att"] == 17
+        assert all(line["pass_att"] >= line["pass_cmp"] + line["pass_int"] for line in lines.values())
         assert lines[1]["pass_yds"] + lines[2]["pass_yds"] == 112
+
+
+@pytest.mark.parametrize("share", [0.3, 0.9])
+def test_a_hurt_starter_threw_his_share_of_regulations_other_incompletions(share):
+    """Review: the backup's attempts are "the rest", so the sums hold however the starter's share is drawn."""
+    side = SimpleNamespace(qb=1, backup=2, qb_share=share)
+    regulation = SimpleNamespace(catches=np.array([12, 8, 0]), rec_yds=np.array([150, 90, 0]),
+                                 rec_td=np.array([1, 0, 0]), ints=2, sack_fumbles=0, attempts=40)   # 18 other misses
+    after = SimpleNamespace(**{**vars(regulation), "attempts": 45})       # five later throws: none of them his
+    draws = [sim_draw._passers(side, after, np.random.default_rng(seed), regulation) for seed in range(2000)]
+    missed = [line[1]["pass_att"] - line[1]["pass_cmp"] - line[1]["pass_int"] for line in draws]
+    assert np.mean(missed) == pytest.approx(share * 18, abs=0.3)
+    assert all(line[1]["pass_int"] + line[2]["pass_int"] == 2 and line[1]["pass_att"] + line[2]["pass_att"] == 45
+               for line in draws)
 
 
 def test_no_team_plays_a_game_without_a_quarterback(monkeypatch):

@@ -120,7 +120,7 @@ describe('PlayersView table', () => {
 
   it('switches to the Advanced columns, sorts by one on the server, and falls back to Value on Box score', async () => {
     const adv = { snap_pct: 71.2, target_share: 12.5, targets_pg: 3.1, carries_pg: 14, touches_pg: 16.5, ypc: 4.8, ypr: 7.9, ypt: 6.2,
-      catch_rate: 78.6, total_td: 9, td_rate: 4.1, pass_ypg: null, td_int: null };
+      catch_rate: 78.6, total_td: 9, td_rate: 4.1, pass_ypg: null, td_int: null, cmp_pct: null };
     const { user, lastQuery } = renderPlayers(summary(), [{ path: PLAYERS, reply: json(wire([wireRow(MOSTERT, { line: statLine({ adv }) })])) }]);
     await row('Raheem Mostert');
     const views = screen.getByRole('group', { name: 'Stat columns' });
@@ -498,13 +498,17 @@ describe('PlayersView pinned-column shadows', () => {
     renderPlayers(summary());
     const table = await screen.findByRole('table', { name: 'Players, week 5' });
     const box = table.parentElement!;
-    const watcher = observers.find((o) => o.targets.includes(table));
-    expect(watcher?.targets).toContain(box);
+    // the effect that starts watching can run after the table is first found (it failed once in CI): wait for it
+    const watcher = await waitFor(() => {
+      const found = observers.find((o) => o.targets.includes(table));
+      expect(found?.targets).toContain(box);
+      return found!;
+    });
     expect(box).not.toHaveAttribute('data-overflow-end');
 
     Object.defineProperty(box, 'clientWidth', { configurable: true, value: 320 });
     Object.defineProperty(box, 'scrollWidth', { configurable: true, value: 900 });   // the table grew; the box did not
-    act(() => watcher!.callback());
+    act(() => watcher.callback());
 
     expect(box).toHaveAttribute('data-overflow-end', 'true');
   });

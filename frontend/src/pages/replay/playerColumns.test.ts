@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { MAHOMES, MOSTERT, statLine, wireRow } from './fixtures';
 import { boxLine } from './fixturesPlayers';
-import { boxColumns, boxText, DEFAULT_SORT, sortDirection, statColumns, visibleSort } from './playerColumns';
+import { boxColumns, boxText, DEFAULT_SORT, passingText, sortDirection, statColumns, visibleSort } from './playerColumns';
 
 const labels = (span: Parameters<typeof statColumns>[0], tab: Parameters<typeof statColumns>[2]) =>
   statColumns(span, span === 'week' ? 5 : null, tab).map((column) => column.label);
@@ -9,7 +9,7 @@ const labels = (span: Parameters<typeof statColumns>[0], tab: Parameters<typeof 
 describe('playerColumns', () => {
   it('picks the span columns, then the box columns for the position tab', () => {
     expect(labels('season', 'ALL')).toEqual(['Pts', 'PPG', 'GP', 'ROS', 'Car', 'RuYd', 'RuTD', 'Tgt', 'Rec', 'ReYd', 'ReTD']);
-    expect(labels('last4', 'QB')).toEqual(['Pts/G', 'Snap % (last 3)', 'PaYd', 'PaTD', 'INT', 'RuYd', 'RuTD']);
+    expect(labels('last4', 'QB')).toEqual(['Pts/G', 'Snap % (last 3)', 'Cmp', 'Att', 'PaYd', 'PaTD', 'INT', 'RuYd', 'RuTD']);
     expect(labels('week', 'WR')).toEqual(['Proj', 'Pts', 'Tgt', 'Rec', 'ReYd', 'ReTD']);
     expect(labels('week', 'TE')).toEqual(labels('week', 'WR'));
     expect(labels('season', 'FLEX')).toEqual(labels('season', 'RB'));
@@ -31,6 +31,9 @@ describe('playerColumns', () => {
     expect(boxText(boxLine({ rush_yds: 64.25 }), 'rush_yds', true)).toBe('64.3');
     expect(boxText(boxLine(), 'rush_yds')).toBe('72');
     expect(boxText(null, 'rush_yds')).toBe('—');
+    expect(boxText(boxLine({ pass_att: null }), 'pass_att')).toBe('—');       // a saved league never recorded it
+    expect([passingText(boxLine({ pass_cmp: 22, pass_att: 34 })), passingText(boxLine({ pass_cmp: null, pass_att: null })), passingText(null)])
+      .toEqual(['22/34', '—', '—']);
     const games = statColumns('season', null, 'QB').find((column) => column.id === 'ppg')!;
     expect(games.text(wireRow(MAHOMES, { games: 0 }))).toBe('—');
   });
@@ -43,8 +46,8 @@ describe('playerColumns', () => {
     const advanced = (tab: Parameters<typeof statColumns>[2]) => statColumns('season', null, tab, 'advanced');
     expect(advanced('RB').map((column) => column.label)).toEqual(['GP', 'Snap%', 'Tch/G', 'Car/G', 'YPC', 'Tgt%', 'Tgt/G', 'Catch%', 'Y/Rec', 'TD%', 'TD']);
     expect(advanced('WR').map((column) => column.label)).toEqual(['GP', 'Snap%', 'Tgt%', 'Tgt/G', 'Catch%', 'Y/Tgt', 'Y/Rec', 'TD%', 'TD']);
-    expect(advanced('QB').map((column) => column.label)).toEqual(['GP', 'Snap%', 'PaYd/G', 'TD:INT', 'Car/G', 'YPC', 'TD']);
-    expect(advanced('ALL')).toHaveLength(14);
+    expect(advanced('QB').map((column) => column.label)).toEqual(['GP', 'Snap%', 'PaYd/G', 'Cmp%', 'TD:INT', 'Car/G', 'YPC', 'TD']);
+    expect(advanced('ALL')).toHaveLength(15);
     expect(advanced('K').map((column) => column.label)).toEqual(['GP']);
     expect(advanced('RB').map((column) => column.sort)).toEqual([null, 'adv_snap_pct', 'adv_touches_pg', 'adv_carries_pg', 'adv_ypc',
       'adv_target_share', 'adv_targets_pg', 'adv_catch_rate', 'adv_ypr', 'adv_td_rate', 'adv_total_td']);
