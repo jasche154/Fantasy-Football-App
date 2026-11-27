@@ -65,12 +65,18 @@ def second_half(stat: str, margin: float, lead: float) -> float:
 
 def parts(side) -> np.ndarray:
     """[[first-half targets, carries], [second-half targets, carries]]: the side's mean volume in each half
-    (`side.margin` its expected margin, `side.half_lead` its mean lead at half time)."""
+    (`side.margin` its expected margin, `side.half_lead` its mean lead at half time). Read-only (cached)."""
+    return _parts(float(side.targets), float(side.carries), float(side.margin), float(side.half_lead))
+
+
+@lru_cache(maxsize=8192)
+def _parts(targets: float, carries: float, margin: float, half_lead: float) -> np.ndarray:
     s, first = stored()["shares"], stored()["first_half"]
     out = np.empty((2, 2))
-    for j, (stat, volume) in enumerate((("targets", side.targets), ("carries", side.carries))):
-        out[0, j] = volume * s[stat][0] * max(0.0, 1.0 + first[stat] * side.margin)
-        out[1, j] = volume * s[stat][1] * second_half(stat, side.margin, side.half_lead)
+    for j, (stat, volume) in enumerate((("targets", targets), ("carries", carries))):
+        out[0, j] = volume * s[stat][0] * max(0.0, 1.0 + first[stat] * margin)
+        out[1, j] = volume * s[stat][1] * second_half(stat, margin, half_lead)
+    out.setflags(write=False)
     return out
 
 
@@ -88,11 +94,17 @@ def window_means(side) -> tuple[float, float, float]:
     """(targets, carries, kneels) the side's window adds besides its scoring plays, on average (sim_closing_means
     over the cut margin's spread): the ending's targets less its TD catches and its carries less its TD runs and
     kneels, scaled by `window_scale`; kneels as they come."""
-    from services import sim_closing_means
-    ev = sim_closing_means.window_events(side.end.lead, side.end.sd)
     t_scale, c_scale = window_scale(side)
-    return (t_scale * max(0.0, ev["targets"] - ev["pass_td"]),
-            c_scale * max(0.0, ev["carries"] - ev["rush_td"] - ev["kneels"]), float(ev["kneels"]))
+    targets, carries, kneels = _window(float(side.end.lead), float(side.end.sd))
+    return t_scale * targets, c_scale * carries, kneels
+
+
+@lru_cache(maxsize=8192)
+def _window(lead: float, sd: float) -> tuple[float, float, float]:
+    from services import sim_closing_means
+    ev = sim_closing_means.window_events(lead, sd)
+    return (max(0.0, ev["targets"] - ev["pass_td"]), max(0.0, ev["carries"] - ev["rush_td"] - ev["kneels"]),
+            float(ev["kneels"]))
 
 
 def window_plays(side, events: Mapping[str, int], rng: np.random.Generator) -> tuple[int, int, int]:
