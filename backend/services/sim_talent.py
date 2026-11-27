@@ -120,7 +120,9 @@ def _season_role(player: Player, z: float, knobs: dict, star: bool = False) -> P
     a quarter of it rookies followed their draft slot too closely; full mode 2021-2025, 3 seeds, real / quarter /
     full: rookie ADP against finish 0.50 / 0.66 / 0.53, rookie top-24 finishes 8.4 / 6.8 / 8.0, with the floor below). A `star` (the
     public's top STAR_RANK at his position, sim_market.position_ranks) keeps at least the most a bust leaves
-    (`bust_cut`'s top): stars never bust, on this draw either."""
+    (`bust_cut`'s top): stars never bust, on this draw either. The floored draw is divided by its own mean
+    (`_floored_mean`), so it still averages 1 and the public, which prices him at mean 1, is not short-changed
+    (unscaled, the floor lifted a top-12 rookie's role about 12% on average)."""
     model = sim_next_year.stored()
     if player.games > 0:
         sd = model.get("role_sd", {}).get(player.position, 0.0) * knobs["season_roles"]
@@ -130,8 +132,17 @@ def _season_role(player: Player, z: float, knobs: dict, star: bool = False) -> P
         return player
     x = _lognormal(sd, z)
     if star:
-        x = max(x, float(knobs["bust_cut"][1]))
+        floor = float(knobs["bust_cut"][1])
+        x = max(x, floor) / _floored_mean(sd, floor)
     return replace(player, targets=player.targets * x, carries=player.carries * x)
+
+
+def _floored_mean(sd: float, floor: float) -> float:
+    """E[max(X, floor)] for X lognormal with mean 1 and log-sd `sd`: floor x Phi(a) + Phi(sd - a),
+    a = (ln floor + sd^2 / 2) / sd."""
+    a = (math.log(floor) + sd ** 2 / 2) / sd
+    phi = lambda v: 0.5 * (1 + math.erf(v / math.sqrt(2)))  # noqa: E731
+    return floor * phi(a) + phi(sd - a)
 
 
 def _team(team: Team, z: np.ndarray, knobs: dict, eff_z: float = 0.0) -> Team:
