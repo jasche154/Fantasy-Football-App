@@ -52,6 +52,8 @@ class GameLine:
     receiving_tds: int
     target_share: float | None
     snap_pct: float | None    # 0-100
+    completions: int = 0      # passing; last with defaults so older callers keep working
+    attempts: int = 0
 
     @property
     def total_tds(self) -> int:
@@ -134,6 +136,7 @@ def _game_line(row, opportunity, snap_pct: float | None, scoring: ScoringSetting
         receiving_yards=_int(stats["receiving_yards"]), receiving_tds=_int(stats["receiving_tds"]),
         target_share=stats["target_share"],
         snap_pct=round(snap_pct * 100, 1) if snap_pct is not None else None,
+        completions=_int(stats["completions"]), attempts=_int(stats["attempts"]),
     )
 
 

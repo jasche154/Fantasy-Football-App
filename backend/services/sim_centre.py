@@ -98,7 +98,7 @@ def factor(side, against: dict | None, target: float, m: dict | None = None, pow
     rest = _mean_points(m, against) - closed            # return TDs and safeties: untouched by the factor
     f = _solve(tds, yards, rest, side.fg_scale, power, target)
     from services import sim_script
-    p_t, p_c = _before_cut(side)
+    p_t, p_c = sim_script.scoring_share(side)
     if max(side.rec_td.max() / p_t, sim_script.rushing(side)[1].max() / p_c) * max(1.0, f) <= MAX_TD_RATE:
         return f                                         # no rate capped before or after: the closed form is exact
     aim = target
@@ -109,14 +109,6 @@ def factor(side, against: dict | None, target: float, m: dict | None = None, pow
         aim += target - got
         f = _solve(tds, yards, rest, side.fg_scale, power, aim, f)
     return f
-
-
-def _before_cut(side) -> tuple[float, float]:
-    """The share of a game's targets and carries a side's TDs come from (sim_script.before_cut; 1 without parts)."""
-    if side.end is None:
-        return 1.0, 1.0
-    from services import sim_script
-    return sim_script.before_cut("targets"), sim_script.before_cut("carries")
 
 
 def team_factor(world, team: str, out, shift: float) -> float:

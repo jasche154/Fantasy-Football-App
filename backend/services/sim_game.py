@@ -328,7 +328,7 @@ def _side_means(side: _Side) -> dict:
         (h1_t, h1_c), (h2_t, h2_c) = sim_script.parts(side)
         pre_t, pre_c = h1_t + h2_t, h1_c + h2_c
         win_t, win_c, kneels = sim_script.window_means(side)
-        p_t, p_c = sim_script.before_cut("targets"), sim_script.before_cut("carries")
+        p_t, p_c = sim_script.scoring_share(side)
     targets = (pre_t + win_t) * t_share
     catches = targets * side.catch
     rec_td = pre_t * t_share * side.catch * np.minimum(side.rec_td / p_t, MAX_TD_RATE)

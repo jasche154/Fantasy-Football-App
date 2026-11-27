@@ -29,14 +29,15 @@ const ADV: Record<ReplayAdvKey, AdvColumn> = {
   td_rate: { key: 'td_rate', label: 'TD%', title: 'Rushing and receiving touchdowns per touch', format: 'pct' },
   pass_ypg: { key: 'pass_ypg', label: 'PaYd/G', title: 'Passing yards a game', format: 'one' },
   td_int: { key: 'td_int', label: 'TD:INT', title: 'Passing touchdowns per interception', format: 'two' },
+  cmp_pct: { key: 'cmp_pct', label: 'Cmp%', title: 'Completions per pass attempt', format: 'pct' },
 };
 
 const RUSHER: readonly ReplayAdvKey[] = ['snap_pct', 'touches_pg', 'carries_pg', 'ypc', 'target_share', 'targets_pg', 'catch_rate', 'ypr', 'td_rate', 'total_td'];
 const RECEIVER: readonly ReplayAdvKey[] = ['snap_pct', 'target_share', 'targets_pg', 'catch_rate', 'ypt', 'ypr', 'td_rate', 'total_td'];
 const ADV_KEYS: Record<ReplayPositionTab, readonly ReplayAdvKey[]> = {
-  ALL: ['snap_pct', 'touches_pg', 'carries_pg', 'ypc', 'target_share', 'targets_pg', 'catch_rate', 'ypr', 'ypt', 'td_rate', 'total_td', 'pass_ypg', 'td_int'],
+  ALL: ['snap_pct', 'touches_pg', 'carries_pg', 'ypc', 'target_share', 'targets_pg', 'catch_rate', 'ypr', 'ypt', 'td_rate', 'total_td', 'pass_ypg', 'cmp_pct', 'td_int'],
   FLEX: [...RUSHER.slice(0, -2), 'ypt', ...RUSHER.slice(-2)],
-  QB: ['snap_pct', 'pass_ypg', 'td_int', 'carries_pg', 'ypc', 'total_td'],
+  QB: ['snap_pct', 'pass_ypg', 'cmp_pct', 'td_int', 'carries_pg', 'ypc', 'total_td'],
   RB: RUSHER,
   WR: RECEIVER,
   TE: RECEIVER,

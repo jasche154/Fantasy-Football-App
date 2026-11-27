@@ -8,11 +8,11 @@ GET  .../box?week=W&team=T        the game NFL team T played in week W (1..the l
                 kept, or a real game the database has no score for)
       BoxPlayer {id, name, position, points, box: BoxLine | null}
                 everyone in the pool who played for the team that week, QB, RB, WR, TE, K, DST, then most points
-                first. points: fantasy points under the league's scoring. box: null for K and DST.
+                first. points: fantasy points under the league's scoring. box: null for K and DST; its pass_cmp and
+                pass_att are null on a passing line that never recorded them (replay_box.shown).
       422 when W is not a played week or T had no game in week W (a bye, or not a team).
 """
-from dataclasses import asdict
-
+from services import replay_box
 from services.replay_views import Game
 
 ORDER = ("QB", "RB", "WR", "TE", "K", "DST")
@@ -23,7 +23,7 @@ def _team(game: Game, team: str, week: int, home: bool) -> dict:
     ids = [pid for pid, games in data.team_by_week.items() if (week, team) in games and (pid, week) in data.actual]
     players = [{"id": pid, "name": data.players[pid].name, "position": data.players[pid].position,
                 "points": data.actual[(pid, week)],
-                "box": asdict(line) if (line := data.box.get((pid, week))) else None} for pid in ids]
+                "box": replay_box.shown(line) if (line := data.box.get((pid, week))) else None} for pid in ids]
     players.sort(key=lambda row: (ORDER.index(row["position"]) if row["position"] in ORDER else len(ORDER),
                                   -row["points"], row["name"]))
     return {"team": team, "home": home, "score": data.scores.get((team, week)), "players": players}

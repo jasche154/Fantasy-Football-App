@@ -5,13 +5,16 @@ import { AsyncView } from '../../components/AsyncView';
 import { Skeleton } from '../../components/StatusViews';
 import { Tabs } from '../../components/Tabs';
 import { useAsync } from '../../hooks/useAsync';
+import { passingText } from './playerColumns';
 import { formatPoints, ReplayPositionChip } from './shared';
 
-type Column = { key: keyof ReplayBoxLine; label: string; title: string };
+/** `text`: the cell when it isn't the plain number (C/ATT reads "22/34"). */
+type Column = { key: keyof ReplayBoxLine; label: string; title: string; text?: (box: ReplayBoxLine) => string };
 
-/** ESPN's sections: who shows in each, and its columns (the box has no attempts or completions). */
+/** ESPN's sections: who shows in each, and its columns. */
 const SECTIONS: readonly { title: string; has: (box: ReplayBoxLine) => boolean; columns: readonly Column[] }[] = [
-  { title: 'Passing', has: (b) => b.pass_yds !== 0 || b.pass_td > 0 || b.pass_int > 0, columns: [
+  { title: 'Passing', has: (b) => (b.pass_att ?? 0) > 0 || b.pass_yds !== 0 || b.pass_td > 0 || b.pass_int > 0, columns: [
+    { key: 'pass_att', label: 'C/ATT', title: 'Completions / attempts', text: passingText },
     { key: 'pass_yds', label: 'YDS', title: 'Passing yards' }, { key: 'pass_td', label: 'TD', title: 'Passing touchdowns' },
     { key: 'pass_int', label: 'INT', title: 'Interceptions' }] },
   { title: 'Rushing', has: (b) => b.carries > 0, columns: [
@@ -38,7 +41,7 @@ function StatTable({ team, title, columns, players }: { team: string; title: str
           {players.map((player) => (
             <tr key={player.id}>
               <th scope="row">{player.name}</th>
-              {columns.map(({ key }) => <td key={key} className="num">{player.box?.[key]}</td>)}
+              {columns.map(({ key, text }) => <td key={key} className="num">{player.box && text ? text(player.box) : player.box?.[key]}</td>)}
             </tr>
           ))}
         </tbody>

@@ -228,7 +228,7 @@ def plays(side, plan: Plan, n_targets: int, n_carries: int, eff: float, rng: np.
             rush_yds[at] += int(round(kneels * sim_script.kneel_yards()))
         return _Offense(targets, catches, rec_yds, zero[0], rec_fumbles, carries, rush_yds, zero[1], rush_fumbles,
                         attempts, 0, 0, 0)
-    p_t, p_c = sim_script.before_cut("targets"), sim_script.before_cut("carries")
+    p_t, p_c = sim_script.scoring_share(side)
     rec_rate = np.minimum(side.rec_td * eff ** game["td_power"] / p_t, MAX_TD_RATE)
     rush_rate = np.minimum(rush_td * rush_eff ** game["td_power"] / p_c, MAX_TD_RATE)
     rec_td, rush_td = _touchdowns(catches, rec_rate, carries, rush_rate, drives, rng, slack=0)
@@ -257,7 +257,7 @@ def _per_play(side) -> np.ndarray:
     """[yards per target, TDs per target, yards per carry, TDs per carry] before the cut, at mean efficiency."""
     t = side.target_w / side.target_w.sum() * side.catch
     c = side.carry_w / side.carry_w.sum()
-    p_t, p_c = sim_script.before_cut("targets"), sim_script.before_cut("carries")
+    p_t, p_c = sim_script.scoring_share(side)
     ypr, rush_td = sim_script.rushing(side)
     return np.array([t @ side.ypc, t @ np.minimum(side.rec_td / p_t, MAX_TD_RATE),
                      c @ ypr, c @ np.minimum(rush_td / p_c, MAX_TD_RATE)])

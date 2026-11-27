@@ -26,6 +26,7 @@
 - both modes report how a team's plays follow the score and how its work is shared, per team-game
   (sim_metrics_usage.usage: margin against carries and targets, the five margin buckets, players with a touch, the
   game's top backs' and receivers' shares, quarterback carries)
+- both modes report the starting QBs' completion %, attempts a start and interceptions a start (sim_metrics.passing).
 - both modes report injuries (sim_metrics.injuries: new injuries per game played, missed share, by position)
   against the real rate and the target, real x sim_injuries.INJURY_SCALE (simulated seasons have fewer on purpose).
 - --set overrides a sim_params.json value for this run (section.key=value, JSON value); --save-tuned writes

@@ -140,7 +140,7 @@ def test_every_advanced_stat_is_a_sort_with_players_lacking_it_last():
 
 
 @pytest.mark.parametrize("query, message", [
-    ({"sort": "luck"}, "Unknown sort"), ({"sort": "adv_bogus"}, "Unknown sort"), ({"direction": "up"}, "Unknown dir"), ({"stats": "career"}, "Unknown stats"),
+    ({"sort": "luck"}, "Unknown sort"), ({"sort": "adv_bogus"}, "Unknown sort"), ({"sort": "pass_comp"}, "Unknown sort"), ({"direction": "up"}, "Unknown dir"), ({"stats": "career"}, "Unknown stats"),
     ({"stats": "week", "stat_week": 0}, "can't be shown"), ({"stats": "week", "stat_week": 7}, "can't be shown"),
     ({"stat_week": 7}, "can't be shown"),
 ])
@@ -286,3 +286,28 @@ def test_a_vague_report_keeps_him_out_every_week_to_come_and_never_reads_the_rea
 
     assert all(row["out_expected"] and row["estimate"] is None for row in upcoming[0])
     assert upcoming[0] == upcoming[1]
+
+
+def test_completions_attempts_and_completion_rate_show_sort_and_send_null_when_never_recorded():
+    """A passing line without attempts (a save from before they were kept) sends null C/ATT and sorts last."""
+    from dataclasses import replace
+    from types import MappingProxyType
+    qbs = sorted(pid for pid, p in DATA.players.items() if p.position == "QB")
+    unrecorded = qbs[0]
+
+    def passing(pid: int, box):
+        if pid not in qbs:
+            return box
+        att = 0 if pid == unrecorded else 25 + qbs.index(pid)
+        return replace(box, pass_cmp=round(att * 0.64), pass_att=att, pass_yds=230)
+    data = replace(DATA, box=MappingProxyType({key: passing(key[0], b) for key, b in DATA.box.items()}))
+    shown = wire.players(game(at(6), data), status="all", limit=10_000, sort="pass_att", position="QB")["results"]
+
+    lines = [row["line"] for row in shown if row["line"]["box"]]
+    attempts = [line["box"]["pass_att"] for line in lines]
+    assert attempts[-1] is None and None not in attempts[:-1] and attempts[:-1] == sorted(attempts[:-1], reverse=True)
+    last = next(row for row in shown if row["player"]["id"] == unrecorded)["line"]
+    assert last["box"]["pass_cmp"] is None and last["box"]["pass_yds"] > 0 and last["adv"]["cmp_pct"] is None
+    rates = [line["adv"]["cmp_pct"] for line in lines[:-1]]
+    assert all(60 < rate < 68 for rate in rates)
+    assert {"pass_cmp", "pass_att", "adv_cmp_pct"} <= set(wire.SORTS)

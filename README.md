@@ -1415,16 +1415,20 @@ and the API sends no result of an unplayed week. The look ("Game Night", `styles
 - **Players:** pick the stat columns with **Stats**: Season (points, PPG, games, rest-of-season rate and
   box-score totals), Last 4 avg (points and box score a game over his last 4 games, and snap share over
   his last 3) or Week N (that week's pre-game projection and, once played, his points and box line). The
-  box-score columns follow the position tab (QB passing; RB carries and catches; WR/TE targets and
-  receiving; none for K/DST). Each row also carries advanced rates over the same span
+  box-score columns follow the position tab (QB passing: completions, attempts, yards, TDs, INTs; RB carries
+  and catches; WR/TE targets and receiving; none for K/DST). Each row also carries advanced rates over the same span
   (`services/replay_advanced.py`): snap % and target share (means over his games), targets, carries and
   touches a game, yards per carry / catch / target, catch rate, total TDs, TD rate per touch, passing
-  yards a game and TD:INT, each blank when there is nothing to divide by. Click a column header to sort
+  yards a game, completion % and TD:INT, each blank when there is nothing to divide by. Click a column header to sort
   on the server (again to flip); players without the number come last either way.
 - **Player card:** his status, five stat tiles, a game log of played weeks (opponent, projection, points,
   box line; a played week's opponent opens that NFL game's **box score**: the final score, then one tab per
-  team with every pool player's passing, rushing and receiving line and fantasy points under the league's
-  scoring, K and DST points included; Back returns to the card) and the weeks to come: opponent (@ when away), a **matchup chip** and an **Est.**, his
+  team with every pool player's passing (C/ATT first, "22/34", as on a real box score), rushing and receiving
+  line and fantasy points under the league's scoring, K and DST points included; Back returns to the card).
+  Completions and attempts come from nflverse in a real season and from the game draw in a simulated one; a
+  simulated league saved before they were kept shows a dash for C/ATT (its passing lines have yards but no
+  attempts, and the API sends null for both). The card's Advanced tab shows a QB's C/ATT a game and his
+  season completion %. The card ends with the weeks to come: opponent (@ when away), a **matchup chip** and an **Est.**, his
   rest-of-season rate x the opponent's defense factor (not a site projection; none on a bye or while the
   injury news has him out).
 - **Matchup ratings** (`services/replay_defense.py`): how many points each NFL defense gives up to a
@@ -1599,9 +1603,15 @@ read the belief, so, as in a real season, the public learns the truth only from 
   team's targets and carries (its volume, a shared game draw for shootouts, the leader running more and the
   trailer passing more), then they are split among the active players by their roles (an injured player's
   work goes to his teammates, a rookie takes some from everyone), then catches, yards and touchdowns per
-  player. The quarterback's passing line is the sum of his receivers' lines, so a QB's yards and TDs always
-  match his receivers'. If he leaves hurt, his backup throws part of each receiver's catches (and the TDs
-  among them). Kickers get an extra point try for each of their team's TDs and field goal tries that rise
+  player. The quarterback's passing line is the sum of his receivers' lines, so a QB's completions, yards and
+  TDs always match his receivers'. His attempts are his completions, his interceptions and the other
+  incompletions (sacks are not attempts); an interception is drawn among the incomplete attempts, at the rate
+  that keeps its mean the team's attempts x INT rate, so attempts never fall below completions + INTs. If he
+  leaves hurt, his backup throws part of each receiver's catches (and the TDs among them) and the matching
+  share of the incompletions; a closing-window or overtime TD catch is one more completion and attempt.
+  sim_eval reports the starters' passing (2021-2025, 3 seeds, real / simulated): completion % 64.3 / 65.4 (mid)
+  and 64.9 / 64.7 (full), attempts a start 31.8 / 33.1 and 32.2 / 34.0, INTs a start 0.72 / 0.75 in both
+  (unchanged by drawing interceptions among the incomplete attempts). Kickers get an extra point try for each of their team's TDs and field goal tries that rise
   with the team's yards and fall with its TDs (drives that stall); a kicker who leaves hurt keeps only his
   share of the kicks. A defense's sacks and interceptions are the opposing offense's, and its points allowed
   are the opponent's points. Points use the league's own scoring, custom settings included. A busy passing day
@@ -1988,7 +1998,8 @@ how its preseason expert ranks agree with its ADP). Both modes end with an injur
 ADP skill players, new injuries per game played (he played and missed his team's next game with any injury
 tag: a real player ruled out on game day often keeps his Q or D, while a simulated one is always O or IR, so
 counting only O/IR would undercount the real rate by about a third) and the share of team games missed,
-with the real value, the target and the simulated one. Both modes also report whole games
+with the real value, the target and the simulated one. Both modes report the starting quarterbacks' completion %,
+attempts a start and interceptions a start (`sim_metrics.passing`). Both modes also report whole games
 (`sim_metrics_games`: the pregame line against the result, a real season's Vegas line and a simulated one's own,
 the spread of margins, blowouts of 21+, 28+ and 35+, blowouts in the most lopsided and the closest fifth of
 games, home wins, ties, team scores and how often a rare score such as 5 shows up) and the expert ranks

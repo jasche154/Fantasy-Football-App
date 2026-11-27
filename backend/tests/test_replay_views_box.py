@@ -76,3 +76,16 @@ def test_a_trade_value_rounds_half_up_like_the_trade_screen():
     from services import replay_views
 
     assert [replay_views.whole(x) for x in (512.5, 511.5, 0.5, 512.4, 1000.0, 0.0)] == [513, 512, 1, 512, 1000, 0]
+
+
+def test_a_passing_line_saved_without_attempts_shows_no_completions_or_attempts():
+    played = _a_game(2)
+    old = replace(DATA, box=MappingProxyType({key: replace(box, pass_cmp=0, pass_att=0, pass_yds=200 if DATA.players[key[0]].position == "QB" else 0)
+                                              for key, box in DATA.box.items()}))
+
+    rows = [row for side in views.box_score(game(at(3), old), 2, played.home_team)["teams"] for row in side["players"]]
+
+    passers = [row["box"] for row in rows if row["box"] and row["box"]["pass_yds"]]
+    others = [row["box"] for row in rows if row["box"] and not row["box"]["pass_yds"]]
+    assert passers and all(box["pass_cmp"] is None and box["pass_att"] is None for box in passers)
+    assert others and all(box["pass_att"] == 0 for box in others if not (box["pass_td"] or box["pass_int"]))

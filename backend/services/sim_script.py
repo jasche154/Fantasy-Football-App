@@ -52,6 +52,14 @@ def before_cut(stat: str) -> float:
     return float(shares[0] + shares[1])
 
 
+def scoring_share(side) -> tuple[float, float]:
+    """The share of a game's targets and of its carries the side's TDs, interceptions and sacks come from: the
+    halves' (`before_cut`) in a game in parts, all of it (1, 1) for a side without one."""
+    if side.end is None:
+        return 1.0, 1.0
+    return before_cut("targets"), before_cut("carries")
+
+
 def half_share() -> float:
     """The first half's share of the plays before the cut (and so of the points scored there)."""
     s = stored()["shares"]
