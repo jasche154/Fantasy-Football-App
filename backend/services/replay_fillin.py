@@ -13,7 +13,8 @@ whoever starts. On the team's bye the week before's news stands.
 - "back": the regular starter is back (no hard tag) and the last game's starter was filling in for him (no
   probation: his regular is back);
 - "taken": the QB who took the job, while his starts since he first started in this stint are fewer than the
-  fitted `probation`.
+  fitted `probation` + GRADUATED (from `probation` on he is a graduate: `graduated`, priced at his fitted share
+  of an established starter's starts).
 `starts`: his consecutive starts for the team before `week`.
 
 `share(fill, report, game_weeks)`: the share of his team's remaining games he is expected to start, fitted on
@@ -192,7 +193,8 @@ def _backup(data: SeasonData, team: str, regular: int, week: int) -> int | None:
 def without_news(data: SeasonData, week: int) -> frozenset[int]:
     """The fill-ins at `week` where no news report is drawn (a simulated season while it is built): an "out"
     fill-in past `probation` is the team's QB when his regular's tag is one only a season-ending report carries
-    (replay_news.SEASON_TAGS), as `share` decides it on an out-for-the-season report."""
+    (replay_news.SEASON_TAGS), as `share` decides it on an out-for-the-season report; a "taken" one is the
+    team's QB from `probation` on (the graduate's markdown is the trade chart's only)."""
     probation = int(stored()["probation"])
     found = _fill_ins(data, week, _history(data))
     return frozenset(pid for pid, fill in found.items()

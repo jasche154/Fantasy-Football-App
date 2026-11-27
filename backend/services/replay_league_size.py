@@ -13,8 +13,8 @@ position rank of real 2018-2025 seasons (PPR, weeks 1, 4, 7, 10 and 13 to week 1
 replay_chart_eval's target rule). `sized(data, league)` moves the ADP of each position's nth drafted player to
 the 12-team pick of rank m(n), so the slot curve, every value read off it and the preseason picks follow.
 
-The view moves ADP only to change the value curve: replay_chart.base_charts reads the preseason picks, pre_rank,
-pre_chart and `star` off the unsized season (`board`), fill-ins read the raw 1-QB season, and the CPU draft prices an
+The view moves ADP only to change the value curve: replay_chart.base_charts reads the preseason order, pre_rank
+and `star`, off the unsized season (`board`; pre_chart is a value and stays tapered like chart), fill-ins read the raw 1-QB season, and the CPU draft prices an
 out player off `untapered(league)`.
 
 Measured with replay_chart_eval --teams 8 (8 seasons, the player-weeks both charts scored): regular Spearman

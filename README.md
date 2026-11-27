@@ -1113,9 +1113,8 @@ that week's games on; only scoring a week reads its real points.
   game against 10.9) and their charts matched their expert ranks as established QBs' do (median chart over
   the expert rank's value 0.96-0.99 against 0.97-0.98), so the data supports no further markdown. League 9
   ("Super", 14-team superflex 2026): J.J. McCarthy at his 5th start 684 -> 556, 6th 601 -> 563, then 584-768 as
-  the team's QB, priced off a simulated expert rank of QB6-13; Drew Lock never reaches probation in that league
-  (his regular returns in week 15: 374 in week 14, 118 in week 15), so the reported 766 does not reproduce on this
-  database. Chart check: regular 0.564 (QBs 0.349 -> 0.351), held-out error 4.015; superflex 0.577, 5.011 -> 5.012.
+  the team's QB, priced off a simulated expert rank of QB6-13; a fill-in whose regular returns (Drew Lock there, back
+  to the bench in week 15) never reaches probation: 374 in week 14, 118 in week 15. Chart check: regular 0.564 (QBs 0.349 -> 0.351), held-out error 4.015; superflex 0.577, 5.011 -> 5.012.
 - **Chart by league size** (`services/replay_league_size.py`): the chart's ADP lists are drafted in 12-team
   leagues. Under 12 teams each position's starters keep their rank and the ranks from the last starter to the
   first player the league leaves unrostered stretch onto the 12-team league's (starters and rostered players

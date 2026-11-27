@@ -277,7 +277,7 @@ def base_charts(data: SeasonData, rows: Sequence[dict], priors: Mapping[int, flo
     scale: replay_personas and replay_mood subtract `chart` from it."""
     frozen, since = frozen or {}, since or {}
     curve, picks = slot_curve(data), pre_picks(board or data, drafted)
-    priced = picks if board is None else pre_picks(data, drafted)
+    priced = picks if board is None or board is data else pre_picks(data, drafted)
     overall = pre_ranks(picks)
     star_ranks = overall if regular is None else {
         **pre_ranks(pre_picks(regular, drafted)),

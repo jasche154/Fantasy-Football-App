@@ -245,11 +245,13 @@ def test_the_freeze_reads_only_the_frozen_players_positions_and_gives_the_full_w
 
 
 def test_a_dropped_season_frees_the_week_builds_and_the_freeze():
-    """replay_pool.free_dependents (a season evicted) empties `_base` and `_live`, which key on SeasonData."""
+    """replay_pool.free_dependents (a season evicted) empties every cache that keys on a SeasonData or on a
+    Knowledge built from one."""
     from services import replay_pool
     data = spell(DATA, fakes.player_id("WR", 3), tagged=range(5, 7), gone=range(5, 7))
     rv.clear_cache()
-    rv.knowledge(data, LEAGUE, 6, END)
-    assert rv._base.cache_info().currsize and rv._live.cache_info().currsize
+    rv.projector(rv.knowledge(data, LEAGUE, 6, END))
+    caches = (rv._base, rv._live, rv._knowledge, rv._priors, rv.projector)
+    assert all(cache.cache_info().currsize for cache in caches)
     replay_pool.free_dependents()
-    assert rv._base.cache_info().currsize == 0 and rv._live.cache_info().currsize == 0
+    assert not any(cache.cache_info().currsize for cache in caches)
