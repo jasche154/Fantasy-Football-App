@@ -300,3 +300,16 @@ def test_credit_means_puts_window_touchdowns_where_the_draw_does_when_one_pool_h
         picks += o.rush_td[:-1] - offense[0].rush_td[:-1]
     assert picks / picks.sum() == pytest.approx(credited / credited.sum(), abs=0.03)
     assert credited / credited.sum() == pytest.approx(weights)
+
+
+def test_a_hurt_kickers_window_kicks_count_for_his_team_not_his_line(monkeypatch):
+    """Item 4: with the kicker gone (kicker_share 0.5) the window's field goals and extra points still score for
+    his side, and his own counts stay as they were (a fill-in kicked them)."""
+    w = world()
+    kicker = sim_game._side(w, "AAA", "BBB", set(), {}).kicker
+    sides, means, offense, counts, rng = _setup({kicker: 0.5})
+    assert sides[0].kicker_share == 0.5
+    monkeypatch.setattr(sim_closing, "ending", lambda margin, rng: (_events(fg_40_49=1, rush_td=1, xp=1), _events()))
+    _, scored, points, *_ = _close_once(sides, means, offense, counts, rng, None)
+    assert points[0] == 10 + 3 + 7
+    assert scored[0][0] == 10 + 10 and scored[0][1] is counts             # no kick added to his line
