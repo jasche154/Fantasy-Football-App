@@ -10,7 +10,6 @@ sim_closing plays the last WINDOW seconds of regulation from the score with what
 - `table`: for each margin at the cut (0-MAX_MARGIN, the trailing team's deficit; larger ones pooled), every real
   game's scoring events after it, the trailer's and the leader's (for a tie: the two teams in random order), as
   (count, trailer events, leader events) with the events in EVENTS order. A drawn row is a real game's ending.
-- `per_side`: the mean events a team scores in the window (what the regulation draw leaves out: sim_centre).
 - `ot`: overtime from the same play-by-play: the share of overtimes that end tied, the share of decided ones the
   winner ends with a field goal, and the mean yards of an overtime-winning TD play by a catch and by a run.
 - `check`: leave-season-out, each season's real cut scores played forward with the other seasons' table, against
@@ -45,6 +44,7 @@ EVENTS = ("pass_td", "rush_td", "ret_td", "fg_0_39", "fg_40_49", "fg_50", "miss_
 POINTS = {"pass_td": 6, "rush_td": 6, "ret_td": 6, "fg_0_39": 3, "fg_40_49": 3, "fg_50": 3, "xp": 1, "two": 2,
           "safety": 2}
 WINDOW = 600                     # seconds of regulation played from the score (chosen with sim_eval: see sim_closing)
+TRIES = ("xp", "xp_miss", "two")
 MAX_MARGIN = 16                  # margins above this share one row set (a two-score-plus lead plays alike)
 SEASONS = range(2018, 2026)
 SHUFFLE_SEED = 7                 # the random order of a tied game's two teams (reproducible fits)
@@ -132,15 +132,22 @@ def _points(events: Mapping[str, int]) -> int:
 
 
 def split(game: Mapping, window: int) -> tuple[dict[str, Counter], dict[str, Counter], dict[str, Counter]]:
-    """(events before the cut, in the window, in overtime) per team of one game."""
+    """(events before the cut, in the window, in overtime) per team of one game. A try (extra point or two-point
+    conversion) is filed with the part its touchdown is in, so a touchdown just before the cut never leaves its
+    try alone in the window (14 of 4,230 side-endings had more tries than touchdowns)."""
     parts: tuple[dict, dict, dict] = ({}, {}, {})
     for team in (game["home"], game["away"]):
         for part in parts:
             part[team] = Counter()
+    last_td: dict[str, int] = {}                           # each team's last touchdown's part
     for qtr, left, team, kind, _ in game["plays"]:
         if team in parts[0]:
-            part = parts[2] if qtr > 4 else parts[1] if qtr == 4 and left <= window else parts[0]
-            part[team][kind] += 1
+            index = 2 if qtr > 4 else 1 if qtr == 4 and left <= window else 0
+            if kind in TRIES and team in last_td:
+                index = last_td[team]
+            elif kind.endswith("_td"):
+                last_td[team] = index
+            parts[index][team][kind] += 1
     return parts
 
 
@@ -275,14 +282,21 @@ def fit(seasons: Iterable[int], window: int = WINDOW, refresh: bool = False) -> 
         script = line_script(session, seasons)
     games = [g for g in scoring_games(seasons, refresh) if consistent(g)]
     table = endings(games, window)
-    sides = [_row(inside[t]) for g in games for inside in (split(g, window)[1],) for t in (g["home"], g["away"])]
     return {"seasons": [min(g["season"] for g in games), max(g["season"] for g in games)], "games": len(games),
             "window": window, "events": list(EVENTS), "max_margin": MAX_MARGIN,
             "td_yards": td_yards(games, window),
-            "per_side": dict(zip(EVENTS, (round(float(v), 5) for v in np.mean(sides, axis=0)))),
             "table": {str(k): sorted([[n, list(t), list(lead)] for (t, lead), n in rows.items()], reverse=True)
                       for k, rows in sorted(table.items())},
             "ot": overtime(games), "line_script": script, "check": check(games, window)}
+
+
+def dumps(result: Mapping) -> str:
+    """sim_closing.json's text: one ending row per line, so a refit's diff is readable."""
+    table = result["table"]
+    head = json.dumps({k: v for k, v in result.items() if k != "table"}, indent=1)[:-2]
+    margins = ",\n".join(f' "{k}": [\n' + ",\n".join(f"  {json.dumps(row)}" for row in rows) + "\n ]"
+                         for k, rows in table.items())
+    return f'{head},\n "table": {{\n{margins}\n }}\n}}\n'
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -295,13 +309,13 @@ def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     first, _, last = args.seasons.partition("-")
     result = fit(range(int(first), int(last or first) + 1), args.window, args.refresh)
-    log.info("%d games, window %ds; per side %s", result["games"], result["window"], result["per_side"])
+    log.info("%d games, window %ds", result["games"], result["window"])
     log.info("overtime %s", result["ot"])
     log.info("volume per point of expected margin %s", result["line_script"])
     for name, row in result["check"].items():
         log.info("%-15s %s", name, "  ".join(f"{k} {100 * v:.1f}%" for k, v in row.items()))
     if args.fit:
-        CLOSING_PATH.write_text(json.dumps(result, separators=(",", ":")) + "\n", encoding="utf-8")
+        CLOSING_PATH.write_text(dumps(result), encoding="utf-8")
         log.info("wrote %s", CLOSING_PATH.name)
 
 

@@ -129,3 +129,42 @@ def test_a_favourite_runs_more_than_the_same_team_as_an_underdog():
     underdog = sim_game.expected(w, "AAA", "BBB", set(), HALF, target={"AAA": 16.0, "BBB": 30.0})
     ratio = favoured[rb].box.carries / underdog[rb].box.carries
     assert ratio == pytest.approx(np.exp(28 * sim_closing.line_script()["carries"]), rel=0.02)
+
+
+def test_over_many_games_the_box_adds_up_to_the_points_and_no_try_comes_without_a_touchdown(monkeypatch):
+    """M3: a real ending's try is filed with its touchdown, so a kicker never kicks more extra points than his
+    team scored touchdowns and a side's points are exactly its touchdowns, kicks, conversions and safeties
+    (sim_closing.json once had 14 endings with a try and no touchdown)."""
+    captured = {}
+    close, overtime = sim_closing.close, sim_draw._overtime
+
+    def closing(*args, **kwargs):
+        captured["after"] = out = close(*args, **kwargs)
+        captured["sides"], captured["final"] = args[0], out
+        return out
+
+    def extra(*args, **kwargs):
+        captured["final"] = out = overtime(*args, **kwargs)
+        return out
+
+    monkeypatch.setattr(sim_closing, "close", closing)
+    monkeypatch.setattr(sim_draw, "_overtime", extra)
+    w, rng = world(), np.random.default_rng(11)
+    targets = (None, {"AAA": 31.0, "BBB": 13.0}, {"AAA": 10.0, "BBB": 13.0}, {"AAA": 17.0, "BBB": 17.0})
+    for g in range(1500):
+        result = sim_game.play(w, "AAA", "BBB", set(), np.random.default_rng(int(rng.integers(1 << 31))), HALF,
+                               target=targets[g % len(targets)])
+        offense, scored, _ = captured["final"][:3]
+        _, _, _, returns, safeties, _, _ = captured["after"]
+        for i, side in enumerate(captured["sides"]):
+            counts, tds = scored[i][1], offense[i].tds + returns[i]
+            assert counts["pat_att"] <= tds
+            conversions = result.points[side.team] - 6 * tds - counts["pat_made"] - 3 * int(counts["made"].sum()) \
+                - 2 * int(safeties[i])
+            assert conversions >= 0 and conversions % 2 == 0 and conversions // 2 <= tds - counts["pat_att"]
+
+
+def test_a_try_is_filed_with_its_touchdown_across_the_cut():
+    game = _game([[4, 605, "AAA", "rush_td", 3], [4, 600, "AAA", "xp", 0], [4, 120, "BBB", "fg_0_39", 0]], 7, 3)
+    before, inside, _ = sim_closing_fit.split(game, 600)
+    assert before["AAA"] == {"rush_td": 1, "xp": 1} and not inside["AAA"] and inside["BBB"] == {"fg_0_39": 1}
