@@ -49,11 +49,13 @@ def test_depth_counts_starters_and_rostered_players_on_the_shipped_curves(lineup
 @pytest.mark.parametrize("starters", [SUPERFLEX, dict(rs.DEFAULT_STARTERS)])
 def test_the_sized_view_keeps_the_starters_picks_and_only_pushes_the_rest_later(starters):
     """`sized` at 8 teams: each position's first `starters` players by ADP keep their pick, picks never go down in
-    the original ADP order, nobody moves earlier than his own pick, and a player without ADP stays without one."""
+    the original ADP order, nobody moves earlier than his own pick, the first player the league leaves unrostered
+    is pushed strictly later (no taper at all would pass the rest), and a player without ADP stays without one."""
     data = fakes.fake_season()
     base = replay_chart.superflex_view(data) if "SUPERFLEX" in starters else data
     view, depth = size.sized(base, league(8, starters)), size.depth(league(8, starters))
     assert view is not base
+    pushed = 0
     for position in ("QB", "RB", "WR", "TE"):
         drafted = sorted((p.adp, pid) for pid, p in base.players.items() if p.position == position and p.adp)
         picks = [view.players[pid].adp for _, pid in drafted]
@@ -61,6 +63,11 @@ def test_the_sized_view_keeps_the_starters_picks_and_only_pushes_the_rest_later(
         assert picks[:kept] == pytest.approx([adp for adp, _ in drafted[:kept]]), position
         assert all(a <= b for a, b in zip(picks, picks[1:])), position
         assert all(new >= old - 1e-9 for new, (old, _) in zip(picks, drafted)), position
+        rostered = depth[position][1]
+        if len(picks) > rostered:
+            assert picks[rostered] > drafted[rostered][0], position
+            pushed += 1
+    assert pushed
     assert all(view.players[pid].adp is None for pid, p in base.players.items() if p.adp is None)
 
 
