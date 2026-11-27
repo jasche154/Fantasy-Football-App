@@ -244,3 +244,59 @@ def test_a_fit_measures_the_cut_spread_on_the_table_it_just_stored(monkeypatch, 
     monkeypatch.undo()
     for cache in (sim_closing.stored, sim_closing_means._tables, sim_closing_means._at):
         cache.cache_clear()
+
+
+def _close_once(sides, means, offense, counts, rng, ending, points=(10, 17), expect=(20.0, 20.0)):
+    return sim_closing.close(sides, offense, [(points[0], counts), (points[1], counts)], list(points), [0, 0], [0, 0],
+                             np.array([33, 33]), np.array([27, 27]), rng, means, list(expect))
+
+
+def _ids(side, group: str) -> list[int]:
+    return list(getattr(side, group)[:-1])
+
+
+@pytest.mark.parametrize("gone", ["receivers", "rushers", "both"])
+def test_a_window_touchdown_with_no_one_to_credit_goes_to_the_other_pool_or_to_nobody(monkeypatch, gone):
+    """Item 3: a pass TD with every receiver gone goes to a rusher, a run with every rusher gone to a receiver, and
+    with neither nobody's line moves; the side's points are the ending's either way."""
+    w = world()
+    groups = {"receivers": ("receivers",), "rushers": ("rushers",), "both": ("receivers", "rushers")}[gone]
+    base = sim_game._side(w, "AAA", "BBB", set(), {})
+    exits = {pid_: 0.5 for group in groups for pid_ in _ids(base, group)}
+    sides, means, offense, counts, rng = _setup(exits)
+    tds = _events(pass_td=1, rush_td=1, xp=2)
+    monkeypatch.setattr(sim_closing, "ending", lambda margin, rng: (tds, _events()))
+    for _ in range(30):
+        after, _, points, *_ = _close_once(sides, means, offense, counts, rng, tds)
+        assert points[0] == 10 + 14                              # AAA trailed: the ending's points, credited or not
+        rec, rush = after[0].rec_td - offense[0].rec_td, after[0].rush_td - offense[0].rush_td
+        assert all(n == 0 for p, n in zip(sides[0].receivers, rec) if p in sides[0].exited)
+        assert all(n == 0 for p, n in zip(sides[0].rushers, rush) if p in sides[0].exited)
+        assert rec.sum() + rush.sum() == (0 if gone == "both" else 2)
+        if gone == "receivers":
+            assert rec.sum() == 0 and rush.sum() == 2
+        if gone == "rushers":
+            assert rush.sum() == 0 and rec.sum() == 2
+
+
+def test_credit_means_puts_window_touchdowns_where_the_draw_does_when_one_pool_has_none():
+    """Item 3: with no receiver carrying a TD rate, credit_means gives every window TD to the rushers in proportion
+    to their TD rates, as score_td's fallback draws them, so projections stay on the draws."""
+    sides, means, offense, counts, rng = _setup()
+    side, m = sides[0], {**means[0], "rec_td": np.zeros_like(means[0]["rec_td"])}
+    end = sim_closing_means.Ending(lead=-3.0, sd=11.0, share=0.5)
+    lines: dict = {}
+    sim_closing_means.credit_means(lines, side, m, end)
+    per = sim_closing_means.window_events(end.lead, end.sd)
+    rushers = _ids(side, "rushers")
+    credited = np.array([lines.get(p, {}).get("rush_td", 0.0) for p in rushers])
+    ot_td = end.ot_wins * (1 - sim_closing.ot()["field_goal"])
+    assert credited.sum() == pytest.approx(per["pass_td"] + per["rush_td"] + ot_td)
+    assert sum(line.get("rec_td", 0.0) for line in lines.values()) == 0.0
+    picks = np.zeros(len(rushers))
+    weights = m["rush_td"][:-1] / m["rush_td"][:-1].sum()
+    for _ in range(4000):
+        o, _, _ = sim_closing.score_td(side, m, offense[0], "rec", {"rec": 10, "rush": 5}, rng)
+        picks += o.rush_td[:-1] - offense[0].rush_td[:-1]
+    assert picks / picks.sum() == pytest.approx(credited / credited.sum(), abs=0.03)
+    assert credited / credited.sum() == pytest.approx(weights)
