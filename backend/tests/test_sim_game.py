@@ -101,6 +101,16 @@ def test_dst_interceptions_equal_the_opposing_quarterbacks(monkeypatch):
         assert seen == [thrown["BBB"], thrown["AAA"]]          # AAA's defense first, then BBB's
 
 
+def _scripted(out: set[int], kind: str) -> float:
+    """exp(line-script slope x the change in AAA's expected margin when `out` sit): how far its volume moves."""
+    from services import sim_closing
+
+    def margin(sitting: set[int]) -> float:
+        a, b = (sim_game._side_means(sim_game._side_of(world(), t, o, sitting)) for t, o in (("AAA", "BBB"), ("BBB", "AAA")))
+        return sim_game._mean_points(a, b) - sim_game._mean_points(b, a)
+    return float(np.exp(sim_closing.line_script()[kind] * (margin(out) - margin(set()))))
+
+
 def test_an_injured_receivers_work_flows_to_his_teammates():
     healthy = sim_game.expected(world(), "AAA", "BBB", set(), HALF)
     without = sim_game.expected(world(), "AAA", "BBB", {pid("AAA", "WR")}, HALF)
@@ -108,14 +118,16 @@ def test_an_injured_receivers_work_flows_to_his_teammates():
     for name in ("WR2", "WR3", "TE", "RB"):
         assert without[pid("AAA", name)].box.targets > healthy[pid("AAA", name)].box.targets
     total = lambda lines: sum(e.box.targets for p, e in lines.items() if team_of(p) == "AAA")  # noqa: E731
-    assert total(without) == pytest.approx(total(healthy), rel=1e-3)   # the closing window's few targets follow the lead
+    # the team's targets move only by the line script, at the margin his absence moves (sim_closing.line_script)
+    assert total(without) / total(healthy) == pytest.approx(_scripted({pid("AAA", "WR")}, "targets"), rel=1e-3)
 
 
 def test_a_hurt_back_s_carries_go_to_the_next_back_not_to_the_quarterback():
     healthy = sim_game.expected(world(), "AAA", "BBB", set(), HALF)
     without = sim_game.expected(world(), "AAA", "BBB", {pid("AAA", "RB")}, HALF)
-    # within 1%: carries follow the expected margin (sim_closing.line_script), which moves when the back is out
-    assert without[pid("AAA", "QB")].box.carries == pytest.approx(healthy[pid("AAA", "QB")].box.carries, rel=1e-2)
+    # the QB's carries move only by the line script, at the margin the back's absence moves
+    ratio = without[pid("AAA", "QB")].box.carries / healthy[pid("AAA", "QB")].box.carries
+    assert ratio == pytest.approx(_scripted({pid("AAA", "RB")}, "carries"), rel=1e-3)
     assert without[pid("AAA", "RB2")].box.carries > 2 * healthy[pid("AAA", "RB2")].box.carries
 
 
