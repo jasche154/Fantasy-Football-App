@@ -6,7 +6,7 @@ from types import MappingProxyType
 import numpy as np
 import pytest
 
-from services import sim_market, sim_next_year, sim_talent, sim_world
+from services import sim_market, sim_talent, sim_world
 from tests import replay_fakes as fakes
 
 
@@ -119,19 +119,22 @@ def test_a_top_ranked_rookie_never_collapses_on_the_season_role_draw():
     rookie = Player(1, "RB", "AAA", carries=0.5, games=0.0)
     knobs = {**sim_talent.settings(), "season_roles": 0.25}
     floor = knobs["bust_cut"][1]
-    sd = sim_next_year.stored()["rookies"]["RB"]["role_sd"]
-    scale = sim_talent._floored_mean(sd, floor)
-    assert sim_talent._season_role(rookie, -3.0, knobs, star=True).carries == pytest.approx(0.5 * floor / scale)
+    assert sim_talent._season_role(rookie, -3.0, knobs, star=True).carries == pytest.approx(0.5 * floor)
     assert sim_talent._season_role(rookie, -3.0, knobs).carries < 0.5 * 0.2
 
 
-@pytest.mark.parametrize("sd", [0.65, 0.72, 0.75])
-def test_the_floored_draw_still_averages_one(sd):
-    """H1: the floor is paid for by the rest of the draw, so a top-ranked rookie is not worth more than his price."""
-    z = np.random.default_rng(4).standard_normal(400_000)
-    floor = sim_talent.settings()["bust_cut"][1]
-    x = np.maximum(np.exp(sd * z - sd ** 2 / 2), floor) / sim_talent._floored_mean(sd, floor)
-    assert x.mean() == pytest.approx(1.0, abs=0.004) and x.min() == pytest.approx(floor / sim_talent._floored_mean(sd, floor))
+@pytest.mark.parametrize("position", ["RB", "WR", "TE"])
+def test_the_floored_draw_still_averages_one(position):
+    """H1: the floor is paid for by the rest of the draw, so a top-ranked rookie is not worth more than his price,
+    and he never falls below the floor (an even grid of the normal's quantiles through `_season_role` itself)."""
+    from statistics import NormalDist
+
+    from services.sim_world import Player
+    rookie = Player(1, position, "AAA", targets=1.0, carries=1.0, games=0.0)
+    knobs, n = sim_talent.settings(), 4000
+    roles = [sim_talent._season_role(rookie, NormalDist().inv_cdf((i + 0.5) / n), knobs, star=True).carries
+             for i in range(n)]
+    assert np.mean(roles) == pytest.approx(1.0, abs=0.004) and min(roles) == pytest.approx(knobs["bust_cut"][1])
 
 
 def test_a_whole_season_flags_the_publics_top_players_for_the_floor(monkeypatch):

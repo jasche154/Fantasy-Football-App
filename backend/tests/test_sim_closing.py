@@ -213,4 +213,4 @@ def test_the_cut_margins_spread_matches_the_measured_one(wanted):
     before = (sim_game._mean_points(m[home], m[away]), sim_game._mean_points(m[away], m[home]))
     rng = np.random.default_rng(6)
     cuts = np.array([sim_draw.draw_game((sides[home], sides[away]), rng, HALF, until_cut=True) for _ in range(1500)])
-    assert np.std(cuts[:, 0] - cuts[:, 1]) == pytest.approx(sim_closing_means.cut_sd(sum(before)), rel=0.10)
+    assert np.std(cuts[:, 0] - cuts[:, 1]) == pytest.approx(sim_closing_means.cut_sd(sum(before)), rel=0.06)       # the sd of 1,500 draws: se about 1.8%

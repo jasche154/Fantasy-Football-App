@@ -306,7 +306,9 @@ def cut_spread(world, games: Iterable[tuple[str, str]], draws: int = CUT_DRAWS, 
 
 
 def _cut_var(session) -> list[float]:
-    """cut_spread on CUT_SEASON's belief before CUT_WEEK, the week's first CUT_GAMES games."""
+    """cut_spread on CUT_SEASON's belief before CUT_WEEK, the week's first CUT_GAMES games. Its games are centred
+    through sim_closing_means, which reads the stored sim_closing.json: after a fit that moves the table, run --fit
+    a second time (and a file without `cut_var` cannot be refit: restore the checked-in one first)."""
     from services import replay_pool, sim_world
     data = replay_pool.load_season_data(session, CUT_SEASON, "half")
     games = [(g.home_team, g.away_team) for g in data.schedule.games if g.week == CUT_WEEK][:CUT_GAMES]

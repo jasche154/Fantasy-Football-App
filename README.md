@@ -1562,8 +1562,8 @@ read the belief, so, as in a real season, the public learns the truth only from 
   touchdown catch to a receiver, with the passer's line still his receivers' sum, a run to a rusher, field goals
   and extra points to the kicker, return TDs and safeties to the defense), and the draw before the cut is
   centred without the window's and overtime's mean points (`services/sim_closing_means.py`), worked out from the
-  game's own expected lead and total: the margin at the cut spreads more in a high-scoring game (sd^2 = 32.5 +
-  2.41 x the two sides' expected points before the cut, measured: 8.0 at 14 points, 12.6 at 56), and over that
+  game's own expected lead and total: the margin at the cut spreads more in a high-scoring game (sd^2 = 42.2 +
+  2.16 x the two sides' expected points before the cut, `cut_var`, measured by the fit: 8.5 at 14 points, 12.8 at 56), and over that
   spread the real endings give each side's mean window points (a trailer scores more in it, and the closer the
   cut the more both kick) and the chance regulation ends tied, which sets each side's overtime points. So
   projections stay unbiased: over 12,000 draws a game averages its target within 0.12 points from 10-13 to 38-10
@@ -1819,19 +1819,18 @@ read the belief, so, as in a real season, the public learns the truth only from 
   1.10, TE 1.06) and it fades by half a week (`market.join_fade`) to `market.projection_scale` (QB 1.04, RB 1.05, WR 1.03,
   TE 0.99), set by the average bias; a season simulated whole uses that scale throughout. A weekly projection
   also follows the week's line only partly: it keeps `market.line_follow` (QB 0.6, RB 0.42, WR / TE 0.3) of the
-  move from his projection at the team's typical points (the team alone against a league-average opponent: no
-  matchup, no line) to his projection under the line, because real ESPN /
+  move from his projection at the team's typical points (the team alone against this
+  opponent's pass and run defense, scaled to its points against a league-average defense: the matchup without the
+  line, `sim_market._anchor`) to his projection under the line, because real ESPN /
   Sleeper projections follow a team's implied total at 0.13-0.56 by position (`sim_metrics_join.line_follow`:
   QB 0.47, RB 0.33, WR 0.16, TE 0.17 in weeks 12-18, QB 0.56, RB 0.32, WR 0.21, TE 0.13 over whole seasons)
   and the full expectation followed it at 0.43-0.79, so simulated projections churned more than real ones. On
-  sim_eval 2021-2025, 3 seeds, mid / full, real in brackets: how far projections follow the line QB 0.49 / 0.51
-  (0.47 / 0.56), RB 0.32 / 0.36 (0.33 / 0.32), WR 0.19 / 0.20 (0.16 / 0.21), TE 0.22 / 0.09 (0.17 / 0.13); actual
-  minus projection -0.48 / -0.37 (-0.35 / -0.39; before -0.66 / -0.80), the join's projection ratio 0.98-1.00
-  (0.98-1.00), median week-to-week change of a healthy top player's projection QB 1.00 / 1.04 (1.28 / 1.30;
-  before 1.91 / 1.82), RB 0.82 / 0.91 (1.18 / 1.13), WR 0.69 / 0.85 (0.75 / 0.79; before 1.22 / 1.29), TE 0.51 /
-  0.63 (0.66 / 0.66): now a little steadier than real, as the typical-points anchor carries no matchup (an anchor
-  at the team's typical points against this opponent churned about like real ones but needed a second centring
-  for every game). The truth and the
+  sim_eval 2021-2025, 3 seeds, mid / full, real in brackets: how far projections follow the line QB 0.54 / 0.53
+  (0.47 / 0.56), RB 0.30 / 0.35 (0.33 / 0.32), WR 0.15 / 0.20 (0.16 / 0.21), TE 0.16 / 0.05 (0.17 / 0.13); actual
+  minus projection -0.50 / -0.36 (-0.35 / -0.39; before -0.66 / -0.80), the join's projection ratio 0.98-1.00
+  (0.98-1.00), median week-to-week change of a healthy top player's projection QB 1.16 / 1.18 (1.28 / 1.30;
+  before 1.91 / 1.82), RB 0.94 / 1.05 (1.18 / 1.13), WR 0.77 / 0.93 (0.75 / 0.79; before 1.22 / 1.29), TE 0.56 /
+  0.64 (0.66 / 0.66): a little steadier than real for QBs and RBs. The truth and the
   values experts and the market rank on are untouched.
 
 **2027 specifics:**
@@ -1957,7 +1956,7 @@ read the belief, so, as in a real season, the public learns the truth only from 
   started because the starter was hurt and most of the rest in a late-season switch; simulated quarterbacks get
   hurt a quarter less often (the injury setting: 0.041 new injuries a game, real 0.056) and healthy benchings run
   at half the real rate (the user's choice), which removes most of those chances.
-- Weekly projections move a little less from week to week than real ones (median change QB 1.0 against 1.3).
+- Weekly projections move a little less from week to week than real ones (median change QB 1.2 against 1.3, RB 1.05 against 1.13).
 - A closing-window or overtime TD is credited with its play's mean yards on top of the draw's yards (which are
   scaled down by the window's mean TD yards, so a team's total stays level).
 

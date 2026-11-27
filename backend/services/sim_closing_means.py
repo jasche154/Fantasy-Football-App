@@ -4,7 +4,7 @@
 A game's margin at the cut (ten minutes before the end of regulation) is spread around the two sides' expected
 lead d with sd `cut_sd`, which grows with their expected points before the cut: sd^2 = a + b x that total,
 sim_closing.json's `cut_var`, measured on simulated games by sim_closing_fit.cut_spread (games of 13-56 points
-before the cut: about 8 at a total of 14, 11 at 36, 12.6 at 56). Re-measure it (sim_closing_fit --fit) whenever
+before the cut: about 8.5 at a total of 14, 11 at 36, 12.8 at 56). Re-measure it (sim_closing_fit --fit) whenever
 the draw before the cut changes (`game.td_drives`, the volumes, the kicking): tests/test_sim_closing checks it
 against fresh draws at totals of about 14 and 56. Over a normal spread of whole-point cut margins
 (-SPAN..SPAN) the real endings (sim_closing.json's table) give
