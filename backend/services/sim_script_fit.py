@@ -19,8 +19,10 @@ real endings (sim_closing_fit joins them); this module fits the two halves befor
   margin (the Vegas spread), within each team-season (each one's own mean taken out, so a team's style is not
   counted): favourites run slightly more plays.
 - `second_half`: the same for the second half before the cut, per point of the spread and per point of the margin
-  at half time (a team down two scores after the half throws about 20% more and runs about 13% less). Linear in
-  the margin: clipping it at 10, 14 or 21 points does no better on held-out seasons (`check`).
+  at half time (per point of lead: targets -1.1%, carries +0.65%, so a team down 14 after the half throws about
+  16% more and runs about 9% less). Linear in the margin: on held-out seasons a clip at 21 points is a hair better
+  for targets (RMSE 0.32402 against 0.32422) and worse for carries (0.37385 against 0.37377), 10 and 14 worse for
+  both (`check`), so one linear slope for both.
 - `participation`: by position (RB, WR, TE), how often a player is in the game plan, by the touches (targets +
   carries) the public belief expects of him in a game: q = 1 - c exp(-touches / scale). Real depth players are
   lumpy, no touch in many games and several in a few, backs most of all: a healthy back the belief expects 3-4
@@ -32,7 +34,7 @@ real endings (sim_closing_fit joins them); this module fits the two halves befor
   seasons score better with it (`check`: the mean log loss with and without).
 - `spread`: a team's pace for the day beyond a Poisson's spread of its plays (within a team-season its plays before
   the cut spread 6.8 a game, a Poisson's 6.9: none) and its pass share's beyond a binomial's (a first half's pass
-  share spreads 0.109 against the binomial's 0.092: a pass-first or run-first plan, sd 0.06).
+  share spreads beyond a binomial's by sd 0.027 within team-seasons: a pass-first or run-first plan).
 - `league`: mean targets and carries per team-game of the same games (the window's real counts are scaled by a
   team's own volume over these), the mean yards of a kneel-down.
 """

@@ -2,10 +2,10 @@
 (sim_game.expected). The draw itself is sim_closing.close and sim_draw._overtime.
 
 A game's margin at the cut (ten minutes before the end of regulation) is spread around the two sides' expected
-lead d with sd `cut_sd`, which grows with their expected points before the cut: sd^2 = a x that total ^ b,
-sim_closing.json's `cut_var`, measured on simulated games by sim_closing_fit.cut_spread (games of 13-56 points
-before the cut: about 8.3 at a total of 13, 11.5 at 35, 13.6 at 56; a straight line in the total put the
-low-scoring games' spread 0.4 too wide once the game was drawn in halves). Re-measure it (sim_closing_fit --fit) whenever
+lead d with sd `cut_sd`, which grows with each side's expected points before the cut: sd^2 = a x (pa^b + pb^b),
+sim_closing.json's `cut_var`, measured on simulated games by sim_closing_fit.cut_spread (a = 13.4, b = 0.50: about
+8.3 for a 5-8 game, 10.4 for 16-16, 11.9 for 30-25; a lopsided game spreads less than an even one at the same
+total, which a single power of the total missed by up to 10%). Re-measure it (sim_closing_fit --fit) whenever
 the draw before the cut changes (`game.td_drives`, the volumes, the kicking): tests/test_sim_closing checks it
 against fresh draws at totals of about 14 and 56. Over a normal spread of whole-point cut margins
 (-SPAN..SPAN) the real endings (sim_closing.json's table) give

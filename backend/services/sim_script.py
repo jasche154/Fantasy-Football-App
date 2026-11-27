@@ -5,7 +5,8 @@ A two-team game is drawn in three parts (sim_draw): the first half, the second h
 and the window (sim_closing). A side's mean targets and carries in each half are its game volume x the half's share
 (`shares`, real 2018-2025: about 50% and 30%; the window has the rest) x (1 + the half's slope per point of the
 side's expected margin, the pregame line) and, in the second half, + its slope per point of the margin at half
-time: a team down two scores after the half throws about 20% more and runs about 13% less. The draw applies the
+time: per point of lead targets -1.1% and carries +0.65%, so a team down 14 after the half throws about 16% more
+and runs about 9% less. The draw applies the
 real margin at half time; its mean, `half_lead`, is what the projections use (`parts`), so they stay the draw's
 mean. The window's plays are a real game's ending (sim_closing.json's table, the endings' counts scaled by the
 side's volume against the league's): the leader runs and kneels, the trailer throws.
