@@ -394,8 +394,8 @@ def _fill_spot(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: 
     positions = [v.position for v in roster]
     holes = rv.lineup_holes(positions, ctx.settings)
     needs = [v for v in free if rv.lineup_holes([*positions, v.position], ctx.settings) < holes]
-    if needs:
-        return _top(needs).player_id, None
+    if needs:                                         # one out for the season only when nobody else fills the hole
+        return _top([v for v in needs if not _season_over(v)] or needs).player_id, None
     pool = [v for v in candidates(ctx.know, free)
             if not _season_over(v) and not rv.crowded([*roster, *ctx.stash], [v], v.position, ctx.settings)]
     best = _best_add(roster, pool, ctx, MIN_FILL_GAIN)

@@ -1000,6 +1000,8 @@ def test_a_taken_ir_slot_goes_to_a_roster_player_worth_clearly_more_and_then_sta
         assert rs.team(ai.cpu_ir(state, SETTINGS, vague, SEED), team_id).ir == (star,)
     both_lost = patched(clear, {star: {"news": LOST, "chart": 61.0}, held: {"news": LOST, "chart": 60.0}})
     assert rs.team(ai.cpu_ir(state, SETTINGS, both_lost, SEED), team_id) == rs.team(state, team_id)
+    far_lost = patched(clear, {star: {"news": LOST}, held: {"news": LOST}})      # across the gap they do swap
+    assert rs.team(ai.cpu_ir(state, SETTINGS, far_lost, SEED), team_id).ir == (star,)
     assert rs.team(after, team_id).ir == (star,) and held in rs.team(after, team_id).roster
     assert (team_id, (held, star)) in ir_moves(state, after) and ai.cpu_ir(after, SETTINGS, clear, SEED) == after
 
@@ -1142,3 +1144,17 @@ def test_a_player_out_for_the_season_is_kept_when_cutting_him_would_leave_no_lin
     assert ai._replace_lost(roster, others, ctx) is None
     move = ai._replace_lost(roster, free, ctx)
     assert move is not None and move[1] == passer and lost.by_id[move[0]].position == "QB"
+
+
+def test_a_lineup_hole_goes_to_a_free_agent_out_for_the_season_only_when_nobody_else_fills_it():
+    week, team_id = 6, CPUS[0]
+    state = league(week, phase="open")
+    team = rs.team(state, team_id)
+    lost_one, other = (v.player_id for v in replay_waivers.available_players(state, know(week), "TE")[:2])
+    hurt = patched(tagged_know(week, {(lost_one, week): fakes.Injury("IR")}),
+                   {lost_one: {"news": LOST, "projection": 99.0}})          # he would win on projection
+    ctx = ai._for_team(ai._context(hurt, SETTINGS, state), team)
+    roster = [hurt.by_id[pid] for pid in team.roster if hurt.by_id[pid].position != "TE"]
+
+    assert ai._fill_spot(roster, [hurt.by_id[lost_one], hurt.by_id[other]], ctx) == (other, None)
+    assert ai._fill_spot(roster, [hurt.by_id[lost_one]], ctx) == (lost_one, None)
