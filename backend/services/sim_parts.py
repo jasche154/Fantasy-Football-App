@@ -23,7 +23,8 @@ read the yards before it, whose mean is exact).
 
 A half's TDs come with its yards: `game.td_yards_rho` (tuned 0.9 with sim_eval: a real team-game's yards and TD
 points correlate 0.54 within team-seasons, 0.61 pooled, 2021-2025 from week 12; 0.27 / 0.31 with the TD count drawn
-apart from the yards, 0.53 / 0.57 at 0.85, 0.58 / 0.61 at 0.95). The TD count keeps its Binomial, so no mean or
+apart from the yards, 0.53 / 0.57 at 0.85, 0.58 / 0.61 at 0.95; sim_eval's row, "usage corr(yards, TDs)", is the
+TD count's pooled one: real 0.63 mid / 0.61 full). The TD count keeps its Binomial, so no mean or
 spread moves; team fantasy points spread 19.5 -> 21.1 a team-game against a real 22.2.
 """
 import math

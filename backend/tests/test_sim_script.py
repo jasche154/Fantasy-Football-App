@@ -307,6 +307,32 @@ def test_a_quarterbacks_carry_share_is_his_full_strength_share_times_one_league_
     assert fitted["scale"] == pytest.approx(1.2) and fitted["check"]["held_out_sse"] < fitted["check"]["unscaled_sse"]
 
 
+def test_every_side_built_gets_the_fitted_league_factor_on_its_quarterbacks_carry_share(monkeypatch):
+    """`_side` builds belief and truth sides alike and reads the factor from sim_script.json."""
+    assert sim_script.qb_share_scale() == sim_script.stored()["qb_share"]["scale"] > 1.0
+    w, qb = world(), pid("AAA", "QB")
+
+    def share(scale: float) -> float:
+        monkeypatch.setattr(sim_script, "qb_share_scale", lambda: scale)
+        side = sim_game._side(w, "AAA", "BBB", set(), {})
+        return side.carry_w[side.rushers.index(qb)] / side.carry_w.sum()
+
+    assert share(1.25) == pytest.approx(1.25 * share(1.0))
+
+
+def test_the_windows_split_keeps_each_players_mean_share_when_the_one_who_left_had_a_varying_part():
+    """Two drawn plans whose mean is the weights' shares, the lead back (gone hurt) holding 0.8 of one and 0.4 of the
+    other and the third back out of the first: the others' window shares average the projection's (renormalizing
+    each plan gave the second back 0.83 for 0.75)."""
+    ids, exited = (1, 2, 3), frozenset({1})
+    plans = np.array([[0.8, 0.2, 0.0], [0.4, 0.4, 0.2]])
+    mean = sim_script.window_shares(plans.mean(axis=0), ids, exited)
+    split = np.array([sim_script.window_split(plan, mean, ids, exited) for plan in plans])
+    assert split.sum(axis=1) == pytest.approx([1.0, 1.0]) and (split[:, 0] == 0).all()
+    assert split.mean(axis=0) == pytest.approx(mean) and mean == pytest.approx([0.0, 0.75, 0.25])
+    assert sim_script.window_split(mean, mean, ids, frozenset()) is mean                 # nobody left: the plan's own
+
+
 def test_with_players_leaving_hurt_every_players_projection_is_his_draws_mean():
     """A game with its QB, lead back and lead receiver leaving hurt: per player, the projected targets, carries and
     TDs (the window's plays and TDs, overtime's too, never to one who left) are the mean of the draws."""
