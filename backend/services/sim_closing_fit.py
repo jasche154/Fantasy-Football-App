@@ -1,6 +1,8 @@
 """Simulated seasons: fit the closing minutes and overtime of a game from real play-by-play (writes sim_closing.json).
 
-    python -m services.sim_closing_fit --fit [--seasons 2018-2025] [--window 300] [--refresh]
+    python -m services.sim_closing_fit --fit [--seasons 2018-2025] [--refresh]
+
+(--window other than sim_script_fit.CUT, 600 s, is refused: the endings' plays are counted for that window.)
 
 Real margins land on exactly 3 or 7 far more often than two teams scoring independently would make them (2018-2025:
 3 in 14.4% of games, pairing each team's score with another game's opponent gives 6.1%), because play late in a game
@@ -20,10 +22,10 @@ sim_closing plays the last WINDOW seconds of regulation from the score with what
   that season's real end of regulation (shares of margins 1-3, 3, 7, 4-8 and ties).
 - `line_script`: how a team's volume follows its pregame expected margin (the Vegas spread), within each
   team-season so a team's own style is not counted: log targets and log carries per point of expected margin
-  (2018-2025: carries +0.76% a point of the favourite's expected margin, targets -0.03%; sim_closing.line_script
-  adds the tuned `game.line_script_extra`, carries +0.24, targets -0.13, because the simulated game on its own
-  moves volume the other way). Read from the database
-  (player_stats_weekly and nfl_games), applied by sim_centre before a game is centred.
+  (2018-2025: carries +0.76% a point of the favourite's expected margin, targets -0.03%). Read from the database
+  (player_stats_weekly and nfl_games); a real reference for sim_eval's "per line point" rows. The simulated game
+  follows the line through its parts (sim_script: the halves' fitted slopes, the second half's response to the
+  lead and the window's real endings), not through this number.
 
 The scoring plays are read once with nflreadpy (the play-by-play the stats load already uses) and cached in
 PLAYS_CACHE (git-ignored); the network is needed the first time, with --refresh, or for a season not in it.
