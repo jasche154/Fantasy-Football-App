@@ -206,3 +206,15 @@ def test_each_passer_is_credited_only_touchdowns_among_the_catches_he_threw():
         lines = sim_draw._passers(side, offense, rng)
         assert all(line["pass_td"] <= line["completions"] for line in lines.values())
         assert sum(line["pass_td"] for line in lines.values()) == 2
+
+
+@pytest.mark.parametrize("qb_carries", [3, 8, 11])
+def test_the_carry_split_gives_everyone_his_weight_on_average(qb_carries):
+    """M1: the QB's wide share is drawn on its own and the backs split the rest, so each player's mean carries are
+    his weight's (renormalizing the wide draw with the narrow ones put an 8-of-27 QB 3.6% under it)."""
+    from services import sim_draw
+    weights = np.array([0.50, 0.15, 0.04, qb_carries / 27, 0.06])
+    rng, total, n = np.random.default_rng(2), 27, 40_000
+    drawn = np.array([sim_draw._split(total, weights, 0.15, rng, (3, 0.45)) for _ in range(n)])
+    assert (drawn.sum(axis=1) == total).all()
+    assert drawn.mean(axis=0) / (total * weights / weights.sum()) == pytest.approx(np.ones(5), abs=0.01)

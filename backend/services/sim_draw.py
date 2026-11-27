@@ -33,6 +33,7 @@ credited like a closing-window TD (sim_closing.score_td: never to one who left t
 still his receivers' sum); a field goal is the kicker's unless he left hurt (then a fill-in's: points, no kick on
 his line). All three rates are measured on 2018-2025 regular-season overtimes (sim_closing_fit: 115 games).
 """
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from types import SimpleNamespace
@@ -49,6 +50,7 @@ from services.sim_game import (
 )
 from services.sim_world import params
 
+SHARE_CAP = 0.95                 # a player drawn on his own (the QB's carries) takes at most this share
 TD_DRIVES = 5.0                  # default of the tuned `game.td_drives`
 
 
@@ -91,12 +93,46 @@ class _Offense:
         return int(self.rec_fumbles.sum() + self.rush_fumbles.sum() + self.sack_fumbles)
 
 
-def _split(total: int, weights: np.ndarray, sd: float | np.ndarray, rng: np.random.Generator) -> np.ndarray:
+def _split(total: int, weights: np.ndarray, sd: float, rng: np.random.Generator,
+           alone: tuple[int, float] | None = None) -> np.ndarray:
     """`total` shared around `weights`: each weight x a lognormal game draw of mean 1 (relative noise, so a small
-    role stays small; without the mean correction the starting QB's wider draw, sd 0.45 against the backs' 0.15,
-    gave him about 9% more carries than his weight), renormalized, then a multinomial."""
-    drawn = weights * np.exp(sd * rng.standard_normal(len(weights)) - np.square(sd) / 2)
-    return rng.multinomial(total, drawn / drawn.sum())
+    role stays small), renormalized, then a multinomial. `alone` (index, sd): that player's share is drawn on its
+    own around his weight's share, with a wider spread (the starting QB's carries), and the others split the
+    rest by their weights x (1 + their noise - its weighted mean), which sums to 1 and averages each weight
+    exactly: renormalizing a wide draw with the narrow ones biased his share (with no mean correction +2.5% at 8
+    of 27 carries; with it, after renormalizing, -3.6%), and renormalizing the backs' noise lifted the smallest
+    by about 2%."""
+    z = rng.standard_normal(len(weights))
+    if alone is None:
+        drawn = weights * np.exp(sd * z - sd ** 2 / 2)
+        return rng.multinomial(total, drawn / drawn.sum())
+    index, wide = alone
+    share = weights[index] / weights.sum()
+    mine = min(SHARE_CAP, _uncapped(share, wide) * np.exp(wide * z[index] - wide ** 2 / 2))
+    rest = np.delete(weights, index)
+    if rest.sum() <= 0:
+        return rng.multinomial(total, np.eye(len(weights))[index])
+    rest = rest / rest.sum()
+    noise = np.exp(sd * np.delete(z, index) - sd ** 2 / 2)
+    others = np.maximum(rest * (1.0 + noise - rest @ noise), 0.0)      # re-centred, not renormalized: mean exact
+    shares = np.insert(others / others.sum() * (1.0 - mine), index, mine)
+    return rng.multinomial(total, shares)
+
+
+def _uncapped(share: float, sd: float, steps: int = 3) -> float:
+    """The base share whose lognormal draw, capped at SHARE_CAP, still averages `share`."""
+    if share <= 0:
+        return 0.0
+    base = share
+    for _ in range(steps):
+        a = (math.log(SHARE_CAP / base) - sd ** 2 / 2) / sd
+        capped = base * _phi(a) + SHARE_CAP * (1 - _phi(a + sd))
+        base *= share / capped
+    return base
+
+
+def _phi(v: float) -> float:
+    return 0.5 * (1 + math.erf(v / math.sqrt(2)))
 
 
 def _yards(plays: np.ndarray, mean: np.ndarray, sd: np.ndarray, shift: float, rng: np.random.Generator) -> np.ndarray:
@@ -114,10 +150,8 @@ def _offense(side, n_targets: int, n_carries: int, eff: float, rng: np.random.Ge
     ypc = side.ypc * eff * (max(n_targets, 1) / max(side.targets, 1.0)) ** -game.get("ypc_volume", 0.0)   # busy games: shorter catches
     rec_yds = _yards(catches, ypc, rates["rec_cv"] * np.maximum(ypc, 1.0), rates["rec_shift"], rng)
     rec_rate = np.minimum(side.rec_td * eff ** game["td_power"], MAX_TD_RATE)
-    spreads = np.full(len(side.carry_w), game["share_sd_carries"])
-    if side.qb is not None:
-        spreads[-2] = game["share_sd_qb_carries"]          # the starting QB is the last rusher before OTHER
-    carries = _split(n_carries, side.carry_w, spreads, rng)
+    qb = (len(side.carry_w) - 2, game["share_sd_qb_carries"]) if side.qb is not None else None   # last before OTHER
+    carries = _split(n_carries, side.carry_w, game["share_sd_carries"], rng, qb)
     rush_eff = eff ** game["rush_power"]
     ypr = side.ypr * rush_eff
     rush_yds = _yards(carries, ypr, np.full(len(ypr), rates["rush_sd"]), rates["rush_shift"], rng)
