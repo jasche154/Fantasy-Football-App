@@ -23,7 +23,9 @@ numbers for the current week), so no CPU ever sees a result or a projection from
   >= KEEP_OUT_CHART) with a return date in the news (except, to cover a slot nobody plays in while its IR slot is taken, one tagged IR or PUP
   outside the top PROTECTED_RANK), and never into a roster that can't field a lineup. A player the news has out
   for the season is none of these: he is the first it drops, whatever he was worth healthy, and with a full roster
-  it cuts him for whoever fills his spot best (`_replace_lost`), unless he sits in its IR slot. For a claim or an
+  it cuts him for whoever fills his spot best (`_replace_lost`), unless he sits in its IR slot and no other player
+  can take it. No CPU adds one either (`_upgrade`, `_fill_spot`): his chart keeps what a wrong report is worth, and
+  a CPU that added him for it would cut him again the week after. For a claim or an
   open spot it drops only one of its DROPPABLE_COUNT least valuable skill players. A kicker or defense is
   only ever swapped for another one.
 - No add takes a CPU over its positional limit (`replay_values.crowded`: 2 QB, 2 TE, 1 K, 1 DST, 6 RB,
@@ -395,7 +397,7 @@ def _fill_spot(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: 
     if needs:
         return _top(needs).player_id, None
     pool = [v for v in candidates(ctx.know, free)
-            if not rv.crowded([*roster, *ctx.stash], [v], v.position, ctx.settings)]
+            if not _season_over(v) and not rv.crowded([*roster, *ctx.stash], [v], v.position, ctx.settings)]
     best = _best_add(roster, pool, ctx, MIN_FILL_GAIN)
     add = best[1] if best else next(iter(pool), None)       # nobody helps the lineup: the most valuable
     return (add.player_id, None) if add else None
@@ -447,14 +449,16 @@ def _upgrade(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: _C
     position) at a position it can use: a manager doesn't leave a 300-point player on
     the wire (testers added and flipped them for 75-85% of chart). He goes to IR after the move when he is out; with the
     IR slot taken an out player is added only when he is worth more than the one on IR (they swap, `_stash_added`), and
-    never one who is out but can't go on IR (a suspension)."""
+    never one who is out but can't go on IR (a suspension) or one the news has out for the season (`_replace_lost`
+    would cut him the week after)."""
     spare = _spare(roster, ctx.know, ctx.protected, ctx.keep) if len(roster) >= ctx.settings.roster_size else []
     if not spare:
         return None
     stashed = max((v.chart for v in ctx.stash), default=None)   # IR taken: an out add must beat its player
     for add in sorted((v for v in free if v.position in SKILL), key=lambda v: (-v.chart, v.player_id)):
-        if add.out and (not replay_ir.eligible(ctx.know, add.player_id) or (stashed is not None and add.chart <= stashed)):
-            continue                                              # he would sit on the bench (suspended: no IR)
+        if _season_over(add) or (add.out and (not replay_ir.eligible(ctx.know, add.player_id)
+                                              or (stashed is not None and add.chart <= stashed))):
+            continue                                  # out for the season, or he would sit on the bench (suspended: no IR)
         drops = [*spare[:DROPPABLE_COUNT], *(v for v in spare[DROPPABLE_COUNT:] if v.position == add.position)]
         legal = [out for out in _legal_drops(roster, add, drops, ctx)
                  if add.chart >= max(UPGRADE_SHARE * out.chart, out.chart + UPGRADE_GAP)]
@@ -544,17 +548,18 @@ def _stash_pick(group: Sequence[ReplayValue], ctx: _Context) -> ReplayValue | No
 
 def _restash(state: State, ctx: _Context, team: rs.Team) -> State:
     """A taken IR slot goes to the roster player `_stash_pick` would rather have there (chosen with the slot's
-    player back on the roster, as he would be): any player when the slot's is out for the season, else one worth
-    IR_SWAP_GAP chart points more whose news has him out past next week (a one-week absence is not worth trading
-    places twice for). An injury later in the season used to leave the better player on the bench all year."""
+    player back on the roster, as he would be): a player the news expects back when the slot's is out for the
+    season, else one worth IR_SWAP_GAP chart points more whose news has him out past next week (a one-week absence
+    is not worth trading places twice for; "no timetable yet" counts as longer, whatever week it guesses)."""
     held = ctx.know.by_id[team.ir[0]]
     if not replay_ir.eligible(ctx.know, held.player_id):
         return state                                  # he lost his tag and could not come back: still blocked
     pick = _stash_pick([*(ctx.know.by_id[pid] for pid in team.roster), held], ctx)
     if pick is None or pick is held:
         return state
-    if not _season_over(held):
-        lasting = pick.news is not None and (pick.news.back is None or pick.news.back > ctx.know.week + 1)
+    if not _season_over(held) or _season_over(pick):
+        lasting = pick.news is not None and (pick.news.vague or pick.news.back is None
+                                             or pick.news.back > ctx.know.week + 1)
         if not lasting or pick.chart < held.chart + IR_SWAP_GAP:
             return state
     return replay_ir.activate(state, ctx.settings, ctx.know, team.id, held.player_id, swap=pick.player_id)

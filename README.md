@@ -1182,7 +1182,8 @@ that week's games on; only scoring a week reads its real points.
   than the slot's player trades places with him, and one the news expects back comes before one it has out for
   the season, whatever their values), so a valuable player rarely sits on the wire. A player the news has out for
   the season ("no timetable yet" is not that) is the first a CPU drops, whatever he was worth healthy: with a full
-  roster it cuts him for the free agent who fills his spot best, unless he sits in its IR slot. A long absence
+  roster it cuts him for the free agent who fills his spot best, unless he sits in its IR slot and no other player
+  can take it, and no CPU adds one from the wire. A long absence
   first reads "out for the season" one time in ten (`replay_news.FALSE_SEASON_ODDS`), so now and then a CPU cuts
   a player who comes back, as a real manager would: every team's best lineup by projection (yours can be set
   by hand), scored with real points. With waivers off, every unrostered player is a free agent.

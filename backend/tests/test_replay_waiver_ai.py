@@ -957,6 +957,10 @@ def test_a_player_out_for_the_season_is_the_first_a_cpu_would_drop_even_a_protec
     assert spare(patched(hurt, {star: {"news": LOST}}))[0] == star          # protected and kept: he still goes first
     unknown = replace(LOST, vague=True, text="Out (O) since week 3; no timetable yet.")
     assert star not in spare(patched(hurt, {star: {"news": unknown}}))       # no week, but nobody said "season"
+    early = next(pick.player_id for pick in state.picks if pick.round == 1)
+    told = {name: patched(hurt, {early: {"out": True, "news": news}}) for name, news in (("lost", LOST), ("vague", unknown))}
+    assert early in ai.early_picks(replace(state, week=1), SETTINGS, told["vague"])        # still an early pick
+    assert early not in ai.early_picks(replace(state, week=1), SETTINGS, told["lost"])
     assert star not in spare(patched(hurt, {star: {"news": BACK}}))          # expected back: never dropped
     assert star not in spare(hurt)                                           # no report at all: neither
 
@@ -988,6 +992,12 @@ def test_a_taken_ir_slot_goes_to_a_roster_player_worth_clearly_more_and_then_sta
     assert rs.team(ai.cpu_ir(state, SETTINGS, close, SEED), team_id) == rs.team(state, team_id)   # near-equal: stays
     soon = patched(clear, {star: {"news": replace(BACK, back=week + 1)}})        # back next week: not worth two moves
     assert rs.team(ai.cpu_ir(state, SETTINGS, soon, SEED), team_id) == rs.team(state, team_id)
+    # "no timetable yet" reads the same to everyone, whatever week it guesses: he takes the slot either way
+    for guess in (week + 1, None):
+        vague = patched(clear, {star: {"news": replace(BACK, back=guess, vague=True)}})
+        assert rs.team(ai.cpu_ir(state, SETTINGS, vague, SEED), team_id).ir == (star,)
+    both_lost = patched(clear, {star: {"news": LOST, "chart": 61.0}, held: {"news": LOST, "chart": 60.0}})
+    assert rs.team(ai.cpu_ir(state, SETTINGS, both_lost, SEED), team_id) == rs.team(state, team_id)
     assert rs.team(after, team_id).ir == (star,) and held in rs.team(after, team_id).roster
     assert (team_id, (held, star)) in ir_moves(state, after) and ai.cpu_ir(after, SETTINGS, clear, SEED) == after
 
@@ -1054,3 +1064,43 @@ def test_the_ir_slot_is_re_picked_as_if_its_player_were_back_on_the_roster():
     assert not rv.can_field_lineup(without_him, SETTINGS)                    # the roster alone cannot spare him
     assert rs.team(after, team_id).ir == (back,) and held in rs.team(after, team_id).roster
     assert ai.cpu_ir(after, SETTINGS, news, SEED) == after
+
+
+def test_no_cpu_adds_a_free_agent_who_is_out_for_the_season_whatever_his_chart_still_says():
+    """A wrong report keeps a star some chart value: a CPU that added him for it traded him into its IR slot,
+    traded him out again the next week and cut him, every week."""
+    week, team_id = 6, CPUS[0]
+    state, held, _ = full_with_ir(week, team_id)
+    lost_one = next(v.player_id for v in replay_waivers.available_players(state, know(week), "WR")
+                    if v.player_id != held)
+    hurt = tagged_know(week, {(pid, week): fakes.Injury("IR") for pid in (held, lost_one)})
+    lost = patched(hurt, {lost_one: {"news": LOST, "chart": 400.0}, held: {"news": BACK, "chart": 60.0}})
+    back = patched(hurt, {lost_one: {"news": BACK, "chart": 400.0}, held: {"news": BACK, "chart": 60.0}})
+
+    def owners(knowledge: Knowledge) -> list[int]:
+        after = state
+        for _ in range(3):
+            after = ai.cpu_free_agency(ai.cpu_ir(after, SETTINGS, knowledge, SEED), SETTINGS, knowledge, SEED)
+        return [team.id for team in after.teams if lost_one in (*team.roster, *team.ir)]
+
+    assert owners(lost) == []
+    assert len(owners(back)) == 1                    # the same player expected back is worth adding
+
+
+def test_an_open_spot_is_never_filled_with_a_free_agent_who_is_out_for_the_season(monkeypatch):
+    week, team_id = 6, CPUS[0]
+    state = league(week, phase="open")
+    team = rs.team(state, team_id)
+    spot = at(state, team_id, "WR", week)[-1]                       # a bench receiver gone: one open spot
+    free = replay_waivers.available_players(state, know(week), "WR")
+    lost_one = free[0].player_id
+    hurt = tagged_know(week, {(lost_one, week): fakes.Injury("IR")})
+    monkeypatch.setattr(ai, "_best_add", lambda *args: None)       # nobody helps the lineup: the most valuable goes
+
+    def filled(news: replay_news.Report) -> int:
+        knowledge = patched(hurt, {lost_one: {"news": news, "trade_value": 9999.0}})
+        ctx = ai._for_team(ai._context(knowledge, SETTINGS, state), team)
+        roster = [knowledge.by_id[pid] for pid in team.roster if pid != spot]
+        return ai._fill_spot(roster, [knowledge.by_id[v.player_id] for v in free], ctx)[0]
+
+    assert filled(BACK) == lost_one and filled(LOST) != lost_one
