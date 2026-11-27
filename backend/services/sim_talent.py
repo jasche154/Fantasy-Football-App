@@ -115,14 +115,16 @@ def _offseason(player: Player, z: np.ndarray, knobs: dict) -> Player:
 
 def _season_role(player: Player, z: float, knobs: dict) -> Player:
     """A whole-season role: x lognormal, sd = what his position's role curve leaves unexplained from one season to
-    the next (sim_next_year.json `role_sd`), for a rookie what the rookie role line at his pick leaves
-    (`rookies.<position>.role_sd`), x the tuned `season_roles`."""
+    the next (sim_next_year.json `role_sd`) x the tuned `season_roles`; for a rookie, in full, what the rookie role
+    line at his pick leaves (`rookies.<position>.role_sd`: the belief knows only his pick, so all of it is
+    hidden; x season_roles too, rookies followed their draft slot too closely: full mode 2021-2025, real / before /
+    after, rookie ADP vs finish r 0.50 / 0.66 / 0.51, rookie top-24 finishes 8.4 / 6.6 / 7.5, breakouts 10.6 / 7.5
+    / 9.0)."""
     model = sim_next_year.stored()
     if player.games > 0:
-        sd = model.get("role_sd", {}).get(player.position, 0.0)
+        sd = model.get("role_sd", {}).get(player.position, 0.0) * knobs["season_roles"]
     else:                                          # a rookie: around the role a player taken at his pick had
-        sd = model.get("rookies", {}).get(player.position, {}).get("role_sd", 0.0)
-    sd *= knobs["season_roles"]
+        sd = model.get("rookies", {}).get(player.position, {}).get("role_sd", 0.0)   # measured: no season_roles
     if sd <= 0:
         return player
     x = _lognormal(sd, z)

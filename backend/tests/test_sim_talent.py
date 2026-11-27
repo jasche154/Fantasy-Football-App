@@ -97,3 +97,16 @@ def test_rookie_qbs_and_kickers_never_grow(belief):
     assert rookies
     assert not [c for seed in range(30) for c in sim_talent.truth(belief, seed, 1, 17, rookies).changes
                 if c.kind == "growth"]
+
+
+def test_a_rookies_season_role_spreads_by_the_measured_rookie_spread_whatever_the_veterans_knob():
+    """Item 4: the belief knows only a rookie's pick, so the whole measured spread around the pick's role is hidden."""
+
+
+    from services import sim_next_year
+    from services.sim_world import Player
+    sd = sim_next_year.stored()["rookies"]["WR"]["role_sd"]
+    rookie, veteran = Player(1, "WR", "AAA", targets=0.1, games=0.0), Player(2, "WR", "AAA", targets=0.1, games=17.0)
+    knobs = {"season_roles": 0.0}
+    assert sim_talent._season_role(veteran, 1.0, knobs) == veteran
+    assert sim_talent._season_role(rookie, 1.0, knobs).targets == pytest.approx(0.1 * math.exp(sd - sd ** 2 / 2))
