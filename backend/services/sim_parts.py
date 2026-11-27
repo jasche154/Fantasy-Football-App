@@ -123,11 +123,11 @@ def _phi(v: float) -> float:
 
 def _yards(plays: np.ndarray, mean: np.ndarray, sd: np.ndarray, shift: float, rng: np.random.Generator) -> np.ndarray:
     """Whole yards over `plays` per player, each play a shifted gamma (mean, sd)."""
-    return _yards_scored(plays, mean, sd, shift, rng)[0]
+    return _yards_scored(plays, mean, sd, shift, rng, scored=False)[0]
 
 
 def _yards_scored(plays: np.ndarray, mean: np.ndarray, sd: np.ndarray, shift: float,
-                  rng: np.random.Generator) -> tuple[np.ndarray, float, float]:
+                  rng: np.random.Generator, scored: bool = True) -> tuple[np.ndarray, float, float]:
     """`_yards` plus (sum of each player's yards sd x his normal score, sum of their variances): the normal score of
     a gamma draw by Wilson-Hilferty's cube root, close to exact from shape 1 (a player's yards over a few plays)."""
     out = np.zeros(len(plays), dtype=int)
@@ -139,6 +139,8 @@ def _yards_scored(plays: np.ndarray, mean: np.ndarray, sd: np.ndarray, shift: fl
     shape = plays[some] * k
     drawn = rng.gamma(shape, theta)
     out[some] = np.round(drawn - plays[some] * shift).astype(int)
+    if not scored:
+        return out, 0.0, 0.0
     c = 1.0 / (9.0 * shape)
     score = ((drawn / (shape * theta)) ** (1.0 / 3.0) - (1.0 - c)) / np.sqrt(c)
     spread = np.sqrt(shape) * theta
@@ -244,12 +246,12 @@ def plays(side, plan: Plan, n_targets: int, n_carries: int, eff: float, rng: np.
     catches = rng.binomial(targets, np.clip(side.catch, 0, 1))
     ypc = side.ypc * eff * busy
     rec_yds, rec_score, rec_var = _yards_scored(catches, ypc, rates["rec_cv"] * np.maximum(ypc, 1.0),
-                                                rates["rec_shift"], rng)
+                                                rates["rec_shift"], rng, drives is not None)
     carries = rng.multinomial(n_carries, plan.carries)
     rush_eff = eff ** game["rush_power"]
     ypr, rush_td = sim_script.rushing(side)
     rush_yds, rush_score, rush_var = _yards_scored(carries, ypr * rush_eff, np.full(len(ypr), rates["rush_sd"]),
-                                                   rates["rush_shift"], rng)
+                                                   rates["rush_shift"], rng, drives is not None)
     rec_fumbles, rush_fumbles = rng.binomial(catches, side.rec_fumble), rng.binomial(carries, side.fumble)
     attempts = int(n_targets + rng.binomial(n_targets, max(0.0, league["attempts_per_target"] - 1)))
     zero = np.zeros(len(catches), dtype=int), np.zeros(len(carries), dtype=int)
