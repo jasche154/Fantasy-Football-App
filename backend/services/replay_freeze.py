@@ -10,7 +10,7 @@ from collections.abc import Mapping
 from functools import lru_cache
 from types import MappingProxyType
 
-from services import replay_chart, replay_league_size, replay_slots, replay_superflex
+from services import replay_chart, replay_league_size, replay_pool, replay_slots, replay_superflex
 from services.league import LeagueSettings
 from services.replay_pool import SeasonData
 from services.replay_rows import _priors, _row
@@ -83,3 +83,6 @@ def _live(data: SeasonData, league: LeagueSettings, week: int, end_week: int, dr
     replay_chart.base_charts(curve, rows, priors, week, end_week, drafted, regular if two_qb else None,
                              dict.fromkeys(teams, 0.0), live, board=board)
     return MappingProxyType(live), MappingProxyType(teams)
+
+
+replay_pool.EVICT_HOOKS.append(_live.cache_clear)          # keyed on SeasonData: a dropped season must not stay alive

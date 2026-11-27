@@ -33,7 +33,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from types import MappingProxyType, SimpleNamespace
 
-from services import lineup_gain, my_team as mt, replay_chart, replay_slots, replay_state
+from services import lineup_gain, my_team as mt, replay_chart, replay_pool, replay_slots, replay_state
 from services import replay_chart_injury  # noqa: F401 (tests reach it as rv.replay_chart_injury)
 from services.league import LeagueSettings, replacement_levels
 from services.replay_news import Report
@@ -169,6 +169,9 @@ def _base(data: SeasonData, league: LeagueSettings, week: int, end_week: int, dr
     replacement = replacement_levels(((r["position"], r["ros_ppg"]) for r in rows if r["position"] in SKILL), league)
     return _Base(MappingProxyType({r["player_id"]: _valued(r, replacement) for r in rows}), chart_data, parts,
                  MappingProxyType(replacement), source, MappingProxyType(live), regular)
+
+
+replay_pool.EVICT_HOOKS.append(_base.cache_clear)           # keyed on SeasonData: a dropped season must not stay alive
 
 
 @lru_cache(maxsize=32)
