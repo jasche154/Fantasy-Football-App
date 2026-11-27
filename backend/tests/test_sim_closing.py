@@ -392,3 +392,15 @@ def test_an_unreadable_play_by_play_cache_warns_with_the_error(caplog, monkeypat
         assert sim_closing_fit._cached() == {}
     record = next(r for r in caplog.records if "unreadable" in r.getMessage())
     assert record.levelname == "WARNING" and record.exc_info is not None
+
+
+def test_a_write_that_cannot_replace_the_file_leaves_no_temp_file(monkeypatch, tmp_path):
+    path = tmp_path / "sim_closing.json"
+    path.write_text("old", encoding="utf-8")
+    monkeypatch.setattr(sim_closing_fit, "CLOSING_PATH", path)
+    monkeypatch.setattr(sim_closing_fit.os, "replace", lambda *args: (_ for _ in ()).throw(PermissionError("locked")))
+
+    with pytest.raises(PermissionError):
+        sim_closing_fit._store("new")
+
+    assert path.read_text(encoding="utf-8") == "old" and list(tmp_path.iterdir()) == [path]
