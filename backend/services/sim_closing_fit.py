@@ -381,8 +381,12 @@ def write(result: dict) -> dict:
 
 def _store(text: str) -> None:
     partial = CLOSING_PATH.with_suffix(f".{os.getpid()}.tmp")
-    partial.write_text(text, encoding="utf-8")
-    os.replace(partial, CLOSING_PATH)
+    try:
+        partial.write_text(text, encoding="utf-8")
+        os.replace(partial, CLOSING_PATH)
+    except BaseException:                             # a locked file: leave no temp file beside the module
+        partial.unlink(missing_ok=True)
+        raise
 
 
 def dumps(result: Mapping) -> str:
