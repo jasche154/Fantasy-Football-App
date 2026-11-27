@@ -23,24 +23,24 @@ its expected yards and TDs, x its field-goal scale), moved linearly by how far t
 from their means (the fitted log slopes, so a team that scores fewer TDs kicks more): linear, so the draw's mean
 tries are the analytic ones (a log-linear move would kick more on average than sim_game's mean says).
 
-Overtime (`_overtime`): a game tied after regulation stays tied with OT_TIE, else one side wins it (in proportion
-to the two sides' mean points) with a field goal (`game.ot_field_goal` of the time, a made kick in a distance band
-drawn like any other) or a touchdown (no try: it ends the game), credited to a receiver or a rusher drawn in
-proportion to his expected TDs (never one who left the game hurt), with `game.ot_td_yards` on the play and one
-more pass attempt for a catch, so the passer's line (the receivers' sum) and the box score still add up; a field
-goal is the kicker's unless he left hurt (then a fill-in's: points, no kick on his line). OT_TIE is set so
-simulated games end tied about as often as real ones (0.29% of regular season games 2021-2025; simulated games
-are tied after regulation 4.3% of the time). `game.ot_field_goal` (0.5) and `game.ot_td_yards` (12 yards on a
-catch, 4 on a run) are hand-set: no overtime play-by-play is loaded; the tie rate and the box score are what the
-realism check measures.
+The closing window (sim_closing.close): the draw above is the game up to the last minutes of regulation; the rest
+is a real game's ending drawn from the score at that point, credited to real players (see sim_closing).
+
+Overtime (`_overtime`): a game tied after regulation stays tied with sim_closing's measured overtime tie share
+(`ot_tie`), else one side wins it (in proportion to the two sides' mean points) with a field goal (`ot_field_goal`
+of the time, a made kick in a distance band drawn like any other) or a touchdown (no try: it ends the game),
+credited like a closing-window TD (sim_closing.score_td: never to one who left the game hurt, the passer's line
+still his receivers' sum); a field goal is the kicker's unless he left hurt (then a fill-in's: points, no kick on
+his line). All three rates are measured on 2018-2025 regular-season overtimes (sim_closing_fit: 118 games, 8 of them tied).
 """
+import math
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from types import SimpleNamespace
 
 import numpy as np
 
-from services import kdst_model
+from services import kdst_model, sim_closing
 from services.replay_box import BoxLine
 from services.replay_pool import Usage
 from services.scoring import ScoringSettings
@@ -50,18 +50,18 @@ from services.sim_game import (
 )
 from services.sim_world import params
 
+SHARE_CAP = 0.95                 # a player drawn on his own (the QB's carries) takes at most this share
 TD_DRIVES = 5.0                  # default of the tuned `game.td_drives`
-OT_TIE = 0.07                    # a tied game stays tied after overtime: 0.29% real ties / 4.3% simulated regulation ties
-OT_DEFAULTS = {"ot_field_goal": 0.5, "ot_td_yards": {"rec": 12, "rush": 4}}   # hand-set (see above); tuned section
+
+
+def ot_tie() -> float:
+    """The share of overtimes that end tied (real, sim_closing.json)."""
+    return float(sim_closing.ot()["tie"])
 
 
 def ot_field_goal() -> float:
-    """The share of decided overtimes that end on a field goal (`game.ot_field_goal`)."""
-    return float(params()["game"].get("ot_field_goal", OT_DEFAULTS["ot_field_goal"]))
-
-
-def _ot_yards() -> dict:
-    return dict(params()["game"].get("ot_td_yards", OT_DEFAULTS["ot_td_yards"]))
+    """The share of decided overtimes that end on a field goal (real, sim_closing.json)."""
+    return float(sim_closing.ot()["field_goal"])
 
 
 @dataclass(frozen=True)
@@ -93,11 +93,48 @@ class _Offense:
         return int(self.rec_fumbles.sum() + self.rush_fumbles.sum() + self.sack_fumbles)
 
 
-def _split(total: int, weights: np.ndarray, sd: float | np.ndarray, rng: np.random.Generator) -> np.ndarray:
-    """`total` shared around `weights`: each weight x a lognormal game draw (relative noise, so a small role
-    stays small), renormalized, then a multinomial."""
-    drawn = weights * np.exp(sd * rng.standard_normal(len(weights)))
-    return rng.multinomial(total, drawn / drawn.sum())
+def _split(total: int, weights: np.ndarray, sd: float, rng: np.random.Generator,
+           alone: tuple[int, float] | None = None) -> np.ndarray:
+    """`total` shared around `weights`: each weight x a lognormal game draw of mean 1 (relative noise, so a small
+    role stays small), renormalized, then a multinomial. `alone` (index, sd): that player's share is drawn on its
+    own around his weight's share, with a wider spread (the starting QB's carries), and the others split the
+    rest by their weights x (1 + their noise - its weighted mean), which sums to 1 and averages each weight
+    exactly: renormalizing a wide draw with the narrow ones biased his share (with no mean correction +2.5% at 8
+    of 27 carries; with it, after renormalizing, -3.6%), and renormalizing the backs' noise lifted the smallest
+    by about 2%."""
+    z = rng.standard_normal(len(weights))
+    if alone is None:
+        drawn = weights * np.exp(sd * z - sd ** 2 / 2)
+        return rng.multinomial(total, drawn / drawn.sum())
+    index, wide = alone
+    share = weights[index] / weights.sum()
+    mine = min(SHARE_CAP, _uncapped(share, wide) * np.exp(wide * z[index] - wide ** 2 / 2))
+    rest = np.delete(weights, index)
+    if rest.sum() <= 0:
+        return rng.multinomial(total, np.eye(len(weights))[index])
+    rest = rest / rest.sum()
+    noise = np.exp(sd * np.delete(z, index) - sd ** 2 / 2)
+    others = np.maximum(rest * (1.0 + noise - rest @ noise), 0.0)      # re-centred, not renormalized: mean exact
+    shares = np.insert(others / others.sum() * (1.0 - mine), index, mine)
+    return rng.multinomial(total, shares)
+
+
+def _uncapped(share: float, sd: float, steps: int = 3) -> float:
+    """The base share whose lognormal draw, capped at SHARE_CAP, still averages `share`."""
+    if share <= 0:
+        return 0.0
+    if sd <= 0:                                      # no spread: the draw is the share itself
+        return share
+    base = share
+    for _ in range(steps):
+        a = (math.log(SHARE_CAP / base) - sd ** 2 / 2) / sd
+        capped = base * _phi(a) + SHARE_CAP * (1 - _phi(a + sd))
+        base *= share / capped
+    return base
+
+
+def _phi(v: float) -> float:
+    return 0.5 * (1 + math.erf(v / math.sqrt(2)))
 
 
 def _yards(plays: np.ndarray, mean: np.ndarray, sd: np.ndarray, shift: float, rng: np.random.Generator) -> np.ndarray:
@@ -115,10 +152,8 @@ def _offense(side, n_targets: int, n_carries: int, eff: float, rng: np.random.Ge
     ypc = side.ypc * eff * (max(n_targets, 1) / max(side.targets, 1.0)) ** -game.get("ypc_volume", 0.0)   # busy games: shorter catches
     rec_yds = _yards(catches, ypc, rates["rec_cv"] * np.maximum(ypc, 1.0), rates["rec_shift"], rng)
     rec_rate = np.minimum(side.rec_td * eff ** game["td_power"], MAX_TD_RATE)
-    spreads = np.full(len(side.carry_w), game["share_sd_carries"])
-    if side.qb is not None:
-        spreads[-2] = game["share_sd_qb_carries"]          # the starting QB is the last rusher before OTHER
-    carries = _split(n_carries, side.carry_w, spreads, rng)
+    qb = (len(side.carry_w) - 2, game["share_sd_qb_carries"]) if side.qb is not None else None   # last before OTHER
+    carries = _split(n_carries, side.carry_w, game["share_sd_carries"], rng, qb)
     rush_eff = eff ** game["rush_power"]
     ypr = side.ypr * rush_eff
     rush_yds = _yards(carries, ypr, np.full(len(ypr), rates["rush_sd"]), rates["rush_shift"], rng)
@@ -229,7 +264,10 @@ def _kicking(o: _Offense, def_tds: int, rng: np.random.Generator, m: dict) -> tu
     return 6 * tds + pat_made + 2 * int(rng.binomial(two, TWO_POINT_SUCCESS)) + 3 * int(made.sum()), counts
 
 
-def draw_game(sides: Sequence, rng: np.random.Generator, scoring: ScoringSettings) -> GameResult:
+def draw_game(sides: Sequence, rng: np.random.Generator, scoring: ScoringSettings,
+              until_cut: bool = False) -> GameResult | tuple[int, int]:
+    """One game (see the module docstring); `until_cut`: only the two sides' points at the closing window's cut
+    (what sim_closing_fit.cut_spread measures)."""
     dst = params()["dst"]
     eff, n_targets, n_carries = _volumes(sides, rng)
     offense = [_offense(side, int(n_targets[i]), int(n_carries[i]), float(eff[i]), rng) for i, side in enumerate(sides)]
@@ -241,11 +279,16 @@ def draw_game(sides: Sequence, rng: np.random.Generator, scoring: ScoringSetting
     blocks = rng.poisson(dst["block"], 2)
     means = [_side_means(side) for side in sides]
     scored = [_kicking(offense[i], returns[i], rng, means[i]) for i in range(2)]
-    points = [scored[i][0] + 2 * int(safeties[i]) for i in range(2)]
     regulation = offense
+    if until_cut:
+        return scored[0][0] + 2 * int(safeties[0]), scored[1][0] + 2 * int(safeties[1])
+    expect = [max(0.1, _mean_points(means[i], means[1 - i])) for i in range(2)]
+    offense, scored, points, returns, safeties, n_targets, n_carries = sim_closing.close(
+        sides, offense, scored, [scored[i][0] + 2 * int(safeties[i]) for i in range(2)], returns, list(safeties),
+        n_targets, n_carries, rng, means, expect)
     if points[0] == points[1]:
         offense, scored, points, n_targets, n_carries = _overtime(sides, offense, scored, points, n_targets,
-                                                                  n_carries, rng, means)
+                                                                  n_carries, rng, means, expect)
     players: dict[int, PlayerGame] = {}
     for i, side in enumerate(sides):
         o, opp = offense[i], offense[1 - i]
@@ -273,12 +316,11 @@ def draw_game(sides: Sequence, rng: np.random.Generator, scoring: ScoringSetting
 
 
 def _overtime(sides, offense: list, scored: list, points: list, n_targets: np.ndarray, n_carries: np.ndarray,
-              rng: np.random.Generator, means: list) -> tuple[list, list, list, np.ndarray, np.ndarray]:
+              rng: np.random.Generator, means: list, expect: list) -> tuple[list, list, list, np.ndarray, np.ndarray]:
     """A tied game's overtime (see the module docstring): the winner's offense or kicker gets the winning play.
-    `means`: each side's sim_game._side_means."""
-    if rng.random() < OT_TIE:
+    `means`: each side's sim_game._side_means; `expect`: each side's mean points (who wins it)."""
+    if rng.random() < ot_tie():
         return offense, scored, points, n_targets, n_carries
-    expect = [max(0.1, _mean_points(means[i], means[1 - i])) for i in range(2)]
     winner = 0 if rng.random() < expect[0] / sum(expect) else 1
     offense, scored, points = list(offense), list(scored), list(points)
     n_targets, n_carries = n_targets.copy(), n_carries.copy()
@@ -292,22 +334,10 @@ def _overtime(sides, offense: list, scored: list, points: list, n_targets: np.nd
         scored[winner] = (scored[winner][0] + 3, counts)
         points[winner] += 3
         return offense, scored, points, n_targets, n_carries
-    side, m, o, yards = sides[winner], means[winner], offense[winner], _ot_yards()
-    left = side.exited
-    rec = m["rec_td"][:-1] * np.array([pid not in left for pid in side.receivers[:-1]], dtype=float)
-    rush = m["rush_td"][:-1] * np.array([pid not in left for pid in side.rushers[:-1]], dtype=float)
-    weights = np.concatenate([rec, rush])               # the "other" bucket's line is not kept
-    pick = int(rng.choice(len(weights), p=weights / weights.sum())) if weights.sum() > 0 else len(rec)
-    if pick < len(rec):
-        one = np.eye(len(o.targets), dtype=int)[pick]
-        offense[winner] = replace(o, targets=o.targets + one, catches=o.catches + one, attempts=o.attempts + 1,
-                                  rec_yds=o.rec_yds + yards["rec"] * one, rec_td=o.rec_td + one)
-        n_targets[winner] += 1
-    else:
-        one = np.eye(len(o.carries), dtype=int)[min(pick - len(rec), len(o.carries) - 1)]
-        offense[winner] = replace(o, carries=o.carries + one, rush_yds=o.rush_yds + yards["rush"] * one,
-                                  rush_td=o.rush_td + one)
-        n_carries[winner] += 1
+    offense[winner], extra_target, extra_carry = sim_closing.score_td(
+        sides[winner], means[winner], offense[winner], None, sim_closing.ot()["td_yards"], rng)
+    n_targets[winner] += extra_target
+    n_carries[winner] += extra_carry
     scored[winner] = (scored[winner][0] + 6, scored[winner][1])
     points[winner] += 6
     return offense, scored, points, n_targets, n_carries

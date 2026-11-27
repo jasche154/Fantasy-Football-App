@@ -168,12 +168,15 @@ def _market_adp(data: SeasonData, settings: Settings) -> SeasonData:
     """Every player's ADP replaced by the market's going into the league's first week, in the league's format
     (settings.adp_format), so a draft held mid-season reflects today, not August. The belief reads the
     simulated season as known before that week, which includes that week's injury tags (a starter's running
-    IR stint): the same belief the week's expert snapshot was drawn from, so the draft room's rank and ADP agree."""
+    IR stint): the same belief the week's expert snapshot was drawn from. Today's market also leans on the
+    experts' opinion of that snapshot (sim_market.implied_opinions of its ranks, as a price multiplier): the
+    simulated experts carry the last real ranks over the join, and a market on the belief alone left the draft
+    room's rank and its ADP agreeing at 0.77-0.80 (Spearman, top 60) where one belief gave 0.88-0.91."""
     from services import sim_next_year, sim_world
 
     week = settings.start_week
     return sim_next_year.with_market_adp(replace(data, adp_format=settings.adp_format),
-                                         sim_world.estimate(data, week), data.last_week - week + 1)
+                                         sim_world.estimate(data, week), data.last_week - week + 1, lean_week=week)
 
 
 def with_status_now(session: Session, base: SeasonData, week: int) -> SeasonData:

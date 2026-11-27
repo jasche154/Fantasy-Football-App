@@ -101,6 +101,16 @@ def test_dst_interceptions_equal_the_opposing_quarterbacks(monkeypatch):
         assert seen == [thrown["BBB"], thrown["AAA"]]          # AAA's defense first, then BBB's
 
 
+def _scripted(out: set[int], kind: str) -> float:
+    """exp(line-script slope x the change in AAA's expected margin when `out` sit): how far its volume moves."""
+    from services import sim_closing
+
+    def margin(sitting: set[int]) -> float:
+        a, b = (sim_game._side_means(sim_game._side_of(world(), t, o, sitting)) for t, o in (("AAA", "BBB"), ("BBB", "AAA")))
+        return sim_game._mean_points(a, b) - sim_game._mean_points(b, a)
+    return float(np.exp(sim_closing.line_script()[kind] * (margin(out) - margin(set()))))
+
+
 def test_an_injured_receivers_work_flows_to_his_teammates():
     healthy = sim_game.expected(world(), "AAA", "BBB", set(), HALF)
     without = sim_game.expected(world(), "AAA", "BBB", {pid("AAA", "WR")}, HALF)
@@ -108,13 +118,16 @@ def test_an_injured_receivers_work_flows_to_his_teammates():
     for name in ("WR2", "WR3", "TE", "RB"):
         assert without[pid("AAA", name)].box.targets > healthy[pid("AAA", name)].box.targets
     total = lambda lines: sum(e.box.targets for p, e in lines.items() if team_of(p) == "AAA")  # noqa: E731
-    assert total(without) == pytest.approx(total(healthy))
+    # the team's targets move only by the line script, at the margin his absence moves (sim_closing.line_script)
+    assert total(without) / total(healthy) == pytest.approx(_scripted({pid("AAA", "WR")}, "targets"), rel=1e-3)
 
 
 def test_a_hurt_back_s_carries_go_to_the_next_back_not_to_the_quarterback():
     healthy = sim_game.expected(world(), "AAA", "BBB", set(), HALF)
     without = sim_game.expected(world(), "AAA", "BBB", {pid("AAA", "RB")}, HALF)
-    assert without[pid("AAA", "QB")].box.carries == pytest.approx(healthy[pid("AAA", "QB")].box.carries)
+    # the QB's carries move only by the line script, at the margin the back's absence moves
+    ratio = without[pid("AAA", "QB")].box.carries / healthy[pid("AAA", "QB")].box.carries
+    assert ratio == pytest.approx(_scripted({pid("AAA", "RB")}, "carries"), rel=1e-3)
     assert without[pid("AAA", "RB2")].box.carries > 2 * healthy[pid("AAA", "RB2")].box.carries
 
 
@@ -126,14 +139,15 @@ def test_a_backup_qb_moves_every_receiver():
 
 
 def test_the_mean_of_many_games_is_the_expected_line():
-    w, rng = world(), np.random.default_rng(5)
+    from tests import sim_draws
+    w = world()
     expected = sim_game.expected(w, "AAA", "BBB", set(), HALF)
     points = defaultdict(float)
     draws = 3000
-    for _ in range(draws):
-        for p, g in sim_game.play(w, "AAA", "BBB", set(), rng, HALF).players.items():
+    for result in sim_draws.games(w, "AAA", "BBB", HALF, draws, 5):
+        for p, g in result.players.items():
             points[p] += g.points / draws
-    for name in ("QB", "RB", "WR", "TE"):
+    for name in ("QB", "RB", "WR", "TE"):              # 3,000 draws: se 1.1-1.6% of the mean, so 6% is 4-5 se
         assert points[pid("AAA", name)] == pytest.approx(expected[pid("AAA", name)].points, rel=0.06)
     assert points[pid("AAA", "K")] == pytest.approx(expected[pid("AAA", "K")].points, rel=0.08)
     assert points[pid("AAA", "DST")] == pytest.approx(expected[pid("AAA", "DST")].points, abs=0.3)
@@ -166,7 +180,12 @@ def test_a_thin_roster_leaves_depth_work_to_the_other_bucket_without_inflating_t
     assert pool < full.teams["AAA"].targets - 1                  # some targets go to unpooled depth
 
 
-def test_a_kicker_who_leaves_hurt_keeps_only_his_share_of_the_kicks():
+def test_a_kicker_who_leaves_hurt_keeps_only_his_share_of_the_kicks(monkeypatch):
+    """His share of the kicks before the closing window (whose kicks, after he left, are a fill-in's: the window is
+    switched off here so the share is measured on its own)."""
+    from services import sim_closing
+    monkeypatch.setattr(sim_closing, "close", lambda sides, offense, scored, points, returns, safeties, n_t, n_c, *rest:
+                        (offense, scored, points, returns, safeties, n_t, n_c))
     rng = np.random.default_rng(8)
     kicker = pid("AAA", "K")
     healthy = np.mean([sim_game.play(world(), "AAA", "BBB", set(), rng, HALF).players[kicker].points for _ in range(400)])
@@ -188,3 +207,26 @@ def test_each_passer_is_credited_only_touchdowns_among_the_catches_he_threw():
         lines = sim_draw._passers(side, offense, rng)
         assert all(line["pass_td"] <= line["completions"] for line in lines.values())
         assert sum(line["pass_td"] for line in lines.values()) == 2
+
+
+@pytest.mark.parametrize("qb_carries", [3, 8, 11])
+def test_the_carry_split_gives_everyone_his_weight_on_average(qb_carries):
+    """M1: the QB's wide share is drawn on its own and the backs split the rest, so each player's mean carries are
+    his weight's (renormalizing the wide draw with the narrow ones put an 8-of-27 QB 3.6% under it)."""
+    from services import sim_draw
+    weights = np.array([0.50, 0.15, 0.04, qb_carries / 27, 0.06])
+    rng, total, n = np.random.default_rng(2), 27, 40_000
+    drawn = np.array([sim_draw._split(total, weights, 0.15, rng, (3, 0.45)) for _ in range(n)])
+    assert (drawn.sum(axis=1) == total).all()
+    assert drawn.mean(axis=0) / (total * weights / weights.sum()) == pytest.approx(np.ones(5), abs=0.01)
+
+
+def test_a_qb_carry_share_with_no_spread_is_his_weights_share():
+    """Item 9: a tuned share_sd_qb_carries of 0 draws no noise instead of dividing by it."""
+    from services import sim_draw
+    assert sim_draw._uncapped(0.3, 0.0) == 0.3
+    weights = np.array([0.5, 0.2, 0.3])
+    rng = np.random.default_rng(1)
+    drawn = np.array([sim_draw._split(30, weights, 0.15, rng, (2, 0.0)) for _ in range(4000)])
+    assert (drawn.sum(axis=1) == 30).all()
+    assert drawn[:, 2].mean() == pytest.approx(30 * 0.3, rel=0.02)      # se 0.04 carries: about 4.5 se

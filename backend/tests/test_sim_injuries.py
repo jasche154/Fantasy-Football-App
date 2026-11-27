@@ -172,3 +172,30 @@ def test_an_absence_that_ends_unseen_is_censored_and_only_a_season_end_carries_o
     tally = Tally()
     walk(_season((1, 4, 5, 6), {2: "O", 3: "O"}), 1, "WR", tally, False)
     assert [(s.length, s.censored, s.season_end) for s in tally.spells] == [(2, False, False)]
+
+
+def test_the_hazard_counts_only_seasons_since_hazard_since_while_lengths_count_every_season(monkeypatch):
+    """M5: two fake seasons, one before HAZARD_SINCE with many injuries and one after with few: the QB hazard is the
+    later season's events over its exposure; the length table still counts the earlier season's spells."""
+    from types import SimpleNamespace
+
+    from services import replay_pool, sim_injuries_fit as fit
+    early, late = fit.HAZARD_SINCE - 1, fit.HAZARD_SINCE
+    plan = {early: (100, 10, 3), late: (200, 4, 1)}          # season: (exposure, absences, games each lasts)
+
+    def walk(data, pid, position, tally, fresh):
+        exposure, absences, length = plan[data.season]
+        tally.players[position] += 1
+        tally.exposure[position] += exposure
+        tally.spells += [fit.Spell(position, length, False, ["O"] * length, pid=pid) for _ in range(absences)]
+        return [], []
+
+    monkeypatch.setattr(replay_pool, "load_season_data", lambda session, season, scoring: SimpleNamespace(
+        season=season, actual={}, injuries={}, players={}))
+    monkeypatch.setattr(fit, "relevant", lambda data: {1: "QB"})
+    monkeypatch.setattr(fit, "walk", walk)
+    model = fit.fit(None, [early, late])
+    qb = model["positions"]["QB"]
+    assert qb["hazard"] == pytest.approx(4 / 200)                     # the later season only
+    assert qb["absences"] == 14 and qb["games"] == 300                # lengths and counts: both seasons
+    assert model["hazard_seasons"] == f"{late}-{late}"

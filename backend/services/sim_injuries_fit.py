@@ -18,6 +18,11 @@ his team's games are walked in order (byes skipped):
 - phantom: a Q/D tag on a game he played that is not part of an injury above;
 - preseason: missing week 1 with an injury tag, last season's carried-over absences excluded (rate by
   position, length pooled: there are only a few dozen);
+- the per-game hazard (absences plus banged-up games over exposure) on seasons since HAZARD_SINCE only: the
+  same count gives quarterbacks 0.023-0.026 new injuries a game in 2018-2020 and 0.043-0.067 in 2021-2025
+  (sim_metrics.injuries; running backs, receivers and tight ends show no such step), so a pooled 2018-2025
+  hazard (QB 0.050) left simulated QBs below the target sim_eval holds them to (0.75 x the 2021-2025 rate);
+  lengths, exits and the rest still use every season;
 - IR policy (seasons since IR_RULES_SINCE, today's rules): the absence length from which IR is the usual
   outcome (fewest misclassified absences), the median missed game it starts at and its usual stint (the rule's
   minimum).
@@ -39,6 +44,7 @@ log = logging.getLogger(__name__)
 
 TOP = {"QB": 32, "RB": 48, "WR": 60, "TE": 24, "K": 20}
 EXIT_CUTOFF = 0.70
+HAZARD_SINCE = 2021               # per-game hazard: 2021 on (see the module docstring); lengths use every season
 IR_RULES_SINCE = 2022             # IR minimum of four games, two-game designations (2020-21 were COVID years)
 MIN_SPELLS = 60                   # below this a position borrows the pooled length fit
 EXIT_LEVELS = 11
@@ -312,9 +318,11 @@ def fit(session, seasons: list[int]) -> dict:
     from services.replay_pool import load_season_data
 
     tally, by_season, o_practices = Tally(), {}, []
+    recent: dict[str, Counter] = {"games": Counter(), "starts": Counter()}
     for season in seasons:
         data = load_season_data(session, season, "half")
         first = len(tally.spells)
+        exposure, banged = Counter(tally.exposure), Counter(tally.banged)
         seen = {}
         prior = by_season.get(season - 1, {})
         for pid, position in relevant(data).items():
@@ -327,12 +335,19 @@ def fit(session, seasons: list[int]) -> dict:
                 seen[pid] = (weeks, [(pid, w) in data.actual for w in weeks], [data.injuries.get((pid, w)) for w in weeks])
         o_practices += [i.practice for (_, w), i in data.injuries.items() if i.tag == "O"]
         mine = tally.spells[first:]
+        if season >= HAZARD_SINCE:
+            recent["games"] += tally.exposure - exposure
+            recent["starts"] += (tally.banged - banged) + Counter(s.position for s in mine if not s.preseason)
         if season - 1 in by_season:
             extend(by_season[season - 1]["spells"], seen)
         by_season[season] = {"spells": mine}
         log.info("%s: %d relevant players, %d spells", season, len(relevant(data)), len(mine))
-    recent = [s for season, row in by_season.items() if season >= IR_RULES_SINCE for s in row["spells"]]
-    model = summarize(tally, recent, o_practices)
+    ir_spells = [s for season, row in by_season.items() if season >= IR_RULES_SINCE for s in row["spells"]]
+    model = summarize(tally, ir_spells, o_practices)
+    for position, fit in model["positions"].items():         # the per-game hazard on the recent seasons only
+        if recent["games"][position]:
+            fit["hazard"] = round(recent["starts"][position] / recent["games"][position], 5)
+    model["hazard_seasons"] = f"{max(HAZARD_SINCE, seasons[0])}-{seasons[-1]}"
     model["seasons"] = f"{seasons[0]}-{seasons[-1]}"
     model["top"] = TOP
     return model

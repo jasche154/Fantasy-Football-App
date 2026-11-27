@@ -113,20 +113,37 @@ def _offseason(player: Player, z: np.ndarray, knobs: dict) -> Player:
     return replace(player, **rates)
 
 
-def _season_role(player: Player, z: float, knobs: dict) -> Player:
+def _season_role(player: Player, z: float, knobs: dict, star: bool = False) -> Player:
     """A whole-season role: x lognormal, sd = what his position's role curve leaves unexplained from one season to
-    the next (sim_next_year.json `role_sd`), for a rookie what the rookie role line at his pick leaves
-    (`rookies.<position>.role_sd`), x the tuned `season_roles`."""
+    the next (sim_next_year.json `role_sd`) x the tuned `season_roles`; a rookie's, in full, what the rookie role
+    line at his pick leaves (`rookies.<position>.role_sd`, no season_roles: the belief knows only his pick, and with
+    a quarter of it rookies followed their draft slot too closely; full mode 2021-2025, 3 seeds, real / quarter /
+    full: rookie ADP against finish 0.50 / 0.66 / 0.53, rookie top-24 finishes 8.4 / 6.8 / 8.0, with the floor below). A `star` (the
+    public's top STAR_RANK at his position, sim_market.position_ranks) keeps at least the most a bust leaves
+    (`bust_cut`'s top): stars never bust, on this draw either. What the floored draw adds above the floor is
+    scaled down by (1 - floor) / (its mean - floor), `_floored_mean`, so it still averages 1 and never falls below
+    the floor: the public, which prices him at mean 1, is not short-changed (unscaled, the floor lifted a top-12
+    rookie's role about 12% on average)."""
     model = sim_next_year.stored()
     if player.games > 0:
-        sd = model.get("role_sd", {}).get(player.position, 0.0)
+        sd = model.get("role_sd", {}).get(player.position, 0.0) * knobs["season_roles"]
     else:                                          # a rookie: around the role a player taken at his pick had
         sd = model.get("rookies", {}).get(player.position, {}).get("role_sd", 0.0)
-    sd *= knobs["season_roles"]
     if sd <= 0:
         return player
     x = _lognormal(sd, z)
+    if star:
+        floor = float(knobs["bust_cut"][1])
+        x = floor + (max(x, floor) - floor) * (1 - floor) / (_floored_mean(sd, floor) - floor)
     return replace(player, targets=player.targets * x, carries=player.carries * x)
+
+
+def _floored_mean(sd: float, floor: float) -> float:
+    """E[max(X, floor)] for X lognormal with mean 1 and log-sd `sd`: floor x Phi(a) + Phi(sd - a),
+    a = (ln floor + sd^2 / 2) / sd."""
+    a = (math.log(floor) + sd ** 2 / 2) / sd
+    phi = lambda v: 0.5 * (1 + math.erf(v / math.sqrt(2)))  # noqa: E731
+    return floor * phi(a) + phi(sd - a)
 
 
 def _team(team: Team, z: np.ndarray, knobs: dict, eff_z: float = 0.0) -> Team:
@@ -225,13 +242,14 @@ def truth(belief: World, seed: int, from_week: int, last_week: int, rookies: Col
     draws = replay_state.rng(seed, "sim", "talent").standard_normal((len(ids), 3))
     players = {pid: _level(belief.players[pid], draws[i], float(team_z.get(belief.players[pid].team, [0.0])[0]), knobs)
                for i, pid in enumerate(ids)}
+    ranks = sim_market.position_ranks(belief)
     if from_week == 1:
         season = replay_state.rng(seed, "sim", "offseason").standard_normal((len(ids), len(SEASON_RATES)))
         roles = replay_state.rng(seed, "sim", "offseason", "role").standard_normal(len(ids))
-        players = {pid: _season_role(_offseason(players[pid], season[i], knobs), float(roles[i]), knobs)
+        players = {pid: _season_role(_offseason(players[pid], season[i], knobs), float(roles[i]), knobs,
+                                     ranks.get(pid, STAR_RANK + 1) <= STAR_RANK)
                    for i, pid in enumerate(ids)}
     first, last = change_weeks(from_week, last_week)
-    ranks = sim_market.position_ranks(belief)
     changes = []
     for team in names:
         team_dice = replay_state.rng(seed, "sim", "changes", team)

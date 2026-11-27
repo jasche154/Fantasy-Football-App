@@ -277,6 +277,37 @@ def test_published_projections_take_the_positions_scale(belief, monkeypatch):
     sim_constants.params.cache_clear()
 
 
+def test_published_projections_start_at_the_join_level_and_fade_to_the_season_scale(belief, monkeypatch):
+    """Item 5: the first simulated week after real ones continues the real sources' level, then fades."""
+    from services import sim_constants, sim_market
+    monkeypatch.setitem(sim_constants._overrides, "market", {"projection_scale": {"QB": 1.0}, "join_scale": {"QB": 1.2},
+                                                             "join_fade": 0.5})
+    sim_constants.params.cache_clear()
+    qb = next(p for p in belief.players.values() if p.position == "QB").player_id
+    levels = [sim_market.published({qb: 10.0}, belief, weeks)[qb] for weeks in (0, 1, 2)]
+    assert levels == pytest.approx([12.0, 11.0, 10.5])
+    assert sim_market.published({qb: 10.0}, belief)[qb] == pytest.approx(10.0)     # a season simulated whole
+    monkeypatch.undo()
+    sim_constants.params.cache_clear()
+
+
+def test_projections_follow_the_line_only_partly(belief, monkeypatch):
+    """Item 5: a weekly projection keeps line_follow of the line's move away from the team's typical points."""
+    from services import sim_constants, sim_game, sim_lines, sim_market, sim_world
+    game = next(g for g in fakes.fake_season().schedule.games if g.week == 9)
+    home, away, scoring = game.home_team, game.away_team, sim_world.scoring_of(fakes.fake_season())
+    line = {home: sim_lines.Line(margin=10.0, total=50.0)}
+    full = sim_game.expected(belief, home, away, set(), scoring, target={home: 30.0, away: 20.0}, week=9)
+    typical = sim_market._anchor(belief, home, away, set(), scoring, 9)    # this matchup at its typical points
+    monkeypatch.setitem(sim_constants._overrides, "market", {"line_follow": {"QB": 0.5}})
+    sim_constants.params.cache_clear()
+    got = sim_market.projections(belief, SimpleNamespace(games=(game,)), 9, set(), scoring, line)
+    qb = next(pid for pid in full if belief.players[pid].position == "QB" and belief.players[pid].team == home)
+    assert got[qb] == pytest.approx((typical[qb] + full[qb].points) / 2, abs=0.01)
+    monkeypatch.undo()
+    sim_constants.params.cache_clear()
+
+
 def test_passing_rates_regress_by_their_measured_keep_whatever_the_calibrated_share(monkeypatch):
     """The passing lead: receivers' yards per catch and catch rate and a QB's quality regress in full in August."""
     from services import sim_next_year
@@ -320,3 +351,26 @@ def test_a_teams_volume_leans_against_its_efficiency_draw():
     assert sim_talent._team(team, z, knobs, eff_z=2.0).targets < sim_talent._team(team, z, knobs, eff_z=-2.0).targets
     assert sim_talent._team(team, z, {**knobs, "volume_eff_rho": 0.0}, eff_z=2.0).targets == pytest.approx(
         32.0 * np.exp(-0.1 ** 2 / 2))
+
+
+def _receiver_vs(belief, pass_def: float) -> float:
+    from services import sim_lines, sim_market, sim_world
+    data = fakes.fake_season()
+    game = next(g for g in data.schedule.games if g.week == 9)
+    home, away, scoring = game.home_team, game.away_team, sim_world.scoring_of(data)
+    teams = {**belief.teams, away: replace(belief.teams[away], pass_def=pass_def)}
+    world = replace(belief, teams=MappingProxyType(teams))
+    got = sim_market.projections(world, SimpleNamespace(games=(game,)), 9, set(), scoring,
+                                 {home: sim_lines.Line(margin=3.0, total=46.0)})
+    wr = max((pid for pid in got if world.players[pid].team == home and world.players[pid].position == "WR"),
+             key=lambda pid: world.players[pid].targets)
+    return got[wr]
+
+
+def test_a_receivers_projection_follows_the_pass_defense_he_faces(belief):
+    """M3: the projection's anchor is this matchup at the team's typical points, so with the line and everything
+    else equal a receiver projects lower against the best pass defense than against the worst (an anchor with no
+    opponent left 70% of his projection blind to it: 4.2% apart here, only through the line's share, against 6.9%
+    now)."""
+    best, worst = _receiver_vs(belief, 0.8), _receiver_vs(belief, 1.2)
+    assert best < 0.945 * worst
