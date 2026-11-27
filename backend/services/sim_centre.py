@@ -10,7 +10,7 @@ TDs; scaling them up too gave a 38-point side 4.3 tries, far above real ones).
 The factor is solved on the closed form of sim_game._mean_points (`_points_at`): TDs = f T0, yards = f^p Y0,
 field-goal tries = min(1, f) ** fg_power x fga_mean(yards, TDs) (capped where the draw caps them). Newton steps on that scalar
 function need no side rebuilt; one check on the scaled side's real means then corrects for the only thing the
-closed form leaves out (a TD rate reaching sim_game.MAX_TD_RATE).
+closed form leaves out (a TD rate reaching sim_game.MAX_TD_RATE; a few steps when it does).
 
 The wanted points include overtime and the closing window (a real line's total does): sim_closing_means.regulation
 gives each side of a two-team game the points its draw before the cut must average so that, with the window's and
@@ -40,7 +40,8 @@ if TYPE_CHECKING:
 FACTOR_RANGE = (0.02, 8.0)       # a side's factor stays in this range
 NEWTON_STEPS = 25                # on the closed form (microseconds each); stops at CLOSED_TOLERANCE
 CLOSED_TOLERANCE = 1e-3          # points, on the closed form
-TARGET_TOLERANCE = 0.05          # points, on the real means (else one correction)
+TARGET_TOLERANCE = 0.05          # points, on the real means (else up to CAP_STEPS corrections)
+CAP_STEPS = 4                    # a quarterback's run TD rate without kneels reaches the cap at big targets
 MIN_TARGET = 1.0                 # a side's draw before the cut is never centred below this many points
 FG_POWER = 1.0                   # default of the tuned `game.fg_power`
 # shortcut: with the window and overtime on top, a side wanted under about 5.5 points cannot be reached (a 3-3
@@ -96,12 +97,17 @@ def factor(side, against: dict | None, target: float, m: dict | None = None, pow
     closed, _ = _points_at(1.0, tds, yards, 0.0, side.fg_scale, power)
     rest = _mean_points(m, against) - closed            # return TDs and safeties: untouched by the factor
     f = _solve(tds, yards, rest, side.fg_scale, power, target)
+    from services import sim_script
     p_t, p_c = _before_cut(side)
-    if max(side.rec_td.max() / p_t, side.rush_td.max() / p_c) * f <= MAX_TD_RATE:
-        return f                                         # the closed form is exact
-    got = _mean_points(_side_means(scaled(side, f, power)), against)
-    if abs(got - target) >= TARGET_TOLERANCE:          # a TD rate hit the cap: aim past it by the miss
-        f = _solve(tds, yards, rest, side.fg_scale, power, 2 * target - got, f)
+    if max(side.rec_td.max() / p_t, sim_script.rushing(side)[1].max() / p_c) * max(1.0, f) <= MAX_TD_RATE:
+        return f                                         # no rate capped before or after: the closed form is exact
+    aim = target
+    for _ in range(CAP_STEPS):                           # a TD rate hit the cap: aim past it by the miss
+        got = _mean_points(_side_means(scaled(side, f, power)), against)
+        if abs(got - target) < TARGET_TOLERANCE:
+            break
+        aim += target - got
+        f = _solve(tds, yards, rest, side.fg_scale, power, aim, f)
     return f
 
 

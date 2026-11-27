@@ -333,14 +333,15 @@ def _side_means(side: _Side) -> dict:
     catches = targets * side.catch
     rec_td = pre_t * t_share * side.catch * np.minimum(side.rec_td / p_t, MAX_TD_RATE)
     carries = (pre_c + win_c) * c_share
-    rush_yds = carries * side.ypr
+    ypr, rush_rate = sim_script.rushing(side)
+    rush_yds = carries * ypr
     fumbles = float((carries * side.fumble).sum() + (catches * side.rec_fumble).sum())     # a kneel never fumbles
     if kneels and side.qb is not None and side.qb not in side.exited:
         at = side.rushers.index(side.qb)
         carries, rush_yds = carries.copy(), rush_yds.copy()
         carries[at] += kneels
         rush_yds[at] += kneels * sim_script.kneel_yards()
-    rush_td = pre_c * c_share * np.minimum(side.rush_td / p_c, MAX_TD_RATE)
+    rush_td = pre_c * c_share * np.minimum(rush_rate / p_c, MAX_TD_RATE)
     attempts = pre_t * league["attempts_per_target"]
     sacks = attempts * side.sack_rate / p_t
     return {"targets": targets, "catches": catches, "rec_yds": catches * side.ypc, "rec_td": rec_td,

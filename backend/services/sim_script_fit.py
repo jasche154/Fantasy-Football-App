@@ -55,8 +55,8 @@ SCRIPT_PATH = Path(__file__).with_name("sim_script.json")
 SEGMENTS_CACHE = Path(__file__).resolve().parent.parent / "data" / "cache" / "script_segments.json"
 SEASONS = range(2018, 2026)
 CUT = 600                        # seconds of regulation in the closing window (sim_closing_fit.WINDOW)
-COUNTS = ("margin", "targets", "attempts", "sacks", "carries", "qb_carries", "kneels", "kneel_yards", "scrambles",
-          "spikes")
+COUNTS = ("margin", "targets", "attempts", "sacks", "carries", "qb_carries", "qb_yards", "kneels", "kneel_yards",
+          "scrambles", "spikes")
 PART_WEEKS = (6, 10, 14)         # the belief before each of these weeks is judged on the next WEEKS_AHEAD weeks
 WEEKS_AHEAD = 4
 FLOOR_TOUCHES = 8.0              # players expected this many touches set the no-show floor
@@ -113,7 +113,9 @@ def game_counts(rows: list[Mapping], season: int) -> dict | None:
         c = counts[(team, part)]
         if r["rush_attempt"] == 1:
             c["carries"] += 1
-            c["qb_carries"] += int(r["rusher_player_id"] is not None and r["rusher_player_id"] == qb.get(team))
+            mine = r["qb_kneel"] == 1 or (r["rusher_player_id"] is not None and r["rusher_player_id"] == qb.get(team))
+            c["qb_carries"] += int(mine)
+            c["qb_yards"] += int(r["yards_gained"] or 0) if mine else 0
             c["kneels"] += int(r["qb_kneel"] == 1)
             c["kneel_yards"] += int(r["yards_gained"] or 0) if r["qb_kneel"] == 1 else 0
             c["scrambles"] += int(r["qb_scramble"] == 1)
@@ -257,11 +259,20 @@ def spread(games: list[Mapping]) -> dict[str, float]:
 
 
 def league(games: list[Mapping]) -> dict[str, float]:
+    """Mean targets and carries per team-game; a kneel-down's mean yards; and how a quarterback's other carries
+    compare with all of his (kneels in, as the box and so the belief count them): `qb_ypr_without_kneels` and
+    `qb_td_without_kneels`, the multipliers of his per-carry yards and TD rate on the carries that are not kneels
+    (a kneel never scores)."""
     rows = _rows(games)
-    kneels = sum(_col(rows, part, "kneels").sum() for part in range(3))
+    total = {name: float(sum(_col(rows, part, name).sum() for part in range(3)))
+             for name in ("qb_carries", "qb_yards", "kneels", "kneel_yards")}
+    plain = total["qb_carries"] - total["kneels"]
+    per_carry = total["qb_yards"] / max(total["qb_carries"], 1.0)
     return {**{stat: round(float(sum(_col(rows, part, stat).mean() for part in range(3))), 3)
                for stat in ("targets", "carries")},
-            "kneel_yards": round(float(sum(_col(rows, part, "kneel_yards").sum() for part in range(3)) / max(kneels, 1)), 3)}
+            "kneel_yards": round(total["kneel_yards"] / max(total["kneels"], 1.0), 3),
+            "qb_ypr_without_kneels": round((total["qb_yards"] - total["kneel_yards"]) / max(plain, 1.0) / per_carry, 4),
+            "qb_td_without_kneels": round(total["qb_carries"] / max(plain, 1.0), 4)}
 
 
 def touch_rows(session, seasons: Iterable[int]) -> list[tuple[int, str, float, int]]:
@@ -316,11 +327,15 @@ def _best(rows: np.ndarray, floor: float) -> tuple[float, float]:
 
 
 def participation(rows: list[tuple[int, str, float, int]]) -> dict:
-    """{position: the participation curve and its held-out check} (see the module docstring)."""
-    pooled = np.array([(r[2], r[3]) for r in rows if r[2] >= FLOOR_TOUCHES], dtype=float)
-    floor = float(np.mean(pooled[:, 1] == 0))
-    return {position: _curve(np.array([(r[0], r[2], r[3]) for r in rows if r[1] == position], dtype=float), floor)
-            for position in ("RB", "WR", "TE")}
+    """{position: the participation curve and its held-out check} (see the module docstring); a position with no
+    rows has none (sim_script.in_plan keeps its players always in)."""
+    floor = float(np.mean([r[3] == 0 for r in rows if r[2] >= FLOOR_TOUCHES] or [0.0]))
+    out = {}
+    for position in ("RB", "WR", "TE"):
+        mine = [(r[0], r[2], r[3]) for r in rows if r[1] == position]
+        if mine:
+            out[position] = _curve(np.array(mine, dtype=float), floor)
+    return out
 
 
 def _curve(a: np.ndarray, pooled: float) -> dict:

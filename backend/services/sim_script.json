@@ -54,7 +54,9 @@
  "league": {
   "targets": 32.256,
   "carries": 26.541,
-  "kneel_yards": -1.072
+  "kneel_yards": -1.072,
+  "qb_ypr_without_kneels": 1.3147,
+  "qb_td_without_kneels": 1.2523
  },
  "participation": {
   "RB": {

@@ -10,6 +10,8 @@ real margin at half time; its mean, `half_lead`, is what the projections use (`p
 mean. The window's plays are a real game's ending (sim_closing.json's table, the endings' counts scaled by the
 side's volume against the league's): the leader runs and kneels, the trailer throws.
 
+A quarterback's carries besides his kneels run at his rates without the kneels in them (`rushing`).
+
 Only plays before the cut score: their TD rates are divided by the halves' share of the game's volume (`before_cut`),
 so the game's mean touchdowns are what a whole game's volume at the per-play rates gives (the window's scoring is
 its real ending's); interceptions and sacks likewise come from the passes before the cut. Yards come from every
@@ -88,6 +90,20 @@ def window_scale(side) -> tuple[float, float]:
 
 def kneel_yards() -> float:
     return float(stored()["league"]["kneel_yards"])
+
+
+def rushing(side) -> tuple[np.ndarray, np.ndarray]:
+    """(yards per carry, TDs per carry) of the side's rushers on carries that are not kneels: a game in parts gives
+    its kneels to the starting QB on their own (window_plays), so his other carries run at his rates without them
+    (the box, and so the belief, counts a kneel as his carry: x `qb_ypr_without_kneels` and `qb_td_without_kneels`,
+    measured on 2018-2025 play-by-play); a side without parts keeps the rates as they are."""
+    if side.end is None or side.qb is None:
+        return side.ypr, side.rush_td
+    league, at = stored()["league"], side.rushers.index(side.qb)
+    ypr, td = side.ypr.copy(), side.rush_td.copy()
+    ypr[at] *= league["qb_ypr_without_kneels"]
+    td[at] *= league["qb_td_without_kneels"]
+    return ypr, td
 
 
 def window_means(side) -> tuple[float, float, float]:

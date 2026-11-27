@@ -215,7 +215,8 @@ def plays(side, plan: Plan, n_targets: int, n_carries: int, eff: float, rng: np.
     rec_yds = _yards(catches, ypc, rates["rec_cv"] * np.maximum(ypc, 1.0), rates["rec_shift"], rng)
     carries = rng.multinomial(n_carries, plan.carries)
     rush_eff = eff ** game["rush_power"]
-    rush_yds = _yards(carries, side.ypr * rush_eff, np.full(len(side.ypr), rates["rush_sd"]), rates["rush_shift"], rng)
+    ypr, rush_td = sim_script.rushing(side)
+    rush_yds = _yards(carries, ypr * rush_eff, np.full(len(ypr), rates["rush_sd"]), rates["rush_shift"], rng)
     rec_fumbles, rush_fumbles = rng.binomial(catches, side.rec_fumble), rng.binomial(carries, side.fumble)
     attempts = int(n_targets + rng.binomial(n_targets, max(0.0, league["attempts_per_target"] - 1)))
     zero = np.zeros(len(catches), dtype=int), np.zeros(len(carries), dtype=int)
@@ -229,7 +230,7 @@ def plays(side, plan: Plan, n_targets: int, n_carries: int, eff: float, rng: np.
                         attempts, 0, 0, 0)
     p_t, p_c = sim_script.before_cut("targets"), sim_script.before_cut("carries")
     rec_rate = np.minimum(side.rec_td * eff ** game["td_power"] / p_t, MAX_TD_RATE)
-    rush_rate = np.minimum(side.rush_td * rush_eff ** game["td_power"] / p_c, MAX_TD_RATE)
+    rush_rate = np.minimum(rush_td * rush_eff ** game["td_power"] / p_c, MAX_TD_RATE)
     rec_td, rush_td = _touchdowns(catches, rec_rate, carries, rush_rate, drives, rng, slack=0)
     sacks = int(rng.binomial(attempts, min(0.5, side.sack_rate / p_t)))
     # an interception is an incomplete attempt: drawn among them at the rate that keeps rate x attempts its mean
@@ -257,8 +258,9 @@ def _per_play(side) -> np.ndarray:
     t = side.target_w / side.target_w.sum() * side.catch
     c = side.carry_w / side.carry_w.sum()
     p_t, p_c = sim_script.before_cut("targets"), sim_script.before_cut("carries")
+    ypr, rush_td = sim_script.rushing(side)
     return np.array([t @ side.ypc, t @ np.minimum(side.rec_td / p_t, MAX_TD_RATE),
-                     c @ side.ypr, c @ np.minimum(side.rush_td / p_c, MAX_TD_RATE)])
+                     c @ ypr, c @ np.minimum(rush_td / p_c, MAX_TD_RATE)])
 
 
 def per_td() -> float:
