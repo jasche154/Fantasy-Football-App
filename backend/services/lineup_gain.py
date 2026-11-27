@@ -146,7 +146,13 @@ def week_lineup(values: Sequence, week: int, projector: Projector, settings) -> 
 
 
 def _modeled(values: Sequence) -> list:
-    return sorted((v for v in values if v.position in mt.MODELED), key=lambda v: v.player_id)
+    """The QB/RB/WR/TE among `values`, each id once (the first one listed), in id order: an id filling two slots
+    would leave one empty."""
+    unique: dict[int, object] = {}
+    for v in values:
+        if v.position in mt.MODELED:
+            unique.setdefault(v.player_id, v)
+    return [unique[pid] for pid in sorted(unique)]
 
 
 def _week_lineup(modeled: Sequence, ids: tuple[int, ...], week: int, projector: Projector,
@@ -166,8 +172,8 @@ def _week_lineup(modeled: Sequence, ids: tuple[int, ...], week: int, projector: 
 
 @lru_cache(maxsize=32)
 def _slot_counts(settings) -> tuple[tuple[int, ...], int, int]:
-    """(starting slots of each of my_team.MODELED, FLEX slots, SUPERFLEX slots), as my_team._slots lists them."""
-    slots = mt._slots(settings)
+    """(starting slots of each of my_team.MODELED, FLEX slots, SUPERFLEX slots), as my_team.lineup_slots lists them."""
+    slots = mt.lineup_slots(settings)
     return tuple(slots.count(p) for p in mt.MODELED), slots.count("FLEX"), slots.count("SUPERFLEX")
 
 

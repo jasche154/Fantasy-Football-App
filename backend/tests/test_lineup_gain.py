@@ -37,3 +37,16 @@ def test_slot_counts_read_the_leagues_lineup():
     assert counts == (tuple(league.starters.get(p, 0) for p in ("QB", "RB", "WR", "TE")),
                       league.starters.get("FLEX", 0), 1)
 
+
+def test_a_player_listed_twice_fills_one_slot_and_the_next_best_takes_the_other():
+    """RB 2 / FLEX 1 with the same RB listed twice (points 20 / 15 / 10): the old scan took ids 1, 2 and 3 (45);
+    the solve dedups the pool once, so it does too."""
+    players = [SimpleNamespace(player_id=pid, position="RB") for pid in (1, 2, 3)]
+    points = {1: 20.0, 2: 15.0, 3: 10.0}
+    projector = SimpleNamespace(points=lambda v, week: points[v.player_id])
+    settings = rv.league_settings(fakes.fake_settings(starters={"QB": 1, "RB": 2, "FLEX": 1}))
+    total, starters = lineup_gain.week_lineup([players[0], *players], 5, projector, settings)
+    assert starters == {1, 2, 3} and total == pytest.approx(45.0)
+    assert lineup_gain.season_points([players[0], *players], lineup_gain.Horizon(5, {5: 1.0}), projector,
+                                     settings) == pytest.approx(45.0)
+
