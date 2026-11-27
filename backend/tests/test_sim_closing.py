@@ -1,4 +1,5 @@
 """sim_closing / sim_closing_fit: a game's closing window played from the score, and overtime's measured rates."""
+import json
 from collections import Counter
 
 import numpy as np
@@ -220,8 +221,8 @@ def test_the_cut_margins_spread_matches_the_measured_one(wanted):
     rng = np.random.default_rng(6)
     cuts = np.array([sim_draw.draw_game((sides[home], sides[away]), rng, HALF, until_cut=True) for _ in range(1500)])
     # the sd of 1,500 draws: se about 1.8%. The fixture's 10-13 game makes its points with more field goals than a
-    # real one at the same points (0.58 tries for 0.41 TDs against 0.44 for 0.47), so it spreads about 7% less than
-    # cut_sd, which reads only the points (5% on main's straight-line spread)
+    # real one at the same points (0.58 tries for 0.41 TDs against 0.44 for 0.47), so it spreads about 5% less than
+    # cut_sd, which reads only the points (4.7% over 6,000 draws; 35-30: 1.8% less)
     tolerance = 0.08 if sum(wanted) < 30 else 0.06
     assert np.std(cuts[:, 0] - cuts[:, 1]) == pytest.approx(sim_closing_means.cut_sd(*before), rel=tolerance)
 
@@ -409,3 +410,14 @@ def test_a_write_that_cannot_replace_the_file_leaves_no_temp_file(monkeypatch, t
         sim_closing_fit._store("new")
 
     assert path.read_text(encoding="utf-8") == "old" and list(tmp_path.iterdir()) == [path]
+
+
+def test_a_refresh_downloads_the_asked_seasons_again_and_keeps_the_others(monkeypatch, tmp_path):
+    path = tmp_path / "scoring_plays.json"
+    path.write_text(json.dumps({"2023": [{"season": 2023}], "2024": [{"season": 2024, "old": True}]}), encoding="utf-8")
+    monkeypatch.setattr(sim_closing_plays, "PLAYS_CACHE", path)
+    fetched = []
+    monkeypatch.setattr(sim_closing_plays, "_download", lambda season: fetched.append(season) or [{"season": season}])
+    assert sim_closing_plays.scoring_games([2024]) == [{"season": 2024, "old": True}] and fetched == []
+    assert sim_closing_plays.scoring_games([2024], refresh=True) == [{"season": 2024}] and fetched == [2024]
+    assert json.loads(path.read_text(encoding="utf-8")) == {"2023": [{"season": 2023}], "2024": [{"season": 2024}]}

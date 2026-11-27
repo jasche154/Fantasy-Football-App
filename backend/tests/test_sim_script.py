@@ -329,3 +329,62 @@ def test_with_players_leaving_hurt_every_players_projection_is_his_draws_mean():
         want = np.array([box.targets, box.carries, box.rec_td, box.rush_td]) if box else np.zeros(4)
         assert drawn[:2] == pytest.approx(want[:2], rel=0.05, abs=0.06), name
         assert drawn[2:] == pytest.approx(want[2:], rel=0.12, abs=0.012), name
+
+
+def test_a_halfs_touchdowns_follow_its_yards_and_keep_their_binomial():
+    """The yards' normal score is a standard normal given the plays; the TD count drawn at a quantile leaning on it
+    keeps the Binomial's mean and spread (no projection moves) and rises with the yards."""
+    rng = np.random.default_rng(5)
+    mean = np.array([11.0, 8.0, 6.0, 4.2])
+    scores = []
+    for _ in range(20_000):
+        _, s, v = sim_parts._yards_scored(rng.integers(0, 7, 4), mean, 0.7 * mean, 0.0, rng)
+        if v > 0:
+            scores.append(s / np.sqrt(v))
+    assert np.mean(scores) == pytest.approx(0.0, abs=0.02) and np.std(scores) == pytest.approx(1.0, abs=0.02)
+    catches, carries = np.array([6, 4, 2]), np.array([12, 3])
+    rec, rush = np.array([0.08, 0.06, 0.1]), np.array([0.04, 0.05])
+    x = rng.standard_normal(40_000)
+    tds = np.array([sum(map(int, np.concatenate(sim_parts._touchdowns(catches, rec, carries, rush, 4.0, rng, 0, z, 0.9))))
+                    for z in x])
+    free = np.array([sum(map(int, np.concatenate(sim_parts._touchdowns(catches, rec, carries, rush, 4.0, rng, 0))))
+                     for _ in range(40_000)])
+    assert tds.mean() == pytest.approx(free.mean(), rel=0.02) and tds.var() == pytest.approx(free.var(), rel=0.04)
+    assert np.corrcoef(x, tds)[0, 1] > 0.7 > abs(np.corrcoef(x, free)[0, 1]) + 0.6
+
+
+def test_writing_sim_script_json_is_atomic(monkeypatch, tmp_path):
+    """A write that cannot replace the file leaves the old sim_script.json whole and no temp file."""
+    path = tmp_path / "sim_script.json"
+    path.write_text("old", encoding="utf-8")
+    monkeypatch.setattr(sim_script_fit, "SCRIPT_PATH", path)
+    monkeypatch.setattr(sim_script_fit.os, "replace", lambda a, b: (_ for _ in ()).throw(OSError("locked")))
+    with pytest.raises(OSError):
+        sim_script_fit.write({"shares": {}})
+    assert path.read_text(encoding="utf-8") == "old" and list(tmp_path.iterdir()) == [path]
+
+
+def test_the_held_out_check_works_out_each_folds_no_show_floor_without_its_season():
+    """One season whose lead players often sit: each fold's floor comes from the other seasons only, so the check
+    differs from one that reads the floor of every season."""
+    rng = np.random.default_rng(1)
+    rows = []
+    for season, sit in ((2020, 0.02), (2021, 0.02), (2022, 0.30)):
+        for _ in range(1500):
+            mu = float(rng.uniform(0.3, 12.0))
+            q = (1 - sit) * (1 - 0.8 * np.exp(-mu / 2.5))
+            rows.append((season, "RB", mu, int(rng.poisson(mu / q)) if rng.random() < q else 0))
+    a = np.array([(r[0], r[2], r[3]) for r in rows], dtype=float)
+    seasons = np.unique(a[:, 0])
+
+    def held(fold_floor) -> float:
+        total = 0.0
+        for season in seasons:
+            train, test = a[a[:, 0] != season], a[a[:, 0] == season]
+            floor = fold_floor(season)
+            total += sim_script_fit._loss(test, *sim_script_fit._best(train, floor), floor)
+        return round(total / len(a), 4)
+
+    got = sim_script_fit.participation(rows)["RB"]["check"]["held_out_loss"]
+    assert got == held(lambda s: sim_script_fit._floor(a, a, seasons[seasons != s]))
+    assert got != held(lambda s: sim_script_fit._floor(a, a, seasons))

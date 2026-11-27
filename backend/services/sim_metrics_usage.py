@@ -11,6 +11,7 @@ A real season and a simulated one are read alike, from the box lines (`SeasonDat
   carry; the game's top three backs' shares of the non-QB carries and the top five receivers' (and the rest's) of
   the targets; a back with 20+ / 25+ carries and a receiver with 10+ / 13+ targets (% of team-games).
 - who carries: QB carries and rushing yards and non-QB carries per team-game.
+- yards and touchdowns: their means and correlation per team-game (a real offense's TDs come with its yards).
 - idle games (`idle`): the share of a player's available games with no touch, by position group and his mean
   touches (the game plan's lumpiness, judged without box-line selection: a real player with no stat has no box row).
 
@@ -62,7 +63,8 @@ def _row(margin: int, lines: list) -> dict[str, float] | None:
            "back with 20+ carries %": 100.0 * (backs[0] >= 20), "back with 25+ carries %": 100.0 * (backs[0] >= 25),
            "receiver with 10+ targets %": 100.0 * (targets[0] >= 10), "receiver with 13+ targets %": 100.0 * (targets[0] >= 13),
            "QB carries": sum(b.carries for p, b in lines if p == "QB"),
-           "QB rush yds": sum(b.rush_yds for p, b in lines if p == "QB"), "non-QB carries": sum(non_qb)}
+           "QB rush yds": sum(b.rush_yds for p, b in lines if p == "QB"), "non-QB carries": sum(non_qb),
+           "yards": sum(b.rec_yds + b.rush_yds for _, b in lines), "TDs": sum(b.rec_td + b.rush_td for _, b in lines)}
     if any(a is not None for a in attempts):
         row["attempts + carries"] = sum(a or 0 for a in attempts) + carries
     share = max(1, sum(non_qb))
@@ -84,6 +86,7 @@ def usage(data: SeasonData, weeks: Iterable[int]) -> dict[str, float]:
     out.update({"usage corr(margin, carries)": corr(margin, col["carries"]),
                 "usage corr(margin, targets)": corr(margin, col["targets"]),
                 "usage corr(carries, targets)": corr(col["carries"], col["targets"]),
+                "usage corr(yards, TDs)": corr(col["yards"], col["TDs"]),
                 "usage carries sd": float(col["carries"].std()), "usage targets sd": float(col["targets"].std())})
     for name, low, high in MARGINS:
         k = (margin >= low) & (margin <= high)

@@ -370,8 +370,9 @@ def main(argv: list[str] | None = None) -> None:
     log.info("%d games, window %ds", result["games"], result["window"])
     log.info("overtime %s", result["ot"])
     log.info("volume per point of expected margin %s", result["line_script"])
-    log.info("cut margin variance%s = %s x (pa ^ %s + pb ^ b), pa / pb a side's expected points before the cut",
-             "" if args.fit else " (stored, not re-measured)", *result["cut_var"])
+    a, b = result["cut_var"]
+    log.info("cut margin variance%s = %s x (pa ^ %s + pb ^ %s), pa / pb a side's expected points before the cut",
+             "" if args.fit else " (stored, not re-measured)", a, b, b)
     for name, row in result["check"].items():
         log.info("%-15s %s", name, "  ".join(f"{k} {100 * v:.1f}%" for k, v in row.items()))
 

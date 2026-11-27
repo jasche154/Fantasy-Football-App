@@ -136,7 +136,7 @@ def test_close_and_low_scoring_games_get_the_window_and_overtime_their_cut_margi
     away_rows, _ = cm._tables(round(-edge * 2) / 2)
     away_points = np.array([points_of(dict(zip(stored()["events"], row))) for row in away_rows])
     index = np.clip(margins, -cm.SPAN, cm.SPAN) + cm.SPAN
-    # 0.05 at 10-13: that game's cut margin spreads 5-7% less than cut_sd (test_sim_closing's cut spread test: the
+    # 0.05 at 10-13: that game's cut margin spreads about 5% less than cut_sd (test_sim_closing's cut spread test: the
     # fixture's low scorers kick more than real ones at the same points), which moves the trailer's window by 0.04
     tolerance = 0.05 if sum(wanted) < 30 else 0.03
     assert points[index].mean() == pytest.approx(ends[0].window, abs=tolerance)        # home leads by the margin

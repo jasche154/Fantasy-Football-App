@@ -9,7 +9,8 @@ their own). Then:
 
 1. First half: its plays ~ Poisson(its mean targets + carries), targets ~ Binomial(plays, its mean pass
    share + its lean), the rest carries, both shared out by the game plan; catches, yards, TDs (drive-limited,
-   `_touchdowns`, over the half's part of the game's drives, `drives_before_cut`), interceptions and sacks per play,
+   `_touchdowns`, over the half's part of the game's drives, `drives_before_cut`, the count drawn at a quantile that
+   leans on how far the half's yards beat their mean, `game.td_yards_rho`), interceptions and sacks per play,
    field goals around the half's share of the game's mean tries, moved by its own TDs and yards as much per TD and per
    yard as a whole game's are (linear, so the mean is exact).
 2. Second half to the cut: the same around sim_script's second-half volume at the real margin at half time.
@@ -19,6 +20,11 @@ their own). Then:
 A busy passing day gets shorter catches: every catch's yards x (the side's targets before the cut / their mean) **
 -`game.ypc_volume` (sim_draw's docstring has the measurement), applied after the halves' field goals are drawn (they
 read the yards before it, whose mean is exact).
+
+A half's TDs come with its yards: `game.td_yards_rho` (tuned 0.9 with sim_eval: a real team-game's yards and TD
+points correlate 0.54 within team-seasons, 0.61 pooled, 2021-2025 from week 12; 0.27 / 0.31 with the TD count drawn
+apart from the yards, 0.53 / 0.57 at 0.85, 0.58 / 0.61 at 0.95). The TD count keeps its Binomial, so no mean or
+spread moves; team fantasy points spread 19.5 -> 21.1 a team-game against a real 22.2.
 """
 import math
 from dataclasses import dataclass, replace
@@ -117,21 +123,51 @@ def _phi(v: float) -> float:
 
 def _yards(plays: np.ndarray, mean: np.ndarray, sd: np.ndarray, shift: float, rng: np.random.Generator) -> np.ndarray:
     """Whole yards over `plays` per player, each play a shifted gamma (mean, sd)."""
+    return _yards_scored(plays, mean, sd, shift, rng)[0]
+
+
+def _yards_scored(plays: np.ndarray, mean: np.ndarray, sd: np.ndarray, shift: float,
+                  rng: np.random.Generator) -> tuple[np.ndarray, float, float]:
+    """`_yards` plus (sum of each player's yards sd x his normal score, sum of their variances): the normal score of
+    a gamma draw by Wilson-Hilferty's cube root, close to exact from shape 1 (a player's yards over a few plays)."""
     out = np.zeros(len(plays), dtype=int)
     some = plays > 0
     if not some.any():
-        return out
+        return out, 0.0, 0.0
     base = np.maximum(mean[some] + shift, 0.5)
     k, theta = base ** 2 / sd[some] ** 2, sd[some] ** 2 / base
-    out[some] = np.round(rng.gamma(plays[some] * k, theta) - plays[some] * shift).astype(int)
-    return out
+    shape = plays[some] * k
+    drawn = rng.gamma(shape, theta)
+    out[some] = np.round(drawn - plays[some] * shift).astype(int)
+    c = 1.0 / (9.0 * shape)
+    score = ((drawn / (shape * theta)) ** (1.0 / 3.0) - (1.0 - c)) / np.sqrt(c)
+    spread = np.sqrt(shape) * theta
+    return out, float(spread @ score), float(spread @ spread)
+
+
+def _binomial_at(u: float, n: int, p: float) -> int:
+    """The Binomial(n, p) count at quantile `u` (its inverse distribution function)."""
+    if p >= 1.0:
+        return n
+    q, k = 1.0 - p, 0
+    pmf = q ** n
+    cdf = pmf
+    while cdf < u and k < n:
+        pmf *= (n - k) / (k + 1) * p / q
+        k += 1
+        cdf += pmf
+    return k
 
 
 def _touchdowns(catches: np.ndarray, rec_rate: np.ndarray, carries: np.ndarray, rush_rate: np.ndarray,
-                drives: float, rng: np.random.Generator, slack: int = 1) -> tuple[np.ndarray, np.ndarray]:
+                drives: float, rng: np.random.Generator, slack: int = 1,
+                yards: float | None = None, rho: float = 0.0) -> tuple[np.ndarray, np.ndarray]:
     """(receiving TDs, rushing TDs) per player: the total drive-limited, Binomial(drives, mean / drives) around the
     mean its catches and carries give (at least the mean + `slack` drives), then shared out play by play in
-    proportion to each one's TD rate. A player never scores more TDs than he has catches or carries."""
+    proportion to each one's TD rate. A player never scores more TDs than he has catches or carries. With `yards`
+    (the plays' yards as a standard normal score given the plays, `_yards_scored`) the count is the binomial's at
+    the quantile Phi(rho x yards + sqrt(1 - rho^2) x a normal): the same Binomial, so every mean and spread is
+    kept, but a half that gains more yards than its plays' mean scores more of its TDs, as a real one does."""
     plays = np.concatenate([catches, carries]).astype(int)
     rates = np.concatenate([rec_rate, rush_rate])
     mean = float((plays * rates).sum())
@@ -139,7 +175,11 @@ def _touchdowns(catches: np.ndarray, rec_rate: np.ndarray, carries: np.ndarray, 
     if mean <= 0:
         return tds[:len(catches)], tds[len(catches):]
     n = max(int(round(drives)), int(np.ceil(mean)) + slack)
-    total = min(int(rng.binomial(n, mean / n)), int(plays.sum()))
+    if yards is None:
+        total = min(int(rng.binomial(n, mean / n)), int(plays.sum()))
+    else:
+        u = _phi(rho * yards + math.sqrt(1.0 - rho * rho) * float(rng.standard_normal()))
+        total = min(_binomial_at(u, n, mean / n), int(plays.sum()))
     while total > 0:                         # shared out in proportion; a player past his plays gives the rest back
         weights = (plays - tds) * rates
         if weights.sum() <= 0:
@@ -203,11 +243,13 @@ def plays(side, plan: Plan, n_targets: int, n_carries: int, eff: float, rng: np.
     targets = rng.multinomial(n_targets, plan.targets)
     catches = rng.binomial(targets, np.clip(side.catch, 0, 1))
     ypc = side.ypc * eff * busy
-    rec_yds = _yards(catches, ypc, rates["rec_cv"] * np.maximum(ypc, 1.0), rates["rec_shift"], rng)
+    rec_yds, rec_score, rec_var = _yards_scored(catches, ypc, rates["rec_cv"] * np.maximum(ypc, 1.0),
+                                                rates["rec_shift"], rng)
     carries = rng.multinomial(n_carries, plan.carries)
     rush_eff = eff ** game["rush_power"]
     ypr, rush_td = sim_script.rushing(side)
-    rush_yds = _yards(carries, ypr * rush_eff, np.full(len(ypr), rates["rush_sd"]), rates["rush_shift"], rng)
+    rush_yds, rush_score, rush_var = _yards_scored(carries, ypr * rush_eff, np.full(len(ypr), rates["rush_sd"]),
+                                                   rates["rush_shift"], rng)
     rec_fumbles, rush_fumbles = rng.binomial(catches, side.rec_fumble), rng.binomial(carries, side.fumble)
     attempts = int(n_targets + rng.binomial(n_targets, max(0.0, league["attempts_per_target"] - 1)))
     zero = np.zeros(len(catches), dtype=int), np.zeros(len(carries), dtype=int)
@@ -222,7 +264,10 @@ def plays(side, plan: Plan, n_targets: int, n_carries: int, eff: float, rng: np.
     p_t, p_c = sim_script.scoring_share(side)
     rec_rate = np.minimum(side.rec_td * eff ** game["td_power"] / p_t, MAX_TD_RATE)
     rush_rate = np.minimum(rush_td * rush_eff ** game["td_power"] / p_c, MAX_TD_RATE)
-    rec_td, rush_td = _touchdowns(catches, rec_rate, carries, rush_rate, drives, rng, slack=0)
+    spread = rec_var + rush_var
+    score = (rec_score + rush_score) / math.sqrt(spread) if spread > 0 else 0.0
+    rec_td, rush_td = _touchdowns(catches, rec_rate, carries, rush_rate, drives, rng, slack=0, yards=score,
+                                  rho=game.get("td_yards_rho", 0.0))
     sacks = int(rng.binomial(attempts, min(0.5, side.sack_rate / p_t)))
     return _Offense(targets, catches, rec_yds, rec_td, rec_fumbles, carries, rush_yds, rush_td, rush_fumbles,
                     attempts, 0, sacks, int(rng.binomial(sacks, league["sack_fumble"])))

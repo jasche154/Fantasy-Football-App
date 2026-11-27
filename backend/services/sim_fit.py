@@ -134,11 +134,8 @@ def _moments(teams: dict, target_variance: float) -> dict:
     for (season, _, team), t in teams.items():
         by_season[(season, team)].append(t)
     for rows in by_season.values():
-        mt, mc = mean(r["targets"] for r in rows), mean(r["carries"] for r in rows)
         my = sum(r["rec_yds"] for r in rows) / max(1, sum(r["targets"] for r in rows))
         for r in rows:
-            r["dt"] = math.log(max(r["targets"], 1) / mt) - 0.5 / mt
-            r["dc"] = math.log(max(r["carries"], 1) / mc) - 0.5 / mc
             r["dy"] = math.log(max(r["rec_yds"], 1) / max(r["targets"], 1) / my)
             r["noise_y"] = target_variance / (max(r["targets"], 1) * my ** 2)    # sampling variance of the log
     rows = list(teams.values())
