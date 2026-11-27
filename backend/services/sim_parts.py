@@ -9,9 +9,10 @@ sim_script.plan_weights, then each weight x a lognormal game draw, renormalized,
 their own). Then:
 
 1. First half: its plays ~ Poisson(pace x its mean targets + carries), targets ~ Binomial(plays, its mean pass
-   share), the rest carries, both shared out by the game plan; catches, yards, TDs (drive-limited, `_touchdowns`,
-   over the half's share of `game.td_drives`), interceptions and sacks per play, field goals around the half's share
-   of the game's mean tries moved by its own TDs and yards (linear, so the mean is exact).
+   share + its lean), the rest carries, both shared out by the game plan; catches, yards, TDs (drive-limited,
+   `_touchdowns`, over the half's part of the game's drives, `drives_before_cut`), interceptions and sacks per play,
+   field goals around the half's share of the game's mean tries, moved by its own TDs and yards as much per TD and per
+   yard as a whole game's are (linear, so the mean is exact).
 2. Second half to the cut: the same around sim_script's second-half volume at the real margin at half time.
 3. Window (after sim_closing.close picks the real ending): its non-scoring plays (sim_script.window_plays) shared
    out by the same game plan, kneels to the starting QB, at the same yards per play; no TD, interception or sack.
@@ -130,17 +131,17 @@ def _yards(plays: np.ndarray, mean: np.ndarray, sd: np.ndarray, shift: float, rn
 
 
 def _touchdowns(catches: np.ndarray, rec_rate: np.ndarray, carries: np.ndarray, rush_rate: np.ndarray,
-                drives: float, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
+                drives: float, rng: np.random.Generator, slack: int = 1) -> tuple[np.ndarray, np.ndarray]:
     """(receiving TDs, rushing TDs) per player: the total drive-limited, Binomial(drives, mean / drives) around the
-    mean its catches and carries give, then shared out play by play in proportion to each one's TD rate. A player
-    never scores more TDs than he has catches or carries."""
+    mean its catches and carries give (at least the mean + `slack` drives), then shared out play by play in
+    proportion to each one's TD rate. A player never scores more TDs than he has catches or carries."""
     plays = np.concatenate([catches, carries]).astype(int)
     rates = np.concatenate([rec_rate, rush_rate])
     mean = float((plays * rates).sum())
     tds = np.zeros(len(plays), dtype=int)
     if mean <= 0:
         return tds[:len(catches)], tds[len(catches):]
-    n = max(int(round(drives)), int(np.ceil(mean)) + 1)
+    n = max(int(round(drives)), int(np.ceil(mean)) + slack)
     total = min(int(rng.binomial(n, mean / n)), int(plays.sum()))
     while total > 0:                         # shared out in proportion; a player past his plays gives the rest back
         weights = (plays - tds) * rates
@@ -229,7 +230,7 @@ def plays(side, plan: Plan, n_targets: int, n_carries: int, eff: float, rng: np.
     p_t, p_c = sim_script.before_cut("targets"), sim_script.before_cut("carries")
     rec_rate = np.minimum(side.rec_td * eff ** game["td_power"] / p_t, MAX_TD_RATE)
     rush_rate = np.minimum(side.rush_td * rush_eff ** game["td_power"] / p_c, MAX_TD_RATE)
-    rec_td, rush_td = _touchdowns(catches, rec_rate, carries, rush_rate, drives, rng)
+    rec_td, rush_td = _touchdowns(catches, rec_rate, carries, rush_rate, drives, rng, slack=0)
     sacks = int(rng.binomial(attempts, min(0.5, side.sack_rate / p_t)))
     # an interception is an incomplete attempt: drawn among them at the rate that keeps rate x attempts its mean
     missed = attempts - int(catches.sum())
@@ -276,20 +277,24 @@ def tries(tds: int, rng: np.random.Generator) -> tuple[int, int, int]:
 
 
 def half(side, plan: Plan, volume: np.ndarray, share: float, pace: float, eff: float, fg_tries: float,
-         rng: np.random.Generator, lean: float = 0.0) -> Half:
-    """One half: `volume` [mean targets, carries], `share` its share of the plays before the cut (and so of the
-    game's drives and of its mean field-goal tries `fg_tries`), `lean` added to its pass share."""
+         rng: np.random.Generator, lean: float = 0.0, drives: int | None = None) -> Half:
+    """One half: `volume` [mean targets, carries], `share` its share of the plays before the cut (and so of its mean
+    field-goal tries `fg_tries`), `lean` added to its pass share, `drives` its share of the game's TD drives
+    (`drives_before_cut`; default the half's share of `game.td_drives`)."""
     game, kick = params()["game"], params()["kick"]
     mean = float(volume.sum())
     n = int(rng.poisson(pace * mean))
     n_targets = int(rng.binomial(n, min(1.0, max(0.0, volume[0] / mean + lean)))) if mean > 0 else 0
-    o = plays(side, plan, n_targets, n - n_targets, eff, rng, drives=game.get("td_drives", TD_DRIVES) * share)
+    drives = game.get("td_drives", TD_DRIVES) * share if drives is None else drives
+    o = plays(side, plan, n_targets, n - n_targets, eff, rng, drives=drives)
     per = _per_play(side)
     mean_tds = volume[0] * per[1] + volume[1] * per[3]
     mean_yards = max(1.0, volume[0] * per[0] + volume[1] * per[2])
-    move = 1 + kick["fga_tds"] * (o.tds - mean_tds) + kick["fga_yards"] * (o.yards - mean_yards) / mean_yards
+    # the game's tries move by the same amount per TD and per yard whichever half they come in (sim_draw's rule for a
+    # whole game, split): a half's own base would move them by its share of it, and points spread 10% more
+    move = share + kick["fga_tds"] * (o.tds - mean_tds) + kick["fga_yards"] * (o.yards - mean_yards) * share / mean_yards
     chances = max(1, round(kick["fga_chances"] * share))
-    fga = int(rng.binomial(chances, min(1.0, fg_tries * share * max(0.0, move) / chances)))
+    fga = int(rng.binomial(chances, min(1.0, fg_tries * max(0.0, move) / chances)))
     bands = rng.multinomial(fga, kick["bands"])
     made = rng.binomial(bands, kick["make"])
     points, pat_made, pat_att = tries(o.tds, rng)
@@ -302,6 +307,18 @@ def mean_points(side, volume: np.ndarray, share: float, fg_tries: float) -> floa
     per = _per_play(side)
     tds = volume[0] * per[1] + volume[1] * per[3]
     return tds * per_td() + 3 * float(np.dot(kick["bands"], kick["make"])) * fg_tries * share
+
+
+def drives_before_cut(side, volumes: np.ndarray, share: float) -> tuple[int, int]:
+    """The side's TD drives in each half: the game's `game.td_drives`, or its mean TDs before the cut + 1 when more
+    (as one drive-limited draw of the whole game had), split by the first half's share of the plays, each half at
+    least its own mean TDs (so a half's binomial chance stays a chance). Splitting first keeps the TD count's spread
+    a whole game's: a mean + 1 floor in each half gave a strong offense 7 drives, not 5."""
+    per = _per_play(side)
+    means = volumes[:, 0] * per[1] + volumes[:, 1] * per[3]
+    total = max(int(round(params()["game"].get("td_drives", TD_DRIVES))), int(np.ceil(means.sum())) + 1)
+    first = max(int(round(total * share)), int(np.ceil(means[0])))
+    return first, max(total - first, int(np.ceil(means[1])))
 
 
 def _second_volume(side, lead: float) -> np.ndarray:
@@ -320,13 +337,14 @@ def before_cut(sides, fg_tries: list[float], rng: np.random.Generator) -> tuple[
     plans = [plan(side, rng) for side in sides]
     volumes = [sim_script.parts(side) for side in sides]
     share = [float(v[0].sum() / v.sum()) if v.sum() > 0 else 0.5 for v in volumes]
-    first = [half(side, plans[i], volumes[i][0], share[i], pace[i], eff[i], fg_tries[i], rng, lean[i])
+    drives = [drives_before_cut(side, volumes[i], share[i]) for i, side in enumerate(sides)]
+    first = [half(side, plans[i], volumes[i][0], share[i], pace[i], eff[i], fg_tries[i], rng, lean[i], drives[i][0])
              for i, side in enumerate(sides)]
     surprise = [first[i].points - mean_points(side, volumes[i][0], share[i], fg_tries[i]) for i, side in enumerate(sides)]
     out, busy = [], np.ones(2)
     for i, side in enumerate(sides):
         volume = _second_volume(side, side.half_lead + surprise[i] - surprise[1 - i])
-        second = half(side, plans[i], volume, 1.0 - share[i], pace[i], eff[i], fg_tries[i], rng, lean[i])
+        second = half(side, plans[i], volume, 1.0 - share[i], pace[i], eff[i], fg_tries[i], rng, lean[i], drives[i][1])
         o = first[i].offense + second.offense
         busy[i] = (max(int(o.targets.sum()), 1) / max(float(volumes[i][:, 0].sum()), 1.0)) \
             ** -params()["game"].get("ypc_volume", 0.0)

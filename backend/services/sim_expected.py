@@ -94,9 +94,10 @@ def _expected_players(side: _Side, m: dict, scoring: ScoringSettings,
         line = lines.setdefault(pid, {})
         line.update(carries=m["carries"][i], rush_yds=m["rush_yds"][i], rush_td=m["rush_td"][i],
                     fumbles=line.get("fumbles", 0.0) + m["carries"][i] * side.fumble[i])
-    if side.qb is not None:
+    if side.qb is not None:      # his line also loses the sacks' lost fumbles, as the draw's does
         line = lines.setdefault(side.qb, {})
-        line.update(pass_yds=float(m["rec_yds"].sum()), pass_td=float(m["rec_td"].sum()), pass_int=m["ints"])
+        line.update(pass_yds=float(m["rec_yds"].sum()), pass_td=float(m["rec_td"].sum()), pass_int=m["ints"],
+                    fumbles=line.get("fumbles", 0.0) + m["sacks"] * params()["league"]["sack_fumble"])
     if end is not None:
         from services.sim_closing_means import credit_means
         credit_means(lines, side, m, end)
