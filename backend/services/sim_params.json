@@ -1245,7 +1245,7 @@
    "floor": 0.2,
    "season_spread": 0.5,
    "strength_sd": 2,
-   "edge_scale": 1.12,
+   "edge_scale": 1.08,
    "depth_targets": 0.78,
    "depth_carries": 0.8,
    "season_roles": 0.25,

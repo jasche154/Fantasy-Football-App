@@ -1690,7 +1690,11 @@ read the belief, so, as in a real season, the public learns the truth only from 
   team's true volume also leans against its offense's shared efficiency draw (`talent.volume_eff_rho` -0.25):
   real teams that pass well do not also pass more (season targets a game against yards per target, r = -0.27;
   simulated -0.25, was -0.22). With the truth closer to the belief, the truth's edge over the line
-  (`talent.edge_scale` 1.05 -> 1.12) and the depth discount (0.85 -> 0.78) were retuned on the same gate.
+  (`talent.edge_scale` 1.05 -> 1.12) and the depth discount (0.85 -> 0.78) were retuned on the same gate; with
+  the closing window in, the edge is 1.08: over 8 seeds of the full-mode gate, 1.12 put 28.0% of the most
+  lopsided fifth's games at 21+ (real 25.1%; ef3f26e 24.5%), 1.08 puts 25.9% with the line's correlation with the
+  result at 0.44 (real 0.455) and results around the line at 12.60 (12.60), and 1.04 put 24.5% but the
+  correlation at 0.43.
   Whole-season gate (2021-2025, 3 seeds; real / before / after): the season's passing leader 4,963 / 5,300 /
   5,106; a team's season passing sd 495 / 548 / 493 (most 4,997 / 5,335 / 5,144); 400+ yard passing games 8.8 /
   15.9 / 11.7 a season, 500+ 0.4 / 1.5 / 0.7, the top game 491 / 522 / 519; 4,000-yard passers 8.2 / 12.3 /
