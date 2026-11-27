@@ -54,9 +54,10 @@
  "league": {
   "targets": 32.256,
   "carries": 26.541,
-  "kneel_yards": -1.072,
-  "qb_ypr_without_kneels": 1.3147,
-  "qb_td_without_kneels": 1.2523
+  "qb_carries": 3.831,
+  "kneels": 0.772,
+  "window_kneels": 0.61,
+  "kneel_yards": -1.072
  },
  "participation": {
   "RB": {
@@ -64,8 +65,8 @@
    "scale": 3.5,
    "floor": 0.0659,
    "check": {
-    "held_out_loss": 0.4156,
-    "without": 0.5278
+    "held_out_loss": 0.4158,
+    "without": 0.529
    },
    "bands": [
     {
@@ -138,8 +139,8 @@
    "scale": 1.75,
    "floor": 0.0188,
    "check": {
-    "held_out_loss": 0.4117,
-    "without": 0.4753
+    "held_out_loss": 0.4119,
+    "without": 0.4758
    },
    "bands": [
     {
@@ -213,7 +214,7 @@
    "floor": 0.059,
    "check": {
     "held_out_loss": 0.4934,
-    "without": 0.5018
+    "without": 0.5019
    },
    "bands": [
     {

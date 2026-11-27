@@ -122,11 +122,47 @@ def _qb_carries(side) -> tuple[int, float, float, float]:
     return at, share * team, own, max(0.0, share * team - own)
 
 
+MEMO_SIZE = 2048                 # sides whose derived arrays are remembered (`per_side`); emptied when full
+_memo: dict[tuple, tuple] = {}
+
+
+def per_side(side, name: str, work):
+    """`work(side)`, remembered for this side object (frozen, so the answer never changes; the entry holds the side,
+    so its id is not reused while remembered): a game's draw and its projections read the same side many times."""
+    hit = _memo.get((id(side), name))
+    if hit is not None and hit[0] is side:
+        return hit[1]
+    if len(_memo) >= MEMO_SIZE:
+        _memo.clear()
+    value = work(side)
+    parts_ = value.values() if isinstance(value, dict) else value if isinstance(value, tuple) else (value,)
+    for array in parts_:
+        if isinstance(array, np.ndarray):
+            array.setflags(write=False)                   # shared by every reader: never changed in place
+    _memo[(id(side), name)] = (side, value)
+    return value
+
+
 def carry_weights(side) -> np.ndarray:
     """The side's carry weights over its carries besides kneels: in a game in parts the starting QB's is cut to his
-    belief carries less his own expected kneels (the others' keep their proportions); else `carry_w`."""
+    belief carries less his own expected kneels (the others' keep their proportions); else `carry_w`. Remembered by
+    the weights and the game script, which the centring's scaled copies of a side share."""
     if side.end is None or side.qb is None:
         return side.carry_w
+    key = (id(side.carry_w), "carry_weights", side.carries, side.targets, side.margin, side.half_lead, side.end,
+           side.exited)
+    hit = _memo.get(key)
+    if hit is not None and hit[0] is side.carry_w:
+        return hit[1]
+    if len(_memo) >= MEMO_SIZE:
+        _memo.clear()
+    value = _carry_weights(side)
+    value.setflags(write=False)
+    _memo[key] = (side.carry_w, value)
+    return value
+
+
+def _carry_weights(side) -> np.ndarray:
     at, _, _, other = _qb_carries(side)
     plays = parts(side)[:, 1].sum() + window_means(side)[1]
     share = min(other / plays, 0.99) if plays > 0 else 0.0
@@ -142,6 +178,10 @@ def rushing(side) -> tuple[np.ndarray, np.ndarray]:
     each, never a TD) are taken out; else the side's rates."""
     if side.end is None or side.qb is None:
         return side.ypr, side.rush_td
+    return per_side(side, "rushing", _rushing)
+
+
+def _rushing(side) -> tuple[np.ndarray, np.ndarray]:
     at, belief, own, other = _qb_carries(side)
     if other <= 0:
         return side.ypr, side.rush_td

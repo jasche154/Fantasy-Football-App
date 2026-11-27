@@ -49,7 +49,6 @@ from services.sim_world import OTHER, World, params
 
 if TYPE_CHECKING:
     from services.sim_closing_means import Ending
-    from services.sim_script import PlanInputs
 
 SNAP_TOP = {"QB": 100.0, "RB": 70.0, "WR": 92.0, "TE": 85.0}   # the lead player's snap share at a position
 SNAP_EXPONENT = 0.5              # snaps fall with the square root of his weight vs the lead player's
@@ -96,7 +95,9 @@ class _Side:
     margin: float = 0.0
     half_lead: float = 0.0
     end: "Ending | None" = None
-    plan_in: "PlanInputs | None" = None    # who may sit out of the game plan (sim_script.plan_inputs; None: worked out)
+    # (target, carry) weights before anyone left the game hurt, when an exit changed them: who is in the game plan
+    # is decided on these (sim_parts.plan); None: the weights above
+    whole: tuple[np.ndarray, np.ndarray] | None = None
 
 
 @dataclass(frozen=True)
@@ -158,13 +159,12 @@ def _side(world: World, team: str, opponent: str | None, out: Collection[int],
         rushers.append(backup)
         carry_w, whole = np.insert(carry_w, -1, 0.0), np.insert(whole, -1, 0.0)
     receiver_ids, rusher_ids = (*(p.player_id for p in receivers), OTHER), (*(p.player_id for p in rushers), OTHER)
-    from services import sim_script
-    plan_in = sim_script.plan_inputs(receiver_ids, np.array([*_weights(receivers, "targets", {}), other_targets]),
-                                     rusher_ids, whole, form.targets, form.carries, positions)
+    target_w = np.array([*_weights(receivers, "targets", exits), other_targets])
+    before = (np.array([*_weights(receivers, "targets", {}), other_targets]), whole) if exits else None
     return _Side(
         team=team,
         receivers=receiver_ids,
-        target_w=np.array([*_weights(receivers, "targets", exits), other_targets]),
+        target_w=target_w,
         catch=np.array([*(p.catch for p in receivers), other["catch"]]),
         ypc=np.array([*(p.ypc for p in receivers), other["ypc"]]) * pass_mult,
         rec_td=np.array([*(p.rec_td for p in receivers), other["rec_td"]]) * pass_mult,
@@ -182,7 +182,7 @@ def _side(world: World, team: str, opponent: str | None, out: Collection[int],
         kicker_share=exits.get(kicker.player_id, 1.0) if kicker else 1.0,
         dst=next((p.player_id for p in roster if p.position == "DST"), None),
         positions=positions, snaps=snaps, exited=frozenset(pid for pid, share in exits.items() if share < 1.0),
-        plan_in=plan_in)
+        whole=before)
 
 
 def _side_of(world: World, team: str, opponent: str | None, out: Collection[int]) -> _Side:
@@ -330,7 +330,12 @@ def _side_means(side: _Side) -> dict:
     closing-window Ending plays in parts (sim_script): its targets and carries are both halves' plus the window's
     plays besides its scoring ones (never a player's who left hurt; its kneels, `kneels`, the finishing QB's), its TDs, interceptions and sacks come from the
     halves' plays at the per-play rates / the halves' share; without one the whole game's volume plays at the
-    per-play rates."""
+    per-play rates. Remembered per side (frozen; the arrays are read-only)."""
+    from services import sim_script
+    return sim_script.per_side(side, "means", _work_means)
+
+
+def _work_means(side: _Side) -> dict:
     from services import sim_script
     league = params()["league"]
     t_share = side.target_w / side.target_w.sum()

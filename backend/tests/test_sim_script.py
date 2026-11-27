@@ -271,7 +271,7 @@ def test_a_depth_players_mean_share_through_the_game_plan_is_his_weights():
     """A player out of the plan some weeks gets his weight / q when in, so his mean share is his weight's (and the
     projection, which uses the weights, is his draws' mean)."""
     side = sim_draws.centred_sides(world(), "AAA", "BBB")[0]
-    inputs = side.plan_in
+    inputs = sim_parts.plan_inputs(side)
     depth = [i for i, at in enumerate(inputs.receivers) if at >= 0 and inputs.q[at] < 1.0]
     assert depth
     rng = np.random.default_rng(9)
@@ -285,8 +285,8 @@ def test_leaving_hurt_never_changes_who_is_in_the_game_plan():
     after a third of it is still always in the plan (he played until he left)."""
     w, wr = world(), pid("AAA", "WR")
     healthy, hurt = (sim_game._side(w, "AAA", "BBB", set(), exits) for exits in ({}, {wr: 0.3}))
-    assert np.array_equal(healthy.plan_in.q, hurt.plan_in.q)
-    at = hurt.plan_in.receivers[hurt.receivers.index(wr)]
-    assert hurt.plan_in.q[at] == 1.0
+    before, after = sim_parts.plan_inputs(healthy), sim_parts.plan_inputs(hurt)
+    assert np.array_equal(before.q, after.q)
+    assert after.q[after.receivers[hurt.receivers.index(wr)]] == 1.0
     rng = np.random.default_rng(3)
     assert min(sim_parts.plan(hurt, rng).targets[hurt.receivers.index(wr)] for _ in range(2000)) > 0

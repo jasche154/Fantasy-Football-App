@@ -164,16 +164,23 @@ def environment(rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray, np.nd
 
 
 def plan(side, rng: np.random.Generator) -> Plan:
-    """The side's game plan (see the module docstring): who is in it (`side.plan_in`, from its weights before
-    anyone left the game), then each weight x a lognormal game draw, the starting QB's carries on their own."""
+    """The side's game plan (see the module docstring): who is in it (`plan_inputs`, from its weights before anyone
+    left the game), then each weight x a lognormal game draw, the starting QB's carries on their own."""
     game = params()["game"]
-    inputs = side.plan_in if side.plan_in is not None else sim_script.plan_inputs(
-        side.receivers, side.target_w, side.rushers, side.carry_w, side.targets, side.carries, side.positions)
+    inputs = plan_inputs(side)
     drawn = rng.random(len(inputs.q)) < inputs.q
     t = _planned(side.target_w, inputs.receivers, inputs.q, drawn)
     c = _planned(sim_script.carry_weights(side), inputs.rushers, inputs.q, drawn)
     qb = (side.rushers.index(side.qb), game["share_sd_qb_carries"]) if side.qb is not None else None
     return Plan(_shares(t, game["share_sd_targets"], rng), _shares(c, game["share_sd_carries"], rng, qb))
+
+
+def plan_inputs(side) -> "sim_script.PlanInputs":
+    """Who may sit out of the side's game plan, worked out once per side from its weights before any exit."""
+    def work(s) -> sim_script.PlanInputs:
+        target_w, carry_w = s.whole if s.whole is not None else (s.target_w, s.carry_w)
+        return sim_script.plan_inputs(s.receivers, target_w, s.rushers, carry_w, s.targets, s.carries, s.positions)
+    return sim_script.per_side(side, "plan", work)
 
 
 def _planned(weights: np.ndarray, index: np.ndarray, q: np.ndarray, drawn: np.ndarray) -> np.ndarray:
@@ -237,6 +244,10 @@ class Half:
 
 def _per_play(side) -> np.ndarray:
     """[yards per target, TDs per target, yards per carry, TDs per carry] before the cut, at mean efficiency."""
+    return sim_script.per_side(side, "per_play", _work_per_play)
+
+
+def _work_per_play(side) -> np.ndarray:
     t = side.target_w / side.target_w.sum() * side.catch
     weights = sim_script.carry_weights(side)
     c = weights / weights.sum()
@@ -323,7 +334,8 @@ def before_cut(sides, fg_tries: list[float], rng: np.random.Generator) -> tuple[
     volumes = [sim_script.parts(side) for side in sides]
     share = [float(v[0].sum() / v.sum()) if v.sum() > 0 else 0.5 for v in volumes]
     per = [_per_play(side) for side in sides]
-    drives = [drives_before_cut(side, volumes[i], share[i], per[i]) for i, side in enumerate(sides)]
+    drives = [sim_script.per_side(side, "drives", lambda s, i=i: drives_before_cut(s, volumes[i], share[i], per[i]))
+              for i, side in enumerate(sides)]
     first = [half(side, plans[i], volumes[i][0], share[i], pace[i], eff[i], fg_tries[i], rng, lean[i], drives[i][0], per[i])
              for i, side in enumerate(sides)]
     surprise = [first[i].points - mean_points(side, volumes[i][0], share[i], fg_tries[i], per[i])
