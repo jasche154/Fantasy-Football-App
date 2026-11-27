@@ -313,3 +313,13 @@ def test_a_hurt_kickers_window_kicks_count_for_his_team_not_his_line(monkeypatch
     _, scored, points, *_ = _close_once(sides, means, offense, counts, rng, None)
     assert points[0] == 10 + 3 + 7
     assert scored[0][0] == 10 + 10 and scored[0][1] is counts             # no kick added to his line
+
+
+def test_a_tied_games_better_ending_goes_to_each_side_by_its_share_of_the_points(monkeypatch):
+    """Item 5: at a tie, the better of the two endings goes to side 0 with its share of the mean points (30 of 40)."""
+    sides, means, offense, counts, rng = _setup()
+    good, bad = _events(fg_0_39=1), _events()
+    monkeypatch.setattr(sim_closing, "ending", lambda margin, rng: (bad, good))      # the better one second
+    wins = sum(_close_once(sides, means, offense, counts, rng, None, (10, 10), (30.0, 10.0))[2][0] == 13
+               for _ in range(4000))
+    assert wins / 4000 == pytest.approx(0.75, abs=0.025)
