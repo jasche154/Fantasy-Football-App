@@ -44,7 +44,7 @@ log = logging.getLogger(__name__)
 
 TOP = {"QB": 32, "RB": 48, "WR": 60, "TE": 24, "K": 20}
 EXIT_CUTOFF = 0.70
-HAZARD_SINCE = 2021               # per-game hazard: 2021 on (see `recent_hazards`); lengths use every season
+HAZARD_SINCE = 2021               # per-game hazard: 2021 on (see the module docstring); lengths use every season
 IR_RULES_SINCE = 2022             # IR minimum of four games, two-game designations (2020-21 were COVID years)
 MIN_SPELLS = 60                   # below this a position borrows the pooled length fit
 EXIT_LEVELS = 11

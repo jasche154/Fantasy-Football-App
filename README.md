@@ -1635,8 +1635,15 @@ read the belief, so, as in a real season, the public learns the truth only from 
   since, a bye week after it or not; a tag fetched after that game, hurt Sunday and placed on IR Tuesday, still
   counts). Real weeks never change.
   The chance a player is hurt in a game is fitted on 2021-2025 only (`HAZARD_SINCE`; how long an injury lasts
-  uses every season): the same count gives quarterbacks less than half the 2021-2025 rate in 2018-2020, and the
-  pooled fit left simulated QBs at 0.034 new injuries a game against the 0.042 target; now 0.041.
+  uses every season): the same count gives quarterbacks 0.029-0.036 new injuries a game in 2018-2020 and
+  0.043-0.061 in 2021-2025, and the pooled fit left simulated QBs at 0.034 against the 0.042 target; now 0.041.
+  The step looks like a recording difference, not football: a quarterback's missed games carry no tag at all
+  about a third of the time in 2018-2020 (0.29-0.38) against about a fifth later (0.10-0.33), and IR tags with no
+  injury text (where the COVID list lands) take 0.002-0.008 off the QB rate in every season, 2021's included
+  (0.060 -> 0.053), so starting the window in 2022 would give the same rate. The refit read today's database,
+  re-imported since the last fit, so other fitted values moved a little too (a kicker's Q/D tags on games he
+  played 0.8% -> 1.4% of games, a kicker listed Q playing 55% -> 66%, a back's preseason injury rate 3.3% -> 3.0%,
+  the preseason length table and the IR shares).
   On purpose, simulated players get hurt **about a quarter less often** than real ones (`INJURY_SCALE = 0.75`
   in `sim_injuries.py` multiplies the per-game and preseason injury chances, in whole simulated seasons and
   in the live season's simulated weeks alike); how long an injury lasts stays real, and an absence already
