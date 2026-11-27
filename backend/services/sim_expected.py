@@ -31,16 +31,18 @@ def _tries(tds: float, against: dict | None) -> float:
 def expected(world: World, home: str, away: str | None, out: Collection[int], scoring: ScoringSettings,
              exits: Mapping[int, float] | None = None, target: Mapping[str, float] | None = None,
              shift: Mapping[str, float] | None = None, factors: Mapping[str, float] | None = None,
-             week: int | None = None) -> dict[int, Expected]:
+             week: int | None = None, versus: str | None = None) -> dict[int, Expected]:
     """Mean line and points of every active player of `home` (and of `away` when given) in their game.
-    `away` None: `home` against a league-average opponent (only home's players are returned). `target`:
+    `away` None: `home` alone (only home's players are returned), against a league-average opponent, or against
+    `versus`'s pass and run defense with no game played against it (no centring, no window). `target`:
     {team: mean points} the game is centred on (see the module docstring); `shift`: {team: points} added to
     its own mean instead; `factors`: {team: factor} to apply as given (sim_centre.factor)."""
     from services.sim_centre import centred
     exits = exits or {}
     teams = [home] if away is None else [home, away]
-    built = {team: _side(world, team, (away if team == home else home), out, exits) if exits
-             else _side_of(world, team, (away if team == home else home), out) for team in teams}
+    opponent = {home: away if away is not None else versus, away: home}
+    built = {team: _side(world, team, opponent[team], out, exits) if exits else _side_of(world, team, opponent[team], out)
+             for team in teams}
     from services import sim_closing_means as closing_means
     sides = centred(built, target, shift, factors, week)
     means = {team: _side_means(side) for team, side in sides.items()}
