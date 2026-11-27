@@ -134,13 +134,14 @@ def scoring_games(seasons: Iterable[int], refresh: bool = False) -> list[dict]:
 def _cached() -> dict:
     try:
         cached = json.loads(PLAYS_CACHE.read_text(encoding="utf-8"))
-        if isinstance(cached, dict) and all(isinstance(v, list) for v in cached.values()):
-            return cached
     except FileNotFoundError:
         return {}
     except (OSError, ValueError):
-        pass
-    log.info("%s is unreadable: downloading the play-by-play again", PLAYS_CACHE.name)
+        log.warning("%s is unreadable: downloading the play-by-play again", PLAYS_CACHE.name, exc_info=True)
+        return {}
+    if isinstance(cached, dict) and all(isinstance(v, list) for v in cached.values()):
+        return cached
+    log.warning("%s is not a {season: games} file: downloading the play-by-play again", PLAYS_CACHE.name)
     return {}
 
 

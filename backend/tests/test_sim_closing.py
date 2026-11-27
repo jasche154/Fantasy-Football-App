@@ -341,3 +341,14 @@ def test_scoring_plays_with_no_game_clock_are_counted_and_logged(caplog):
         games = sim_closing_fit.games_of(rows, 2020)
     assert [p[3] for p in games[0]["plays"]] == ["rush_td"]
     assert "2020: 1 scoring plays with no game clock" in caplog.text
+
+
+def test_an_unreadable_play_by_play_cache_warns_with_the_error(caplog, monkeypatch, tmp_path):
+    """Item 8: a corrupt cache is logged at WARNING with the exception before every season is downloaded again."""
+    path = tmp_path / "scoring_plays.json"
+    path.write_text("{not json", encoding="utf-8")
+    monkeypatch.setattr(sim_closing_fit, "PLAYS_CACHE", path)
+    with caplog.at_level("WARNING", logger="services.sim_closing_fit"):
+        assert sim_closing_fit._cached() == {}
+    record = next(r for r in caplog.records if "unreadable" in r.getMessage())
+    assert record.levelname == "WARNING" and record.exc_info is not None
