@@ -47,11 +47,13 @@ def stored() -> Mapping:
 
 def factors(week: int) -> tuple[float, float, float]:
     """(targets, carries, yards per target) multipliers of a game in `week` against a team's calendar-free volume
-    and a player's season rates."""
+    and a player's season rates. Only regular-season weeks have one: every caller passes a played or simulated
+    week of the regular season (1-17 before 2021, 1-18 since; a draft's projections are week 1's), so any other
+    week is a bug, not a week to treat as average."""
     for (low, high), values in zip(BUCKETS, stored()["buckets"]):
         if low <= week <= high:
             return float(values["targets"]), float(values["carries"]), float(values["ypt"])
-    return 1.0, 1.0, 1.0
+    raise ValueError(f"week {week} outside {BUCKETS}")
 
 
 def fit(session, seasons: Iterable[int]) -> dict:

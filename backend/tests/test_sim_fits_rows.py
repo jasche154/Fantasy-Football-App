@@ -113,3 +113,15 @@ def test_percentile_rows_pool_every_season_and_seed():
     rows = [{"x": 1.0, "leader p95": [float(v)]} for v in range(1, 21)]
     out = sim_eval._percentiles(sim_eval._mean([sim_eval._mean(rows[:10]), sim_eval._mean(rows[10:])]))
     assert out["x"] == 1.0 and out["leader p95"] == pytest.approx(np.quantile(range(1, 21), 0.95))
+
+
+@pytest.mark.parametrize("week", [0, 19, -1])
+def test_a_week_outside_the_regular_season_has_no_calendar(week):
+    """Item 6: no silent 'average week' for a week no caller should pass (week 0 is the draft, 19+ the postseason)."""
+    with pytest.raises(ValueError, match=f"week {week} outside"):
+        sim_calendar.factors(week)
+
+
+@pytest.mark.parametrize("week", [1, 17, 18])
+def test_every_regular_season_week_has_a_calendar_whatever_the_seasons_length(week):
+    assert len(sim_calendar.factors(week)) == 3          # 17 ends a 2018-2020 season, 18 a later one
