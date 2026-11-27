@@ -342,4 +342,10 @@ def play(world: World, home: str, away: str, out: Collection[int], rng: np.rando
     return draw_game((sides[home], sides[away]), rng, scoring)
 
 
-from services.sim_expected import _expected_players, expected  # noqa: E402,F401  (re-exported: the import path stays)
+def __getattr__(name: str):
+    """`expected` and `_expected_players` live in sim_expected (which imports this module): served lazily, so
+    either module can be imported first and the import path stays."""
+    if name in ("expected", "_expected_players"):
+        from services import sim_expected
+        return getattr(sim_expected, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
