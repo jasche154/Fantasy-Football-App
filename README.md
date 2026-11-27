@@ -1122,11 +1122,17 @@ that week's games on; only scoring a week reads its real points.
   counted as the replacement level does, on the average points per game by rank of real 2018-2025 seasons:
   `python -m services.replay_league_size --fit` -> `replay_league_size.json`), so a waiver player is priced like
   a 12-team waiver player. An 8-team superflex league starts 16 QBs and rosters about 28: its QB24 is valued like
-  a 12-team QB33. After a jump-in draft (2026, PPR, two seeds each) the free agents worth 300+ went from 2 and 3
-  (all QBs, 325-412) in 8-team superflex leagues to none; 10-, 12- and 14-team leagues had none before or after.
-  Chart check at 8 teams (common player-weeks): regular Spearman 0.464 -> 0.475, held-out error 4.022 -> 4.001,
-  out players 2.927 -> 2.889; superflex 0.523 -> 0.522, 4.165 -> 4.155, out players 2.925 -> 2.921. At 10 teams:
-  regular 0.518 -> 0.524, 4.012 -> 3.990, out players 2.975 -> 2.957; superflex 0.549 -> 0.550, 4.743 -> 4.729, out
+  a 12-team QB33. Only the value curve moves: the draft board's order, `pre_rank`, `pre_chart` and `star` read the
+  unsized season (the CPU draft drafts on raw ADP), a fill-in's "drafted" group reads the raw 1-QB list, and the CPU
+  draft prices an out player off the chart without the taper, next to everyone else's raw ADP. The order holds per
+  rank, not per blended value: a player whose expert and model ranks disagree can swap places with a neighbour.
+  After a jump-in draft (2026, PPR; each new league draws its own simulated future, so these are samples) the free
+  agents worth 300+ went from 2 and 3 (all QBs, 325-412) in two 8-team superflex leagues to no healthy one in eight;
+  twice an injured QB stayed on the wire (Malik Willis on IR, 678 healthy, 313; Jalen Hurts 412) because every CPU
+  was at its QB limit. 10-, 12- and 14-team leagues had none before or after.
+  Chart check at 8 teams (common player-weeks): regular Spearman 0.463 -> 0.474, held-out error 4.021 -> 4.000,
+  out players 2.927 -> 2.890; superflex 0.523 -> 0.522, 4.165 -> 4.155, out players 2.925 -> 2.920. At 10 teams:
+  regular 0.518 -> 0.524, 4.012 -> 3.989, out players 2.975 -> 2.957; superflex 0.549 -> 0.550, 4.743 -> 4.729, out
   players 3.477 -> 3.490 (the one number that got worse, by 0.4%). Mapping
   every rank by equal points over replacement instead scored worse in superflex (0.540 -> 0.422): it marks down
   the starting QBs, whom the 12-team chart already prices below their points. 12 teams and more are unchanged
