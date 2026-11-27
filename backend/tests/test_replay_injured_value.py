@@ -213,3 +213,32 @@ def test_a_player_hurt_in_a_game_he_played_is_frozen_from_that_week():
     data = spell(DATA, pid, tagged=range(5, 8), gone=range(6, 8))                # keeps his week-5 stat line
 
     assert rv._absences(data.as_of(7), 7)[pid] == 5                              # out from week 6, not week 5
+
+
+def _full_week_frozen(data, league, week, end_week, drafted):
+    """The freeze as a full `_base` of each absence's last week before it reads it (the slower reference)."""
+    found = {}
+    for pid, before in rv._absences(data, week).items():
+        base = rv._base(data.as_of(before), league, before, end_week, min(drafted, before))
+        if pid in base.rows:
+            bumped = rv.replay_chart._bye_done(data, base.rows[pid]["team"], before)
+            found[pid] = base.live.get(pid, base.rows[pid]["healthy_chart"]) / (rv.replay_chart.BYE_BUMP if bumped else 1.0)
+    return found
+
+
+@pytest.mark.parametrize("superflex", [False, True])
+def test_the_freeze_reads_only_the_frozen_players_positions_and_gives_the_full_weeks_values(superflex):
+    """`_frozen` builds each frozen week's live charts for the frozen players' positions only (`_live`); the values,
+    and so every chart of the week, are the ones a full week's build gives. Nested absences included."""
+    data = spell(DATA, fakes.player_id("WR", 3), tagged=range(5, 6), gone=range(5, 7))
+    data = spell(data, fakes.player_id("WR", 3), tagged=range(7, 9), gone=range(7, 9))
+    data = spell(data, fakes.player_id("RB", 1), tagged=range(4, 9), gone=range(4, 9), tag="IR")
+    data = spell(data, fakes.player_id("QB", 2), tagged=range(3, 7), gone=range(3, 7))
+    starters = {**SETTINGS.starters, "SUPERFLEX": 1} if superflex else SETTINGS.starters
+    league = rv.league_settings(replace(SETTINGS, starters=starters))
+    for week in (4, 6, 8, 10):
+        rv.clear_cache()
+        fast = rv._frozen(data.as_of(week), league, week, END, 0)
+        rv.clear_cache()
+        assert fast and fast == _full_week_frozen(data.as_of(week), league, week, END, 0)
+    rv.clear_cache()

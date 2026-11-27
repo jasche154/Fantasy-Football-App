@@ -246,14 +246,39 @@ def _frozen(data: SeasonData, league: LeagueSettings, week: int, end_week: int, 
     he is available for a game again (`_absences`): the expert and model ranks of a hurt player fall while he is out (the experts price the
     injury), and the chart's discount (replay_chart_injury) is the one price of it. Point in time: the frozen
     week's values are built from data.as_of(that week). A player listed nowhere that week keeps his live value."""
-    found: dict[int, float] = {}
+    by_week: dict[int, list[int]] = defaultdict(list)
     for pid, before in _absences(data, week).items():
-        base = _base(data.as_of(before), league, before, end_week, min(drafted, before))
-        if pid in base.rows:                        # back that week from an earlier absence: his live value then
-            row = base.rows[pid]
-            bumped = replay_chart._bye_done(data, row["team"], before)     # replay_chart re-applies today's bump
-            found[pid] = base.live.get(pid, row["healthy_chart"]) / (replay_chart.BYE_BUMP if bumped else 1.0)
+        by_week[before].append(pid)
+    found: dict[int, float] = {}
+    for before, pids in by_week.items():
+        then = data.as_of(before)
+        positions = tuple(sorted({then.players[pid].position for pid in pids if pid in then.players}))
+        live, teams = _live(then, league, before, end_week, min(drafted, before), positions)
+        frozen_then = _absences(then, before)       # frozen that week too: `_base` kept his live value unrounded
+        for pid in pids:
+            if pid in live:
+                bumped = replay_chart._bye_done(data, teams[pid], before)     # replay_chart re-applies today's bump
+                value = live[pid] if pid in frozen_then else round(live[pid], 1)
+                found[pid] = value / (replay_chart.BYE_BUMP if bumped else 1.0)
     return found
+
+
+@lru_cache(maxsize=256)
+def _live(data: SeasonData, league: LeagueSettings, week: int, end_week: int, drafted: int,
+          positions: tuple[str, ...]) -> tuple[Mapping[int, float], Mapping[int, str | None]]:
+    """({player: live healthy chart}, {player: team}) at `week` for every player at `positions`: what `_base` of
+    that week has as each one's value before any freeze (a position's ranks read only its own players), without
+    building the other positions, the news or that week's own freezes. `data` is as of `week`."""
+    regular = replay_superflex.one_qb(data)
+    priors = _priors(regular)
+    teams = {pid: data.team_at(pid, week) for pid, p in data.players.items() if p.position in positions}
+    rows = [_row(data, data.players[pid], priors[pid], week, team, 0) for pid, team in teams.items()]
+    two_qb = replay_slots.two_qb(league.starters)
+    chart_data = replay_chart.superflex_view(data) if two_qb else regular
+    live: dict[int, float] = {}
+    replay_chart.base_charts(chart_data, rows, priors, week, end_week, drafted, regular if two_qb else None,
+                             dict.fromkeys(teams, 0.0), live)
+    return MappingProxyType(live), MappingProxyType(teams)
 
 
 @lru_cache(maxsize=128)
@@ -316,6 +341,7 @@ def knowledge(data: SeasonData, league: LeagueSettings, week: int, end_week: int
 def clear_cache() -> None:
     _knowledge.cache_clear()
     _base.cache_clear()
+    _live.cache_clear()
     _priors.cache_clear()
     projector.cache_clear()
     replay_chart.clear_cache()
