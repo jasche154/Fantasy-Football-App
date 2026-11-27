@@ -28,6 +28,42 @@ def test_starters_keep_their_rank_and_the_first_unrostered_player_takes_the_twel
         assert all(a < b for a, b in zip(ranks, ranks[1:]))                           # order kept
 
 
+# (starters, rostered) league-wide on the shipped curves (replay_league_size.json), bench 6
+DEPTH = {
+    ("superflex", 8): {"QB": (16, 28), "RB": (17, 30), "WR": (23, 40), "TE": (8, 14)},
+    ("superflex", 10): {"QB": (20, 35), "RB": (21, 37), "WR": (29, 51), "TE": (10, 18)},
+    ("superflex", 12): {"QB": (24, 42), "RB": (25, 44), "WR": (35, 61), "TE": (12, 21)},
+    ("regular", 8): {"QB": (8, 15), "RB": (17, 32), "WR": (23, 43), "TE": (8, 15)},
+    ("regular", 10): {"QB": (10, 19), "RB": (21, 39), "WR": (29, 54), "TE": (10, 19)},
+    ("regular", 12): {"QB": (12, 22), "RB": (25, 46), "WR": (35, 65), "TE": (12, 22)},
+}
+
+
+@pytest.mark.parametrize("lineup, teams", sorted(DEPTH))
+def test_depth_counts_starters_and_rostered_players_on_the_shipped_curves(lineup, teams):
+    starters = SUPERFLEX if lineup == "superflex" else dict(rs.DEFAULT_STARTERS)
+    found = size.depth(league(teams, starters))
+    assert {p: found[p] for p in DEPTH[(lineup, teams)]} == DEPTH[(lineup, teams)]
+
+
+@pytest.mark.parametrize("starters", [SUPERFLEX, dict(rs.DEFAULT_STARTERS)])
+def test_the_sized_view_keeps_the_starters_picks_and_only_pushes_the_rest_later(starters):
+    """`sized` at 8 teams: each position's first `starters` players by ADP keep their pick, picks never go down in
+    the original ADP order, nobody moves earlier than his own pick, and a player without ADP stays without one."""
+    data = fakes.fake_season()
+    base = replay_chart.superflex_view(data) if "SUPERFLEX" in starters else data
+    view, depth = size.sized(base, league(8, starters)), size.depth(league(8, starters))
+    assert view is not base
+    for position in ("QB", "RB", "WR", "TE"):
+        drafted = sorted((p.adp, pid) for pid, p in base.players.items() if p.position == position and p.adp)
+        picks = [view.players[pid].adp for _, pid in drafted]
+        kept = depth[position][0]
+        assert picks[:kept] == pytest.approx([adp for adp, _ in drafted[:kept]]), position
+        assert all(a <= b for a, b in zip(picks, picks[1:])), position
+        assert all(new >= old - 1e-9 for new, (old, _) in zip(picks, drafted)), position
+    assert all(view.players[pid].adp is None for pid, p in base.players.items() if p.adp is None)
+
+
 def test_superflex_in_eight_teams_uses_two_starting_qbs_a_team():
     starters, rostered = size.depth(league(8))["QB"]
     assert starters == 16 and rostered > starters

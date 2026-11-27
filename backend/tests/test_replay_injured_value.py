@@ -226,22 +226,51 @@ def _full_week_frozen(data, league, week, end_week, drafted):
     return found
 
 
-@pytest.mark.parametrize("superflex", [False, True])
-def test_the_freeze_reads_only_the_frozen_players_positions_and_gives_the_full_weeks_values(superflex):
-    """`_frozen` builds each frozen week's live charts for the frozen players' positions only (`_live`); the values,
-    and so every chart of the week, are the ones a full week's build gives. Nested absences included."""
+def _deep_qb(data):
+    """The 20th QB by ADP: past an 8-team league's starters, so the league-size taper moves his value."""
+    return sorted((p.adp, pid) for pid, p in data.players.items() if p.position == "QB" and p.adp)[19][1]
+
+
+def _freeze_season():
     data = spell(DATA, fakes.player_id("WR", 3), tagged=range(5, 6), gone=range(5, 7))
     data = spell(data, fakes.player_id("WR", 3), tagged=range(7, 9), gone=range(7, 9))
     data = spell(data, fakes.player_id("RB", 1), tagged=range(4, 9), gone=range(4, 9), tag="IR")
     data = spell(data, fakes.player_id("QB", 2), tagged=range(3, 7), gone=range(3, 7))
+    return spell(data, _deep_qb(DATA), tagged=range(5, 9), gone=range(5, 9))
+
+
+def _freeze_league(teams: int, superflex: bool):
     starters = {**SETTINGS.starters, "SUPERFLEX": 1} if superflex else SETTINGS.starters
-    league = rv.league_settings(replace(SETTINGS, starters=starters))
+    return rv.league_settings(replace(SETTINGS, teams=teams, starters=starters))
+
+
+@pytest.mark.parametrize("drafted", [0, 3])
+@pytest.mark.parametrize("superflex", [False, True])
+@pytest.mark.parametrize("teams", [8, 12])
+def test_the_freeze_reads_only_the_frozen_players_positions_and_gives_the_full_weeks_values(teams, superflex, drafted):
+    """`_frozen` builds each frozen week's live charts for the frozen players' positions only (`_live`); the values,
+    and so every chart of the week, are the ones a full week's build gives, in a tapered league (value curve and
+    preseason board are then different seasons) and with a jump-in draft week. Nested absences included."""
+    data, league = _freeze_season(), _freeze_league(teams, superflex)
     for week in (4, 6, 8, 10):
         rv.clear_cache()
-        fast = rv._frozen(data.as_of(week), league, week, END, 0)
+        fast = rv._frozen(data.as_of(week), league, week, END, drafted)
         rv.clear_cache()
-        assert fast and fast == _full_week_frozen(data.as_of(week), league, week, END, 0)
+        assert fast and fast == _full_week_frozen(data.as_of(week), league, week, END, drafted)
     rv.clear_cache()
+
+
+@pytest.mark.parametrize("superflex", [False, True])
+def test_a_deep_qbs_frozen_value_carries_the_league_size_taper(superflex):
+    """The freeze reads the league's own value curve: a QB past an 8-team league's starters is frozen lower than in
+    a 12-team league."""
+    data, deep, week = _freeze_season(), _deep_qb(DATA), 8
+    rv.clear_cache()
+    eight = rv._frozen(data.as_of(week), _freeze_league(8, superflex), week, END, 0)[deep]
+    rv.clear_cache()
+    twelve = rv._frozen(data.as_of(week), _freeze_league(12, superflex), week, END, 0)[deep]
+    rv.clear_cache()
+    assert 0 < eight < twelve
 
 
 def test_a_dropped_season_frees_the_week_builds_and_the_freeze():

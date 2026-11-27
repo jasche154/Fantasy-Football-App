@@ -257,7 +257,17 @@ def test_a_graduates_prior_group_is_the_same_in_every_lineup_and_league_size(dat
     superflex = {**fakes.fake_settings().starters, "SUPERFLEX": 1}
     for settings in (fakes.fake_settings(), fakes.fake_settings(starters=superflex),
                      fakes.fake_settings(teams=8), fakes.fake_settings(teams=8, starters=superflex)):
+        league = rv.league_settings(settings)
         rv.clear_cache()
-        priced = rv.knowledge(season, rv.league_settings(settings), week, 16, 0).by_id[backup]
+        priced = rv.knowledge(season, league, week, 16, 0).by_id[backup]
+        with pytest.MonkeyPatch.context() as patch:       # the same week with nobody priced as a fill-in
+            patch.setattr(replay_fillin, "_fill_ins", lambda data, week, teams: MappingProxyType({}))
+            rv.clear_cache()
+            plain = rv.knowledge(season, league, week, 16, 0).by_id[backup]
+        curve = rv.chart_view(season.as_of(week), league)[1]           # this league's value curve
+        backup_value = replay_chart.value_at(replay_chart.slot_curve(curve), "QB",
+                                             len({t for t, _ in season.schedule.opponents}) + 1)
         assert priced.fill_in == pytest.approx(expected), (settings.teams, settings.starters)
+        graduate = expected * plain.chart + (1 - expected) * min(backup_value, plain.chart)
+        assert priced.chart == pytest.approx(graduate, abs=0.1), (settings.teams, settings.starters)
     rv.clear_cache()
