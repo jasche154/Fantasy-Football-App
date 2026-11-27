@@ -215,6 +215,17 @@ def implied_opinions(belief: World, known: SeasonData, week: int, worth: Mapping
     return out
 
 
+def expert_lean(belief: World, known: SeasonData, week: int, scoring: ScoringSettings, games_left: int) -> dict[int, float]:
+    """{player: price multiplier} for a market held mid-season (sim_setup._market_adp): the opinion under which the
+    belief's values give `known`'s expert ranks of `week` (`implied_opinions`), as the experts' noise prices it.
+    The simulated experts carry the last real ranks over the join; a market on the belief alone left a jump-in
+    draft room's order and its ADP agreeing at 0.77-0.80 (Spearman, top 60) where one belief gave 0.88-0.91."""
+    worth = values(belief, scoring, games_left)
+    spread = opinion_knob("opinion_spread")
+    return {pid: float(np.exp(EXPERT_NOISE * spread.get(belief.players[pid].position, 1.0) * z))
+            for pid, z in implied_opinions(belief, known, week, worth).items()}
+
+
 def held(previous: Mapping[int, float], worth: Mapping[int, float], belief: World,
          was_out: Collection[int] = (), benched: Collection[int] = ()) -> dict[int, float]:
     """{player: the value experts rank him on this week}: worth_step of the way from last week's to this week's
