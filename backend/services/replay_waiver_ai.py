@@ -433,14 +433,16 @@ def _trim(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: _Cont
 
 def _close_by_chart(spare: Sequence[ReplayValue]) -> list[ReplayValue]:
     """`spare` (least valuable first) with each run of healthy values within TRIM_CLOSE of its lowest one
-    reordered by trade value, lowest first: the model can't tell them apart (often all 0), the market can."""
+    reordered by trade value, lowest first: the model can't tell them apart (often all 0), the market can. The
+    players out for the season `_spare` puts in front stay there: they are not in value order."""
+    lost = [v for v in spare if _season_over(v)]
     runs: list[list[ReplayValue]] = []
-    for value in spare:
+    for value in spare[len(lost):]:
         if runs and value.healthy_value - runs[-1][0].healthy_value <= TRIM_CLOSE:
             runs[-1].append(value)
         else:
             runs.append([value])
-    return [v for run in runs for v in sorted(run, key=lambda v: (v.healthy_chart, v.player_id))]
+    return [*lost, *(v for run in runs for v in sorted(run, key=lambda v: (v.healthy_chart, v.player_id)))]
 
 
 def _upgrade(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: _Context) -> Move | None:

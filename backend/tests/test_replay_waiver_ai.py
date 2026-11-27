@@ -992,6 +992,8 @@ def test_a_taken_ir_slot_goes_to_a_roster_player_worth_clearly_more_and_then_sta
     assert rs.team(ai.cpu_ir(state, SETTINGS, close, SEED), team_id) == rs.team(state, team_id)   # near-equal: stays
     soon = patched(clear, {star: {"news": replace(BACK, back=week + 1)}})        # back next week: not worth two moves
     assert rs.team(ai.cpu_ir(state, SETTINGS, soon, SEED), team_id) == rs.team(state, team_id)
+    later = patched(clear, {star: {"news": replace(BACK, back=week + 2)}})       # the week after: it is
+    assert rs.team(ai.cpu_ir(state, SETTINGS, later, SEED), team_id).ir == (star,)
     # "no timetable yet" reads the same to everyone, whatever week it guesses: he takes the slot either way
     for guess in (week + 1, None):
         vague = patched(clear, {star: {"news": replace(BACK, back=guess, vague=True)}})
@@ -1104,3 +1106,39 @@ def test_an_open_spot_is_never_filled_with_a_free_agent_who_is_out_for_the_seaso
         return ai._fill_spot(roster, [knowledge.by_id[v.player_id] for v in free], ctx)[0]
 
     assert filled(BACK) == lost_one and filled(LOST) != lost_one
+
+
+def test_a_slot_whose_player_lost_his_tag_is_never_swapped_for_a_roster_player():
+    """He could not come back (`_bring_back` found nobody to spare), so the slot stays blocked."""
+    week, team_id = 6, CPUS[0]
+    state, held, star = full_with_ir(week, team_id)
+    tags = {(star, week): fakes.Injury("IR")}
+    untagged = patched(tagged_know(week, tags), {star: {"news": BACK, "chart": 500.0}})
+    tagged = patched(tagged_know(week, {**tags, (held, week): fakes.Injury("IR")}),
+                     {star: {"news": BACK, "chart": 500.0}, held: {"news": BACK, "chart": 60.0}})
+
+    def restash(knowledge: Knowledge) -> State:
+        return ai._restash(state, ai._for_team(ai._context(knowledge, SETTINGS, state), rs.team(state, team_id)),
+                           rs.team(state, team_id))
+
+    assert restash(untagged) is state
+    assert rs.team(restash(tagged), team_id).ir == (star,)
+
+
+def test_a_player_out_for_the_season_is_kept_when_cutting_him_would_leave_no_lineup():
+    """The only quarterback, and none on the wire: `_fill_spot` finds somebody, but the roster could not start a
+    quarterback without him, so he stays (a free-agent quarterback is added for him at once)."""
+    week, team_id = 6, CPUS[0]
+    state = league(week, phase="open")
+    team = rs.team(state, team_id)
+    passer = at(state, team_id, "QB", week)[0]
+    lost = patched(tagged_know(week, {(passer, week): fakes.Injury("IR")}), {passer: {"news": LOST}})
+    ctx = ai._for_team(ai._context(lost, SETTINGS, state), team)
+    roster = [lost.by_id[pid] for pid in team.roster if lost.by_id[pid].position != "QB" or pid == passer]
+    free = [lost.by_id[v.player_id] for v in replay_waivers.available_players(state, lost)]
+    others = [v for v in free if v.position != "QB"]
+
+    assert ai._fill_spot([v for v in roster if v.player_id != passer], others, ctx) is not None
+    assert ai._replace_lost(roster, others, ctx) is None
+    move = ai._replace_lost(roster, free, ctx)
+    assert move is not None and move[1] == passer and lost.by_id[move[0]].position == "QB"
