@@ -34,6 +34,7 @@ if __package__ in (None, ""):
 import argparse  # noqa: E402
 import json
 import logging
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from functools import lru_cache
@@ -147,6 +148,13 @@ def fit(session, seasons: Sequence[int]) -> dict:
     return {"seasons": list(seasons), "weeks": list(FIT_WEEKS), "points": found}
 
 
+def compact_json(found: Mapping) -> str:
+    """`found` as JSON with each list of numbers on one line."""
+    text = json.dumps(found, indent=1)
+    return re.sub(r"\[\s+([^\[\]{}]*?)\s+\]", lambda m: "[" + ", ".join(x.strip() for x in m.group(1).split(",")) + "]",
+                  text) + "\n"
+
+
 def main(argv: list[str] | None = None) -> None:
     from services.replay_data import parse_seasons
     from services.replay_value_eval import DEFAULT_DB, read_only_copy
@@ -161,7 +169,7 @@ def main(argv: list[str] | None = None) -> None:
         return
     with read_only_copy(DEFAULT_DB) as session:
         found = fit(session, parse_seasons(args.seasons))
-    PATH.write_text(json.dumps(found, indent=1) + "\n", encoding="utf-8")
+    PATH.write_text(compact_json(found), encoding="utf-8")
     points.cache_clear()
     rank_map.cache_clear()
     sized.cache_clear()
