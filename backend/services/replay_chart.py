@@ -263,16 +263,19 @@ def charts(data: SeasonData, rows: Sequence[dict], priors: Mapping[int, float], 
 def base_charts(data: SeasonData, rows: Sequence[dict], priors: Mapping[int, float], week: int,
                 end_week: int, drafted: int = 0, regular: SeasonData | None = None,
                 frozen: Mapping[int, float] | None = None, live: dict[int, float] | None = None,
-                since: Mapping[int, int] | None = None) -> tuple[dict[int, dict], Parts, str]:
+                since: Mapping[int, int] | None = None,
+                board: SeasonData | None = None) -> tuple[dict[int, dict], Parts, str]:
     """`charts` without the seeded news: (fields with news None, the parts `with_news` needs for players
     with an open hard-tag streak, rank_source). `drafted`: the league's draft week (see `pre_picks`).
     `regular`: a superflex league's season on the 1-QB list (replay_superflex.one_qb), whose overall ranks
     set a non-QB's `star`, so the SUPERFLEX slot changes only the QBs. `frozen`: {id: healthy chart} for the
     players in an injury absence (replay_values), standing in for the expert and model parts; their live
     healthy chart goes into `live` when given; `since`: the first week of each frozen absence, so the frozen value
-    is scaled by `replay_chart_injury.return_factor` of the games missed (`with_news` uses the reported length)."""
+    is scaled by `replay_chart_injury.return_factor` of the games missed (`with_news` uses the reported length).
+    `board`: the season whose ADP sets the preseason picks (pre_rank, pre_chart, `star`) when `data` is a view
+    that moves ADP only to change the value curve (replay_league_size.sized); default `data`."""
     frozen, since = frozen or {}, since or {}
-    curve, picks = slot_curve(data), pre_picks(data, drafted)
+    curve, picks = slot_curve(data), pre_picks(board or data, drafted)
     overall = pre_ranks(picks)
     star_ranks = overall if regular is None else {
         **pre_ranks(pre_picks(regular, drafted)),

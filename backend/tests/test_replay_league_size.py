@@ -61,3 +61,19 @@ def test_the_sized_view_moves_adp_only_and_reads_nothing_from_the_week_on():
         changed = rv.knowledge(fakes.future_changed(data, week), league(8), week, 16)
         assert [(v.player_id, v.chart) for v in now.values] == [(v.player_id, v.chart) for v in changed.values]
     rv.clear_cache()
+
+
+@pytest.mark.parametrize("starters", [SUPERFLEX, dict(rs.DEFAULT_STARTERS)])
+@pytest.mark.parametrize("week", [0, 6])
+def test_the_board_order_pre_rank_and_star_do_not_depend_on_league_size(starters, week):
+    """The taper moves the value curve only: the preseason picks (the board's rank order, `pre_rank`,
+    `pre_chart`) and `star` (which feeds the form term) are the 12-team league's, as the CPU draft's raw ADP is."""
+    data = fakes.fake_season()
+    rv.clear_cache()
+    eight = rv.knowledge(data, league(8, starters), week, 16)
+    twelve = rv.knowledge(data, league(12, starters), week, 16)
+    rv.clear_cache()
+
+    def board(know):
+        return {v.player_id: (v.pre_rank, v.star, v.pre_chart) for v in know.values}
+    assert board(eight) == board(twelve)

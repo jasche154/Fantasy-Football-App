@@ -16,7 +16,8 @@ the 12-team pick of rank m(n), so the slot curve, every value read off it and th
 Measured with replay_chart_eval --teams 8 (8 seasons, the player-weeks both charts scored): regular Spearman
 0.464 -> 0.475, held-out RMSE 4.022 -> 4.001, out players 2.927 -> 2.889; superflex 0.523 -> 0.522, 4.165 ->
 4.155, out players 2.925 -> 2.921 (--teams 10: regular 0.518 -> 0.524, 4.012 -> 3.990, 2.975 -> 2.957; superflex
-0.549 -> 0.550, 4.743 -> 4.729, out players 3.477 -> 3.490). Mapping every rank by equal points over replacement instead (a starter too)
+0.549 -> 0.550, 4.743 -> 4.729, out players 3.477 -> 3.490). Mapping every rank by equal points over replacement
+instead (a starter too)
 scored worse in superflex (0.540 -> 0.422, out players 3.082 -> 3.326): it marks down the starting QBs, whom the
 12-team chart already prices below their points. Leagues of 12 teams or more are left as they are (the brief's
 rule: the 12- and 14-team charts are the fitted ones).
@@ -105,7 +106,8 @@ def sized(data: SeasonData, league: LeagueSettings) -> SeasonData:
     curve = replay_chart.slot_curve(data)
     moved: dict[int, float] = {}
     for position, mapped in ranks.items():
-        drafted = sorted((p.adp, pid) for pid, p in data.players.items() if p.position == position and p.adp is not None)
+        drafted = sorted((p.adp, pid) for pid, p in data.players.items()
+                         if p.position == position and p.adp is not None)
         for n, (_, pid) in enumerate(drafted, start=1):
             moved[pid] = replay_chart.pick_at(curve, position, twelve_team_rank(mapped, n))
     return replay_superflex._with_adp(data, {pid: moved.get(pid, p.adp) for pid, p in data.players.items()})

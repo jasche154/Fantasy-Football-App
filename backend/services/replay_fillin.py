@@ -49,7 +49,8 @@ NEWS_SEEDS = range(20)           # the fit averages the noisy report over these 
 STATES = ("keep", "named", "season", "unreported", "back", "taken")   # the fitted shares
 MIN_GAMES = 20                   # a bucket with fewer real team games takes its state's pooled share
 GRADUATED = 2                    # starts past probation still marked down (probation, probation + 1); measured: real
-                                 # graduates' 7th start on kept the job as often as an established starter (0.79 vs 0.81)
+                                 # graduates' 7th start on kept the job as often as an established starter
+                                 # (0.79 vs 0.81)
 PRIOR_PICK = 200.0               # a preseason ADP before this pick: the market drafted him (a high-pick rookie, a
                                  # veteran starter), his climb is fitted apart from a career backup's (`prior` group)
 log = logging.getLogger(__name__)
@@ -339,7 +340,8 @@ def fit(seasons: Sequence[int], probation: int) -> dict:
         shares[state] = [round(s / g, 3) if g >= MIN_GAMES * weight else round(pooled, 3) for s, g in buckets]
     shares.setdefault("unreported", shares["season"])
     rate = base[0] / base[1]
-    graduated_fit = {group: [round(min(1.0, share / rate), 3) for share in _climb(totals["graduated:" + group][:GRADUATED])]
+    graduated_fit = {group: [round(min(1.0, share / rate), 3)
+                             for share in _climb(totals["graduated:" + group][:GRADUATED])]
                      for group in ("prior", "none")}
     graduated_fit["prior"] = [max(a, b) for a, b in zip(graduated_fit["prior"], graduated_fit["none"])]
     return {"seasons": list(seasons), "probation": probation, "shares": shares,
