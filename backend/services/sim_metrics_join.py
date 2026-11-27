@@ -76,8 +76,9 @@ def churn(data: SeasonData, weeks: Iterable[int]) -> dict[str, float]:
 
 def line_follow(data: SeasonData, weeks: Iterable[int]) -> dict[str, float]:
     """How far a player's weekly projection follows his team's implied total (from the line), within player-season:
-    the slope of log projection on log implied total, healthy players projected PLAYING_PROJECTION+ (real ESPN / Sleeper, 2021-2025, sim_eval: QB 0.
-    7, RB 0.33, WR 0.16, TE 0.17 in weeks 12-18 (mid mode), QB 0.56, RB 0.32, WR 0.21, TE 0.13 over whole seasons (full mode))."""
+    the slope of log projection on log implied total, healthy players projected PLAYING_PROJECTION+ (real ESPN /
+    Sleeper, 2021-2025, sim_eval: QB 0.47, RB 0.33, WR 0.16, TE 0.17 in weeks 12-18 (mid mode), QB 0.56, RB 0.32,
+    WR 0.21, TE 0.13 over whole seasons (full mode))."""
     weeks, totals = set(weeks), {}
     for g in data.schedule.games:
         if g.week in weeks and g.spread_line is not None and g.total_line is not None and g.total_line > abs(g.spread_line):
