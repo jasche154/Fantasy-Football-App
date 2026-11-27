@@ -69,6 +69,8 @@ def line_script(data: SeasonData, weeks: Iterable[int]) -> dict[str, float]:
     if not parts:
         return {}
     x, t, c = np.concatenate(parts).T
+    if x @ x <= 0:                                   # every team's line the same each week: no slope to read
+        return {}
     return {"targets per line point %": 100 * float(x @ t / (x @ x)), "carries per line point %": 100 * float(x @ c / (x @ x))}
 
 

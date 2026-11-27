@@ -125,3 +125,12 @@ def test_a_week_outside_the_regular_season_has_no_calendar(week):
 @pytest.mark.parametrize("week", [1, 17, 18])
 def test_every_regular_season_week_has_a_calendar_whatever_the_seasons_length(week):
     assert len(sim_calendar.factors(week)) == 3          # 17 ends a 2018-2020 season, 18 a later one
+
+
+def test_the_line_script_row_is_empty_when_no_team_s_line_ever_moves():
+    """Item 10: a constant line within every team-season leaves no slope (x @ x = 0), so the row is left out."""
+    games = [_game(w, "AAA", "BBB", 3.0) for w in range(1, 9)]
+    box = {(1, w): BoxLine(targets=30, carries=28) for w in range(1, 9)}
+    data = SimpleNamespace(schedule=SimpleNamespace(games=games), box=box,
+                           team_by_week={1: tuple((w, "AAA") for w in range(1, 9))})
+    assert sim_metrics_games.line_script(data, range(1, 9)) == {}
