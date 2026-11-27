@@ -97,17 +97,3 @@ def usual_passer(team: str, seen: _Seen, players: Mapping[int, Player], week: in
     qbs = [p for p in players.values() if p.team == team and p.position == "QB"]
     return max(qbs, key=lambda p: p.starts).quality if qbs else 1.0
 
-
-def played_weight(team: str, games: Mapping, carries: Mapping[int, float], week: int, decay: float) -> float:
-    """The decayed mean, over the team's played games before `week`, of the carry weights of the players with a box
-    line in the game plus the "other" bucket's (member 0): the sum a Luce weight is a share of. A depth player
-    dressed in every simulated game appears in only some real ones, so a quarterback's weight over every dressed
-    player's understates his real share (0.127 against 0.149, mid-season 2023-2025); sim_game gives him his weight
-    over this. 0.0 when the team has no game (sim_world.estimate then keeps the prior World's)."""
-    total = weight = 0.0
-    for (game_team, game_week), lines in games.items():
-        if game_team == team and game_week < week:
-            d = decay ** max(0, week - 1 - game_week)
-            total += d * (sum(carries.get(pid, 0.0) for pid in lines) + carries.get(0, 0.0))
-            weight += d
-    return total / weight if weight > 0 else 0.0

@@ -59,6 +59,21 @@
   "window_kneels": 0.61,
   "kneel_yards": -1.072
  },
+ "qb_share": {
+  "scale": 1.1364,
+  "games": 1928,
+  "check": {
+   "held_out_sse": 4.941,
+   "unscaled_sse": 5.252
+  },
+  "groups": {
+   "share small": 1.1419,
+   "share middle": 1.0196,
+   "share large": 1.2001,
+   "dressed light": 1.1322,
+   "dressed heavy": 1.1416
+  }
+ },
  "participation": {
   "RB": {
    "c": 0.92,

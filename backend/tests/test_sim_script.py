@@ -292,17 +292,40 @@ def test_leaving_hurt_never_changes_who_is_in_the_game_plan():
     assert min(sim_parts.plan(hurt, rng).targets[hurt.receivers.index(wr)] for _ in range(2000)) > 0
 
 
-def test_a_quarterbacks_carry_share_is_his_weight_over_the_players_who_appear():
-    """A Luce weight is a share of the weights of the players in a game (with a box line); a quarterback's share is
-    his weight over that (sim_teams.played_weight), not over every player the simulation dresses."""
-    from services import sim_teams
-    games = {("AAA", 1): {1: None, 2: None, 3: None}, ("AAA", 2): {1: None, 2: None}, ("BBB", 1): {9: None}}
-    weights = {0: 0.05, 1: 0.15, 2: 0.6, 3: 0.2, 9: 1.0}
-    norm = sim_teams.played_weight("AAA", games, weights, 3, 0.5)
-    assert norm == pytest.approx((0.5 * (0.95 + 0.05) + 1.0 * (0.75 + 0.05)) / 1.5)
-    assert sim_teams.played_weight("CCC", games, weights, 3, 0.5) == 0.0
+def test_a_quarterbacks_carry_share_is_his_full_strength_share_times_one_league_factor():
+    """The same fitted factor in every game (belief and truth, week 1 or 18, whoever played before); a hurt back's
+    carries still go to the next back, not to the quarterback."""
     w = world()
     qb = w.players[pid("AAA", "QB")]
     rushers = [p for p in w.roster("AAA") if p.position in ("RB", "WR", "TE") and p.carries > 0] + [qb]
-    shares = sim_game._carry_weights(rushers, qb, 0.0, {}, norm=0.8)
-    assert shares[-2] == pytest.approx(qb.carries / 0.8)
+    plain, scaled = (sim_game._carry_weights(rushers, qb, 0.0, {}, s)[-2] for s in (1.0, 1.25))
+    assert scaled == pytest.approx(1.25 * plain)
+    without = [p for p in rushers if p.player_id != pid("AAA", "RB")]
+    assert sim_game._carry_weights(without, qb, 0.0, {}, 1.25)[-2] == pytest.approx(scaled)
+    rows = [(2020 + i % 3, 0.1, 3.0, 25.0, 1.0) for i in range(30)] + [(2020 + i % 3, 0.2, 6.0, 25.0, 1.3) for i in range(30)]
+    fitted = sim_script_fit.qb_share(rows)
+    assert fitted["scale"] == pytest.approx(1.2) and fitted["check"]["held_out_sse"] < fitted["check"]["unscaled_sse"]
+
+
+def test_with_players_leaving_hurt_every_players_projection_is_his_draws_mean():
+    """A game with its QB, lead back and lead receiver leaving hurt: per player, the projected targets, carries and
+    TDs (the window's plays and TDs, overtime's too, never to one who left) are the mean of the draws."""
+    w, target = world(), {"AAA": 21.0, "BBB": 20.0}
+    exits = {pid("AAA", "QB"): 0.5, pid("AAA", "RB"): 0.5, pid("AAA", "WR"): 0.6}
+    projected = sim_game.expected(w, "AAA", "BBB", set(), HALF, exits=exits, target=target)
+    sides = sim_centre.centred({"AAA": sim_game._side(w, "AAA", "BBB", set(), exits),
+                                "BBB": sim_game._side(w, "BBB", "AAA", set(), {})}, target)
+    rng, n, sums = np.random.default_rng(12), 6000, {}
+    for _ in range(n):
+        for p, g in sim_draw.draw_game((sides["AAA"], sides["BBB"]), rng, HALF).players.items():
+            if team_of(p) == "AAA" and g.usage is not None:
+                b = g.box
+                row = sums.setdefault(p, np.zeros(4))
+                row += (b.targets, b.carries, b.rec_td, b.rush_td)
+    for name in ("RB", "RB2", "RB3", "WR", "WR2", "WR3", "TE", "QB", "QB2"):
+        p = pid("AAA", name)
+        drawn = sums.get(p, np.zeros(4)) / n
+        box = projected[p].box if p in projected else None
+        want = np.array([box.targets, box.carries, box.rec_td, box.rush_td]) if box else np.zeros(4)
+        assert drawn[:2] == pytest.approx(want[:2], rel=0.05, abs=0.06), name
+        assert drawn[2:] == pytest.approx(want[2:], rel=0.12, abs=0.012), name

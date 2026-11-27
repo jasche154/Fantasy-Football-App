@@ -66,6 +66,12 @@ def scoring_share(side) -> tuple[float, float]:
     return before_cut("targets"), before_cut("carries")
 
 
+def qb_share_scale() -> float:
+    """The fitted factor on a QB's full-strength share of his team's carries (sim_script_fit.qb_share; 1.0 when the
+    file has none yet, as the fit itself reads the unscaled share)."""
+    return float(stored().get("qb_share", {}).get("scale", 1.0))
+
+
 def half_share() -> float:
     """The first half's share of the plays before the cut (and so of the points scored there)."""
     s = stored()["shares"]
@@ -123,48 +129,29 @@ def _qb_carries(side) -> tuple[int, float, float, float]:
     return at, share * team, own, max(0.0, share * team - own)
 
 
-MEMO_SIZE = 2048                 # sides whose derived arrays are remembered (`per_side`); emptied when full
-_memo: dict[tuple, tuple] = {}
-
-
-def per_side(side, name: str, work):
-    """`work(side)`, remembered for this side object (frozen, so the answer never changes; the entry holds the side,
-    so its id is not reused while remembered): a game's draw and its projections read the same side many times."""
-    hit = _memo.get((id(side), name))
-    if hit is not None and hit[0] is side:
-        return hit[1]
-    if len(_memo) >= MEMO_SIZE:
-        _memo.clear()
-    value = work(side)
-    parts_ = value.values() if isinstance(value, dict) else value if isinstance(value, tuple) else (value,)
-    for array in parts_:
-        if isinstance(array, np.ndarray):
-            array.setflags(write=False)                   # shared by every reader: never changed in place
-    _memo[(id(side), name)] = (side, value)
-    return value
+def structural(side, name: str, work):
+    """`work(side)` for a value the centring never changes (weights, shares, the script's volumes), kept in the
+    side's `cache` (sim_game._side gives every side one, sim_centre gives a fresh one to a side whose volumes or
+    script it sets, and its scaled copies share it: the centring changes only TD rates, yards and field-goal
+    tries); worked out each time for a side without one."""
+    cache = side.cache
+    if cache is None:
+        return work(side)
+    if name not in cache:
+        cache[name] = work(side)
+    return cache[name]
 
 
 def carry_weights(side) -> np.ndarray:
     """The side's carry weights over its carries besides kneels: in a game in parts the starting QB's is cut to his
-    belief carries less his own expected kneels (the others' keep their proportions); else `carry_w`. Remembered by
-    the weights and the game script, which the centring's scaled copies of a side share."""
+    belief carries less his own expected kneels (the others' keep their proportions); else `carry_w`."""
     if side.end is None or side.qb is None:
         return side.carry_w
-    key = (id(side.carry_w), "carry_weights", side.carries, side.targets, side.margin, side.half_lead, side.end,
-           side.exited)
-    hit = _memo.get(key)
-    if hit is not None and hit[0] is side.carry_w:
-        return hit[1]
-    if len(_memo) >= MEMO_SIZE:
-        _memo.clear()
-    value = _carry_weights(side)
-    value.setflags(write=False)
-    _memo[key] = (side.carry_w, value)
-    return value
+    return structural(side, "carry_weights", _carry_weights)
 
 
 def _carry_weights(side) -> np.ndarray:
-    at, _, _, other = _qb_carries(side)
+    at, _, _, other = structural(side, "qb", _qb_carries)
     plays = parts(side)[:, 1].sum() + window_means(side)[1]
     share = min(other / plays, 0.99) if plays > 0 else 0.0
     rest = side.carry_w.sum() - side.carry_w[at]
@@ -179,11 +166,7 @@ def rushing(side) -> tuple[np.ndarray, np.ndarray]:
     each, never a TD) are taken out; else the side's rates."""
     if side.end is None or side.qb is None:
         return side.ypr, side.rush_td
-    return per_side(side, "rushing", _rushing)
-
-
-def _rushing(side) -> tuple[np.ndarray, np.ndarray]:
-    at, belief, own, other = _qb_carries(side)
+    at, belief, own, other = structural(side, "qb", _qb_carries)
     if other <= 0:
         return side.ypr, side.rush_td
     ypr, td = side.ypr.copy(), side.rush_td.copy()
@@ -196,6 +179,10 @@ def window_means(side) -> tuple[float, float, float]:
     """(targets, carries, kneels) the side's window adds besides its scoring plays, on average (sim_closing_means
     over the cut margin's spread): the ending's targets less its TD catches and its carries less its TD runs and
     kneels, scaled by `window_scale`; kneels as they come."""
+    return structural(side, "window_means", _window_means)
+
+
+def _window_means(side) -> tuple[float, float, float]:
     t_scale, c_scale = window_scale(side)
     targets, carries, kneels = _window(float(side.end.lead), float(side.end.sd))
     return t_scale * targets, c_scale * carries, kneels
@@ -291,3 +278,25 @@ def window_shares(shares: np.ndarray, ids: tuple, exited: frozenset) -> np.ndarr
     out = np.where([pid in exited for pid in ids], 0.0, shares)
     total = out.sum()
     return out / total if total > 0 else out
+
+
+def window_split(drawn: np.ndarray, mean: np.ndarray, ids: tuple, exited: frozenset) -> np.ndarray:
+    """One game's window shares: the drawn plan's (`drawn`) without the players who left hurt, their part shared out
+    by the side's mean window shares (`mean`: `window_shares` of the weights' shares). Linear in the drawn shares, so
+    its mean is `mean` exactly (renormalizing each drawn plan gave a back who sits out some plans' teammates up to
+    60% more window carries than the projection)."""
+    if not exited:
+        return drawn
+    gone = np.array([pid in exited for pid in ids])
+    return np.where(gone, 0.0, drawn) + drawn[gone].sum() * mean
+
+
+def shares(side) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """(target shares, carry shares, their window shares without the exited players) of the side's weights."""
+    return structural(side, "shares", _shares_of)
+
+
+def _shares_of(side) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    weights = carry_weights(side)
+    t, c = side.target_w / side.target_w.sum(), weights / weights.sum()
+    return t, c, window_shares(t, side.receivers, side.exited), window_shares(c, side.rushers, side.exited)

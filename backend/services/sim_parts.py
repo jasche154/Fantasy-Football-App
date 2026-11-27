@@ -117,10 +117,14 @@ def _phi(v: float) -> float:
 
 def _yards(plays: np.ndarray, mean: np.ndarray, sd: np.ndarray, shift: float, rng: np.random.Generator) -> np.ndarray:
     """Whole yards over `plays` per player, each play a shifted gamma (mean, sd)."""
-    base = np.maximum(mean + shift, 0.5)
-    k, theta = base ** 2 / sd ** 2, sd ** 2 / base
-    total = np.where(plays > 0, rng.gamma(np.maximum(plays * k, 1e-9), theta) - plays * shift, 0.0)
-    return np.round(total).astype(int)
+    out = np.zeros(len(plays), dtype=int)
+    some = plays > 0
+    if not some.any():
+        return out
+    base = np.maximum(mean[some] + shift, 0.5)
+    k, theta = base ** 2 / sd[some] ** 2, sd[some] ** 2 / base
+    out[some] = np.round(rng.gamma(plays[some] * k, theta) - plays[some] * shift).astype(int)
+    return out
 
 
 def _touchdowns(catches: np.ndarray, rec_rate: np.ndarray, carries: np.ndarray, rush_rate: np.ndarray,
@@ -178,7 +182,7 @@ def plan_inputs(side) -> "sim_script.PlanInputs":
     def work(s) -> sim_script.PlanInputs:
         target_w, carry_w = s.whole if s.whole is not None else (s.target_w, s.carry_w)
         return sim_script.plan_inputs(s.receivers, target_w, s.rushers, carry_w, s.targets, s.carries, s.positions)
-    return sim_script.per_side(side, "plan", work)
+    return sim_script.structural(side, "plan", work)
 
 
 def _planned(weights: np.ndarray, index: np.ndarray, q: np.ndarray, drawn: np.ndarray) -> np.ndarray:
@@ -248,13 +252,8 @@ class Half:
 
 def _per_play(side) -> np.ndarray:
     """[yards per target, TDs per target, yards per carry, TDs per carry] before the cut, at mean efficiency."""
-    return sim_script.per_side(side, "per_play", _work_per_play)
-
-
-def _work_per_play(side) -> np.ndarray:
-    t = side.target_w / side.target_w.sum() * side.catch
-    weights = sim_script.carry_weights(side)
-    c = weights / weights.sum()
+    t_share, c, _, _ = sim_script.shares(side)
+    t = t_share * side.catch
     p_t, p_c = sim_script.scoring_share(side)
     ypr, rush_td = sim_script.rushing(side)
     return np.array([t @ side.ypc, t @ np.minimum(side.rec_td / p_t, MAX_TD_RATE),
@@ -338,8 +337,7 @@ def before_cut(sides, fg_tries: list[float], rng: np.random.Generator) -> tuple[
     volumes = [sim_script.parts(side) for side in sides]
     share = [float(v[0].sum() / v.sum()) if v.sum() > 0 else 0.5 for v in volumes]
     per = [_per_play(side) for side in sides]
-    drives = [sim_script.per_side(side, "drives", lambda s, i=i: drives_before_cut(s, volumes[i], share[i], per[i]))
-              for i, side in enumerate(sides)]
+    drives = [drives_before_cut(side, volumes[i], share[i], per[i]) for i, side in enumerate(sides)]
     first = [half(side, plans[i], volumes[i][0], share[i], eff[i], fg_tries[i], rng, lean[i], drives[i][0], per[i])
              for i, side in enumerate(sides)]
     surprise = [first[i].points - mean_points(side, volumes[i][0], share[i], fg_tries[i], per[i])
@@ -369,8 +367,9 @@ def window(sides, offense: list[_Offense], events: list, plans: list[Plan], eff:
     for i, side in enumerate(sides):
         targets, carries, kneels = sim_script.window_plays(side, events[i], rng)
         kneels = kneels if sim_script.kneeler(side) in side.rushers else 0
-        late = Plan(sim_script.window_shares(plans[i].targets, side.receivers, side.exited),
-                    sim_script.window_shares(plans[i].carries, side.rushers, side.exited))
+        _, _, t_win, c_win = sim_script.shares(side)
+        late = Plan(sim_script.window_split(plans[i].targets, t_win, side.receivers, side.exited),
+                    sim_script.window_split(plans[i].carries, c_win, side.rushers, side.exited))
         targets = targets if late.targets.sum() > 0 else 0
         carries = carries if late.carries.sum() > 0 else 0
         offense[i] = offense[i] + plays(side, late, targets, carries, float(eff[i]), rng, kneels=kneels,

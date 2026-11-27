@@ -138,7 +138,7 @@ def _scripted(side: "_Side", margin: float, end: "Ending") -> "_Side":
     half's share of its expected lead at the cut (`end.lead`), its window `end`. Its halves' volumes follow the line and the score, its window's a real ending's (a favourite runs more
     and throws a little less, as real ones do against the Vegas line)."""
     from services import sim_script
-    return replace(side, margin=margin, half_lead=sim_script.half_share() * end.lead, end=end)
+    return replace(side, margin=margin, half_lead=sim_script.half_share() * end.lead, end=end, cache={})
 
 
 def _wanted(sides: dict, means: dict, against: dict, target, shift, factors) -> dict[str, float]:
@@ -162,7 +162,7 @@ def _in_week(side: "_Side", week: int) -> "_Side":
     """`side` with week `week`'s pass / run mix (sim_calendar: its targets, carries and yards per catch)."""
     from services import sim_calendar
     targets, carries, ypt = sim_calendar.factors(week)
-    return replace(side, targets=side.targets * targets, carries=side.carries * carries, ypc=side.ypc * ypt)
+    return replace(side, targets=side.targets * targets, carries=side.carries * carries, ypc=side.ypc * ypt, cache={})
 
 
 def centred(sides: dict, target: Mapping[str, float] | None = None, shift: Mapping[str, float] | None = None,

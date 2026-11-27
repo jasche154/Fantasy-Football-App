@@ -35,6 +35,10 @@ real endings (sim_closing_fit joins them); this module fits the two halves befor
 - `spread`: a team's pace for the day beyond a Poisson's spread of its plays (within a team-season its plays before
   the cut spread 6.8 a game, a Poisson's 6.9: none) and its pass share's beyond a binomial's (a first half's pass
   share spreads beyond a binomial's by sd 0.027 within team-seasons: a pass-first or run-first plan).
+- `qb_share`: a league-wide factor on a quarterback's full-strength share of his team's carries (sim_game
+  ._carry_weights): the share counts every dressed player, though real games see only some of them, so it runs
+  short; fitted as his real carries over his share x his team's real carries in the games he started after each of
+  PART_WEEKS, checked held out by season and by share size and dressed backfield size (`qb_share`).
 - `league`: mean targets and carries per team-game of the same games (the window's real counts are scaled by a
   team's own volume over these), the mean yards of a kneel-down.
 """
@@ -328,6 +332,62 @@ def _expected_touches(side) -> dict[int, float]:
     return touches
 
 
+def qb_share_rows(session, seasons: Iterable[int]) -> list[tuple[int, float, float, float, int]]:
+    """(season, the starter's unscaled full-strength share, his real carries, his team's real carries, the carry
+    weights dressed) per game he started (50+ passing yards) in the WEEKS_AHEAD weeks after each of PART_WEEKS, his
+    share from the belief before it (sim_game._carry_weights, the stored scale taken back out)."""
+    from services import replay_pool, sim_game, sim_script, sim_world
+    scale = sim_script.qb_share_scale()
+    out = []
+    for season in seasons:
+        data = replay_pool.load_season_data(session, season, "half")
+        team_at = {(pid, w): t for pid, games in data.team_by_week.items() for w, t in games}
+        for week in PART_WEEKS:
+            world = sim_world.estimate(data.as_of(week), week)
+            for team in world.teams:
+                side = sim_game._side_of(world, team, None, set())
+                if side.qb is None:
+                    continue
+                share = float(side.carry_w[side.rushers.index(side.qb)] / side.carry_w.sum()) / scale
+                for played in range(week, min(week + WEEKS_AHEAD, data.last_week + 1)):
+                    mine = data.box.get((side.qb, played))
+                    if mine is None or mine.pass_yds < 50:
+                        continue
+                    team_carries = sum(line.carries for (pid, w), line in data.box.items()
+                                       if w == played and team_at.get((pid, w)) == team)
+                    if team_carries > 0:
+                        dressed = sum(world.players[pid].carries for pid in side.rushers[:-1] if pid in world.players)
+                        out.append((season, share, mine.carries, team_carries, dressed + world.teams[team].other_carries))
+    return out
+
+
+def qb_share(rows: list[tuple[int, float, float, float, int]]) -> dict:
+    """The league-wide factor on a QB's full-strength carry share: his real carries over his unscaled share x his
+    team's real carries, summed over the rows. Every dressed player counts in the share, though real games see only
+    some of them, so it runs short; the same factor in the belief and the truth, week 1 to the last. `check`: held
+    out one season at a time, the squared error of his carries against the unscaled share's; `groups`: the factor
+    for small / middle / large shares (a pocket passer to a runner) and for light / heavy dressed carry weights (the
+    sum the share divides by), to see whether one factor fits them all."""
+    a = np.array(rows, dtype=float)
+    season, share, qb, team, dressed = a.T
+
+    def factor(k: np.ndarray) -> float:
+        return float(qb[k].sum() / (share[k] * team[k]).sum()) if k.any() else float("nan")
+    held = without = 0.0
+    for s in np.unique(season):
+        f = factor(season != s)
+        test = season == s
+        held += float(np.sum((qb[test] - f * share[test] * team[test]) ** 2))
+        without += float(np.sum((qb[test] - share[test] * team[test]) ** 2))
+    edges = np.quantile(share, [1 / 3, 2 / 3])
+    groups = {"share small": factor(share < edges[0]), "share middle": factor((share >= edges[0]) & (share < edges[1])),
+              "share large": factor(share >= edges[1]), "dressed light": factor(dressed <= np.median(dressed)),
+              "dressed heavy": factor(dressed > np.median(dressed))}
+    return {"scale": round(factor(np.ones(len(a), dtype=bool)), 4), "games": len(a),
+            "check": {"held_out_sse": round(held / len(a), 3), "unscaled_sse": round(without / len(a), 3)},
+            "groups": {k: round(v, 4) for k, v in groups.items()}}
+
+
 def zero_chance(mu: np.ndarray, c: float, scale: float, floor: float) -> np.ndarray:
     """The chance a player expected `mu` touches has none: a no-show, else out of the game plan, else none of a
     Poisson around mu / q."""
@@ -393,9 +453,10 @@ def fit(seasons: Iterable[int], refresh: bool = False) -> dict:
     games = segments(seasons, refresh)
     with SessionLocal() as session:
         touch = touch_rows(session, [s for s in seasons if s >= 2019])     # projections and ADP from 2019 on
+        qb = qb_share_rows(session, [s for s in seasons if s >= 2019])
         session.rollback()
     return {"seasons": [seasons[0], seasons[-1]], "games": len(games), "cut": CUT, **halves(games),
-            "spread": spread(games), "league": league(games), "participation": participation(touch)}
+            "spread": spread(games), "league": league(games), "qb_share": qb_share(qb), "participation": participation(touch)}
 
 
 def write(result: Mapping) -> None:
@@ -414,7 +475,7 @@ def main(argv: list[str] | None = None) -> None:
     if args.fit:
         write(result)
         log.info("wrote %s", SCRIPT_PATH.name)
-    for key in ("shares", "first_half", "second_half", "check", "spread", "league"):
+    for key in ("shares", "first_half", "second_half", "check", "spread", "league", "qb_share"):
         log.info("%-12s %s", key, result[key])
     for position, curve in result["participation"].items():
         log.info("participation %s %s", position, {k: v for k, v in curve.items() if k != "bands"})
