@@ -139,14 +139,15 @@ def test_a_backup_qb_moves_every_receiver():
 
 
 def test_the_mean_of_many_games_is_the_expected_line():
-    w, rng = world(), np.random.default_rng(5)
+    from tests import sim_draws
+    w = world()
     expected = sim_game.expected(w, "AAA", "BBB", set(), HALF)
     points = defaultdict(float)
     draws = 3000
-    for _ in range(draws):
-        for p, g in sim_game.play(w, "AAA", "BBB", set(), rng, HALF).players.items():
+    for result in sim_draws.games(w, "AAA", "BBB", HALF, draws, 5):
+        for p, g in result.players.items():
             points[p] += g.points / draws
-    for name in ("QB", "RB", "WR", "TE"):
+    for name in ("QB", "RB", "WR", "TE"):              # 3,000 draws: se 1.1-1.6% of the mean, so 6% is 4-5 se
         assert points[pid("AAA", name)] == pytest.approx(expected[pid("AAA", name)].points, rel=0.06)
     assert points[pid("AAA", "K")] == pytest.approx(expected[pid("AAA", "K")].points, rel=0.08)
     assert points[pid("AAA", "DST")] == pytest.approx(expected[pid("AAA", "DST")].points, abs=0.3)

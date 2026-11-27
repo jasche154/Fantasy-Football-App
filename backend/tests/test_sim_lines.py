@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from services import replay_blob, sim_centre, sim_closing_means, sim_draw, sim_game, sim_lines, sim_market, sim_season, sim_world
-from tests import replay_fakes as fakes
+from tests import replay_fakes as fakes, sim_draws
 
 WEEK = 9
 SEED = 5
@@ -105,23 +105,37 @@ def test_a_centred_game_averages_its_target_and_projections_follow(data, belief)
     centred = sim_game.expected(belief, home, away, set(), scoring, target=target)
     qb_home, qb_away = sides[home].qb, sides[away].qb
     assert centred[qb_home].points > plain[qb_home].points and centred[qb_away].points < plain[qb_away].points
-    rng = np.random.default_rng(3)
-    drawn = np.array([[r.points[home], r.points[away]] for r in
-                      (sim_game.play(belief, home, away, set(), rng, scoring, None, target) for _ in range(4000))])
-    assert drawn.mean(axis=0) == pytest.approx([31.0, 13.0], abs=0.3)        # unbiased, overtime included
+    drawn = np.array([[r.points[home], r.points[away]] for r in sim_draws.games(belief, home, away, scoring, 4000, 3,
+                                                                               target)])
+    # unbiased, overtime included: se 0.17 / 0.13, so 0.3 is 1.8 / 2.3 se (9ec0677 drew +0.33 here)
+    assert drawn.mean(axis=0) == pytest.approx([31.0, 13.0], abs=0.3)
 
 
 @pytest.mark.parametrize("wanted", [(17.0, 17.0), (10.0, 13.0)])
-def test_close_and_low_scoring_games_average_their_target(data, belief, wanted):
-    """The window and overtime add the most in close games (both sides kick, ties go to overtime) and their spread
-    follows the game's total (sim_closing_means): with one spread and one tie rate for every game, a 17-17 game
-    averaged +0.23 / +0.25 over its target and a 10-13 game +0.09 / +0.38 (12,000 draws, se 0.07)."""
+def test_close_and_low_scoring_games_get_the_window_and_overtime_their_cut_margins_give(data, belief, wanted):
+    """The window and overtime add the most in close games (both sides kick, ties go to overtime), and the cut
+    margin spreads less in a low-scoring game: the centring's window points and tie chance (sim_closing_means, at the
+    game's own expected lead and total) must be what the real endings give over the margins the draw reaches at
+    the cut, read exactly from the table, so the window's own noise is out. With one spread (11.1) for every game
+    the window was 0.11 a side too low at 17-17 (17 se of this test) and more at 10-13; se here 0.005-0.008 a
+    side, so 0.03 is about 4 se. The tie chance is a normal spread's, and real cut margins are lumpier (3s and 7s):
+    it runs 9% under the drawn one at 17-17 and 24% under at 10-13 (0.01-0.04 overtime points a side); a fixed
+    4.2% for every game was 33% / 46% under, so 30% catches that."""
+    from services import sim_closing_means as cm
+    from services.sim_closing import points_of, stored
     game = next(g for g in data.schedule.games if g.week == WEEK)
     home, away = game.home_team, game.away_team
-    target, scoring, rng = {home: wanted[0], away: wanted[1]}, sim_world.scoring_of(data), np.random.default_rng(5)
-    drawn = np.array([[r.points[home], r.points[away]] for r in
-                      (sim_game.play(belief, home, away, set(), rng, scoring, None, target) for _ in range(10000))])
-    assert drawn.mean(axis=0) == pytest.approx(list(wanted), abs=0.2)
+    sides = sim_draws.centred_sides(belief, home, away, {home: wanted[0], away: wanted[1]})
+    means = [sim_game._side_means(s) for s in sides]
+    ends = cm.endings(sim_game._mean_points(means[0], means[1]), sim_game._mean_points(means[1], means[0]))
+    rng, scoring = np.random.default_rng(5), sim_world.scoring_of(data)
+    margins = np.array([np.subtract(*sim_draw.draw_game(sides, rng, scoring, until_cut=True)) for _ in range(2500)])
+    rows, ties = cm._tables()
+    points = np.array([points_of(dict(zip(stored()["events"], row))) for row in rows])
+    index = np.clip(margins, -cm.SPAN, cm.SPAN) + cm.SPAN
+    assert points[index].mean() == pytest.approx(ends[0].window, abs=0.03)        # home leads by the margin
+    assert points[2 * cm.SPAN - index].mean() == pytest.approx(ends[1].window, abs=0.03)
+    assert cm.tie_chance(ends[0].lead, ends[0].sd) == pytest.approx(ties[index].mean(), rel=0.3)
 
 
 def test_touchdowns_are_drive_limited_and_never_outnumber_the_plays():

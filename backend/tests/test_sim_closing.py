@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 from services import sim_calendar, sim_closing, sim_closing_fit, sim_closing_means, sim_draw, sim_game
+from tests import sim_draws
 from tests.test_sim_game import HALF, pid, world
 
 NONE = dict.fromkeys(sim_closing_fit.EVENTS, 0)
@@ -91,7 +92,7 @@ def test_the_trailers_ending_goes_to_the_trailing_side_and_to_real_players(monke
 
 
 def test_drawn_games_average_the_projections_with_the_window_in():
-    w, rng = world(), np.random.default_rng(8)
+    w = world()
     target = {"AAA": 30.0, "BBB": 17.0}
     expected = sim_game.expected(w, "AAA", "BBB", set(), HALF, target=target)
     side = sim_game._side(w, "AAA", "BBB", set(), {})
@@ -99,13 +100,13 @@ def test_drawn_games_average_the_projections_with_the_window_in():
     qb = pid("AAA", "QB")
     totals: Counter = Counter()
     games = 3000
-    for _ in range(games):
-        result = sim_game.play(w, "AAA", "BBB", set(), rng, HALF, target=target)
+    for result in sim_draws.games(w, "AAA", "BBB", HALF, games, 8, target):
         totals["AAA"] += result.points["AAA"]
         totals["kicker"] += result.players[kicker].points
         totals["qb_td"] += result.players[qb].box.pass_td if qb in result.players else 0
         totals["skill"] += sum(g.points for p, g in result.players.items() if p in skilled)
     skill = sum(e.points for p, e in expected.items() if p in skilled)
+    # 3,000 draws: se 0.19 team points (0.35 = 1.8 se), 0.08 kicker points (3 se), 0.018 QB TDs (3.3 se)
     assert totals["AAA"] / games == pytest.approx(30.0, abs=0.35)
     assert totals["kicker"] / games == pytest.approx(expected[kicker].points, abs=0.25)
     assert totals["qb_td"] / games == pytest.approx(expected[qb].box.pass_td, abs=0.06)
@@ -151,9 +152,9 @@ def test_over_many_games_the_box_adds_up_to_the_points_and_no_try_comes_without_
     monkeypatch.setattr(sim_draw, "_overtime", extra)
     w, rng = world(), np.random.default_rng(11)
     targets = (None, {"AAA": 31.0, "BBB": 13.0}, {"AAA": 10.0, "BBB": 13.0}, {"AAA": 17.0, "BBB": 17.0})
+    sides = [sim_draws.centred_sides(w, "AAA", "BBB", t) for t in targets]
     for g in range(1500):
-        result = sim_game.play(w, "AAA", "BBB", set(), np.random.default_rng(int(rng.integers(1 << 31))), HALF,
-                               target=targets[g % len(targets)])
+        result = sim_draw.draw_game(sides[g % len(targets)], np.random.default_rng(int(rng.integers(1 << 31))), HALF)
         offense, scored, _ = captured["final"][:3]
         _, _, _, returns, safeties, _, _ = captured["after"]
         for i, side in enumerate(captured["sides"]):
