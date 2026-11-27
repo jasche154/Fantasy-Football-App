@@ -108,7 +108,7 @@ def test_a_teams_halves_add_up_and_attempts_cover_completions_and_interceptions(
         for h in halves:
             o = h.offense
             assert o.attempts >= int(o.catches.sum()) + o.ints and (o.catches <= o.targets).all()
-            assert h.made.sum() <= 5 and h.pat_att + 0 <= o.tds
+            assert h.made.sum() <= 5 and h.pat_att <= o.tds
 
 
 def test_drives_split_between_the_halves_keep_a_whole_games_count():
@@ -290,3 +290,19 @@ def test_leaving_hurt_never_changes_who_is_in_the_game_plan():
     assert after.q[after.receivers[hurt.receivers.index(wr)]] == 1.0
     rng = np.random.default_rng(3)
     assert min(sim_parts.plan(hurt, rng).targets[hurt.receivers.index(wr)] for _ in range(2000)) > 0
+
+
+def test_a_quarterbacks_carry_share_is_his_weight_over_the_players_who_appear():
+    """A Luce weight is a share of the weights of the players in a game (with a box line); a quarterback's share is
+    his weight over that (sim_teams.played_weight), not over every player the simulation dresses."""
+    from services import sim_teams
+    games = {("AAA", 1): {1: None, 2: None, 3: None}, ("AAA", 2): {1: None, 2: None}, ("BBB", 1): {9: None}}
+    weights = {0: 0.05, 1: 0.15, 2: 0.6, 3: 0.2, 9: 1.0}
+    norm = sim_teams.played_weight("AAA", games, weights, 3, 0.5)
+    assert norm == pytest.approx((0.5 * (0.95 + 0.05) + 1.0 * (0.75 + 0.05)) / 1.5)
+    assert sim_teams.played_weight("CCC", games, weights, 3, 0.5) == 0.0
+    w = world()
+    qb = w.players[pid("AAA", "QB")]
+    rushers = [p for p in w.roster("AAA") if p.position in ("RB", "WR", "TE") and p.carries > 0] + [qb]
+    shares = sim_game._carry_weights(rushers, qb, 0.0, {}, norm=0.8)
+    assert shares[-2] == pytest.approx(qb.carries / 0.8)

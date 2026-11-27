@@ -55,6 +55,7 @@ SNAP_EXPONENT = 0.5              # snaps fall with the square root of his weight
 MIN_SNAP_TO_RECORD = 20.0        # an active player with no stat is listed as playing above this snap share
 MAX_TD_RATE = 0.6
 FULL_STRENGTH = 1.0              # role weights of a team at full strength sum to about this
+QB_SHARE_CAP = 0.6               # a quarterback never takes more than this share of a backfield's carries
 ACTIVE_SLOTS = {"RB": 3, "WR": 5, "TE": 3}     # game-day actives at a position (the top healthy by role weight)
 PA_GRID = np.arange(0, 80)       # points allowed values for the D/ST expectation
 TWO_POINT_SUCCESS = 0.48
@@ -153,8 +154,8 @@ def _side(world: World, team: str, opponent: str | None, out: Collection[int],
         known = (world, _other(world, team, form))
         _sides[("other", id(world), team)] = known
     other_targets, other_carries = known[1]
-    carry_w = _carry_weights(rushers, qb, other_carries, exits)
-    whole = _carry_weights(rushers, qb, other_carries, {}) if exits else carry_w     # before anyone leaves
+    carry_w = _carry_weights(rushers, qb, other_carries, exits, form.carry_norm)
+    whole = _carry_weights(rushers, qb, other_carries, {}, form.carry_norm) if exits else carry_w   # before any exit
     if qb is not None and backup is not None and qb_share < 1.0:   # the backup finishes the game: its kneels
         rushers.append(backup)
         carry_w, whole = np.insert(carry_w, -1, 0.0), np.insert(whole, -1, 0.0)
@@ -234,15 +235,16 @@ def _weights(group, attr: str, exits: Mapping[int, float]) -> list[float]:
     return [getattr(p, attr) * exits.get(p.player_id, 1.0) for p in group]
 
 
-def _carry_weights(rushers, qb, other: float, exits: Mapping[int, float]) -> np.ndarray:
+def _carry_weights(rushers, qb, other: float, exits: Mapping[int, float], norm: float = 0.0) -> np.ndarray:
     """Carry weights in `rushers` order (the QB last) plus OTHER. The QB keeps his share of a full-strength
-    backfield (his weight over max(FULL_STRENGTH, all active weights)); the backs and receivers who are active
-    split the rest, so an injured back's carries go to the next back, not to the QB."""
+    backfield: his weight over the team's `norm` (sim_teams.played_weight: the weights of the players who appear in
+    its games), else over max(FULL_STRENGTH, all active weights); the backs and receivers who are active split the
+    rest, so an injured back's carries go to the next back, not to the QB."""
     backs = np.array([*_weights([p for p in rushers if p is not qb], "carries", exits), other])
     if qb is None:
         return backs
     mine = qb.carries * exits.get(qb.player_id, 1.0)
-    share = mine / max(FULL_STRENGTH, mine + backs.sum())
+    share = min(QB_SHARE_CAP, mine / (norm if norm > 0 else max(FULL_STRENGTH, mine + backs.sum())))
     scaled = backs / backs.sum() * (1 - share)
     return np.array([*scaled[:-1], share, scaled[-1]])
 

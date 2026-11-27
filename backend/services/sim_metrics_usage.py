@@ -11,6 +11,8 @@ A real season and a simulated one are read alike, from the box lines (`SeasonDat
   carry; the game's top three backs' shares of the non-QB carries and the top five receivers' (and the rest's) of
   the targets; a back with 20+ / 25+ carries and a receiver with 10+ / 13+ targets (% of team-games).
 - who carries: QB carries and rushing yards and non-QB carries per team-game.
+- idle games (`idle`): the share of a player's available games with no touch, by position group and his mean
+  touches (the game plan's lumpiness, judged without box-line selection: a real player with no stat has no box row).
 
 A team-game counts when its team has 5+ carries and 5+ targets in the box (a partial box is left out).
 """
@@ -72,6 +74,7 @@ def _row(margin: int, lines: list) -> dict[str, float] | None:
 
 def usage(data: SeasonData, weeks: Iterable[int]) -> dict[str, float]:
     """The rows of the module docstring over the team-games of `weeks`."""
+    weeks = list(weeks)
     rows = [r for margin, lines in _team_games(data, weeks) if (r := _row(margin, lines)) is not None]
     if len(rows) < MIN_VOLUME:
         return {}
@@ -90,4 +93,39 @@ def usage(data: SeasonData, weeks: Iterable[int]) -> dict[str, float]:
     lost = margin <= BIG_LOSS
     if lost.any():
         out["usage 30+ carries in a 14+ loss %"] = 100.0 * float((col["carries"][lost] >= MANY_CARRIES).mean())
-    return out
+    return {**out, **idle(data, weeks)}
+
+
+IDLE_BANDS = ((0.5, 1.5), (1.5, 3.0), (3.0, 6.0), (6.0, 99.0))
+IDLE_GAMES = 4                   # a player counts with this many available games in the weeks
+
+
+def idle(data: SeasonData, weeks: Iterable[int]) -> dict[str, float]:
+    """The share of a player's available games with no touch (no target, no carry), by position group (RB, and WR
+    with TE) and his mean touches over those games: available = his team played, he was on it (his team as known
+    the week after) and had no hard injury tag. Read alike from a real and a simulated season's box lines, so a
+    healthy scratch or an untouched dressed game both count as none."""
+    weeks = sorted(set(weeks))
+    played = {(team, w) for (team, w) in data.scores}
+    games: dict[int, list[int]] = defaultdict(list)
+    for pid, player in data.players.items():
+        group = "RB" if player.position == "RB" else "WR/TE" if player.position in ("WR", "TE") else None
+        if group is None:
+            continue
+        for w in weeks:
+            team = data.team_at(pid, w + 1)
+            tag = data.injuries.get((pid, w))
+            if team is None or (team, w) not in played or (tag is not None and tag.hard):
+                continue
+            line = data.box.get((pid, w))
+            games[pid].append((line.targets + line.carries) if line else 0)
+    out: dict[str, list[float]] = defaultdict(list)
+    for pid, touches in games.items():
+        if len(touches) < IDLE_GAMES:
+            continue
+        group = "RB" if data.players[pid].position == "RB" else "WR/TE"
+        mean = float(np.mean(touches))
+        for low, high in IDLE_BANDS:
+            if low <= mean < high:
+                out[f"usage no-touch games {group} {low:g}-{high:g} touches %"] += [100.0 * (t == 0) for t in touches]
+    return {k: float(np.mean(v)) for k, v in out.items()}

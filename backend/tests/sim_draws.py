@@ -1,5 +1,6 @@
 """Many draws of one simulated game, centred once (sim_game.play rebuilds and re-centres both sides every call)."""
 from collections.abc import Iterator, Mapping
+from dataclasses import replace
 
 import numpy as np
 
@@ -24,4 +25,5 @@ def games(world, home: str, away: str, scoring: ScoringSettings, n: int, seed: i
 
 def offense(side, n_targets: int, n_carries: int, rng: np.random.Generator, eff: float = 1.0) -> sim_parts._Offense:
     """One stretch of plays before the cut (TDs, interceptions and sacks drawn), shared out by a fresh game plan."""
-    return sim_parts.plays(side, sim_parts.plan(side, rng), n_targets, n_carries, eff, rng, drives=sim_parts.TD_DRIVES)
+    o = sim_parts.plays(side, sim_parts.plan(side, rng), n_targets, n_carries, eff, rng, drives=sim_parts.TD_DRIVES)
+    return replace(o, ints=sim_parts.interceptions(side, o, eff, rng))

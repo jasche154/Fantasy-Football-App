@@ -96,6 +96,7 @@ class Team:
     rush_def: float = 1.0        # opponents' yards and TDs per carry x this
     takeaways: float = 1.0       # sacks, INTs and fumbles it forces x this
     passer: float = 1.0          # quality of its usual passer
+    carry_norm: float = 0.0      # its carry weights' sum over the players in a game (sim_teams.played_weight; 0: unknown)
 
 
 @dataclass(frozen=True)
@@ -354,7 +355,7 @@ def _efficiency(seen: _Seen, games: list[tuple[str, int]], pid: int, position: s
 
 def estimate(data: SeasonData, week: int, prior: World | None = None) -> World:
     """The public belief before `week` (see the module docstring). Pure; reads data.as_of(week) only."""
-    from services.sim_teams import team_forms, usual_passer     # it imports this module
+    from services.sim_teams import played_weight, team_forms, usual_passer     # it imports this module
 
     known = data.as_of(week)
     scoring = scoring_of(known)
@@ -377,7 +378,9 @@ def estimate(data: SeasonData, week: int, prior: World | None = None) -> World:
         fitted = _team_roles(team, seen, members, roles, positions, week,
                              (teams[team].other_targets, teams[team].other_carries))
         teams[team] = replace(teams[team], other_targets=fitted["targets"][OTHER],
-                              other_carries=fitted["carries"][OTHER])
+                              other_carries=fitted["carries"][OTHER],
+                              carry_norm=played_weight(team, seen.games, fitted["carries"], week, DECAY)
+                              or (prior.teams[team].carry_norm if prior is not None and team in prior.teams else 0.0))
         for pid in members:
             played = [(t, w) for w, t in known.team_by_week.get(pid, ()) if w < week]
             rates = _efficiency(seen, played, pid, positions[pid], prior, roles[pid][2] >= STARTER_ROLE)

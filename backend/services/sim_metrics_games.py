@@ -43,6 +43,15 @@ def fifths(line: np.ndarray, margin: np.ndarray, blowout: int = BLOWOUTS[0]) -> 
     return float((np.abs(margin[big]) >= blowout).mean()), float((np.abs(margin[close]) >= blowout).mean())
 
 
+def by_line_fifth(line: np.ndarray, margin: np.ndarray, blowout: int = BLOWOUTS[0]) -> dict[str, float]:
+    """The share of games won by `blowout`+ in each fifth of games by the line's margin, closest first (1) to most
+    lopsided (5); a fifth's edges are the |line| quantiles, so tied lines can tip a game into the next fifth."""
+    edges = np.quantile(np.abs(line), np.linspace(0, 1, 6))
+    fifth = np.clip(np.searchsorted(edges, np.abs(line), side="right") - 1, 0, 4)
+    return {f"21+ in line 5th {k + 1} %": 100 * float((np.abs(margin[fifth == k]) >= blowout).mean())
+            for k in range(5) if (fifth == k).any()}
+
+
 def close_games(margin: np.ndarray) -> dict[str, float]:
     """How close games end: shares of final margins 1-3, exactly 3, exactly 7 and 4-8."""
     m = np.abs(margin)
@@ -90,6 +99,7 @@ def games(data: SeasonData, weeks: Iterable[int]) -> dict[str, float]:
            "line margin sd": float(line_m.std()), "result - line sd": float((margin - line_m).std()),
            "line home edge": float(line_m.mean()), "home edge": float(margin.mean())}
     out.update({f"{b}+ margin %": 100 * float((np.abs(margin) >= b).mean()) for b in BLOWOUTS})
+    out.update(by_line_fifth(line_m, margin))
     out.update({"21+ in lopsided 5th %": 100 * lopsided, "21+ in closest 5th %": 100 * closest,
                 "home win %": 100 * float((margin > 0).mean() + 0.5 * (margin == 0).mean()),
                 "tie %": 100 * float((margin == 0).mean()), **close_games(margin), "team score mean": float(points.mean()),

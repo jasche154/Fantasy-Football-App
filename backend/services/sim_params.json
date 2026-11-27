@@ -87,7 +87,6 @@
   "rush_shift": 4.0
  },
  "game": {
-  "pace_shared": 0.0,
   "eff_sd": 0.01,
   "eff_shared": 0.9,
   "share_sd_targets": 0.4035,
@@ -1219,7 +1218,6 @@
   "game": {
    "eff_sd": 0.05,
    "eff_shared": 0.3,
-   "pace_shared": 0.3,
    "share_sd_targets": 0.05,
    "share_sd_carries": 0.15,
    "share_sd_qb_carries": 0.45,
