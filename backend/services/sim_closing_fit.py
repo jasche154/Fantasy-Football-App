@@ -91,16 +91,27 @@ def _download(season: int) -> list[dict]:
             "posteam", "defteam", "touchdown", "td_team", "pass_touchdown", "rush_touchdown", "field_goal_result",
             "kick_distance", "extra_point_result", "two_point_conv_result", "safety", "yards_gained"]
     pbp = nfl.load_pbp(season).filter(pl.col("season_type") == "REG").select(cols)
+    return games_of(pbp.iter_rows(named=True), season)
+
+
+def games_of(rows: Iterable[Mapping], season: int) -> list[dict]:
+    """The games of one season's play-by-play rows (see _download); a scoring play with no game clock is left
+    out, counted and logged at WARNING (its window cannot be told)."""
     games: dict[str, dict] = {}
-    for r in pbp.iter_rows(named=True):
+    no_clock = 0
+    for r in rows:
         g = games.setdefault(r["game_id"], {"week": r["week"], "home": TEAM_ALIASES.get(r["home_team"], r["home_team"]),
                                             "away": TEAM_ALIASES.get(r["away_team"], r["away_team"]),
                                             "home_score": r["home_score"], "away_score": r["away_score"], "plays": []})
         kind = _kind(r)
-        if kind is not None and r["game_seconds_remaining"] is not None:
+        if kind is not None and r["game_seconds_remaining"] is None:
+            no_clock += 1
+        elif kind is not None:
             team = TEAM_ALIASES.get(kind[0], kind[0])
             g["plays"].append([int(r["qtr"]), int(r["game_seconds_remaining"]), team, kind[1],
                                int(r["yards_gained"] or 0)])
+    if no_clock:
+        log.warning("%s: %d scoring plays with no game clock left out", season, no_clock)
     return [{"season": season, **g} for g in games.values()]
 
 

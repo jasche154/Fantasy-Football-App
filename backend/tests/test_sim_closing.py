@@ -323,3 +323,21 @@ def test_a_tied_games_better_ending_goes_to_each_side_by_its_share_of_the_points
     wins = sum(_close_once(sides, means, offense, counts, rng, None, (10, 10), (30.0, 10.0))[2][0] == 13
                for _ in range(4000))
     assert wins / 4000 == pytest.approx(0.75, abs=0.025)
+
+
+def _row(**fields):
+    base = {"game_id": "g1", "week": 1, "home_team": "AAA", "away_team": "BBB", "home_score": 7, "away_score": 0,
+            "qtr": 1, "game_seconds_remaining": 3000, "posteam": "AAA", "defteam": "BBB", "touchdown": 0, "td_team": None,
+            "pass_touchdown": 0, "rush_touchdown": 0, "field_goal_result": None, "kick_distance": None,
+            "extra_point_result": None, "two_point_conv_result": None, "safety": 0, "yards_gained": 0}
+    return {**base, **fields}
+
+
+def test_scoring_plays_with_no_game_clock_are_counted_and_logged(caplog):
+    """Item 7: a scoring play with a null clock is left out loudly, not silently."""
+    rows = [_row(touchdown=1, td_team="AAA", rush_touchdown=1), _row(extra_point_result="good", game_seconds_remaining=None),
+            _row(yards_gained=5)]
+    with caplog.at_level("WARNING", logger="services.sim_closing_fit"):
+        games = sim_closing_fit.games_of(rows, 2020)
+    assert [p[3] for p in games[0]["plays"]] == ["rush_td"]
+    assert "2020: 1 scoring plays with no game clock" in caplog.text
