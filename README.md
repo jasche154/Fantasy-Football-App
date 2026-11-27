@@ -1122,7 +1122,7 @@ that week's games on; only scoring a week reads its real points.
   counted as the replacement level does, on the average points per game by rank of real 2018-2025 seasons:
   `python -m services.replay_league_size --fit` -> `replay_league_size.json`), so a waiver player is priced like
   a 12-team waiver player. An 8-team superflex league starts 16 QBs and rosters about 28: its QB24 is valued like
-  a 12-team QB33. Only the value curve moves: the draft board's order, `pre_rank`, `pre_chart` and `star` read the
+  a 12-team QB33. Only the value curve moves: the draft board's order, `pre_rank` and `star` read the
   unsized season (the CPU draft drafts on raw ADP), a fill-in's "drafted" group reads the raw 1-QB list, and the CPU
   draft prices an out player off the chart without the taper, next to everyone else's raw ADP. The order holds per
   rank, not per blended value: a player whose expert and model ranks disagree can swap places with a neighbour.

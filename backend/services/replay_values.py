@@ -171,9 +171,6 @@ def _base(data: SeasonData, league: LeagueSettings, week: int, end_week: int, dr
                  MappingProxyType(replacement), source, MappingProxyType(live), regular)
 
 
-replay_pool.EVICT_HOOKS.append(_base.cache_clear)           # keyed on SeasonData: a dropped season must not stay alive
-
-
 @lru_cache(maxsize=32)
 def _knowledge(data: SeasonData, league: LeagueSettings, week: int, end_week: int, seed: int,
                drafted: int) -> Knowledge:
@@ -230,6 +227,10 @@ def projector(know: Knowledge) -> lineup_gain.Projector:
     One per Knowledge, so every team's lineup maths shares its point cache."""
     weekly = {v.player_id: SimpleNamespace(projection=v.projection) for v in know.values}
     return ReplayProjector(know, {}, weekly, max(1, know.week))
+
+
+# keyed on SeasonData (projector on a Knowledge of one): a dropped season must not stay alive
+replay_pool.EVICT_HOOKS.extend((_base.cache_clear, _knowledge.cache_clear, _priors.cache_clear, projector.cache_clear))
 
 
 def horizon(know: Knowledge, settings: "replay_state.Settings") -> lineup_gain.Horizon:

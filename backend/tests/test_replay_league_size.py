@@ -66,8 +66,9 @@ def test_the_sized_view_moves_adp_only_and_reads_nothing_from_the_week_on():
 @pytest.mark.parametrize("starters", [SUPERFLEX, dict(rs.DEFAULT_STARTERS)])
 @pytest.mark.parametrize("week", [0, 6])
 def test_the_board_order_pre_rank_and_star_do_not_depend_on_league_size(starters, week):
-    """The taper moves the value curve only: the preseason picks (the board's rank order, `pre_rank`,
-    `pre_chart`) and `star` (which feeds the form term) are the 12-team league's, as the CPU draft's raw ADP is."""
+    """The taper moves the value curve only: the board's rank order (`pre_rank`) and `star` (which feeds the
+    form term) are the 12-team league's, as the CPU draft's raw ADP is. `pre_chart` is a value, so it is tapered
+    like `chart`: the gap between the two (replay_personas, replay_mood) must not open from league size alone."""
     data = fakes.fake_season()
     rv.clear_cache()
     eight = rv.knowledge(data, league(8, starters), week, 16)
@@ -75,5 +76,10 @@ def test_the_board_order_pre_rank_and_star_do_not_depend_on_league_size(starters
     rv.clear_cache()
 
     def board(know):
-        return {v.player_id: (v.pre_rank, v.star, v.pre_chart) for v in know.values}
+        return {v.player_id: (v.pre_rank, v.star) for v in know.values}
     assert board(eight) == board(twelve)
+    _, curve, _ = rv.chart_view(data.as_of(week), league(8, starters))
+    priced = replay_chart.pre_picks(curve)
+    mine, theirs = ({v.player_id: v.pre_chart for v in know.values} for know in (eight, twelve))
+    assert all(mine[pid] == round(replay_chart.pick_value(pick), 1) for pid, pick in priced.items() if pid in mine)
+    assert mine != theirs                                   # the taper does reach the preseason value

@@ -272,10 +272,12 @@ def base_charts(data: SeasonData, rows: Sequence[dict], priors: Mapping[int, flo
     players in an injury absence (replay_values), standing in for the expert and model parts; their live
     healthy chart goes into `live` when given; `since`: the first week of each frozen absence, so the frozen value
     is scaled by `replay_chart_injury.return_factor` of the games missed (`with_news` uses the reported length).
-    `board`: the season whose ADP sets the preseason picks (pre_rank, pre_chart, `star`) when `data` is a view
-    that moves ADP only to change the value curve (replay_league_size.sized); default `data`."""
+    `board`: the season whose ADP sets the preseason order (pre_rank, `star`) when `data` is a view that moves
+    ADP only to change the value curve (replay_league_size.sized); default `data`. `pre_chart` stays on `data`'s
+    scale: replay_personas and replay_mood subtract `chart` from it."""
     frozen, since = frozen or {}, since or {}
     curve, picks = slot_curve(data), pre_picks(board or data, drafted)
+    priced = picks if board is None else pre_picks(data, drafted)
     overall = pre_ranks(picks)
     star_ranks = overall if regular is None else {
         **pre_ranks(pre_picks(regular, drafted)),
@@ -323,7 +325,7 @@ def base_charts(data: SeasonData, rows: Sequence[dict], priors: Mapping[int, flo
             chart, _ = _injured(data, row, None, week, end_week, expert, model_part)
             fields[pid] = {
                 "chart": round(chart, 1), "healthy_chart": round(expert + model_part, 1),
-                "pre_chart": round(pick_value(picks[pid]), 1) if pid in picks else 0.0,
+                "pre_chart": round(pick_value(priced[pid]), 1) if pid in priced else 0.0,
                 "expert_rank": listed.get(pid), "pre_rank": overall.get(pid), "star": round(stars[pid], 3),
                 "form_chart": round((1 - w) * (model_value - value_at(curve, position, plain[pid])) * bump, 1),
                 "news": None,
