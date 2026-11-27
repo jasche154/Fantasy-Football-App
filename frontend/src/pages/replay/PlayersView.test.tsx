@@ -498,13 +498,17 @@ describe('PlayersView pinned-column shadows', () => {
     renderPlayers(summary());
     const table = await screen.findByRole('table', { name: 'Players, week 5' });
     const box = table.parentElement!;
-    const watcher = observers.find((o) => o.targets.includes(table));
-    expect(watcher?.targets).toContain(box);
+    // the effect that starts watching can run after the table is first found (it failed once in CI): wait for it
+    const watcher = await waitFor(() => {
+      const found = observers.find((o) => o.targets.includes(table));
+      expect(found?.targets).toContain(box);
+      return found!;
+    });
     expect(box).not.toHaveAttribute('data-overflow-end');
 
     Object.defineProperty(box, 'clientWidth', { configurable: true, value: 320 });
     Object.defineProperty(box, 'scrollWidth', { configurable: true, value: 900 });   // the table grew; the box did not
-    act(() => watcher!.callback());
+    act(() => watcher.callback());
 
     expect(box).toHaveAttribute('data-overflow-end', 'true');
   });
