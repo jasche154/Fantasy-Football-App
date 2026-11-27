@@ -529,7 +529,7 @@ def test_a_cpu_activates_a_player_who_lost_his_tag_into_its_open_spot_and_starts
     assert STAR in rv.best_lineup(know(fakes.STAR_BACK_WEEK), team.roster, SETTINGS)["RB"]
 
 
-def test_activating_then_placing_is_one_of_each_and_a_taken_slot_goes_to_the_better_player():     # IR-20
+def test_activating_then_placing_is_one_of_each_and_never_a_still_eligible_player():     # IR-20
     week = fakes.STAR_BACK_WEEK
     state = star_on_ir(week)
     other = best_keeper(state, STAR_OWNER, week)
@@ -540,12 +540,8 @@ def test_activating_then_placing_is_one_of_each_and_a_taken_slot_goes_to_the_bet
 
     assert ir_moves(state, after) == [(STAR_OWNER, (STAR,)), (STAR_OWNER, (other,))]
     assert rs.team(after, STAR_OWNER).ir == (other,) and ai.cpu_ir(after, SETTINGS, hurt, SEED) == after
-    # the star is still out and holds the slot: the more valuable player who is hurt now trades places with him
-    swapped = ai.cpu_ir(state, SETTINGS, still_hurt, SEED)
-    assert still_hurt.by_id[other].chart >= still_hurt.by_id[STAR].chart + ai.IR_SWAP_GAP
-    assert rs.team(swapped, STAR_OWNER).ir == (other,) and STAR in rs.team(swapped, STAR_OWNER).roster
-    assert ir_moves(state, swapped) == [(STAR_OWNER, (STAR, other))]
-    assert ai.cpu_ir(swapped, SETTINGS, still_hurt, SEED) == swapped             # and stays there
+    # his slot is taken by a still-eligible star, and no report has the other one out past next week
+    assert ai.cpu_ir(state, SETTINGS, still_hurt, SEED) == state
 
 
 def test_a_full_cpu_swaps_an_eligible_player_onto_ir_rather_than_cut_anyone():     # IR-18 b
@@ -959,6 +955,8 @@ def test_a_player_out_for_the_season_is_the_first_a_cpu_would_drop_even_a_protec
                                                ctx.protected | {star}, ctx.keep | {star})]
 
     assert spare(patched(hurt, {star: {"news": LOST}}))[0] == star          # protected and kept: he still goes first
+    unknown = replace(LOST, vague=True, text="Out (O) since week 3; no timetable yet.")
+    assert star not in spare(patched(hurt, {star: {"news": unknown}}))       # no week, but nobody said "season"
     assert star not in spare(patched(hurt, {star: {"news": BACK}}))          # expected back: never dropped
     assert star not in spare(hurt)                                           # no report at all: neither
 
@@ -988,6 +986,8 @@ def test_a_taken_ir_slot_goes_to_a_roster_player_worth_clearly_more_and_then_sta
     after = ai.cpu_ir(state, SETTINGS, clear, SEED)
 
     assert rs.team(ai.cpu_ir(state, SETTINGS, close, SEED), team_id) == rs.team(state, team_id)   # near-equal: stays
+    soon = patched(clear, {star: {"news": replace(BACK, back=week + 1)}})        # back next week: not worth two moves
+    assert rs.team(ai.cpu_ir(state, SETTINGS, soon, SEED), team_id) == rs.team(state, team_id)
     assert rs.team(after, team_id).ir == (star,) and held in rs.team(after, team_id).roster
     assert (team_id, (held, star)) in ir_moves(state, after) and ai.cpu_ir(after, SETTINGS, clear, SEED) == after
 
@@ -1030,3 +1030,27 @@ def test_an_empty_ir_slot_takes_the_player_expected_back_before_a_more_valuable_
 
     assert rs.team(ai.cpu_ir(state, SETTINGS, mixed, SEED), team_id).ir == (other,)
     assert rs.team(ai.cpu_ir(state, SETTINGS, both_back, SEED), team_id).ir == (star,)     # else the more valuable
+
+
+def test_the_ir_slot_is_re_picked_as_if_its_player_were_back_on_the_roster():
+    """Review: the roster alone could not spare its only other back, so a lesser receiver took the slot and the
+    back followed on the next call (two IR moves in a week). With the slot's back counted, the back goes at once."""
+    week, team_id = 6, CPUS[0]
+    state = league(week, phase="open")
+    backs = at(state, team_id, "RB", week)
+    kept = backs[:SETTINGS.starters["RB"]]
+    receiver = at(state, team_id, "WR", week)[-1]
+    held = next(v.player_id for v in replay_waivers.available_players(state, know(week), "RB"))
+    roster = tuple(pid for pid in rs.team(state, team_id).roster if pid not in backs or pid in kept)
+    state = edited(state, team_id, roster=roster, ir=(held,))
+    back = kept[0]
+    hurt = tagged_know(week, {(pid, week): fakes.Injury("IR") for pid in (held, back, receiver)})
+    news = patched(hurt, {held: {"news": LOST}, back: {"news": BACK, "chart": 500.0},
+                          receiver: {"news": BACK, "chart": 50.0}})
+    without_him = [news.by_id[pid].position for pid in roster if pid != back]
+
+    after = ai.cpu_ir(state, SETTINGS, news, SEED)
+
+    assert not rv.can_field_lineup(without_him, SETTINGS)                    # the roster alone cannot spare him
+    assert rs.team(after, team_id).ir == (back,) and held in rs.team(after, team_id).roster
+    assert ai.cpu_ir(after, SETTINGS, news, SEED) == after

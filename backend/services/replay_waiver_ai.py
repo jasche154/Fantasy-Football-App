@@ -31,7 +31,8 @@ numbers for the current week), so no CPU ever sees a result or a projection from
 - `cpu_ir` (before claims and free agency): a CPU brings back an IR player who lost his tag (into an open
   spot, swapping in an eligible player worth keeping, or cutting one it can spare, maybe him), then puts its
   most valuable eligible player (by trade value; one expected back before one out for the season) on IR, trading
-  places with the slot's player when he is clearly worth less (`_restash`, IR_SWAP_GAP). Size and this week's lineup read the active roster only; season
+  places with the slot's player when that one is out for the season or clearly worth less than a player out past
+  next week (`_restash`, IR_SWAP_GAP). Size and this week's lineup read the active roster only; season
   points and positional limits also count the IR player (`_Context.stash`): he is coming back.
 
 The only dice roll is `streamers`, once per game; ties go to the better-ranked player, so the same state
@@ -115,8 +116,10 @@ def protected_rank(settings: Settings) -> int:
 
 
 def _season_over(value: ReplayValue | None) -> bool:
-    """Does the news have him out for the season?"""
-    return value is not None and value.out and value.news is not None and value.news.back is None
+    """Does the news have him out for the season? Never a vague report ("no timetable yet"): one whose guess runs
+    past the season also carries no week (replay_news.report), but what the public reads is that nobody knows."""
+    return (value is not None and value.out and value.news is not None and value.news.back is None
+            and not value.news.vague)
 
 
 def _coming_back(value: ReplayValue) -> bool:
@@ -428,16 +431,14 @@ def _trim(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: _Cont
 
 def _close_by_chart(spare: Sequence[ReplayValue]) -> list[ReplayValue]:
     """`spare` (least valuable first) with each run of healthy values within TRIM_CLOSE of its lowest one
-    reordered by trade value, lowest first: the model can't tell them apart (often all 0), the market can. The
-    players out for the season stay in front."""
-    lost = [v for v in spare if _season_over(v)]
+    reordered by trade value, lowest first: the model can't tell them apart (often all 0), the market can."""
     runs: list[list[ReplayValue]] = []
-    for value in spare[len(lost):]:
+    for value in spare:
         if runs and value.healthy_value - runs[-1][0].healthy_value <= TRIM_CLOSE:
             runs[-1].append(value)
         else:
             runs.append([value])
-    return [*lost, *(v for run in runs for v in sorted(run, key=lambda v: (v.healthy_chart, v.player_id)))]
+    return [v for run in runs for v in sorted(run, key=lambda v: (v.healthy_chart, v.player_id))]
 
 
 def _upgrade(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: _Context) -> Move | None:
@@ -542,17 +543,20 @@ def _stash_pick(group: Sequence[ReplayValue], ctx: _Context) -> ReplayValue | No
 
 
 def _restash(state: State, ctx: _Context, team: rs.Team) -> State:
-    """A taken IR slot goes to the roster player `_stash_pick` would rather have there: one the news expects back
-    when the slot's player is out for the season, else one worth IR_SWAP_GAP chart points more. They trade
-    places (an injury later in the season used to leave the better player on the bench all year)."""
+    """A taken IR slot goes to the roster player `_stash_pick` would rather have there (chosen with the slot's
+    player back on the roster, as he would be): any player when the slot's is out for the season, else one worth
+    IR_SWAP_GAP chart points more whose news has him out past next week (a one-week absence is not worth trading
+    places twice for). An injury later in the season used to leave the better player on the bench all year."""
     held = ctx.know.by_id[team.ir[0]]
     if not replay_ir.eligible(ctx.know, held.player_id):
         return state                                  # he lost his tag and could not come back: still blocked
-    pick = _stash_pick([ctx.know.by_id[pid] for pid in team.roster], ctx)
-    if pick is None or _season_over(pick) > _season_over(held):
+    pick = _stash_pick([*(ctx.know.by_id[pid] for pid in team.roster), held], ctx)
+    if pick is None or pick is held:
         return state
-    if _season_over(pick) == _season_over(held) and pick.chart < held.chart + IR_SWAP_GAP:
-        return state
+    if not _season_over(held):
+        lasting = pick.news is not None and (pick.news.back is None or pick.news.back > ctx.know.week + 1)
+        if not lasting or pick.chart < held.chart + IR_SWAP_GAP:
+            return state
     return replay_ir.activate(state, ctx.settings, ctx.know, team.id, held.player_id, swap=pick.player_id)
 
 
