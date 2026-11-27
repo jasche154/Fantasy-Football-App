@@ -108,13 +108,13 @@ def test_an_injured_receivers_work_flows_to_his_teammates():
     for name in ("WR2", "WR3", "TE", "RB"):
         assert without[pid("AAA", name)].box.targets > healthy[pid("AAA", name)].box.targets
     total = lambda lines: sum(e.box.targets for p, e in lines.items() if team_of(p) == "AAA")  # noqa: E731
-    assert total(without) == pytest.approx(total(healthy))
+    assert total(without) == pytest.approx(total(healthy), rel=1e-3)   # the closing window's few targets follow the lead
 
 
 def test_a_hurt_back_s_carries_go_to_the_next_back_not_to_the_quarterback():
     healthy = sim_game.expected(world(), "AAA", "BBB", set(), HALF)
     without = sim_game.expected(world(), "AAA", "BBB", {pid("AAA", "RB")}, HALF)
-    assert without[pid("AAA", "QB")].box.carries == pytest.approx(healthy[pid("AAA", "QB")].box.carries)
+    assert without[pid("AAA", "QB")].box.carries == pytest.approx(healthy[pid("AAA", "QB")].box.carries, rel=1e-3)
     assert without[pid("AAA", "RB2")].box.carries > 2 * healthy[pid("AAA", "RB2")].box.carries
 
 

@@ -331,20 +331,28 @@ def expected(world: World, home: str, away: str | None, out: Collection[int], sc
     teams = [home] if away is None else [home, away]
     built = {team: _side(world, team, (away if team == home else home), out, exits) if exits
              else _side_of(world, team, (away if team == home else home), out) for team in teams}
+    from services import sim_closing
+    from services.sim_centre import ot_points
     sides = centred(built, target, shift, factors)
     means = {team: _side_means(side) for team, side in sides.items()}
     dst = params()["dst"]
     league = params()["league"]
     other = {home: away, away: home}
-    team_points = {team: _mean_points(m, means.get(other[team])) for team, m in means.items()}
+    before = {team: _mean_points(m, means.get(other[team])) for team, m in means.items()}
+    lead = {team: before[team] - before[other[team]] if other[team] in before else 0.0 for team in sides}   # at the cut
+    closing = {team: away is not None and not (factors and team in factors) for team in sides}   # the draw adds the window
+    team_points = {team: before[team] + (sim_closing.window_points(lead[team]) + ot_points() if closing[team] else 0.0)
+                   for team in means}
     out_lines: dict[int, Expected] = {}
     for team, side in sides.items():
         m, opp = means[team], (away if team == home else home)
-        out_lines.update(_expected_players(side, m, scoring))
+        out_lines.update(_expected_players(side, m, scoring, lead[team] if closing[team] else None))
         if side.kicker is not None:
             tds = float(m["rec_td"].sum() + m["rush_td"].sum())
             yards = float(m["rec_yds"].sum() + m["rush_yds"].sum())
-            out_lines[side.kicker] = Expected(BoxLine(), round(_kick_points(_fga_drawn(yards, tds, side.fg_scale), tds), 2))
+            kicks = _kick_points(_fga_drawn(yards, tds, side.fg_scale), tds)
+            out_lines[side.kicker] = Expected(BoxLine(), round(
+                kicks + (sim_closing.kicker_points(lead[team]) if closing[team] else 0.0), 2))
         if side.dst is not None:
             allowed = team_points.get(opp, league["points"])
             sacks, ints, fumbles = _takeaways(means.get(opp))
@@ -353,12 +361,14 @@ def expected(world: World, home: str, away: str | None, out: Collection[int], sc
             grid = np.exp(-0.5 * ((PA_GRID - allowed) / league["points_sd"]) ** 2)
             pa = float(grid @ _pa_points() / grid.sum())
             points = _dst_points(sacks, ints, fumbles, tds, dst["safety"], dst["block"], 1000) - _dst_points(
-                0, 0, 0, 0, 0, 0, 1000) + pa
+                0, 0, 0, 0, 0, 0, 1000) + pa + (sim_closing.defense_points(lead[team]) if closing[team] else 0.0)
             out_lines[side.dst] = Expected(BoxLine(), round(points, 2))
     return out_lines
 
 
-def _expected_players(side: _Side, m: dict, scoring: ScoringSettings) -> dict[int, Expected]:
+def _expected_players(side: _Side, m: dict, scoring: ScoringSettings, lead: float | None = None) -> dict[int, Expected]:
+    """Every skill player's mean line and points; `lead`: with the closing window's mean events at that expected
+    lead at the cut (sim_closing), None without."""
     lines: dict[int, dict[str, float]] = {}
     for i, pid in enumerate(side.receivers[:-1]):
         lines[pid] = {"targets": m["targets"][i], "rec": m["catches"][i], "rec_yds": m["rec_yds"][i],
@@ -370,6 +380,9 @@ def _expected_players(side: _Side, m: dict, scoring: ScoringSettings) -> dict[in
     if side.qb is not None:
         line = lines.setdefault(side.qb, {})
         line.update(pass_yds=float(m["rec_yds"].sum()), pass_td=float(m["rec_td"].sum()), pass_int=m["ints"])
+    if lead is not None:
+        from services.sim_closing import credit_means
+        credit_means(lines, side, m, lead)
     out = {}
     for pid, line in lines.items():
         fumbles = line.pop("fumbles", 0.0)

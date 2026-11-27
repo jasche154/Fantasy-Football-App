@@ -5,7 +5,7 @@ from types import MappingProxyType
 import numpy as np
 import pytest
 
-from services import replay_blob, sim_centre, sim_draw, sim_game, sim_lines, sim_market, sim_season, sim_world
+from services import replay_blob, sim_centre, sim_closing, sim_draw, sim_game, sim_lines, sim_market, sim_season, sim_world
 from tests import replay_fakes as fakes
 
 WEEK = 9
@@ -78,15 +78,18 @@ def test_the_line_reads_nothing_from_the_week_on(data):
 
 
 def test_a_centred_side_hits_any_reasonable_target(data, belief):
-    """The closed-form solve reaches every target from a weak offense to a blowout (overtime points included)."""
+    """The closed-form solve reaches every target from a weak offense to a blowout (overtime and the closing window
+    included; the window alone averages about 3 points, so 6 is the lowest target)."""
     worst = 0.0
     for game in (g for g in data.schedule.games if g.week == WEEK):
         home, away = game.home_team, game.away_team
-        for wanted in (3.0, 6.0, 10.0, 14.0, 21.0, 28.0, 35.0, 45.0, 60.0):
+        for wanted in (6.0, 10.0, 14.0, 21.0, 28.0, 35.0, 45.0, 60.0):
             sides = sim_centre.centred({home: sim_game._side(belief, home, away, set(), {}),
                                         away: sim_game._side(belief, away, home, set(), {})}, {home: wanted, away: 20.0})
             means = {t: sim_game._side_means(s) for t, s in sides.items()}
-            got = sim_game._mean_points(means[home], means[away]) + sim_centre.ot_points()
+            lead = sim_game._mean_points(means[home], means[away]) - sim_game._mean_points(means[away], means[home])
+            got = (sim_game._mean_points(means[home], means[away]) + sim_centre.ot_points()
+                   + sim_closing.window_points(lead))                 # the draw before the cut + the window + overtime
             worst = max(worst, abs(got - wanted))
     assert worst < 0.05
 
@@ -123,7 +126,7 @@ def test_touchdowns_are_drive_limited_and_never_outnumber_the_plays():
 
 
 def test_a_tied_game_goes_to_overtime_and_the_box_score_still_adds_up(data, belief, monkeypatch):
-    monkeypatch.setattr(sim_draw, "OT_TIE", 0.0)
+    monkeypatch.setattr(sim_draw, "ot_tie", lambda: 0.0)
     game = next(g for g in data.schedule.games if g.week == WEEK)
     home, away = game.home_team, game.away_team
     scoring = sim_world.scoring_of(data)
@@ -209,7 +212,7 @@ def test_experts_take_injury_news_in_full_for_the_player_and_his_position_group(
 
 
 def test_a_player_who_left_hurt_never_scores_the_overtime_touchdown_and_attempts_keep_up(data, belief, monkeypatch):
-    monkeypatch.setattr(sim_draw, "OT_TIE", 0.0)
+    monkeypatch.setattr(sim_draw, "ot_tie", lambda: 0.0)
     monkeypatch.setattr(sim_draw, "ot_field_goal", lambda: 0.0)
     game = next(g for g in data.schedule.games if g.week == WEEK)
     home, away = game.home_team, game.away_team
@@ -223,7 +226,7 @@ def test_a_player_who_left_hurt_never_scores_the_overtime_touchdown_and_attempts
     home_wins = 0
     for _ in range(300):
         after, _, points, _, _ = sim_draw._overtime(sides, offense, [(20, {}), (20, {})], [20, 20],
-                                                    np.array([33, 33]), np.array([27, 27]), rng, means)
+                                                    np.array([33, 33]), np.array([27, 27]), rng, means, [20.0, 20.0])
         if points[0] > points[1]:
             home_wins += 1
             o, before = after[0], offense[0]

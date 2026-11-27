@@ -6,7 +6,8 @@ season's Vegas closing line; a simulated week's own line, sim_lines, stored ther
 
 - games(data, weeks): correlation of the line with the result (margin, total), the spread of pregame margins,
   the residual spread, the share of games won by 21+ / 28+ / 35+, the 21+ share in the most lopsided and the
-  closest fifth of games by the line, the home win rate, the tie rate, and team points (mean, spread, the share
+  closest fifth of games by the line, the home win rate, the tie rate, close finishes (margins 1-3, 3, 7, 4-8:
+  `close_games`), and team points (mean, spread, the share
   that are 0 and the share that are rare in real games: RARE_TOTALS).
 - tails(data, weeks): single games no real season has (team-games with catches but no QB line; 400+ and 500+
   yard passing games; the season's top single-game passing, rushing and receiving yards, targets and carries;
@@ -41,6 +42,13 @@ def fifths(line: np.ndarray, margin: np.ndarray, blowout: int = BLOWOUTS[0]) -> 
     return float((np.abs(margin[big]) >= blowout).mean()), float((np.abs(margin[close]) >= blowout).mean())
 
 
+def close_games(margin: np.ndarray) -> dict[str, float]:
+    """How close games end: shares of final margins 1-3, exactly 3, exactly 7 and 4-8."""
+    m = np.abs(margin)
+    return {"margin 1-3 %": 100 * float(((m >= 1) & (m <= 3)).mean()), "margin 3 %": 100 * float((m == 3).mean()),
+            "margin 7 %": 100 * float((m == 7).mean()), "margin 4-8 %": 100 * float(((m >= 4) & (m <= 8)).mean())}
+
+
 def games(data: SeasonData, weeks: Iterable[int]) -> dict[str, float]:
     weeks = set(weeks)
     rows = []
@@ -59,7 +67,7 @@ def games(data: SeasonData, weeks: Iterable[int]) -> dict[str, float]:
     out.update({f"{b}+ margin %": 100 * float((np.abs(margin) >= b).mean()) for b in BLOWOUTS})
     out.update({"21+ in lopsided 5th %": 100 * lopsided, "21+ in closest 5th %": 100 * closest,
                 "home win %": 100 * float((margin > 0).mean() + 0.5 * (margin == 0).mean()),
-                "tie %": 100 * float((margin == 0).mean()), "team score mean": float(points.mean()),
+                "tie %": 100 * float((margin == 0).mean()), **close_games(margin), "team score mean": float(points.mean()),
                 "team score sd": float(points.std()), "team score 0 %": 100 * float((points == 0).mean()),
                 "rare score %": 100 * float(np.isin(points, RARE_TOTALS).mean())})
     return out

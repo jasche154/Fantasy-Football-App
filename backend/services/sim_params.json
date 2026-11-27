@@ -1229,11 +1229,6 @@
    "share_sd_carries": 0.15,
    "share_sd_qb_carries": 0.45,
    "td_drives": 5,
-   "ot_field_goal": 0.5,
-   "ot_td_yards": {
-    "rec": 12,
-    "rush": 4
-   },
    "fg_power": 1.0,
    "ypc_volume": 0.3
   },

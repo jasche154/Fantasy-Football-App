@@ -5,8 +5,8 @@
   and rushers; receiving yards of the #1/#3/#5/#10 WR and TE; receptions #5 and #10; the share of a team's
   targets its top WR, top TE and top five receivers got, its top RB's share of the carries; the
   spread (sd) of yards per target among receivers with MIN_TARGETS or more (real seasons ~1.3).
-- standings(data): best and worst record (wins, a tie half), the spread of team season points, and the share
-  of games decided by 1-3 points and by 8 or fewer (one score).
+- standings(data): best and worst record (wins, a tie half), the spread of wins, the teams at 10+ wins and at 4 or fewer, the spread
+  of team season points, and the share of games decided by 1-3 points and by 8 or fewer (one score).
 """
 from collections import defaultdict
 
@@ -16,6 +16,7 @@ from services.replay_pool import SeasonData
 
 LEADER_RANKS = (1, 3, 5, 10)
 MIN_TARGETS = 80                 # yards per target spread: receivers with a starter's season of targets
+GOOD_RECORD, BAD_RECORD = 10, 4   # wins: a strong team's season and a weak one's
 MIN_TEAM_TARGETS = 300           # a team with fewer box targets (a partial season) is left out of the shares
 
 
@@ -121,6 +122,9 @@ def standings(data: SeasonData) -> dict[str, float]:
         return {}
     margins = np.array(margins)
     return {"best record (wins)": max(wins.values()), "worst record (wins)": min(wins.values()),
+            "wins sd": float(np.std(list(wins.values()))),
+            "teams at 10+ wins": float(sum(w >= GOOD_RECORD for w in wins.values())),
+            "teams at 4 or fewer wins": float(sum(w <= BAD_RECORD for w in wins.values())),
             "team season points sd": float(np.std(list(points.values()))),
             "games by 1-3 %": float(100 * np.mean((margins >= 1) & (margins <= 3))),
             "games by 8 or fewer %": float(100 * np.mean(margins <= 8))}
