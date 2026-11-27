@@ -97,6 +97,12 @@ def test_close_model_values_are_settled_by_trade_value():
     useful = replace(base, player_id=3, healthy_value=30.0, healthy_chart=10.0)
 
     assert ai._close_by_chart([loveland, ertz, useful]) == [ertz, loveland, useful]
+    # a player out for the season comes first in `_spare` whatever his value: he is no run's lowest value
+    gone = replace(base, player_id=4, out=True, healthy_value=80.0, healthy_chart=150.0,
+                   news=Report(since=1, back=None, text="Out for the season (IR since week 1)."))
+    low = replace(base, player_id=5, healthy_value=0.0, healthy_chart=20.0)
+    mid = replace(base, player_id=6, healthy_value=40.0, healthy_chart=5.0)
+    assert ai._close_by_chart([gone, low, mid]) == [gone, low, mid]
 
 
 def test_the_trim_cuts_the_cheaper_of_two_players_the_model_cannot_tell_apart():

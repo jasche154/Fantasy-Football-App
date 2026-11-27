@@ -1178,7 +1178,14 @@ that week's games on; only scoring a week reads its real points.
   a week), then free agency, then the games. In free agency a CPU also adds a free agent whose trade value
   clearly beats a player it can drop at a position it can use (1.5 x his value and 100 more,
   `replay_waiver_ai._upgrade`), straight to IR when he is out, and every CPU keeps its most valuable eligible
-  player in its IR slot, so a valuable player rarely sits on the wire: every team's best lineup by projection (yours can be set
+  player in its IR slot (re-picked each week: a roster player out past next week and worth 10 chart points more
+  than the slot's player trades places with him, and one the news expects back comes before one it has out for
+  the season, whatever their values), so a valuable player rarely sits on the wire. A player the news has out for
+  the season ("no timetable yet" is not that) is the first a CPU drops, whatever he was worth healthy: with a full
+  roster it cuts him for the free agent who fills his spot best, unless he sits in its IR slot and no other player
+  can take it, and no CPU adds one from the wire. A long absence
+  first reads "out for the season" one time in ten (`replay_news.FALSE_SEASON_ODDS`), so now and then a CPU cuts
+  a player who comes back, as a real manager would: every team's best lineup by projection (yours can be set
   by hand), scored with real points. With waivers off, every unrostered player is a free agent.
 - **FAAB:** the same week, but each claim carries a blind bid from a $100 season budget (whole dollars, $0
   allowed). At the waiver run the highest bid wins, ties go to the team earlier in the rolling waiver order,
