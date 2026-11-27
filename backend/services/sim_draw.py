@@ -123,6 +123,8 @@ def _uncapped(share: float, sd: float, steps: int = 3) -> float:
     """The base share whose lognormal draw, capped at SHARE_CAP, still averages `share`."""
     if share <= 0:
         return 0.0
+    if sd <= 0:                                      # no spread: the draw is the share itself
+        return share
     base = share
     for _ in range(steps):
         a = (math.log(SHARE_CAP / base) - sd ** 2 / 2) / sd

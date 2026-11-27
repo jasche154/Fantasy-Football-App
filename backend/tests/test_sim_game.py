@@ -219,3 +219,12 @@ def test_the_carry_split_gives_everyone_his_weight_on_average(qb_carries):
     drawn = np.array([sim_draw._split(total, weights, 0.15, rng, (3, 0.45)) for _ in range(n)])
     assert (drawn.sum(axis=1) == total).all()
     assert drawn.mean(axis=0) / (total * weights / weights.sum()) == pytest.approx(np.ones(5), abs=0.01)
+
+
+def test_a_qb_carry_share_with_no_spread_is_his_weights_share():
+    """Item 9: a tuned share_sd_qb_carries of 0 draws no noise instead of dividing by it."""
+    from services import sim_draw
+    assert sim_draw._uncapped(0.3, 0.0) == 0.3
+    weights = np.array([0.5, 0.2, 0.3])
+    drawn = sim_draw._split(30, weights, 0.15, np.random.default_rng(1), (2, 0.0))
+    assert drawn.sum() == 30
