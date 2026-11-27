@@ -56,7 +56,8 @@ def expected(world: World, home: str, away: str | None, out: Collection[int], sc
     before = {team: _mean_points(m, means.get(other[team])) for team, m in means.items()}
     ends = {}                                        # the draw adds the closing window and overtime (sim_closing_means)
     if away is not None and not factors:
-        ends = dict(zip((home, away), closing_means.endings(before[home], before[away])))
+        edge = sides[home].end.edge if sides[home].end is not None else 0.0      # the endings drawn near it
+        ends = dict(zip((home, away), closing_means.endings(before[home], before[away], edge)))
     team_points = {team: before[team] + (ends[team].window + ends[team].overtime if team in ends else 0.0)
                    for team in means}
     out_lines: dict[int, Expected] = {}

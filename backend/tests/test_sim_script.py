@@ -171,7 +171,7 @@ def test_the_closing_table_carries_each_endings_plays():
             "plays_in_window": {"AAA": {"targets": 2, "carries": 7, "kneels": 3},
                                 "BBB": {"targets": 11, "carries": 1, "kneels": 0}}}
     table = sim_closing_fit.endings([game], sim_closing_fit.WINDOW)
-    (trail, lead), = table[7]
+    (trail, lead, _), = table[7]
     events = sim_closing_fit.EVENTS
     assert [trail[events.index(k)] for k in ("targets", "carries", "kneels")] == [11, 1, 0]
     assert [lead[events.index(k)] for k in ("targets", "carries", "kneels")] == [2, 7, 3]

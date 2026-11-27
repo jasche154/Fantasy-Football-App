@@ -128,7 +128,7 @@ def _without_window(side: "_Side", against: dict | None, regulation: float, end:
     from services.sim_game import _side_means
     m = _side_means(side)
     yards = float(m["rec_yds"].sum() + m["rush_yds"].sum())
-    keep = max(0.0, 1.0 - sim_closing_means.window_yards(end.lead, end.sd) / yards) if yards > 0 else 1.0
+    keep = max(0.0, 1.0 - sim_closing_means.window_yards(end.lead, end.sd, end.edge) / yards) if yards > 0 else 1.0
     side = replace(side, ypc=side.ypc * keep, ypr=side.ypr * keep)
     return scaled(side, factor(side, against, max(MIN_TARGET, regulation), power=0.0), 0.0)
 

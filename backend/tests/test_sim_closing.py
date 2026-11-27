@@ -39,7 +39,7 @@ def test_endings_are_filed_by_the_margin_at_the_cut_from_the_trailers_side():
              _game([[1, 3000, "AAA", "pass_td", 20], [1, 3000, "AAA", "xp", 0], [5, 400, "BBB", "fg_0_39", 0]], 7, 3)]
     assert all(sim_closing_fit.consistent(g) for g in games)
     table = sim_closing_fit.endings(games, 600)
-    (trail, lead), = table[3]                       # BBB trailed 0-3 and scored a TD and the extra point
+    (trail, lead, spread), = table[3]               # BBB trailed 0-3 and scored a TD and the extra point
     assert dict(zip(sim_closing_fit.EVENTS, trail))["rush_td"] == 1 and not any(lead)
     assert sum(table[7].values()) == 1              # the second game: no scoring in its window (OT is not the window)
     ot = sim_closing_fit.overtime(games)
@@ -78,7 +78,7 @@ def test_the_trailers_ending_goes_to_the_trailing_side_and_to_real_players(monke
     star = pid("AAA", "WR")
     sides, means, offense, counts, rng = _setup({star: 0.1})
     ending = (_events(pass_td=2, fg_40_49=1, xp=2), _events(ret_td=1, safety=1))
-    monkeypatch.setattr(sim_closing, "ending", lambda margin, rng: ending)
+    monkeypatch.setattr(sim_closing, "ending", lambda margin, rng, edge=None: ending)
     for _ in range(50):
         out = sim_closing.close(sides, offense, [(10, counts), (17, counts)], [10, 17], [0, 0], [0, 0],
                                 np.array([33, 33]), np.array([27, 27]), rng, means, [20.0, 20.0])
@@ -310,7 +310,7 @@ def test_a_window_touchdown_with_no_one_to_credit_goes_to_the_other_pool_or_to_n
     exits = {pid_: 0.5 for group in groups for pid_ in _ids(base, group)}
     sides, means, offense, counts, rng = _setup(exits)
     tds = _events(pass_td=1, rush_td=1, xp=2)
-    monkeypatch.setattr(sim_closing, "ending", lambda margin, rng: (tds, _events()))
+    monkeypatch.setattr(sim_closing, "ending", lambda margin, rng, edge=None: (tds, _events()))
     for _ in range(30):
         after, _, points, *_ = _close_once(sides, means, offense, counts, rng, tds)
         assert points[0] == 10 + 14                              # AAA trailed: the ending's points, credited or not
@@ -354,7 +354,7 @@ def test_a_hurt_kickers_window_kicks_count_for_his_team_not_his_line(monkeypatch
     kicker = sim_game._side(w, "AAA", "BBB", set(), {}).kicker
     sides, means, offense, counts, rng = _setup({kicker: 0.5})
     assert sides[0].kicker_share == 0.5
-    monkeypatch.setattr(sim_closing, "ending", lambda margin, rng: (_events(fg_40_49=1, rush_td=1, xp=1), _events()))
+    monkeypatch.setattr(sim_closing, "ending", lambda margin, rng, edge=None: (_events(fg_40_49=1, rush_td=1, xp=1), _events()))
     _, scored, points, *_ = _close_once(sides, means, offense, counts, rng, None)
     assert points[0] == 10 + 3 + 7
     assert scored[0][0] == 10 + 10 and scored[0][1] is counts             # no kick added to his line
@@ -364,7 +364,7 @@ def test_a_tied_games_better_ending_goes_to_each_side_by_its_share_of_the_points
     """Item 5: at a tie, the better of the two endings goes to side 0 with its share of the mean points (30 of 40)."""
     sides, means, offense, counts, rng = _setup()
     good, bad = _events(fg_0_39=1), _events()
-    monkeypatch.setattr(sim_closing, "ending", lambda margin, rng: (bad, good))      # the better one second
+    monkeypatch.setattr(sim_closing, "ending", lambda margin, rng, edge=None: (bad, good))      # the better one second
     wins = sum(_close_once(sides, means, offense, counts, rng, None, (10, 10), (30.0, 10.0))[2][0] == 13
                for _ in range(4000))
     assert wins / 4000 == pytest.approx(0.75, abs=0.025)

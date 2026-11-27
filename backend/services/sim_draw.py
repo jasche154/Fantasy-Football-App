@@ -153,7 +153,7 @@ def draw_game(sides: Sequence, rng: np.random.Generator, scoring: ScoringSetting
         return scored[0][0] + 2 * int(safeties[0]), scored[1][0] + 2 * int(safeties[1])
     expect = [max(0.1, _mean_points(means[i], means[1 - i])) for i in range(2)]
     cut = [scored[i][0] + 2 * int(safeties[i]) for i in range(2)]
-    events = sim_closing.pick(cut, expect, rng)
+    events = sim_closing.pick(cut, expect, rng, [side.end.edge for side in sides])
     n_targets = np.array([int(o.targets.sum()) for o in offense])
     n_carries = np.array([int(o.carries.sum()) for o in offense])
     offense, scored, points, returns, safeties, n_targets, n_carries = sim_closing.close(

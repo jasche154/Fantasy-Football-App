@@ -36,6 +36,8 @@ CLOSING_PATH = Path(__file__).with_name("sim_closing.json")
 CLOSING_FIT = "python -m services.sim_closing_fit --fit"
 TD_POINTS = 6
 SAFETY_POINTS = 2
+EDGE_WIDTH = 4.0                 # points: the spread kernel's sd (the real slope of the window's change on the spread
+                                 # at the same cut margin, 0.21, is matched by the kernel at 3-5)
 BANDS = ("0_39", "40_49", "50")
 SECTIONS = ("window", "events", "table", "td_yards", "ot", "line_script", "cut_var")
 
@@ -48,7 +50,9 @@ def stored() -> Mapping:
     events, table = found["events"], {}
     for margin, rows in found["table"].items():
         counts = np.array([r[0] for r in rows], dtype=float)
-        table[int(margin)] = (counts / counts.sum(), [(dict(zip(events, r[1])), dict(zip(events, r[2]))) for r in rows])
+        spreads = np.array([float(r[3]) if len(r) > 3 else 0.0 for r in rows])
+        table[int(margin)] = (counts / counts.sum(), [(dict(zip(events, r[1])), dict(zip(events, r[2]))) for r in rows],
+                              spreads)
     missing = sorted(set(range(max(table, default=-1) + 1)) - set(table))
     if not table or missing:
         raise RuntimeError(f"{CLOSING_PATH.name} has no endings for margins {missing or 'any'}: run {CLOSING_FIT}")
@@ -69,11 +73,23 @@ def ot() -> Mapping:
     return stored()["ot"]
 
 
-def ending(margin: int, rng: np.random.Generator) -> tuple[dict, dict]:
-    """(trailer's events, leader's events) of a real game that stood at `margin` (>= 0) at the cut."""
+def ending(margin: int, rng: np.random.Generator, edge: float | None = None) -> tuple[dict, dict]:
+    """(trailer's events, leader's events) of a real game that stood at `margin` (>= 0) at the cut, drawn with
+    `near(edge)` weights: the trailer's expected margin (None: every ending alike)."""
     s = stored()
-    shares, rows = s["rows"][min(margin, s["top"])]
-    return rows[int(rng.choice(len(rows), p=shares))]
+    shares, rows, spreads = s["rows"][min(margin, s["top"])]
+    return rows[int(rng.choice(len(rows), p=near(shares, spreads, edge)))]
+
+
+def near(shares: np.ndarray, spreads: np.ndarray, edge: float | None) -> np.ndarray:
+    """`shares` x a normal kernel (sd EDGE_WIDTH) on how far each ending's trailer spread is from `edge`, the
+    trailing side's expected margin in this game, renormalized: a real favourite closes a game better than an
+    underdog at the same margin (0.21 points a point of the spread over the window, 2018-2025)."""
+    if edge is None:
+        return shares
+    weights = shares * np.exp(-0.5 * ((spreads - edge) / EDGE_WIDTH) ** 2)
+    total = weights.sum()
+    return weights / total if total > 0 else shares
 
 
 # ---------------- crediting the points ----------------
@@ -110,11 +126,13 @@ def _kicks(counts: dict, events: Mapping[str, int], kicker_in: bool) -> dict:
             "pat_att": counts["pat_att"] + events["xp"] + events["xp_miss"]}
 
 
-def pick(points: Sequence[int], expect: Sequence[float], rng: np.random.Generator) -> list[dict]:
-    """Each side's events in the window: a real ending for the margin at the cut (`points`), the trailer's to the
-    trailing side; a tie's better ending to each side in proportion to its mean points (`expect`)."""
+def pick(points: Sequence[int], expect: Sequence[float], rng: np.random.Generator,
+         edges: Sequence[float] | None = None) -> list[dict]:
+    """Each side's events in the window: a real ending for the margin at the cut (`points`), near the trailing side's
+    expected margin (`edges`, each side's; None: any), the trailer's to the trailing side; a tie's better ending to
+    each side in proportion to its mean points (`expect`), drawn near the first side's."""
     margin = points[0] - points[1]
-    first, second = ending(abs(margin), rng)
+    first, second = ending(abs(margin), rng, None if edges is None else edges[1 if margin > 0 else 0])
     if margin == 0:                                     # the better ending to each side by its mean points
         better, worse = (first, second) if _points(first) >= _points(second) else (second, first)
         return [better, worse] if rng.random() < expect[0] / sum(expect) else [worse, better]

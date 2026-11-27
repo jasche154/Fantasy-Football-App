@@ -88,7 +88,7 @@ def test_a_centred_side_hits_any_reasonable_target(data, belief):
                                         away: sim_game._side(belief, away, home, set(), {})}, {home: wanted, away: 20.0})
             means = {t: sim_game._side_means(s) for t, s in sides.items()}
             before = (sim_game._mean_points(means[home], means[away]), sim_game._mean_points(means[away], means[home]))
-            end = sim_closing_means.endings(*before)[0]
+            end = sim_closing_means.endings(*before, wanted - 20.0)[0]
             got = before[0] + end.window + end.overtime      # the draw before the cut + the window + overtime
             worst = max(worst, abs(got - wanted))
     assert worst < 0.05
@@ -127,18 +127,21 @@ def test_close_and_low_scoring_games_get_the_window_and_overtime_their_cut_margi
     home, away = game.home_team, game.away_team
     sides = sim_draws.centred_sides(belief, home, away, {home: wanted[0], away: wanted[1]})
     means = [sim_game._side_means(s) for s in sides]
-    ends = cm.endings(sim_game._mean_points(means[0], means[1]), sim_game._mean_points(means[1], means[0]))
+    edge = sides[0].end.edge                       # the endings are drawn near each side's expected margin
+    ends = cm.endings(sim_game._mean_points(means[0], means[1]), sim_game._mean_points(means[1], means[0]), edge)
     rng, scoring = np.random.default_rng(5), sim_world.scoring_of(data)
     margins = np.array([np.subtract(*sim_draw.draw_game(sides, rng, scoring, until_cut=True)) for _ in range(2500)])
-    rows, ties = cm._tables()
+    rows, ties = cm._tables(round(edge * 2) / 2)
     points = np.array([points_of(dict(zip(stored()["events"], row))) for row in rows])
+    away_rows, _ = cm._tables(round(-edge * 2) / 2)
+    away_points = np.array([points_of(dict(zip(stored()["events"], row))) for row in away_rows])
     index = np.clip(margins, -cm.SPAN, cm.SPAN) + cm.SPAN
-    # 0.04 at 10-13: that game's cut margin spreads 7% less than cut_sd (test_sim_closing's cut spread test: the
-    # fixture's low scorers kick more than real ones at the same points), which moves the trailer's window by 0.035
-    tolerance = 0.04 if sum(wanted) < 30 else 0.03
+    # 0.05 at 10-13: that game's cut margin spreads 5-7% less than cut_sd (test_sim_closing's cut spread test: the
+    # fixture's low scorers kick more than real ones at the same points), which moves the trailer's window by 0.04
+    tolerance = 0.05 if sum(wanted) < 30 else 0.03
     assert points[index].mean() == pytest.approx(ends[0].window, abs=tolerance)        # home leads by the margin
-    assert points[2 * cm.SPAN - index].mean() == pytest.approx(ends[1].window, abs=tolerance)
-    assert cm.tie_chance(ends[0].lead, ends[0].sd) == pytest.approx(ties[index].mean(), rel=0.3)
+    assert away_points[2 * cm.SPAN - index].mean() == pytest.approx(ends[1].window, abs=tolerance)
+    assert cm.tie_chance(ends[0].lead, ends[0].sd, edge) == pytest.approx(ties[index].mean(), rel=0.3)
 
 
 def test_touchdowns_are_drive_limited_and_never_outnumber_the_plays():
@@ -288,6 +291,6 @@ def test_the_calendar_moves_the_mix_not_a_shifted_games_points(data, belief, wee
         sides = sim_centre.centred(raw, shift={home: 0.0, away: 0.0}, week=week)
         c = [sim_game._side_means(sides[t]) for t in (home, away)]
         before = (sim_game._mean_points(c[0], c[1]), sim_game._mean_points(c[1], c[0]))
-        ends = sim_closing_means.endings(*before)
+        ends = sim_closing_means.endings(*before, sides[home].end.edge)
         worst = max(worst, *(abs(before[i] + ends[i].window + ends[i].overtime - free[i]) for i in range(2)))
     assert worst < 0.05

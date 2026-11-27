@@ -184,14 +184,14 @@ def window_means(side) -> tuple[float, float, float]:
 
 def _window_means(side) -> tuple[float, float, float]:
     t_scale, c_scale = window_scale(side)
-    targets, carries, kneels = _window(float(side.end.lead), float(side.end.sd))
+    targets, carries, kneels = _window(float(side.end.lead), float(side.end.sd), float(side.end.edge))
     return t_scale * targets, c_scale * carries, kneels
 
 
 @lru_cache(maxsize=8192)
-def _window(lead: float, sd: float) -> tuple[float, float, float]:
+def _window(lead: float, sd: float, edge: float) -> tuple[float, float, float]:
     from services import sim_closing_means
-    ev = sim_closing_means.window_events(lead, sd)
+    ev = sim_closing_means.window_events(lead, sd, edge)
     return (max(0.0, ev["targets"] - ev["pass_td"]), max(0.0, ev["carries"] - ev["rush_td"] - ev["kneels"]),
             float(ev["kneels"]))
 

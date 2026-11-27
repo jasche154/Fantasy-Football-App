@@ -10,7 +10,9 @@ follows the score: a tied or close team kicks to win, a team down 4-8 chases a t
 sim_closing plays the last WINDOW seconds of regulation from the score with what real teams did from that score:
 
 - `table`: for each margin at the cut (0-MAX_MARGIN, the trailing team's deficit; larger ones pooled), every real
-  game's scoring events after it, the trailer's and the leader's (for a tie: the two teams in random order), with
+  game's scoring events after it, the trailer's and the leader's (for a tie: the two teams in random order) and the
+  trailer's Vegas spread (sim_closing draws an ending near the game's own expected margin: real favourites gain
+  0.21 points a point of the spread in the window at the same cut margin), with
   its plays there (targets, carries and kneel-downs, PLAYS, from sim_script_fit's cache: run that fit first), as
   (count, trailer events, leader events) with the events in EVENTS order. A drawn row is a real game's ending: the
   leader runs and kneels, the trailer throws (sim_script).
@@ -104,8 +106,9 @@ def _row(c: Counter) -> tuple[int, ...]:
 
 
 def endings(games: Iterable[Mapping], window: int, seed: int = SHUFFLE_SEED) -> dict[int, Counter]:
-    """{margin at the cut (capped at MAX_MARGIN + 1): Counter((trailer events, leader events))}; a game's window
-    plays (`plays`: {team: {PLAYS name: count}}) ride on its events when it has them."""
+    """{margin at the cut (capped at MAX_MARGIN + 1): Counter((trailer events, leader events, the trailer's Vegas
+    spread))}; a game's window plays (`plays_in_window`: {team: {PLAYS name: count}}) ride on its events when it has
+    them, its spread (`spread`, the home side's) when it has one (0.0 else)."""
     rnd = random.Random(seed)
     table: dict[int, Counter] = defaultdict(Counter)
     for g in games:
@@ -117,7 +120,8 @@ def endings(games: Iterable[Mapping], window: int, seed: int = SHUFFLE_SEED) -> 
         trail, lead = (home, away) if margin < 0 else (away, home)
         if margin == 0 and rnd.random() < 0.5:
             trail, lead = lead, trail
-        table[min(abs(margin), MAX_MARGIN + 1)][(_row(inside[trail]), _row(inside[lead]))] += 1
+        spread = float(g.get("spread", 0.0)) * (1.0 if trail == home else -1.0)      # the trailer's Vegas edge
+        table[min(abs(margin), MAX_MARGIN + 1)][(_row(inside[trail]), _row(inside[lead]), round(spread * 2) / 2)] += 1
     return table
 
 
@@ -132,7 +136,8 @@ def with_plays(games: list[Mapping], window: int, seasons: Iterable[int], refres
     for g in games:
         found = cached.get((g["season"], g["week"], g["home"], g["away"]))
         if found is not None:
-            out.append({**g, "plays_in_window": {t: sim_script_fit.window_counts(found, t) for t in (g["home"], g["away"])}})
+            out.append({**g, "spread": found["spread"],
+                        "plays_in_window": {t: sim_script_fit.window_counts(found, t) for t in (g["home"], g["away"])}})
     return out
 
 
@@ -173,7 +178,7 @@ def play_forward(cut: tuple[int, int], table: Mapping[int, Counter], rng: random
     home, away = cut
     margin = abs(home - away)
     rows = table[min(margin, MAX_MARGIN + 1)]
-    trail_row, lead_row = rng.choices(list(rows), weights=list(rows.values()))[0]
+    trail_row, lead_row = rng.choices(list(rows), weights=list(rows.values()))[0][:2]
     gained = _points(dict(zip(EVENTS, lead_row))) - _points(dict(zip(EVENTS, trail_row)))
     if margin == 0:
         return gained if rng.random() < 0.5 else -gained
@@ -299,7 +304,7 @@ def fit(seasons: Iterable[int], window: int = WINDOW, refresh: bool = False) -> 
     return {"seasons": [min(g["season"] for g in games), max(g["season"] for g in games)], "games": len(games),
             "window": window, "events": list(EVENTS), "max_margin": MAX_MARGIN,
             "td_yards": td_yards(games, window),
-            "table": {str(k): sorted([[n, list(t), list(lead)] for (t, lead), n in rows.items()], reverse=True)
+            "table": {str(k): sorted([[n, list(t), list(lead), spread] for (t, lead, spread), n in rows.items()], reverse=True)
                       for k, rows in sorted(table.items())},
             "ot": overtime(every), "line_script": script, "cut_var": cut_var, "check": check(games, window)}
 
@@ -309,7 +314,8 @@ def write(result: dict) -> dict:
     it) and store it again: one --fit is enough, and a file without cut_var can be refit."""
     from database.db import SessionLocal
     from services import sim_closing, sim_closing_means, sim_script
-    caches = (sim_closing.stored, sim_closing_means._tables, sim_closing_means._at, sim_script._window)
+    caches = (sim_closing.stored, sim_closing_means._endings, sim_closing_means._tables, sim_closing_means._at,
+              sim_script._window)
     previous = CLOSING_PATH.read_text(encoding="utf-8") if CLOSING_PATH.exists() else None
     try:
         _store(dumps(result))

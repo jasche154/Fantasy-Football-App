@@ -47,19 +47,20 @@ class Ending:
     lead: float                  # the side's expected lead at the cut
     sd: float                    # the cut margin's spread
     share: float                 # the side's share of the two sides' mean points before the cut (wins overtime)
+    edge: float = 0.0            # the side's expected final margin: the endings drawn near it (sim_closing.near)
 
     @property
     def window(self) -> float:
-        return window_points(self.lead, self.sd)
+        return window_points(self.lead, self.sd, self.edge)
 
     @property
     def overtime(self) -> float:
-        return ot_points(self.lead, self.sd, self.share)
+        return ot_points(self.lead, self.sd, self.share, self.edge)
 
     @property
     def ot_wins(self) -> float:
         """The chance overtime is decided in this side's favour."""
-        return tie_chance(self.lead, self.sd) * (1.0 - float(sim_closing.ot()["tie"])) * self.share
+        return tie_chance(self.lead, self.sd, self.edge) * (1.0 - float(sim_closing.ot()["tie"])) * self.share
 
 
 def cut_sd(pre_a: float, pre_b: float) -> float:
@@ -69,51 +70,72 @@ def cut_sd(pre_a: float, pre_b: float) -> float:
 
 
 @lru_cache(maxsize=1)
-def _tables() -> tuple[np.ndarray, np.ndarray]:
-    """(mean events in EVENTS order of a side leading by m at the cut, the chance an ending at m leaves the game
-    tied), m = -SPAN..SPAN (row m + SPAN)."""
+def _endings() -> list[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]]:
+    """Per margin 0..top: (shares, trailer events, leader events, trailer spreads, closes the game), arrays."""
     s = sim_closing.stored()
-    events, rows, ties = s["events"], [], []
-    for m in MARGINS:
-        shares, endings = s["rows"][min(abs(int(m)), s["top"])]
+    events, out = s["events"], []
+    for m in range(s["top"] + 1):
+        shares, endings, spreads = s["rows"][m]
         trail = np.array([[e[0][k] for k in events] for e in endings], dtype=float)
         lead = np.array([[e[1][k] for k in events] for e in endings], dtype=float)
-        rows.append(shares @ ((trail + lead) / 2 if m == 0 else lead if m > 0 else trail))
-        closes = np.array([sim_closing.points_of(t) - sim_closing.points_of(ld) == abs(int(m)) for t, ld in endings])
-        ties.append(float(shares @ closes))
+        closes = np.array([sim_closing.points_of(t) - sim_closing.points_of(ld) == m for t, ld in endings], dtype=float)
+        out.append((shares, trail, lead, spreads, closes))
+    return out
+
+
+@lru_cache(maxsize=256)
+def _tables(edge: float) -> tuple[np.ndarray, np.ndarray]:
+    """(mean events in EVENTS order of a side expected to win by `edge` that leads by m at the cut, the chance an
+    ending at m leaves the game tied), m = -SPAN..SPAN (row m + SPAN): the endings drawn near its edge as the draw
+    draws them (sim_closing.near: as the trailer near `edge`, as the leader its opponent near -`edge`)."""
+    by_margin, top = _endings(), sim_closing.stored()["top"]
+    rows, ties = [], []
+    for m in MARGINS:
+        shares, trail, lead, spreads, closes = by_margin[min(abs(int(m)), top)]
+        if m < 0:
+            w = sim_closing.near(shares, spreads, edge)
+            rows.append(w @ trail)
+        elif m > 0:
+            w = sim_closing.near(shares, spreads, -edge)
+            rows.append(w @ lead)
+        else:
+            w = sim_closing.near(shares, spreads, edge)
+            rows.append(w @ (trail + lead) / 2)
+        ties.append(float(w @ closes))
     return np.array(rows), np.array(ties)
 
 
 @lru_cache(maxsize=8192)
-def _at(d: float, s: float) -> tuple[Mapping[str, float], float]:
+def _at(d: float, s: float, edge: float) -> tuple[Mapping[str, float], float]:
     weights = np.exp(-0.5 * ((MARGINS - d) / s) ** 2)
     weights /= weights.sum()
-    rows, ties = _tables()
+    rows, ties = _tables(edge)
     return MappingProxyType(dict(zip(sim_closing.stored()["events"], weights @ rows))), float(weights @ ties)
 
 
-def _key(d: float, s: float) -> tuple[float, float]:
-    return round(float(d), 1), round(float(s), 2)
+def _key(d: float, s: float, edge: float) -> tuple[float, float, float]:
+    return round(float(d), 1), round(float(s), 2), round(float(edge) * 2) / 2
 
 
-def window_events(d: float, s: float) -> Mapping[str, float]:
-    """A side's mean window events when it is expected to lead by `d` at the cut, the margin spread `s`."""
-    return _at(*_key(d, s))[0]
+def window_events(d: float, s: float, edge: float = 0.0) -> Mapping[str, float]:
+    """A side's mean window events when it is expected to lead by `d` at the cut, the margin spread `s`, and to win
+    by `edge` (the endings drawn near it)."""
+    return _at(*_key(d, s, edge))[0]
 
 
-def window_points(d: float, s: float) -> float:
-    return float(sim_closing.points_of(window_events(d, s)))
+def window_points(d: float, s: float, edge: float = 0.0) -> float:
+    return float(sim_closing.points_of(window_events(d, s, edge)))
 
 
-def window_yards(d: float, s: float) -> float:
+def window_yards(d: float, s: float, edge: float = 0.0) -> float:
     """A side's mean yards on its window TD plays (credited to the scorer on top of the draw's yards)."""
-    ev, yards = window_events(d, s), sim_closing.stored()["td_yards"]
+    ev, yards = window_events(d, s, edge), sim_closing.stored()["td_yards"]
     return float(ev["pass_td"] * yards["rec"] + ev["rush_td"] * yards["rush"])
 
 
-def tie_chance(d: float, s: float) -> float:
-    """The chance regulation ends tied (the same for either side: `d`'s sign does not matter)."""
-    return _at(*_key(abs(d), s))[1]
+def tie_chance(d: float, s: float, edge: float = 0.0) -> float:
+    """The chance regulation ends tied."""
+    return _at(*_key(d, s, edge))[1]
 
 
 def _winning_points() -> float:
@@ -121,9 +143,9 @@ def _winning_points() -> float:
     return 3 * field_goal + 6 * (1 - field_goal)
 
 
-def ot_points(d: float, s: float, share: float) -> float:
+def ot_points(d: float, s: float, share: float, edge: float = 0.0) -> float:
     """A side's mean overtime points (see the module docstring)."""
-    return tie_chance(d, s) * (1.0 - float(sim_closing.ot()["tie"])) * share * _winning_points()
+    return tie_chance(d, s, edge) * (1.0 - float(sim_closing.ot()["tie"])) * share * _winning_points()
 
 
 def regulation(a: float, b: float, floor: float = 1.0) -> tuple[float, float, Ending, Ending]:
@@ -131,16 +153,16 @@ def regulation(a: float, b: float, floor: float = 1.0) -> tuple[float, float, En
     the window and overtime in; each kept at `floor` or more."""
     pre_a, pre_b = a, b
     for _ in range(STEPS):
-        ends = endings(pre_a, pre_b)
+        ends = endings(pre_a, pre_b, a - b)
         pre_a = max(floor, a - ends[0].window - ends[0].overtime)
         pre_b = max(floor, b - ends[1].window - ends[1].overtime)
-    return pre_a, pre_b, *endings(pre_a, pre_b)
+    return pre_a, pre_b, *endings(pre_a, pre_b, a - b)
 
 
-def endings(pre_a: float, pre_b: float) -> tuple[Ending, Ending]:
-    """Both sides' Endings from their mean points before the cut."""
+def endings(pre_a: float, pre_b: float, edge: float = 0.0) -> tuple[Ending, Ending]:
+    """Both sides' Endings from their mean points before the cut; `edge`: the first side's expected final margin."""
     s, share = cut_sd(pre_a, pre_b), pre_a / (pre_a + pre_b) if pre_a + pre_b > 0 else 0.5
-    return Ending(pre_a - pre_b, s, share), Ending(pre_b - pre_a, s, 1.0 - share)
+    return Ending(pre_a - pre_b, s, share, edge), Ending(pre_b - pre_a, s, 1.0 - share, -edge)
 
 
 # ---------------- crediting the means, for projections ----------------
@@ -150,7 +172,7 @@ def credit_means(lines: dict[int, dict[str, float]], side: "_Side", m: dict, end
     (sim_game._expected_players' dicts, by player), as the draw credits them (sim_closing.score_td): window TDs by
     kind, by expected TDs among the players the draw credits, with their catches, targets and yards; an overtime TD
     by catch or run alike, by the same weights; the passer's line follows his receivers'."""
-    per, s = window_events(end.lead, end.sd), sim_closing.stored()
+    per, s = window_events(end.lead, end.sd, end.edge), sim_closing.stored()
     left = side.exited                                   # never one who left the game hurt, as score_td
     rec = m["rec_td"][:-1] * np.array([pid not in left for pid in side.receivers[:-1]], dtype=float)
     rush = m["rush_td"][:-1] * np.array([pid not in left for pid in side.rushers[:-1]], dtype=float)
@@ -184,7 +206,7 @@ def credit_means(lines: dict[int, dict[str, float]], side: "_Side", m: dict, end
 def kicker_points(end: Ending, bands: list[float]) -> float:
     """A kicker's mean points from the window (its field goals by band, misses and extra points) and from an
     overtime field goal (drawn in a band by `bands`, the kick bands' shares)."""
-    per = window_events(end.lead, end.sd)
+    per = window_events(end.lead, end.sd, end.edge)
     ot_fg = end.ot_wins * float(sim_closing.ot()["field_goal"])
     share = np.array(bands) / sum(bands)
     row = SimpleNamespace(**{f"made_{b}": per[f"fg_{b}"] + ot_fg * share[j] for j, b in enumerate(BANDS)},
@@ -195,7 +217,7 @@ def kicker_points(end: Ending, bands: list[float]) -> float:
 
 def defense_points(end: Ending) -> float:
     """A defense's mean points from the window (return TDs, safeties), points allowed aside."""
-    per = window_events(end.lead, end.sd)
+    per = window_events(end.lead, end.sd, end.edge)
     blank = SimpleNamespace(def_sacks=0, def_ints=0, def_fumble_rec=0, def_tds=0, def_safeties=0, def_blocks=0,
                             points_against=1000)
     scored = SimpleNamespace(**{**vars(blank), "def_tds": per["ret_td"], "def_safeties": per["safety"]})
