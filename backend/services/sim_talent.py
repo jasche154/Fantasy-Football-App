@@ -113,21 +113,24 @@ def _offseason(player: Player, z: np.ndarray, knobs: dict) -> Player:
     return replace(player, **rates)
 
 
-def _season_role(player: Player, z: float, knobs: dict) -> Player:
+def _season_role(player: Player, z: float, knobs: dict, star: bool = False) -> Player:
     """A whole-season role: x lognormal, sd = what his position's role curve leaves unexplained from one season to
-    the next (sim_next_year.json `role_sd`) x the tuned `season_roles`; for a rookie, in full, what the rookie role
-    line at his pick leaves (`rookies.<position>.role_sd`: the belief knows only his pick, so all of it is
-    hidden; x season_roles too, rookies followed their draft slot too closely: full mode 2021-2025, real / before /
-    after, rookie ADP vs finish r 0.50 / 0.66 / 0.51, rookie top-24 finishes 8.4 / 6.6 / 7.5, breakouts 10.6 / 7.5
-    / 9.0)."""
+    the next (sim_next_year.json `role_sd`) x the tuned `season_roles`; a rookie's, in full, what the rookie role
+    line at his pick leaves (`rookies.<position>.role_sd`, no season_roles: the belief knows only his pick, and with
+    a quarter of it rookies followed their draft slot too closely; full mode 2021-2025, 3 seeds, real / quarter /
+    full: rookie ADP against finish 0.50 / 0.66 / 0.55, rookie top-24 finishes 8.4 / 6.8 / 8.0). A `star` (the
+    public's top STAR_RANK at his position, sim_market.position_ranks) keeps at least the most a bust leaves
+    (`bust_cut`'s top): stars never bust, on this draw either."""
     model = sim_next_year.stored()
     if player.games > 0:
         sd = model.get("role_sd", {}).get(player.position, 0.0) * knobs["season_roles"]
     else:                                          # a rookie: around the role a player taken at his pick had
-        sd = model.get("rookies", {}).get(player.position, {}).get("role_sd", 0.0)   # measured: no season_roles
+        sd = model.get("rookies", {}).get(player.position, {}).get("role_sd", 0.0)
     if sd <= 0:
         return player
     x = _lognormal(sd, z)
+    if star:
+        x = max(x, float(knobs["bust_cut"][1]))
     return replace(player, targets=player.targets * x, carries=player.carries * x)
 
 
@@ -227,13 +230,14 @@ def truth(belief: World, seed: int, from_week: int, last_week: int, rookies: Col
     draws = replay_state.rng(seed, "sim", "talent").standard_normal((len(ids), 3))
     players = {pid: _level(belief.players[pid], draws[i], float(team_z.get(belief.players[pid].team, [0.0])[0]), knobs)
                for i, pid in enumerate(ids)}
+    ranks = sim_market.position_ranks(belief)
     if from_week == 1:
         season = replay_state.rng(seed, "sim", "offseason").standard_normal((len(ids), len(SEASON_RATES)))
         roles = replay_state.rng(seed, "sim", "offseason", "role").standard_normal(len(ids))
-        players = {pid: _season_role(_offseason(players[pid], season[i], knobs), float(roles[i]), knobs)
+        players = {pid: _season_role(_offseason(players[pid], season[i], knobs), float(roles[i]), knobs,
+                                     ranks.get(pid, STAR_RANK + 1) <= STAR_RANK)
                    for i, pid in enumerate(ids)}
     first, last = change_weeks(from_week, last_week)
-    ranks = sim_market.position_ranks(belief)
     changes = []
     for team in names:
         team_dice = replay_state.rng(seed, "sim", "changes", team)

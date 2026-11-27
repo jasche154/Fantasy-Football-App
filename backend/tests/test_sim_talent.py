@@ -110,3 +110,15 @@ def test_a_rookies_season_role_spreads_by_the_measured_rookie_spread_whatever_th
     knobs = {"season_roles": 0.0}
     assert sim_talent._season_role(veteran, 1.0, knobs) == veteran
     assert sim_talent._season_role(rookie, 1.0, knobs).targets == pytest.approx(0.1 * math.exp(sd - sd ** 2 / 2))
+
+
+def test_a_top_ranked_rookie_never_collapses_on_the_season_role_draw():
+    """L2: stars never bust (sim_talent.STAR_RANK), on the season role draw either: a top-ranked player keeps at
+    least bust_cut's top of his role, whatever the draw; anyone else can fall far."""
+    from services.sim_world import Player
+    rookie = Player(1, "RB", "AAA", carries=0.5, games=0.0)
+    knobs = {**sim_talent.settings(), "season_roles": 0.25}
+    floor = knobs["bust_cut"][1]
+    assert sim_talent._season_role(rookie, -3.0, knobs, star=True).carries == pytest.approx(0.5 * floor)
+    assert sim_talent._season_role(rookie, -3.0, knobs).carries < 0.5 * 0.2
+    assert sim_talent._season_role(rookie, 1.0, knobs, star=True) == sim_talent._season_role(rookie, 1.0, knobs)
