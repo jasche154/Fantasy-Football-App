@@ -337,9 +337,13 @@ def fit(seasons: Iterable[int], window: int = WINDOW, refresh: bool = False) -> 
         from services import sim_closing
         cut_var = list(sim_closing.stored()["cut_var"])      # the stored one, re-measured by `write` on the new table
     except RuntimeError:
+        log.warning("no stored cut_var to start from (%s unreadable or incomplete): using %s",
+                    CLOSING_PATH.name, CUT_VAR_START, exc_info=True)
         cut_var = list(CUT_VAR_START)
     every = scoring_games(seasons, refresh)
-    games = [g for g in every if consistent(g)]      # the endings need every scoring play; overtime only the score
+    # the endings need every scoring play. Overtime reads every game: a tied one shows in the score alone; a
+    # decided one still needs its quarter-5 play (one with no game clock is lost: games_of logs those)
+    games = [g for g in every if consistent(g)]
     table = endings(games, window)
     return {"seasons": [min(g["season"] for g in games), max(g["season"] for g in games)], "games": len(games),
             "window": window, "events": list(EVENTS), "max_margin": MAX_MARGIN,
@@ -354,14 +358,31 @@ def write(result: dict) -> dict:
     it) and store it again: one --fit is enough, and a file without cut_var can be refit."""
     from database.db import SessionLocal
     from services import sim_closing, sim_closing_means
-    CLOSING_PATH.write_text(dumps(result), encoding="utf-8")
-    for cache in (sim_closing.stored, sim_closing_means._tables, sim_closing_means._at):
-        cache.cache_clear()
-    with SessionLocal() as session:
-        result = {**result, "cut_var": _cut_var(session)}
-    CLOSING_PATH.write_text(dumps(result), encoding="utf-8")
-    sim_closing.stored.cache_clear()
+    caches = (sim_closing.stored, sim_closing_means._tables, sim_closing_means._at)
+    previous = CLOSING_PATH.read_text(encoding="utf-8") if CLOSING_PATH.exists() else None
+    try:
+        _store(dumps(result))
+        for cache in caches:
+            cache.cache_clear()
+        with SessionLocal() as session:
+            result = {**result, "cut_var": _cut_var(session)}
+        _store(dumps(result))
+    except BaseException:           # a failed measurement must not leave a new table beside the old cut_var
+        if previous is None:
+            CLOSING_PATH.unlink(missing_ok=True)
+        else:
+            _store(previous)
+        raise
+    finally:
+        for cache in caches:
+            cache.cache_clear()
     return result
+
+
+def _store(text: str) -> None:
+    partial = CLOSING_PATH.with_suffix(f".{os.getpid()}.tmp")
+    partial.write_text(text, encoding="utf-8")
+    os.replace(partial, CLOSING_PATH)
 
 
 def dumps(result: Mapping) -> str:
@@ -389,7 +410,8 @@ def main(argv: list[str] | None = None) -> None:
     log.info("%d games, window %ds", result["games"], result["window"])
     log.info("overtime %s", result["ot"])
     log.info("volume per point of expected margin %s", result["line_script"])
-    log.info("cut margin variance = %s + %s x expected points before the cut", *result["cut_var"])
+    log.info("cut margin variance%s = %s + %s x expected points before the cut",
+             "" if args.fit else " (stored, not re-measured)", *result["cut_var"])
     for name, row in result["check"].items():
         log.info("%-15s %s", name, "  ".join(f"{k} {100 * v:.1f}%" for k, v in row.items()))
 

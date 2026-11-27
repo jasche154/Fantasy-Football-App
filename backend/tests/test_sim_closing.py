@@ -238,12 +238,46 @@ def test_a_fit_measures_the_cut_spread_on_the_table_it_just_stored(monkeypatch, 
     monkeypatch.setattr(sim_closing_fit, "CLOSING_PATH", path)
     monkeypatch.setattr(sim_closing_fit, "_cut_var", lambda session: [float(sim_closing.stored()["games"]), 1.0])
     monkeypatch.setattr("database.db.SessionLocal", lambda: __import__("contextlib").nullcontext())
-    written = sim_closing_fit.write({**good, "games": 12345})
-    assert written["cut_var"] == [12345.0, 1.0]
-    assert json.loads(path.read_text(encoding="utf-8"))["cut_var"] == [12345.0, 1.0]
-    monkeypatch.undo()
-    for cache in (sim_closing.stored, sim_closing_means._tables, sim_closing_means._at):
-        cache.cache_clear()
+    try:
+        written = sim_closing_fit.write({**good, "games": 12345})
+        assert written["cut_var"] == [12345.0, 1.0]
+        assert json.loads(path.read_text(encoding="utf-8"))["cut_var"] == [12345.0, 1.0]
+
+        def failing(session):
+            raise OSError("no database")
+        monkeypatch.setattr(sim_closing_fit, "_cut_var", failing)
+        before = path.read_text(encoding="utf-8")
+        with pytest.raises(OSError):
+            sim_closing_fit.write({**good, "games": 777})
+        assert path.read_text(encoding="utf-8") == before      # the old table and its cut_var, together
+        path.unlink()
+        with pytest.raises(OSError):
+            sim_closing_fit.write({**good, "games": 777})
+        assert not path.exists()                               # no file before: none left half-written
+    finally:
+        monkeypatch.undo()
+        for cache in (sim_closing.stored, sim_closing_means._tables, sim_closing_means._at):
+            cache.cache_clear()
+
+
+def test_fit_counts_overtime_on_every_game_and_warns_when_nothing_is_stored(monkeypatch, caplog):
+    """The overtime share reads every game, also one whose scoring plays miss a score (the endings leave it out),
+    and a fit with no readable sim_closing.json starts cut_var from CUT_VAR_START, saying so."""
+    from contextlib import nullcontext
+    plain = [_game([[1, 3000, "AAA", "fg_0_39", 0]], 3, 0, season) for season in (2020, 2021)]
+    tied = _game([[1, 3000, "AAA", "fg_0_39", 0]], 3, 3)        # BBB's field goal is missing from the plays
+
+    def unreadable():
+        raise RuntimeError("sim_closing.json is unreadable")
+    monkeypatch.setattr(sim_closing_fit, "scoring_games", lambda seasons, refresh=False: [*plain, tied])
+    monkeypatch.setattr(sim_closing_fit, "line_script", lambda session, seasons: {"targets": 0.0, "carries": 0.0})
+    monkeypatch.setattr("database.db.SessionLocal", nullcontext)
+    monkeypatch.setattr(sim_closing, "stored", unreadable)
+    with caplog.at_level("WARNING", logger="services.sim_closing_fit"):
+        result = sim_closing_fit.fit([2020, 2021])
+    assert not sim_closing_fit.consistent(tied) and result["games"] == 2
+    assert result["ot"]["games"] == 1 and result["ot"]["tie"] == 1.0
+    assert result["cut_var"] == list(sim_closing_fit.CUT_VAR_START) and "no stored cut_var" in caplog.text
 
 
 def _close_once(sides, means, offense, counts, rng, ending, points=(10, 17), expect=(20.0, 20.0)):

@@ -171,7 +171,7 @@ def centred(sides: dict, target: Mapping[str, float] | None = None, shift: Mappi
 
     def pair(means: dict) -> dict:
         return {teams[0]: means[teams[-1]], teams[-1]: means[teams[0]]} if len(teams) == 2 else {}
-    wanted = {}
+    wanted, plain = {}, None
     if target or shift:      # a shift is on the week-free mean (the line's belief points have no week either)
         plain = {team: _side_means(side) for team, side in sides.items()}
         wanted = _wanted(sides, plain, pair(plain), target, shift, factors)
@@ -182,7 +182,7 @@ def centred(sides: dict, target: Mapping[str, float] | None = None, shift: Mappi
     from services import sim_closing_means
     from services.sim_lines import yards_power
     power = yards_power()
-    means = {team: _side_means(side) for team, side in sides.items()}
+    means = plain if plain is not None and week is None else {team: _side_means(side) for team, side in sides.items()}
     against = pair(means)
     ends = {}
     if len(teams) == 2 and all(team in wanted for team in teams):

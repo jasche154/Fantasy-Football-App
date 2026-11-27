@@ -226,5 +226,7 @@ def test_a_qb_carry_share_with_no_spread_is_his_weights_share():
     from services import sim_draw
     assert sim_draw._uncapped(0.3, 0.0) == 0.3
     weights = np.array([0.5, 0.2, 0.3])
-    drawn = sim_draw._split(30, weights, 0.15, np.random.default_rng(1), (2, 0.0))
-    assert drawn.sum() == 30
+    rng = np.random.default_rng(1)
+    drawn = np.array([sim_draw._split(30, weights, 0.15, rng, (2, 0.0)) for _ in range(4000)])
+    assert (drawn.sum(axis=1) == 30).all()
+    assert drawn[:, 2].mean() == pytest.approx(30 * 0.3, rel=0.02)      # se 0.04 carries: about 4.5 se
