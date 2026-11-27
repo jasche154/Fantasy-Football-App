@@ -261,3 +261,11 @@ def test_a_player_who_left_hurt_never_scores_the_overtime_touchdown_and_attempts
                 assert all(n == 0 for pid, n in zip(ids, gained) if pid == star)
             assert o.attempts - before.attempts == int((o.catches - before.catches).sum())
     assert home_wins > 0                                   # the checks above ran
+
+
+def test_a_nan_target_is_refused_not_floored(data, belief):
+    game = next(g for g in data.schedule.games if g.week == WEEK)
+    home, away = game.home_team, game.away_team
+    with pytest.raises(ValueError, match="not a number"):
+        sim_centre.centred({home: sim_game._side(belief, home, away, set(), {}),
+                            away: sim_game._side(belief, away, home, set(), {})}, {home: float("nan"), away: 20.0})

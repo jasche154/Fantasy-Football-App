@@ -1591,7 +1591,10 @@ read the belief, so, as in a real season, the public learns the truth only from 
   team-game more than real (mid / full; 2.1 / 2.3 before, the full mode's rest following last season's scoring
   level, 23.2 points a team against 22.5) and shutouts are 1.3% / 0.86% of team scores against 1.4% / 1.1%; in
   the closest fifth of lines in the mid-season mode a 21+ blowout is more common than real (13.0% against 7.9%, a
-  small real sample: full mode's real is 12.0%).
+  small real sample: full mode's real is 12.0%); a favourite's D/ST draws about half a point a game over its
+  projection in a lopsided game (0.56 at 31-13; 0.52 before the closing window); and a tie's chance is a normal
+  spread's, while real cut margins are lumpier, so it runs 9-24% under the drawn one in close and low-scoring
+  games (0.01-0.04 points of overtime a side).
 - **Games are played top-down,** so box scores always add up (`services/sim_game.py`): first each
   team's targets and carries (its volume, a shared game draw for shootouts, the leader running more and the
   trailer passing more), then they are split among the active players by their roles (an injured player's

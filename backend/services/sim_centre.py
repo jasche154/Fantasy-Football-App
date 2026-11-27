@@ -40,8 +40,13 @@ FACTOR_RANGE = (0.02, 8.0)       # a side's factor stays in this range
 NEWTON_STEPS = 25                # on the closed form (microseconds each); stops at CLOSED_TOLERANCE
 CLOSED_TOLERANCE = 1e-3          # points, on the closed form
 TARGET_TOLERANCE = 0.05          # points, on the real means (else one correction)
-MIN_TARGET = 1.0                 # a side is never centred below this many points
+MIN_TARGET = 1.0                 # a side's draw before the cut is never centred below this many points
 FG_POWER = 1.0                   # default of the tuned `game.fg_power`
+# shortcut: with the window and overtime on top, a side wanted under about 5.5 points cannot be reached (a 3-3
+# target delivers 5.96 a side; real lines never go that low: 28.5 is the lowest total); lower MIN_TARGET's floor
+# into the window itself if a line ever does.
+
+
 def fg_power() -> float:
     """How field-goal tries follow a factor below 1 (`game.fg_power`)."""
     return float(params()["game"].get("fg_power", FG_POWER))
@@ -140,6 +145,8 @@ def _wanted(sides: dict, means: dict, against: dict, target, shift, factors) -> 
         if goal is None and team in (shift or {}):
             goal = _mean_points(means[team], against.get(team)) + shift[team]       # the truth minus the belief: OT in both
         if goal is not None:
+            if math.isnan(goal):
+                raise ValueError(f"{team}'s target is not a number")
             wanted[team] = max(MIN_TARGET, goal)
     return wanted
 

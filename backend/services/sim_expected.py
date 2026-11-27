@@ -7,6 +7,7 @@ in a two-team game the closing window's and overtime's mean events are added on 
 draw plays them.
 """
 from collections.abc import Collection, Mapping
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -17,6 +18,9 @@ from services.sim_game import (
     _side_of, _skill_points, _takeaways,
 )
 from services.sim_world import World, params
+
+if TYPE_CHECKING:
+    from services.sim_closing_means import Ending
 
 
 def _tries(tds: float, against: dict | None) -> float:
@@ -78,7 +82,8 @@ def expected(world: World, home: str, away: str | None, out: Collection[int], sc
     return out_lines
 
 
-def _expected_players(side: _Side, m: dict, scoring: ScoringSettings, end=None) -> dict[int, Expected]:
+def _expected_players(side: _Side, m: dict, scoring: ScoringSettings,
+                      end: "Ending | None" = None) -> dict[int, Expected]:
     """Every skill player's mean line and points; `end`: with the closing window's and overtime's mean events
     (a sim_closing_means.Ending), None without."""
     lines: dict[int, dict[str, float]] = {}
@@ -101,5 +106,3 @@ def _expected_players(side: _Side, m: dict, scoring: ScoringSettings, end=None) 
         box = BoxLine(**{key: float(value) for key, value in line.items()})
         out[pid] = Expected(box, round(_skill_points(box, fumbles, side.positions[pid], scoring), 2))
     return out
-
-
