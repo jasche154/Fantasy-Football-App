@@ -332,9 +332,10 @@ def base_charts(data: SeasonData, rows: Sequence[dict], priors: Mapping[int, flo
 
 
 def with_news(data: SeasonData, rows: Mapping[int, dict], fields: Mapping[int, dict], parts: Parts, week: int,
-              end_week: int, seed: int) -> dict[int, dict]:
+              end_week: int, seed: int, regular: SeasonData | None = None) -> dict[int, dict]:
     """{id: fields} for the players in `parts` (their seeded news report and the chart it gives) and the
-    players an opportunity shock moves (replay_shocks: the market's reaction, which reads that news)."""
+    players an opportunity shock moves (replay_shocks: the market's reaction, which reads that news).
+    `regular`: the 1-QB season the fill-ins are read on (`_filling`); default `data`."""
     out: dict[int, dict] = {}
     for pid, (expert, model_part, (since, back, tag), missed) in parts.items():
         started = data.injuries.get((pid, since))          # the streak's first tag sets its news group
@@ -353,17 +354,19 @@ def with_news(data: SeasonData, rows: Mapping[int, dict], fields: Mapping[int, d
         chart, extra = _injured(data, rows[pid], news, week, end_week, expert, model_part)
         out[pid] = {**fields[pid], **extra, "chart": round(chart, 1), "news": news}
     shocked = {**out, **_shocked(data, rows, fields, out, week)}
-    return {**shocked, **_filling(data, rows, {**fields, **shocked}, week, end_week, seed)}
+    return {**shocked, **_filling(data, rows, {**fields, **shocked}, week, end_week, seed, regular)}
 
 
 def _filling(data: SeasonData, rows: Mapping[int, dict], fields: Mapping[int, dict], week: int,
-             end_week: int, seed: int) -> dict[int, dict]:
+             end_week: int, seed: int, regular: SeasonData | None = None) -> dict[int, dict]:
     """{id: fields} of the fill-in QBs (replay_fillin): share x the value of his rank without the form bonus +
     (1 - share) x a backup's (the QB ranked just past one per team), never above his own chart. A graduate
     (replay_fillin.graduated: past probation, his regular not expected back) keeps his form: his share of an
     established starter's starts x his chart + the rest x a backup's. `share` reads the regular starter's news,
-    so it is the same report his injured chart is priced on."""
-    found = replay_fillin.fill_ins(data, week)
+    so it is the same report his injured chart is priced on. Who fills in, and his `prior` group, are read on
+    `regular` (the 1-QB season, unmoved by the superflex view or the league-size taper: what the fit read); only
+    the backup's value comes off `data`'s curve."""
+    found = replay_fillin.fill_ins(regular or data, week)
     if not found:
         return {}
     curve = slot_curve(data)

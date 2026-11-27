@@ -140,6 +140,7 @@ class _Base:
     replacement: Mapping[str, float]
     source: str
     live: Mapping[int, float]                       # healthy chart before the freeze, frozen players only
+    regular: SeasonData                             # the 1-QB season, unmoved (fill-ins are read on it)
 
 
 
@@ -167,7 +168,7 @@ def _base(data: SeasonData, league: LeagueSettings, week: int, end_week: int, dr
     rows = [{**row, **charts[row["player_id"]]} for row in rows]
     replacement = replacement_levels(((r["position"], r["ros_ppg"]) for r in rows if r["position"] in SKILL), league)
     return _Base(MappingProxyType({r["player_id"]: _valued(r, replacement) for r in rows}), chart_data, parts,
-                 MappingProxyType(replacement), source, MappingProxyType(live))
+                 MappingProxyType(replacement), source, MappingProxyType(live), regular)
 
 
 @lru_cache(maxsize=32)
@@ -175,7 +176,8 @@ def _knowledge(data: SeasonData, league: LeagueSettings, week: int, end_week: in
                drafted: int) -> Knowledge:
     """`_base` plus this seed's news (which may set availability) on the hard-tagged players only."""
     base = _base(data, league, week, end_week, drafted)
-    news = replay_chart.with_news(base.chart_data, base.rows, base.rows, base.parts, week, end_week, seed)
+    news = replay_chart.with_news(base.chart_data, base.rows, base.rows, base.parts, week, end_week, seed,
+                                  base.regular)
     values = _ranked(_valued(news[pid], base.replacement) if pid in news else row for pid, row in base.rows.items())
     through = max(0, week - 1)
     return Knowledge(season=data.season, week=week, league=league, values=values,

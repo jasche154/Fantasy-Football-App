@@ -241,3 +241,23 @@ def test_without_news_drops_a_taker_at_probation_as_before(data):
     season, team, regular, backup = _season(data, weeks, tagged=())
     assert backup in replay_fillin.without_news(season.as_of(weeks[probation - 1]), weeks[probation - 1])
     assert backup not in replay_fillin.without_news(season.as_of(weeks[probation]), weeks[probation])
+
+
+@pytest.mark.parametrize("adp", [190.0, 230.0])
+def test_a_graduates_prior_group_is_the_same_in_every_lineup_and_league_size(data, adp):
+    """`prior` reads the raw 1-QB ADP, the list the fit read: the superflex view (which moves QBs earlier) and the
+    league-size taper (which moves an 8-team league's deep QBs later) never move a QB across PRIOR_PICK."""
+    probation = int(replay_fillin.stored()["probation"])
+    weeks = [w for w, _ in data.team_by_week[_team_qbs(data)[1]] if w >= 5]
+    season, team, regular, backup = _season(data, weeks, tagged=())
+    season = replace(season, players=MappingProxyType(
+        {**season.players, backup: replace(season.players[backup], adp=adp)}))
+    week = weeks[probation]
+    expected = replay_fillin.stored()["graduated"]["prior" if adp < replay_fillin.PRIOR_PICK else "none"][0]
+    superflex = {**fakes.fake_settings().starters, "SUPERFLEX": 1}
+    for settings in (fakes.fake_settings(), fakes.fake_settings(starters=superflex),
+                     fakes.fake_settings(teams=8), fakes.fake_settings(teams=8, starters=superflex)):
+        rv.clear_cache()
+        priced = rv.knowledge(season, rv.league_settings(settings), week, 16, 0).by_id[backup]
+        assert priced.fill_in == pytest.approx(expected), (settings.teams, settings.starters)
+    rv.clear_cache()

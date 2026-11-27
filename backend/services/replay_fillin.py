@@ -71,6 +71,11 @@ def stored() -> Mapping:
 
 
 def _prior(data: SeasonData, pid: int) -> bool:
+    """A preseason ADP before PRIOR_PICK on the season's 1-QB list (replay_chart passes the 1-QB season, unmoved by
+    the superflex view or the league-size taper, as the fit read it). In a jump-in league (replay_state.draft_week
+    > 0) the season's ADP is the market's at the draft week, not the preseason one, so a QB who has started well
+    may already be inside it: the threshold is the preseason fit's, not refitted for that market (shortcut: refit
+    on draft-week ADP if jump-in graduates turn out to be priced off)."""
     adp = data.players[pid].adp if pid in data.players else None
     return adp is not None and adp < PRIOR_PICK
 
