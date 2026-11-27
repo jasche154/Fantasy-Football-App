@@ -1561,8 +1561,13 @@ read the belief, so, as in a real season, the public learns the truth only from 
   game's opponent gives margins of 3 in 6.1% of games, real 14.4%). The ending's points go to real players (a
   touchdown catch to a receiver, with the passer's line still his receivers' sum, a run to a rusher, field goals
   and extra points to the kicker, return TDs and safeties to the defense), and the draw before the cut is
-  centred without the window's mean points, which depend on the side's expected lead (a trailer scores more in
-  it), so projections stay unbiased. A favourite also **runs more and throws a little less** than an underdog
+  centred without the window's and overtime's mean points (`services/sim_closing_means.py`), worked out from the
+  game's own expected lead and total: the margin at the cut spreads more in a high-scoring game (sd^2 = 32.5 +
+  2.41 x the two sides' expected points before the cut, measured: 8.0 at 14 points, 12.6 at 56), and over that
+  spread the real endings give each side's mean window points (a trailer scores more in it, and the closer the
+  cut the more both kick) and the chance regulation ends tied, which sets each side's overtime points. So
+  projections stay unbiased: over 12,000 draws a game averages its target within 0.12 points from 10-13 to 38-10
+  (one spread and one tie rate for every game had a 17-17 game at +0.23 / +0.25 and a 10-13 one at +0.38). A favourite also **runs more and throws a little less** than an underdog
   (real teams within a season, 2018-2025: carries +0.76% and targets -0.03% per point of the Vegas spread,
   `line_script` in `sim_closing.json`; the draw applies that plus a tuned offset, carries +0.24 and targets -0.13,
   `game.line_script_extra`, because the simulated game on its own moves volume the other way; sim_eval's rows then
@@ -1572,22 +1577,21 @@ read the belief, so, as in a real season, the public learns the truth only from 
   lower late; the belief learns calendar-free volumes); both apply before a game is centred on its line, so the
   points stay the line's and only the mix moves. The hidden strength, the widened edge and the drive count are
   tuned so simulated results against the sim's own line look like real results against Vegas (sim_eval
-  2021-2025, 3 seeds, full / mid mode, real in brackets: line vs result correlation 0.45 / 0.50 (0.46 / 0.53),
-  results around the line spread 12.6 / 12.9 (12.6 / 12.0; 12.5 over 8 seeds mid), margins of 21+ 16.5% / 18.9%
-  (16.9% / 17.2%), 21+ in the most lopsided fifth of lines 25.2% / 33.6% (25.1% / 29.0%; 30.5% over 8 seeds
-  mid), in the closest fifth 11.6% / 12.0% (12.0% / 7.9%), team scores mean 23.2 / 22.7 (22.5 / 22.6), sd 9.9 /
-  10.3 (9.9 / 10.1), ties 0.17% / 0.25% (0.29% / 0.19%); margins of 1-3 23.4% / 20.9% (24.9% / 23.7%), exactly 3
-  12.9% / 10.8% (14.6% / 13.6%), exactly 7 6.8% / 8.2% (7.7% / 7.5%), 4-8 27.8% / 28.6% (28.3% / 29.5%); before
-  the closing window 1-3 was 18.5% and exactly 3 8.0% in full mode). Known gaps: margins of exactly 3 are still
-  about 2 points short (the draw before the cut is smoother than a real game's first fifty minutes); records run a
-  little extreme (wins sd 3.27 against 3.12, best record 14.7 against 13.8, worst 2.0 against 2.8; a smaller
-  hidden strength does not help once the line correlation is held, and the user's lighter injuries and rarer
-  benchings keep strong teams whole); skill players score 0.6 / 1.8 fantasy points a team-game more than real
-  (mid / full; 2.1 / 2.3 before, the full mode's rest following last season's scoring level, 23.2 points a team
-  against 22.5) and shutouts are 1.2% / 0.75% of team scores against 1.4% / 1.1%; in the closest fifth of lines in
-  the mid-season mode a 21+ blowout is more
-  common than real (12.0% against 7.9%, a small real sample: full mode's real is 12.0%); and a 31-13 game's draw
-  averages about 0.3 points over its favourite's target (per-game volume noise on yards per catch).
+  2021-2025, 3 seeds, full / mid mode, real in brackets: line vs result correlation 0.45 / 0.49 (0.46 / 0.53),
+  results around the line spread 12.6 / 12.9 (12.6 / 12.0), margins of 21+ 16.7% / 18.4% (16.9% / 17.2%), 21+ in
+  the most lopsided fifth of lines 25.7% / 32.1% (25.1% / 29.0%; mid mode's 3-seed figure moves by 3 points from
+  run to run, 30.5% over 8 seeds), in the closest fifth 13.2% / 13.0% (12.0% / 7.9%), team scores mean 23.2 / 22.3
+  (22.5 / 22.6), sd 10.0 / 10.1 (9.9 / 10.1), ties 0.29% / 0.37% (0.29% / 0.19%); margins of 1-3 22.7% / 21.1%
+  (24.9% / 23.7%), exactly 3 11.9% / 11.6% (14.6% / 13.6%), exactly 7 8.1% / 7.3% (7.7% / 7.5%), 4-8 28.7% /
+  27.6% (28.3% / 29.5%); before the closing window 1-3 was 18.5% and exactly 3 8.0% in full mode). Known gaps:
+  margins of exactly 3 are still 2-3 points short (the draw before the cut is smoother than a real game's first
+  fifty minutes); records run a little extreme (wins sd 3.23 against 3.12, best record 14.9 against 13.8, worst
+  1.7 against 2.8; a smaller hidden strength does not help once the line correlation is held, and the user's
+  lighter injuries and rarer benchings keep strong teams whole); skill players score 0.2 / 1.9 fantasy points a
+  team-game more than real (mid / full; 2.1 / 2.3 before, the full mode's rest following last season's scoring
+  level, 23.2 points a team against 22.5) and shutouts are 1.3% / 0.86% of team scores against 1.4% / 1.1%; in
+  the closest fifth of lines in the mid-season mode a 21+ blowout is more common than real (13.0% against 7.9%, a
+  small real sample: full mode's real is 12.0%).
 - **Games are played top-down,** so box scores always add up (`services/sim_game.py`): first each
   team's targets and carries (its volume, a shared game draw for shootouts, the leader running more and the
   trailer passing more), then they are split among the active players by their roles (an injured player's
@@ -1630,6 +1634,9 @@ read the belief, so, as in a real season, the public learns the truth only from 
   sync is, except a stale one fetched before the kickoff of any game he then played (he has been activated
   since, a bye week after it or not; a tag fetched after that game, hurt Sunday and placed on IR Tuesday, still
   counts). Real weeks never change.
+  The chance a player is hurt in a game is fitted on 2021-2025 only (`HAZARD_SINCE`; how long an injury lasts
+  uses every season): the same count gives quarterbacks less than half the 2021-2025 rate in 2018-2020, and the
+  pooled fit left simulated QBs at 0.034 new injuries a game against the 0.042 target; now 0.041.
   On purpose, simulated players get hurt **about a quarter less often** than real ones (`INJURY_SCALE = 0.75`
   in `sim_injuries.py` multiplies the per-game and preseason injury chances, in whole simulated seasons and
   in the live season's simulated weeks alike); how long an injury lasts stays real, and an absence already
@@ -1652,8 +1659,8 @@ read the belief, so, as in a real season, the public learns the truth only from 
   receiver, a quarter of it used, `talent.season_roles`; a rookie's around the role a player taken at his pick
   had, all of what the rookie role line leaves unexplained, 0.65-0.75, as the public knows only his pick: with a
   quarter of it, as for veterans, rookies followed their draft slot too closely; full mode 2021-2025, real /
-  before / after: rookie ADP against finish 0.50 / 0.66 / 0.55, rookie top-24 finishes 8.4 / 6.8 / 8.0,
-  breakouts 10.6 / 7.5 / 9.0), and its belief takes 22% of the targets (20% of the
+  before / after: rookie ADP against finish 0.50 / 0.66 / 0.53, rookie top-24 finishes 8.4 / 6.8 / 8.0,
+  breakouts 10.6 / 7.5 / 7.9; with the top-12 floor below), and its belief takes 22% of the targets (20% of the
   carries) from each team's depth beyond its top five receivers (top two backs) to give to them
   (`talent.depth_targets` / `depth_carries`): a belief carried over from the end of a season spreads a team's
   work too thinly. With the whole-season efficiency spread halved (`talent.season_spread` 0.5), on the
@@ -1794,18 +1801,23 @@ read the belief, so, as in a real season, the public learns the truth only from 
   The **published projections** start at the real sources' level at a join and settle to their average bias:
   real sources project high (2019-2025, actual minus projection QB -0.49, RB -0.50, WR -0.19, TE +0.03, about
   2-6% at every level; the belief's own are unbiased), and at the join they sit about 9% above the belief's for
-  the healthy top players. The first simulated week takes that level (`market.join_scale`, QB / RB / WR 1.10, TE
-  1.07) and it fades by half a week (`market.join_fade`) to `market.projection_scale` (QB 1.04, RB 1.05, WR 1.03,
+  the healthy top players. The first simulated week takes that level (`market.join_scale`, QB 1.08, RB 1.09, WR
+  1.10, TE 1.06) and it fades by half a week (`market.join_fade`) to `market.projection_scale` (QB 1.04, RB 1.05, WR 1.03,
   TE 0.99), set by the average bias; a season simulated whole uses that scale throughout. A weekly projection
-  also follows the week's line only partly: it keeps `market.line_follow` (QB 0.5, RB 0.3, WR / TE 0.25) of the
-  line's move away from the team's typical points (against a league-average opponent), because real ESPN /
+  also follows the week's line only partly: it keeps `market.line_follow` (QB 0.6, RB 0.42, WR / TE 0.3) of the
+  move from his projection at the team's typical points (the team alone against a league-average opponent: no
+  matchup, no line) to his projection under the line, because real ESPN /
   Sleeper projections follow a team's implied total at 0.13-0.56 by position (`sim_metrics_join.line_follow`:
   QB 0.47, RB 0.33, WR 0.16, TE 0.17 in weeks 12-18, QB 0.56, RB 0.32, WR 0.21, TE 0.13 over whole seasons)
   and the full expectation followed it at 0.43-0.79, so simulated projections churned more than real ones. On
-  sim_eval 2021-2025, 3 seeds, mid / full, real in brackets: actual minus projection -0.43 / -0.34 (-0.35 /
-  -0.39; before -0.66 / -0.80), the join's projection ratio 0.98-1.00 (0.98-1.00), median week-to-week change of
-  a healthy top player's projection QB 1.16 / 1.19 (1.28 / 1.30; before 1.91 / 1.82), RB 1.02 / 1.09 (1.18 /
-  1.13), WR 0.83 / 0.99 (0.75 / 0.79; before 1.22 / 1.29), TE 0.62 / 0.69 (0.66 / 0.66). The truth and the
+  sim_eval 2021-2025, 3 seeds, mid / full, real in brackets: how far projections follow the line QB 0.49 / 0.51
+  (0.47 / 0.56), RB 0.32 / 0.36 (0.33 / 0.32), WR 0.19 / 0.20 (0.16 / 0.21), TE 0.22 / 0.09 (0.17 / 0.13); actual
+  minus projection -0.48 / -0.37 (-0.35 / -0.39; before -0.66 / -0.80), the join's projection ratio 0.98-1.00
+  (0.98-1.00), median week-to-week change of a healthy top player's projection QB 1.00 / 1.04 (1.28 / 1.30;
+  before 1.91 / 1.82), RB 0.82 / 0.91 (1.18 / 1.13), WR 0.69 / 0.85 (0.75 / 0.79; before 1.22 / 1.29), TE 0.51 /
+  0.63 (0.66 / 0.66): now a little steadier than real, as the typical-points anchor carries no matchup (an anchor
+  at the team's typical points against this opponent churned about like real ones but needed a second centring
+  for every game). The truth and the
   values experts and the market rank on are untouched.
 
 **2027 specifics:**
@@ -1925,13 +1937,13 @@ read the belief, so, as in a real season, the public learns the truth only from 
 - A whole season's passing level is last season's (4,000-yard passers 12.0 a season against 8.2 on 2021-2025,
   when real passing fell every year), and the season leaders' tails run long (passing leader's 95th percentile
   5,665 yards against 5,303, receiving 2,206 against 1,919).
-- Real margins land on exactly 3 in 14.6% of games, simulated ones in 12.9% (11.0% before the closing window
-  ran ten minutes; 8.0% without one), and records run a little extreme (wins sd 3.27 against 3.12).
-- Rookie quarterbacks who become starters during a season: 2.8 against a real 5.0. About half of the real ones
+- Real margins land on exactly 3 in 14.6% of games, simulated ones in 11.9% (8.0% without the closing window),
+  and records run a little extreme (wins sd 3.23 against 3.12).
+- Rookie quarterbacks who become starters during a season: 2.7 against a real 5.0. About half of the real ones
   started because the starter was hurt and most of the rest in a late-season switch; simulated quarterbacks get
-  hurt less (the injury setting: 0.034 new injuries a game against a target of 0.042, real 0.056) and healthy
-  benchings run at half the real rate (the user's choice), which removes most of those chances. Simulated QBs'
-  new injuries are below even their target while their missed share is on it (not yet traced).
+  hurt a quarter less often (the injury setting: 0.041 new injuries a game, real 0.056) and healthy benchings run
+  at half the real rate (the user's choice), which removes most of those chances.
+- Weekly projections move a little less from week to week than real ones (median change QB 1.0 against 1.3).
 - A closing-window or overtime TD is credited with its play's mean yards on top of the draw's yards (which are
   scaled down by the window's mean TD yards, so a team's total stays level).
 

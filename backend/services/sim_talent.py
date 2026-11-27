@@ -118,7 +118,7 @@ def _season_role(player: Player, z: float, knobs: dict, star: bool = False) -> P
     the next (sim_next_year.json `role_sd`) x the tuned `season_roles`; a rookie's, in full, what the rookie role
     line at his pick leaves (`rookies.<position>.role_sd`, no season_roles: the belief knows only his pick, and with
     a quarter of it rookies followed their draft slot too closely; full mode 2021-2025, 3 seeds, real / quarter /
-    full: rookie ADP against finish 0.50 / 0.66 / 0.55, rookie top-24 finishes 8.4 / 6.8 / 8.0). A `star` (the
+    full: rookie ADP against finish 0.50 / 0.66 / 0.53, rookie top-24 finishes 8.4 / 6.8 / 8.0, with the floor below). A `star` (the
     public's top STAR_RANK at his position, sim_market.position_ranks) keeps at least the most a bust leaves
     (`bust_cut`'s top): stars never bust, on this draw either."""
     model = sim_next_year.stored()
