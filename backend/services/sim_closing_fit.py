@@ -8,11 +8,13 @@ follows the score: a tied or close team kicks to win, a team down 4-8 chases a t
 sim_closing plays the last WINDOW seconds of regulation from the score with what real teams did from that score:
 
 - `table`: for each margin at the cut (0-MAX_MARGIN, the trailing team's deficit; larger ones pooled), every real
-  game's scoring events after it, the trailer's and the leader's (for a tie: the two teams in random order), as
-  (count, trailer events, leader events) with the events in EVENTS order. A drawn row is a real game's ending.
+  game's scoring events after it, the trailer's and the leader's (for a tie: the two teams in random order), with
+  its plays there (targets, carries and kneel-downs, PLAYS, from sim_script_fit's cache: run that fit first), as
+  (count, trailer events, leader events) with the events in EVENTS order. A drawn row is a real game's ending: the
+  leader runs and kneels, the trailer throws (sim_script).
 - `ot`: overtime from the same play-by-play: the share of overtimes that end tied, the share of decided ones the
   winner ends with a field goal, and the mean yards of an overtime-winning TD play by a catch and by a run.
-- `cut_var`: the spread of a simulated game's margin at the cut as a + b x its expected points before the cut
+- `cut_var`: the spread of a simulated game's margin at the cut as a x its expected points before the cut ^ b
   (`cut_spread`, measured on the simulator's own draws, CUT_SEASON's belief; re-measure when the draw changes);
 - `check`: leave-season-out, each season's real cut scores played forward with the other seasons' table, against
   that season's real end of regulation (shares of margins 1-3, 3, 7, 4-8 and ties).
@@ -44,7 +46,8 @@ log = logging.getLogger(__name__)
 CLOSING_PATH = Path(__file__).with_name("sim_closing.json")
 PLAYS_CACHE = Path(__file__).resolve().parent.parent / "data" / "cache" / "scoring_plays.json"
 EVENTS = ("pass_td", "rush_td", "ret_td", "fg_0_39", "fg_40_49", "fg_50", "miss_0_39", "miss_40_49", "miss_50",
-          "xp", "xp_miss", "two", "safety")
+          "xp", "xp_miss", "two", "safety", "targets", "carries", "kneels")
+PLAYS = ("targets", "carries", "kneels")       # the window's plays (sim_script_fit's cache), its scoring ones among them
 POINTS = {"pass_td": 6, "rush_td": 6, "ret_td": 6, "fg_0_39": 3, "fg_40_49": 3, "fg_50": 3, "xp": 1, "two": 2,
           "safety": 2}
 WINDOW = 600                     # seconds of regulation played from the score (chosen with sim_eval: see sim_closing)
@@ -52,7 +55,7 @@ TRIES = ("xp", "xp_miss", "two")
 CUT_SEASON, CUT_WEEK, CUT_GAMES = 2024, 9, 3          # the belief the cut margin's spread is measured on
 CUT_TARGETS = ((10, 13), (14, 10), (17, 17), (24, 20), (28, 28), (31, 13), (38, 10), (21, 21), (35, 30))
 CUT_DRAWS = 1500
-CUT_VAR_START = (42.0, 2.2)      # stored until `write` measures it, when the file has none
+CUT_VAR_START = (11.7, 0.69)     # stored until `write` measures it, when the file has none
 MAX_MARGIN = 16                  # margins above this share one row set (a two-score-plus lead plays alike)
 SEASONS = range(2018, 2026)
 SHUFFLE_SEED = 7                 # the random order of a tied game's two teams (reproducible fits)
@@ -183,11 +186,14 @@ def _row(c: Counter) -> tuple[int, ...]:
 
 
 def endings(games: Iterable[Mapping], window: int, seed: int = SHUFFLE_SEED) -> dict[int, Counter]:
-    """{margin at the cut (capped at MAX_MARGIN + 1): Counter((trailer events, leader events))}."""
+    """{margin at the cut (capped at MAX_MARGIN + 1): Counter((trailer events, leader events))}; a game's window
+    plays (`plays`: {team: {PLAYS name: count}}) ride on its events when it has them."""
     rnd = random.Random(seed)
     table: dict[int, Counter] = defaultdict(Counter)
     for g in games:
         before, inside, _ = split(g, window)
+        for team, counts in g.get("plays_in_window", {}).items():
+            inside[team].update(counts)
         home, away = g["home"], g["away"]
         margin = _points(before[home]) - _points(before[away])
         trail, lead = (home, away) if margin < 0 else (away, home)
@@ -195,6 +201,20 @@ def endings(games: Iterable[Mapping], window: int, seed: int = SHUFFLE_SEED) -> 
             trail, lead = lead, trail
         table[min(abs(margin), MAX_MARGIN + 1)][(_row(inside[trail]), _row(inside[lead]))] += 1
     return table
+
+
+def with_plays(games: list[Mapping], window: int, seasons: Iterable[int], refresh: bool = False) -> list[dict]:
+    """`games` that sim_script_fit's cache has, each with its teams' window plays (`plays_in_window`)."""
+    from services import sim_script_fit
+    if window != sim_script_fit.CUT:
+        raise ValueError(f"the window plays are counted for a {sim_script_fit.CUT}s window, not {window}s")
+    cached = {(g["season"], g["week"], g["home"], g["away"]): g for g in sim_script_fit.segments(seasons, refresh)}
+    out = []
+    for g in games:
+        found = cached.get((g["season"], g["week"], g["home"], g["away"]))
+        if found is not None:
+            out.append({**g, "plays_in_window": {t: sim_script_fit.window_counts(found, t) for t in (g["home"], g["away"])}})
+    return out
 
 
 def td_yards(games: Iterable[Mapping], window: int) -> dict[str, float]:
@@ -297,7 +317,7 @@ def line_script(session, seasons: Iterable[int]) -> dict[str, float]:
 
 
 def cut_spread(world, games: Iterable[tuple[str, str]], draws: int = CUT_DRAWS, seed: int = 0) -> list[float]:
-    """[a, b] of the cut margin's variance a + b x the two sides' expected points before the cut, least squares over
+    """[a, b] of the cut margin's variance a x (the two sides' expected points before the cut) ^ b, least squares on logs over
     `games` ((home, away) under `world`) at each of CUT_TARGETS: the margin at the cut (sim_draw.draw_game's
     until_cut) around its expected value, over `draws` draws each (sim_closing_means.cut_sd reads it)."""
     from services.scoring import scoring_for
@@ -315,8 +335,8 @@ def cut_spread(world, games: Iterable[tuple[str, str]], draws: int = CUT_DRAWS, 
                              for _ in range(draws)], dtype=float)
             rows.append((sum(before), float(np.var(cuts[:, 0] - cuts[:, 1] - (before[0] - before[1])))))
     totals, variances = np.array(rows).T
-    b, a = np.polyfit(totals, variances, 1)
-    return [round(float(a), 2), round(float(b), 3)]
+    b, log_a = np.polyfit(np.log(totals), np.log(variances), 1)
+    return [round(float(np.exp(log_a)), 3), round(float(b), 4)]
 
 
 def _cut_var(session) -> list[float]:
@@ -343,7 +363,7 @@ def fit(seasons: Iterable[int], window: int = WINDOW, refresh: bool = False) -> 
     every = scoring_games(seasons, refresh)
     # the endings need every scoring play. Overtime reads every game: a tied one shows in the score alone; a
     # decided one still needs its quarter-5 play (one with no game clock is lost: games_of logs those)
-    games = [g for g in every if consistent(g)]
+    games = with_plays([g for g in every if consistent(g)], window, seasons, refresh)
     table = endings(games, window)
     return {"seasons": [min(g["season"] for g in games), max(g["season"] for g in games)], "games": len(games),
             "window": window, "events": list(EVENTS), "max_margin": MAX_MARGIN,
@@ -410,7 +430,7 @@ def main(argv: list[str] | None = None) -> None:
     log.info("%d games, window %ds", result["games"], result["window"])
     log.info("overtime %s", result["ot"])
     log.info("volume per point of expected margin %s", result["line_script"])
-    log.info("cut margin variance%s = %s + %s x expected points before the cut",
+    log.info("cut margin variance%s = %s x (expected points before the cut) ^ %s",
              "" if args.fit else " (stored, not re-measured)", *result["cut_var"])
     for name, row in result["check"].items():
         log.info("%-15s %s", name, "  ".join(f"{k} {100 * v:.1f}%" for k, v in row.items()))

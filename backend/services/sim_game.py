@@ -37,6 +37,7 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
 from functools import lru_cache
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -45,6 +46,9 @@ from services.replay_box import BoxLine
 from services.replay_pool import Usage
 from services.scoring import ScoringSettings, fantasy_points
 from services.sim_world import OTHER, World, params
+
+if TYPE_CHECKING:
+    from services.sim_closing_means import Ending
 
 SNAP_TOP = {"QB": 100.0, "RB": 70.0, "WR": 92.0, "TE": 85.0}   # the lead player's snap share at a position
 SNAP_EXPONENT = 0.5              # snaps fall with the square root of his weight vs the lead player's
@@ -86,6 +90,11 @@ class _Side:
     snaps: Mapping[int, float] = field(default_factory=dict)
     fg_scale: float = 1.0               # field-goal tries x this (the centring factor, sim_centre)
     exited: frozenset[int] = frozenset()   # players who leave the game hurt (no overtime score)
+    # a two-team game's script (sim_centre sets them; sim_script): its expected margin, mean lead at half time and
+    # closing-window Ending. None: no parts, the whole game's volume plays at the per-play rates (one team alone).
+    margin: float = 0.0
+    half_lead: float = 0.0
+    end: "Ending | None" = None
 
 
 @dataclass(frozen=True)
@@ -305,17 +314,39 @@ def _mean_points(m: dict, against: dict | None) -> float:
 # ---------------- the analytic mean ----------------
 
 def _side_means(side: _Side) -> dict:
-    targets = side.targets * side.target_w / side.target_w.sum()
+    """The side's mean line per player (receivers' and rushers' arrays, OTHER last) and team totals. A side with a
+    closing-window Ending plays in parts (sim_script): its targets and carries are both halves' plus the window's
+    plays besides its scoring ones (its kneels the starting QB's), its TDs, interceptions and sacks come from the
+    halves' plays at the per-play rates / the halves' share; without one the whole game's volume plays at the
+    per-play rates."""
+    from services import sim_script
+    league = params()["league"]
+    t_share, c_share = side.target_w / side.target_w.sum(), side.carry_w / side.carry_w.sum()
+    if side.end is None:
+        pre_t, pre_c, win_t, win_c, kneels, p_t, p_c = side.targets, side.carries, 0.0, 0.0, 0.0, 1.0, 1.0
+    else:
+        (h1_t, h1_c), (h2_t, h2_c) = sim_script.parts(side)
+        pre_t, pre_c = h1_t + h2_t, h1_c + h2_c
+        win_t, win_c, kneels = sim_script.window_means(side)
+        p_t, p_c = sim_script.before_cut("targets"), sim_script.before_cut("carries")
+    targets = (pre_t + win_t) * t_share
     catches = targets * side.catch
-    rec_yds, rec_td = catches * side.ypc, catches * np.minimum(side.rec_td, MAX_TD_RATE)
-    carries = side.carries * side.carry_w / side.carry_w.sum()
-    rush_yds, rush_td = carries * side.ypr, carries * np.minimum(side.rush_td, MAX_TD_RATE)
-    attempts = side.targets * params()["league"]["attempts_per_target"]
-    return {"targets": targets, "catches": catches, "rec_yds": rec_yds, "rec_td": rec_td, "carries": carries,
-            "rush_yds": rush_yds, "rush_td": rush_td, "ints": attempts * side.int_rate,
-            "sacks": attempts * side.sack_rate,
-            "fumbles": float((carries * side.fumble).sum() + (catches * side.rec_fumble).sum()
-                             + attempts * side.sack_rate * params()["league"]["sack_fumble"]),   # sack fumbles too
+    rec_td = pre_t * t_share * side.catch * np.minimum(side.rec_td / p_t, MAX_TD_RATE)
+    carries = (pre_c + win_c) * c_share
+    rush_yds = carries * side.ypr
+    fumbles = float((carries * side.fumble).sum() + (catches * side.rec_fumble).sum())     # a kneel never fumbles
+    if kneels and side.qb is not None and side.qb not in side.exited:
+        at = side.rushers.index(side.qb)
+        carries, rush_yds = carries.copy(), rush_yds.copy()
+        carries[at] += kneels
+        rush_yds[at] += kneels * sim_script.kneel_yards()
+    rush_td = pre_c * c_share * np.minimum(side.rush_td / p_c, MAX_TD_RATE)
+    attempts = pre_t * league["attempts_per_target"]
+    sacks = attempts * side.sack_rate / p_t
+    return {"targets": targets, "catches": catches, "rec_yds": catches * side.ypc, "rec_td": rec_td,
+            "carries": carries, "rush_yds": rush_yds, "rush_td": rush_td, "ints": attempts * side.int_rate / p_t,
+            "sacks": sacks,
+            "fumbles": fumbles + sacks * league["sack_fumble"],     # sack fumbles too
             "fg_scale": side.fg_scale}
 
 

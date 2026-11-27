@@ -9,6 +9,9 @@ to its mean points, as overtime's winner is drawn). So a tied or close game is d
 as often as real ones are, a team down 4-8 chases a touchdown, and a big lead is run out. Real margins of exactly 3
 or 7 come from this: two teams scoring independently land on 3 about half as often.
 
+Its other plays (the leader's runs and kneel-downs, the trailer's throws: the real ending's targets, carries and
+kneels, ridden on the table's rows) are shared out by the game plan (sim_parts.window).
+
 The ending's points go to real players: a touchdown by a catch to a receiver (one more target, catch and pass
 attempt, `td_yards` on the play, so the passer's line still is his receivers' sum), a run to a rusher, each drawn
 in proportion to his expected TDs among the players still in the game; field goals by distance band, extra points
@@ -27,7 +30,7 @@ from types import MappingProxyType
 
 import numpy as np
 
-from services.sim_constants import fitted_json, params
+from services.sim_constants import fitted_json
 
 CLOSING_PATH = Path(__file__).with_name("sim_closing.json")
 CLOSING_FIT = "python -m services.sim_closing_fit --fit"
@@ -59,15 +62,6 @@ def points_of(events: Mapping[str, float]) -> float:
 
 
 _points = points_of
-
-
-def line_script() -> Mapping[str, float]:
-    """How a team's targets and carries follow its expected margin, log volume per point: the real slope
-    (sim_closing_fit) + the tuned `game.line_script_extra` (the simulated game on its own moves volume against the
-    line, carries about -0.2% a point: the extra is set so sim_eval's "per line point" rows match real ones)."""
-    real = stored()["line_script"]
-    extra = params()["game"].get("line_script_extra", {})
-    return {k: float(real[k]) + float(extra.get(k, 0.0)) for k in ("targets", "carries")}
 
 
 def ot() -> Mapping:
@@ -116,19 +110,25 @@ def _kicks(counts: dict, events: Mapping[str, int], kicker_in: bool) -> dict:
             "pat_att": counts["pat_att"] + events["xp"] + events["xp_miss"]}
 
 
-def close(sides: Sequence, offense: list, scored: list, points: list, returns: list, safeties: list,
-          n_targets: np.ndarray, n_carries: np.ndarray, rng: np.random.Generator, means: list,
-          expect: list) -> tuple[list, list, list, list, list, np.ndarray, np.ndarray]:
-    """The game after its closing window (see the module docstring); every argument is per side and returned
-    updated as (offense, scored, points, returns, safeties, n_targets, n_carries). `expect`: each side's mean
-    points (who gets the better ending of a tie)."""
+def pick(points: Sequence[int], expect: Sequence[float], rng: np.random.Generator) -> list[dict]:
+    """Each side's events in the window: a real ending for the margin at the cut (`points`), the trailer's to the
+    trailing side; a tie's better ending to each side in proportion to its mean points (`expect`)."""
     margin = points[0] - points[1]
     first, second = ending(abs(margin), rng)
     if margin == 0:                                     # the better ending to each side by its mean points
         better, worse = (first, second) if _points(first) >= _points(second) else (second, first)
-        events = [better, worse] if rng.random() < expect[0] / sum(expect) else [worse, better]
-    else:
-        events = [first, second] if margin < 0 else [second, first]
+        return [better, worse] if rng.random() < expect[0] / sum(expect) else [worse, better]
+    return [first, second] if margin < 0 else [second, first]
+
+
+def close(sides: Sequence, offense: list, scored: list, points: list, returns: list, safeties: list,
+          n_targets: np.ndarray, n_carries: np.ndarray, rng: np.random.Generator, means: list,
+          expect: list, events: list | None = None) -> tuple[list, list, list, list, list, np.ndarray, np.ndarray]:
+    """The game after its closing window (see the module docstring); every argument is per side and returned
+    updated as (offense, scored, points, returns, safeties, n_targets, n_carries). `expect`: each side's mean
+    points (who gets the better ending of a tie); `events`: the endings already picked (`pick`), else picked here.
+    Only the endings' scoring plays are credited here (sim_parts.window adds the rest)."""
+    events = events if events is not None else pick(points, expect, rng)
     offense, scored, points, returns, safeties = list(offense), list(scored), list(points), list(returns), list(safeties)
     n_targets, n_carries = n_targets.copy(), n_carries.copy()
     yards = stored()["td_yards"]

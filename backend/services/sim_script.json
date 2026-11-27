@@ -1,0 +1,283 @@
+{
+ "seasons": [
+  2018,
+  2025
+ ],
+ "games": 2127,
+ "cut": 600,
+ "shares": {
+  "targets": [
+   0.5039,
+   0.3009,
+   0.1952
+  ],
+  "carries": [
+   0.4871,
+   0.3184,
+   0.1945
+  ]
+ },
+ "first_half": {
+  "targets": 0.00425,
+  "carries": 0.00216
+ },
+ "second_half": {
+  "targets": {
+   "spread": 0.00571,
+   "margin": -0.01125
+  },
+  "carries": {
+   "spread": 0.00399,
+   "margin": 0.00651
+  }
+ },
+ "check": {
+  "targets": {
+   "clip none": 0.32422,
+   "clip 21": 0.32402,
+   "clip 14": 0.32419,
+   "clip 10": 0.32473
+  },
+  "carries": {
+   "clip none": 0.37377,
+   "clip 21": 0.37385,
+   "clip 14": 0.37423,
+   "clip 10": 0.37473
+  }
+ },
+ "spread": {
+  "plays_sd": 0.0,
+  "mix_sd": 0.0268,
+  "plays_within_sd": 6.76,
+  "plays_poisson_sd": 6.88
+ },
+ "league": {
+  "targets": 32.256,
+  "carries": 26.541,
+  "kneel_yards": -1.072
+ },
+ "participation": {
+  "RB": {
+   "c": 0.92,
+   "scale": 3.5,
+   "floor": 0.0659,
+   "check": {
+    "held_out_loss": 0.4156,
+    "without": 0.5278
+   },
+   "bands": [
+    {
+     "touches": [
+      0,
+      1
+     ],
+     "players": 140,
+     "real_zero": 0.729,
+     "model_zero": 0.803
+    },
+    {
+     "touches": [
+      1,
+      2
+     ],
+     "players": 314,
+     "real_zero": 0.573,
+     "model_zero": 0.638
+    },
+    {
+     "touches": [
+      2,
+      3
+     ],
+     "players": 434,
+     "real_zero": 0.532,
+     "model_zero": 0.492
+    },
+    {
+     "touches": [
+      3,
+      4
+     ],
+     "players": 551,
+     "real_zero": 0.456,
+     "model_zero": 0.383
+    },
+    {
+     "touches": [
+      4,
+      6
+     ],
+     "players": 881,
+     "real_zero": 0.321,
+     "model_zero": 0.274
+    },
+    {
+     "touches": [
+      6,
+      8
+     ],
+     "players": 798,
+     "real_zero": 0.127,
+     "model_zero": 0.184
+    },
+    {
+     "touches": [
+      8,
+      99
+     ],
+     "players": 3248,
+     "real_zero": 0.066,
+     "model_zero": 0.092
+    }
+   ]
+  },
+  "WR": {
+   "c": 0.92,
+   "scale": 1.75,
+   "floor": 0.0188,
+   "check": {
+    "held_out_loss": 0.4117,
+    "without": 0.4753
+   },
+   "bands": [
+    {
+     "touches": [
+      0,
+      1
+     ],
+     "players": 679,
+     "real_zero": 0.691,
+     "model_zero": 0.71
+    },
+    {
+     "touches": [
+      1,
+      2
+     ],
+     "players": 2023,
+     "real_zero": 0.475,
+     "model_zero": 0.454
+    },
+    {
+     "touches": [
+      2,
+      3
+     ],
+     "players": 1739,
+     "real_zero": 0.267,
+     "model_zero": 0.268
+    },
+    {
+     "touches": [
+      3,
+      4
+     ],
+     "players": 1516,
+     "real_zero": 0.168,
+     "model_zero": 0.161
+    },
+    {
+     "touches": [
+      4,
+      6
+     ],
+     "players": 2324,
+     "real_zero": 0.063,
+     "model_zero": 0.08
+    },
+    {
+     "touches": [
+      6,
+      8
+     ],
+     "players": 1807,
+     "real_zero": 0.039,
+     "model_zero": 0.038
+    },
+    {
+     "touches": [
+      8,
+      99
+     ],
+     "players": 586,
+     "real_zero": 0.019,
+     "model_zero": 0.025
+    }
+   ]
+  },
+  "TE": {
+   "c": 1.0,
+   "scale": 0.75,
+   "floor": 0.059,
+   "check": {
+    "held_out_loss": 0.4934,
+    "without": 0.5018
+   },
+   "bands": [
+    {
+     "touches": [
+      0,
+      1
+     ],
+     "players": 1526,
+     "real_zero": 0.627,
+     "model_zero": 0.621
+    },
+    {
+     "touches": [
+      1,
+      2
+     ],
+     "players": 2015,
+     "real_zero": 0.39,
+     "model_zero": 0.362
+    },
+    {
+     "touches": [
+      2,
+      3
+     ],
+     "players": 986,
+     "real_zero": 0.16,
+     "model_zero": 0.168
+    },
+    {
+     "touches": [
+      3,
+      4
+     ],
+     "players": 730,
+     "real_zero": 0.088,
+     "model_zero": 0.096
+    },
+    {
+     "touches": [
+      4,
+      6
+     ],
+     "players": 943,
+     "real_zero": 0.039,
+     "model_zero": 0.069
+    },
+    {
+     "touches": [
+      6,
+      8
+     ],
+     "players": 223,
+     "real_zero": 0.036,
+     "model_zero": 0.06
+    },
+    {
+     "touches": [
+      8,
+      99
+     ],
+     "players": 45,
+     "real_zero": 0.089,
+     "model_zero": 0.059
+    }
+   ]
+  }
+ }
+}

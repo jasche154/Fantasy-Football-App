@@ -249,7 +249,7 @@ def test_a_player_who_left_hurt_never_scores_the_overtime_touchdown_and_attempts
     assert star in sides[0].exited
     means = [sim_game._side_means(s) for s in sides]
     rng = np.random.default_rng(2)
-    offense = [sim_draw._offense(s, 33, 27, 1.0, rng) for s in sides]
+    offense = [sim_draws.offense(s, 33, 27, rng) for s in sides]
     home_wins = 0
     for _ in range(300):
         after, _, points, _, _ = sim_draw._overtime(sides, offense, [(20, {}), (20, {})], [20, 20],

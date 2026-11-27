@@ -6,7 +6,7 @@ import pytest
 
 from services import sim_calendar, sim_closing, sim_closing_fit, sim_closing_means, sim_draw, sim_game
 from tests import sim_draws
-from tests.test_sim_game import HALF, pid, world
+from tests.test_sim_game import HALF, pid, team_of, world
 
 NONE = dict.fromkeys(sim_closing_fit.EVENTS, 0)
 
@@ -68,7 +68,7 @@ def _setup(exits: dict | None = None):
     sides = [sim_game._side(w, "AAA", "BBB", set(), exits or {}), sim_game._side(w, "BBB", "AAA", set(), {})]
     means = [sim_game._side_means(s) for s in sides]
     rng = np.random.default_rng(4)
-    offense = [sim_draw._offense(s, 33, 27, 1.0, rng) for s in sides]
+    offense = [sim_draws.offense(s, 33, 27, rng) for s in sides]
     counts = {"made": np.zeros(3, dtype=int), "missed": np.zeros(3, dtype=int), "pat_made": 0, "pat_att": 0}
     return sides, means, offense, counts, rng
 
@@ -125,11 +125,16 @@ def test_late_season_games_run_more_and_throw_less_at_the_same_points():
 
 
 def test_a_favourite_runs_more_than_the_same_team_as_an_underdog():
-    w, rb = world(), pid("AAA", "RB")
+    """A 14-point favourite runs more and throws less than the same team as a 14-point underdog (sim_script: its
+    halves follow the line and its lead, its window a leader's ending); real teams' carries move +0.76% a point of
+    the Vegas spread within a season (sim_closing.json's line_script), e^(28 x 0.0076) = 1.24 here."""
+    w, rb, qb = world(), pid("AAA", "RB"), pid("AAA", "QB")
     favoured = sim_game.expected(w, "AAA", "BBB", set(), HALF, target={"AAA": 30.0, "BBB": 16.0})
     underdog = sim_game.expected(w, "AAA", "BBB", set(), HALF, target={"AAA": 16.0, "BBB": 30.0})
-    ratio = favoured[rb].box.carries / underdog[rb].box.carries
-    assert ratio == pytest.approx(np.exp(28 * sim_closing.line_script()["carries"]), rel=0.02)
+    team = lambda lines, key: sum(getattr(e.box, key) for p, e in lines.items() if team_of(p) == "AAA")  # noqa: E731
+    assert 1.12 < favoured[rb].box.carries / underdog[rb].box.carries < 1.4
+    assert team(favoured, "targets") < team(underdog, "targets")
+    assert favoured[qb].box.carries > underdog[qb].box.carries          # the leader's kneel-downs
 
 
 def test_over_many_games_the_box_adds_up_to_the_points_and_no_try_comes_without_a_touchdown(monkeypatch):
@@ -270,6 +275,7 @@ def test_fit_counts_overtime_on_every_game_and_warns_when_nothing_is_stored(monk
     def unreadable():
         raise RuntimeError("sim_closing.json is unreadable")
     monkeypatch.setattr(sim_closing_fit, "scoring_games", lambda seasons, refresh=False: [*plain, tied])
+    monkeypatch.setattr(sim_closing_fit, "with_plays", lambda games, window, seasons, refresh=False: games)
     monkeypatch.setattr(sim_closing_fit, "line_script", lambda session, seasons: {"targets": 0.0, "carries": 0.0})
     monkeypatch.setattr("database.db.SessionLocal", nullcontext)
     monkeypatch.setattr(sim_closing, "stored", unreadable)

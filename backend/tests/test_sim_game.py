@@ -5,7 +5,7 @@ from types import MappingProxyType
 import numpy as np
 import pytest
 
-from services import sim_game
+from services import sim_centre, sim_game
 from services.replay_scoring import ScoringRules, scoring_settings
 from services.scoring import scoring_for
 from services.sim_world import Player, Team, World
@@ -101,14 +101,16 @@ def test_dst_interceptions_equal_the_opposing_quarterbacks(monkeypatch):
         assert seen == [thrown["BBB"], thrown["AAA"]]          # AAA's defense first, then BBB's
 
 
-def _scripted(out: set[int], kind: str) -> float:
-    """exp(line-script slope x the change in AAA's expected margin when `out` sit): how far its volume moves."""
-    from services import sim_closing
-
-    def margin(sitting: set[int]) -> float:
-        a, b = (sim_game._side_means(sim_game._side_of(world(), t, o, sitting)) for t, o in (("AAA", "BBB"), ("BBB", "AAA")))
-        return sim_game._mean_points(a, b) - sim_game._mean_points(b, a)
-    return float(np.exp(sim_closing.line_script()[kind] * (margin(out) - margin(set()))))
+def _volume(out: set[int]) -> tuple[float, float, float]:
+    """AAA's mean (targets, carries besides kneels, kneels) in its game with `out` sitting, as the game is centred:
+    its volume moves only by its game script (sim_script), at the margin his absence moves."""
+    from services import sim_script
+    from tests import sim_draws
+    w = world()
+    side = sim_draws.centred_sides(w, "AAA", "BBB") if not out else tuple(sim_centre.centred(
+        {t: sim_game._side(w, t, o, out, {}) for t, o in (("AAA", "BBB"), ("BBB", "AAA"))}).values())
+    m, kneels = sim_game._side_means(side[0]), sim_script.window_means(side[0])[2]
+    return float(m["targets"].sum()), float(m["carries"].sum()) - kneels, kneels
 
 
 def test_an_injured_receivers_work_flows_to_his_teammates():
@@ -118,16 +120,17 @@ def test_an_injured_receivers_work_flows_to_his_teammates():
     for name in ("WR2", "WR3", "TE", "RB"):
         assert without[pid("AAA", name)].box.targets > healthy[pid("AAA", name)].box.targets
     total = lambda lines: sum(e.box.targets for p, e in lines.items() if team_of(p) == "AAA")  # noqa: E731
-    # the team's targets move only by the line script, at the margin his absence moves (sim_closing.line_script)
-    assert total(without) / total(healthy) == pytest.approx(_scripted({pid("AAA", "WR")}, "targets"), rel=1e-3)
+    # the team's targets move only by its game script, at the margin his absence moves (sim_script)
+    assert total(without) / total(healthy) == pytest.approx(_volume({pid("AAA", "WR")})[0] / _volume(set())[0], rel=1e-3)
 
 
 def test_a_hurt_back_s_carries_go_to_the_next_back_not_to_the_quarterback():
     healthy = sim_game.expected(world(), "AAA", "BBB", set(), HALF)
     without = sim_game.expected(world(), "AAA", "BBB", {pid("AAA", "RB")}, HALF)
-    # the QB's carries move only by the line script, at the margin the back's absence moves
-    ratio = without[pid("AAA", "QB")].box.carries / healthy[pid("AAA", "QB")].box.carries
-    assert ratio == pytest.approx(_scripted({pid("AAA", "RB")}, "carries"), rel=1e-3)
+    # the QB's carries besides his kneels move only by the game script, at the margin the back's absence moves
+    (_, before, kneels), (_, after, kneels_after) = _volume(set()), _volume({pid("AAA", "RB")})
+    ratio = (without[pid("AAA", "QB")].box.carries - kneels_after) / (healthy[pid("AAA", "QB")].box.carries - kneels)
+    assert ratio == pytest.approx(after / before, rel=1e-3)
     assert without[pid("AAA", "RB2")].box.carries > 2 * healthy[pid("AAA", "RB2")].box.carries
 
 

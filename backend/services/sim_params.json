@@ -87,10 +87,6 @@
   "rush_shift": 4.0
  },
  "game": {
-  "targets_sd": 0.12895,
-  "carries_sd": 0.01,
-  "script_targets": 0.0651,
-  "script_carries": 0.19835,
   "pace_shared": 0.0,
   "eff_sd": 0.01,
   "eff_shared": 0.9,
@@ -1224,17 +1220,12 @@
    "eff_sd": 0.05,
    "eff_shared": 0.3,
    "pace_shared": 0.3,
-   "carries_sd": 0.1,
    "share_sd_targets": 0.05,
    "share_sd_carries": 0.15,
    "share_sd_qb_carries": 0.45,
    "td_drives": 5,
    "fg_power": 1.0,
-   "ypc_volume": 0.3,
-   "line_script_extra": {
-    "targets": -0.0013,
-    "carries": 0.0024
-   }
+   "ypc_volume": 0.3
   },
   "rates": {
    "rec_cv": 0.68
