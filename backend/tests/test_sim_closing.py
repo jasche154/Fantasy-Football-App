@@ -168,3 +168,29 @@ def test_a_try_is_filed_with_its_touchdown_across_the_cut():
     game = _game([[4, 605, "AAA", "rush_td", 3], [4, 600, "AAA", "xp", 0], [4, 120, "BBB", "fg_0_39", 0]], 7, 3)
     before, inside, _ = sim_closing_fit.split(game, 600)
     assert before["AAA"] == {"rush_td": 1, "xp": 1} and not inside["AAA"] and inside["BBB"] == {"fg_0_39": 1}
+
+
+def test_short_or_gapped_fitted_files_fail_with_the_file_and_its_fit(monkeypatch, tmp_path):
+    """M4: a missing section, a missing interior margin or a short calendar names the file and the command."""
+    import json
+
+    good = json.loads(sim_closing.CLOSING_PATH.read_text(encoding="utf-8"))
+    for broken in ({k: v for k, v in good.items() if k != "line_script"},
+                   {**good, "table": {k: v for k, v in good["table"].items() if k != "5"}}):
+        path = tmp_path / "sim_closing.json"
+        path.write_text(json.dumps(broken), encoding="utf-8")
+        monkeypatch.setattr(sim_closing, "CLOSING_PATH", path)
+        sim_closing.stored.cache_clear()
+        with pytest.raises(RuntimeError, match="sim_closing.json.*sim_closing_fit --fit"):
+            sim_closing.stored()
+    sim_closing.stored.cache_clear()
+    calendar = json.loads(sim_calendar.CALENDAR_PATH.read_text(encoding="utf-8"))
+    path = tmp_path / "sim_calendar.json"
+    path.write_text(json.dumps({**calendar, "buckets": calendar["buckets"][:-1]}), encoding="utf-8")
+    monkeypatch.setattr(sim_calendar, "CALENDAR_PATH", path)
+    sim_calendar.stored.cache_clear()
+    with pytest.raises(RuntimeError, match="sim_calendar.json.*sim_calendar --fit"):
+        sim_calendar.factors(16)
+    monkeypatch.undo()
+    sim_closing.stored.cache_clear()
+    sim_calendar.stored.cache_clear()

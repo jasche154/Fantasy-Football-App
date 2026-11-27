@@ -37,7 +37,12 @@ SEASONS = "2018-2025"
 
 @lru_cache(maxsize=1)
 def stored() -> Mapping:
-    return fitted_json(CALENDAR_PATH, CALENDAR_FIT, ("buckets",))
+    """sim_calendar.json; one clear error naming the file and the fit when its buckets are not BUCKETS."""
+    found = fitted_json(CALENDAR_PATH, CALENDAR_FIT, ("buckets",))
+    weeks = [tuple(b.get("weeks", ())) for b in found["buckets"]]
+    if weeks != [tuple(b) for b in BUCKETS]:
+        raise RuntimeError(f"{CALENDAR_PATH.name} has buckets {weeks}, not {list(BUCKETS)}: run {CALENDAR_FIT}")
+    return found
 
 
 def factors(week: int) -> tuple[float, float, float]:
