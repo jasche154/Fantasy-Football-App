@@ -179,7 +179,12 @@ def test_a_thin_roster_leaves_depth_work_to_the_other_bucket_without_inflating_t
     assert pool < full.teams["AAA"].targets - 1                  # some targets go to unpooled depth
 
 
-def test_a_kicker_who_leaves_hurt_keeps_only_his_share_of_the_kicks():
+def test_a_kicker_who_leaves_hurt_keeps_only_his_share_of_the_kicks(monkeypatch):
+    """His share of the kicks before the closing window (whose kicks, after he left, are a fill-in's: the window is
+    switched off here so the share is measured on its own)."""
+    from services import sim_closing
+    monkeypatch.setattr(sim_closing, "close", lambda sides, offense, scored, points, returns, safeties, n_t, n_c, *rest:
+                        (offense, scored, points, returns, safeties, n_t, n_c))
     rng = np.random.default_rng(8)
     kicker = pid("AAA", "K")
     healthy = np.mean([sim_game.play(world(), "AAA", "BBB", set(), rng, HALF).players[kicker].points for _ in range(400)])
