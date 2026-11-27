@@ -194,3 +194,22 @@ def test_short_or_gapped_fitted_files_fail_with_the_file_and_its_fit(monkeypatch
     monkeypatch.undo()
     sim_closing.stored.cache_clear()
     sim_calendar.stored.cache_clear()
+
+
+@pytest.mark.parametrize("wanted", [(10.0, 13.0), (35.0, 30.0)])
+def test_the_cut_margins_spread_matches_the_measured_one(wanted):
+    """M4: sim_closing_means.cut_sd (sim_closing.json's cut_var, measured by sim_closing_fit.cut_spread) stays
+    within 10% of fresh draws at about 14 and 56 expected points before the cut, so a retune of the game model
+    cannot drift it silently (re-measure with sim_closing_fit --fit if this fails)."""
+    from services import sim_centre, sim_world
+    from tests import replay_fakes as fakes
+    data = fakes.fake_season()
+    belief, game = sim_world.estimate(data, 9), next(g for g in data.schedule.games if g.week == 9)
+    home, away = game.home_team, game.away_team
+    sides = sim_centre.centred({home: sim_game._side(belief, home, away, set(), {}),
+                                away: sim_game._side(belief, away, home, set(), {})}, {home: wanted[0], away: wanted[1]})
+    m = {t: sim_game._side_means(s) for t, s in sides.items()}
+    before = (sim_game._mean_points(m[home], m[away]), sim_game._mean_points(m[away], m[home]))
+    rng = np.random.default_rng(6)
+    cuts = np.array([sim_draw.draw_game((sides[home], sides[away]), rng, HALF, until_cut=True) for _ in range(1500)])
+    assert np.std(cuts[:, 0] - cuts[:, 1]) == pytest.approx(sim_closing_means.cut_sd(sum(before)), rel=0.10)

@@ -34,7 +34,7 @@ CLOSING_FIT = "python -m services.sim_closing_fit --fit"
 TD_POINTS = 6
 SAFETY_POINTS = 2
 BANDS = ("0_39", "40_49", "50")
-SECTIONS = ("window", "events", "table", "td_yards", "ot", "line_script")
+SECTIONS = ("window", "events", "table", "td_yards", "ot", "line_script", "cut_var")
 
 
 @lru_cache(maxsize=1)

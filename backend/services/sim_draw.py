@@ -262,7 +262,10 @@ def _kicking(o: _Offense, def_tds: int, rng: np.random.Generator, m: dict) -> tu
     return 6 * tds + pat_made + 2 * int(rng.binomial(two, TWO_POINT_SUCCESS)) + 3 * int(made.sum()), counts
 
 
-def draw_game(sides: Sequence, rng: np.random.Generator, scoring: ScoringSettings) -> GameResult:
+def draw_game(sides: Sequence, rng: np.random.Generator, scoring: ScoringSettings,
+              until_cut: bool = False) -> GameResult | tuple[int, int]:
+    """One game (see the module docstring); `until_cut`: only the two sides' points at the closing window's cut
+    (what sim_closing_fit.cut_spread measures)."""
     dst = params()["dst"]
     eff, n_targets, n_carries = _volumes(sides, rng)
     offense = [_offense(side, int(n_targets[i]), int(n_carries[i]), float(eff[i]), rng) for i, side in enumerate(sides)]
@@ -275,6 +278,8 @@ def draw_game(sides: Sequence, rng: np.random.Generator, scoring: ScoringSetting
     means = [_side_means(side) for side in sides]
     scored = [_kicking(offense[i], returns[i], rng, means[i]) for i in range(2)]
     regulation = offense
+    if until_cut:
+        return scored[0][0] + 2 * int(safeties[0]), scored[1][0] + 2 * int(safeties[1])
     expect = [max(0.1, _mean_points(means[i], means[1 - i])) for i in range(2)]
     offense, scored, points, returns, safeties, n_targets, n_carries = sim_closing.close(
         sides, offense, scored, [scored[i][0] + 2 * int(safeties[i]) for i in range(2)], returns, list(safeties),

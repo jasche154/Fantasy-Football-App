@@ -2,9 +2,11 @@
 (sim_game.expected). The draw itself is sim_closing.close and sim_draw._overtime.
 
 A game's margin at the cut (ten minutes before the end of regulation) is spread around the two sides' expected
-lead d with sd `cut_sd`, which grows with their expected points before the cut: sd^2 = CUT_VAR[0] + CUT_VAR[1] x
-that total (measured on simulated games, 27 fake-season matchups of 13-56 points: 8.0 at a total of 14, 11.0 at
-36, 12.6 at 56; the mean over 2,272 real-season games was 11.1). Over a normal spread of whole-point cut margins
+lead d with sd `cut_sd`, which grows with their expected points before the cut: sd^2 = a + b x that total,
+sim_closing.json's `cut_var`, measured on simulated games by sim_closing_fit.cut_spread (games of 13-56 points
+before the cut: about 8 at a total of 14, 11 at 36, 12.6 at 56). Re-measure it (sim_closing_fit --fit) whenever
+the draw before the cut changes (`game.td_drives`, the volumes, the kicking): tests/test_sim_closing checks it
+against fresh draws at totals of about 14 and 56. Over a normal spread of whole-point cut margins
 (-SPAN..SPAN) the real endings (sim_closing.json's table) give
 - each side's mean window events (`window_events(d, s)`): a trailer scores more in the window, a leader less, and
   the closer the cut, the more both kick;
@@ -34,7 +36,6 @@ from services.sim_closing import BANDS
 if TYPE_CHECKING:
     from services.sim_game import _Side
 
-CUT_VAR = (32.5, 2.41)           # cut margin variance = a + b x pre-window expected total (see the docstring)
 SPAN = 70                        # whole-point cut margins averaged over (-SPAN..SPAN)
 MARGINS = np.arange(-SPAN, SPAN + 1)
 STEPS = 6                        # fixed-point steps in `regulation` (converged to under 0.01 points by 4)
@@ -62,7 +63,8 @@ class Ending:
 
 def cut_sd(total: float) -> float:
     """The spread of a game's margin at the cut, from its two sides' expected points before the cut."""
-    return math.sqrt(CUT_VAR[0] + CUT_VAR[1] * max(0.0, total))
+    a, b = sim_closing.stored()["cut_var"]
+    return math.sqrt(a + b * max(0.0, total))
 
 
 @lru_cache(maxsize=1)
