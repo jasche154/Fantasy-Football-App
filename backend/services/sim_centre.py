@@ -166,18 +166,24 @@ def centred(sides: dict, target: Mapping[str, float] | None = None, shift: Mappi
     week, whose pass / run mix it plays with (sim_calendar; None: the season's average)."""
     if len(sides) == 2 and not target and not shift and not factors:
         shift = {team: 0.0 for team in sides}
+    from services.sim_game import _side_means
+    teams = list(sides)
+
+    def pair(means: dict) -> dict:
+        return {teams[0]: means[teams[-1]], teams[-1]: means[teams[0]]} if len(teams) == 2 else {}
+    wanted = {}
+    if target or shift:      # a shift is on the week-free mean (the line's belief points have no week either)
+        plain = {team: _side_means(side) for team, side in sides.items()}
+        wanted = _wanted(sides, plain, pair(plain), target, shift, factors)
     if week is not None:
         sides = {team: _in_week(side, week) for team, side in sides.items()}
     if not target and not shift and not factors:
         return sides
     from services import sim_closing_means
-    from services.sim_game import _side_means
     from services.sim_lines import yards_power
     power = yards_power()
     means = {team: _side_means(side) for team, side in sides.items()}
-    teams = list(sides)
-    against = {teams[0]: means[teams[-1]], teams[-1]: means[teams[0]]} if len(teams) == 2 else {}
-    wanted = _wanted(sides, means, against, target, shift, factors)
+    against = pair(means)
     ends = {}
     if len(teams) == 2 and all(team in wanted for team in teams):
         pre_a, pre_b, end_a, end_b = sim_closing_means.regulation(wanted[teams[0]], wanted[teams[1]], MIN_TARGET)

@@ -269,3 +269,22 @@ def test_a_nan_target_is_refused_not_floored(data, belief):
     with pytest.raises(ValueError, match="not a number"):
         sim_centre.centred({home: sim_game._side(belief, home, away, set(), {}),
                             away: sim_game._side(belief, away, home, set(), {})}, {home: float("nan"), away: 20.0})
+
+
+@pytest.mark.parametrize("week", [2, 16])
+def test_the_calendar_moves_the_mix_not_a_shifted_games_points(data, belief, week):
+    """A game centred on its own mean + a shift (how the truth's games are centred on the line) plays the week's pass /
+    run mix at the week-free mean points: on 36ae0dc the shift was taken after the week, so week 2 landed up to 0.07
+    above and week 16 0.09 below (fake season, worst side); now within 0.005."""
+    worst = 0.0
+    for game in (g for g in data.schedule.games if g.week == WEEK):
+        home, away = game.home_team, game.away_team
+        raw = {home: sim_game._side(belief, home, away, set(), {}), away: sim_game._side(belief, away, home, set(), {})}
+        m = {t: sim_game._side_means(s) for t, s in raw.items()}
+        free = (sim_game._mean_points(m[home], m[away]), sim_game._mean_points(m[away], m[home]))
+        sides = sim_centre.centred(raw, shift={home: 0.0, away: 0.0}, week=week)
+        c = [sim_game._side_means(sides[t]) for t in (home, away)]
+        before = (sim_game._mean_points(c[0], c[1]), sim_game._mean_points(c[1], c[0]))
+        ends = sim_closing_means.endings(*before)
+        worst = max(worst, *(abs(before[i] + ends[i].window + ends[i].overtime - free[i]) for i in range(2)))
+    assert worst < 0.05
