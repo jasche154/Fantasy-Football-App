@@ -307,14 +307,14 @@ def test_one_projectors_lineup_solves_fit_under_the_cap(monkeypatch):
     from services import replay_game as rg
 
     peak = {}
-    solve = lineup_gain.week_lineup
+    solve = lineup_gain._week_lineup                # every solve goes through it (season_points calls it directly)
 
-    def counted(values, week, projector, settings):
-        found = solve(values, week, projector, settings)
+    def counted(modeled, ids, week, projector, settings):
+        found = solve(modeled, ids, week, projector, settings)
         peak[id(projector)] = max(peak.get(id(projector), 0), len(projector._lineups))
         return found
 
-    monkeypatch.setattr(lineup_gain, "week_lineup", counted)
+    monkeypatch.setattr(lineup_gain, "_week_lineup", counted)
     settings = fakes.fake_settings(waiver_mode="wednesday")
     data = fakes.fake_season(settings.season, settings.scoring)
     state = rg.auto_draft(rg.create_game(settings, data, 1), settings, data, 1)
