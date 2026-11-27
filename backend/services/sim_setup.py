@@ -18,6 +18,7 @@ that reads the database; the engine (services/sim_season, sim_world, sim_market)
 The season is built once, when its league is created, and frozen into the save (services/replay_blob.py).
 """
 import logging
+import math
 from datetime import datetime
 from dataclasses import replace
 from types import MappingProxyType
@@ -168,12 +169,23 @@ def _market_adp(data: SeasonData, settings: Settings) -> SeasonData:
     """Every player's ADP replaced by the market's going into the league's first week, in the league's format
     (settings.adp_format), so a draft held mid-season reflects today, not August. The belief reads the
     simulated season as known before that week, which includes that week's injury tags (a starter's running
-    IR stint): the same belief the week's expert snapshot was drawn from, so the draft room's rank and ADP agree."""
-    from services import sim_next_year, sim_world
+    IR stint): the same belief the week's expert snapshot was drawn from. Today's market also leans on the
+    experts' opinion of that snapshot (sim_market.implied_opinions of its ranks, as a price multiplier): the
+    simulated experts carry the last real ranks over the join, and a market on the belief alone left the draft
+    room's rank and its ADP agreeing at 0.77-0.80 (Spearman, top 60) where one belief gave 0.88-0.91."""
+    from services import sim_market, sim_next_year, sim_world
+    from services.sim_world import scoring_of
 
     week = settings.start_week
-    return sim_next_year.with_market_adp(replace(data, adp_format=settings.adp_format),
-                                         sim_world.estimate(data, week), data.last_week - week + 1)
+    belief = sim_world.estimate(data, week)
+    games_left = data.last_week - week + 1
+    known = data.as_of(week)
+    worth = sim_market.values(belief, scoring_of(data), games_left)
+    spread = sim_market.opinion_knob("opinion_spread")
+    lean = {pid: math.exp(sim_market.EXPERT_NOISE * spread.get(belief.players[pid].position, 1.0) * z)
+            for pid, z in sim_market.implied_opinions(belief, known, week, worth).items()}
+    return sim_next_year.with_market_adp(replace(data, adp_format=settings.adp_format), belief, games_left,
+                                         premium=lean)
 
 
 def with_status_now(session: Session, base: SeasonData, week: int) -> SeasonData:
