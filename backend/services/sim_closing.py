@@ -15,22 +15,18 @@ in proportion to his expected TDs among the players still in the game; field goa
 and misses to the kicker (to a fill-in when the kicker left hurt: points, no line); return TDs and safeties to the
 defense. A side with no one to credit (no receivers or rushers) still scores the points.
 
-The draw before the cut is centred without the window (sim_centre): its touchdowns and field-goal tries are scaled
-down by the window's mean points and its yards by the window TDs' mean yards, and `expected` adds the window's mean
-events back to the players (`credit_means`), so projections stay unbiased. The window's mean events depend on the
-side's expected lead at the cut d (a trailer scores more in it, a leader less): `window_events(d)` averages each
-margin's real mean events over a normal spread of margins around d (CUT_SD, the simulated spread of margins at the
-cut around their mean).
+The draw before the cut is centred without the window's and overtime's mean points, and `expected` adds their
+mean events back to the players, so projections stay unbiased: sim_closing_means, which works them out from the
+game's expected lead and total.
 """
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from functools import lru_cache
 from pathlib import Path
-from types import MappingProxyType, SimpleNamespace
+from types import MappingProxyType
 
 import numpy as np
 
-from services import kdst_model
 from services.sim_constants import fitted_json, params
 
 CLOSING_PATH = Path(__file__).with_name("sim_closing.json")
@@ -38,78 +34,38 @@ CLOSING_FIT = "python -m services.sim_closing_fit --fit"
 TD_POINTS = 6
 SAFETY_POINTS = 2
 BANDS = ("0_39", "40_49", "50")
-CUT_SD = 11.1                    # sd of a simulated margin at the cut around its mean (2,272 games, sim_eval 2022-24)
-SPAN = 70                        # margins at the cut averaged over (-SPAN..SPAN)
+SECTIONS = ("window", "events", "table", "td_yards", "ot", "line_script")
 
 
 @lru_cache(maxsize=1)
 def stored() -> Mapping:
-    found = fitted_json(CLOSING_PATH, CLOSING_FIT, ("window", "events", "table", "per_side", "td_yards", "ot"))
-    events = found["events"]
-    table = {}
+    """sim_closing.json, read-only, with each margin's endings as (shares, [(trailer events, leader events)]); one
+    clear error naming the file and the fit when a section or an interior margin is missing."""
+    found = fitted_json(CLOSING_PATH, CLOSING_FIT, SECTIONS)
+    events, table = found["events"], {}
     for margin, rows in found["table"].items():
         counts = np.array([r[0] for r in rows], dtype=float)
         table[int(margin)] = (counts / counts.sum(), [(dict(zip(events, r[1])), dict(zip(events, r[2]))) for r in rows])
+    missing = sorted(set(range(max(table, default=-1) + 1)) - set(table))
+    if not table or missing:
+        raise RuntimeError(f"{CLOSING_PATH.name} has no endings for margins {missing or 'any'}: run {CLOSING_FIT}")
     return MappingProxyType({**found, "rows": table, "top": max(table)})
 
 
-def _points(events: Mapping[str, int]) -> int:
+def points_of(events: Mapping[str, float]) -> float:
+    """The points of one side's window events (a real ending, or their means)."""
     return (TD_POINTS * (events["pass_td"] + events["rush_td"] + events["ret_td"]) + events["xp"] + 2 * events["two"]
             + 3 * sum(events[f"fg_{b}"] for b in BANDS) + SAFETY_POINTS * events["safety"])
 
 
-@lru_cache(maxsize=1)
-def _by_margin() -> np.ndarray:
-    """Mean events (EVENTS order) of a side leading by m at the cut, m = -SPAN..SPAN (row m + SPAN)."""
-    s = stored()
-    events = s["events"]
-    rows = []
-    for m in range(-SPAN, SPAN + 1):
-        shares, endings = s["rows"][min(abs(m), s["top"])]
-        trail = np.array([[e[0][k] for k in events] for e in endings], dtype=float)
-        lead = np.array([[e[1][k] for k in events] for e in endings], dtype=float)
-        mine = (trail + lead) / 2 if m == 0 else lead if m > 0 else trail
-        rows.append(shares @ mine)
-    return np.array(rows)
-
-
-@lru_cache(maxsize=4096)
-def _events_at(d: float) -> Mapping[str, float]:
-    margins = np.arange(-SPAN, SPAN + 1)
-    weights = np.exp(-0.5 * ((margins - d) / CUT_SD) ** 2)
-    return MappingProxyType(dict(zip(stored()["events"], weights @ _by_margin() / weights.sum())))
-
-
-def window_events(d: float = 0.0) -> Mapping[str, float]:
-    """A side's mean closing-window events when it is expected to lead by `d` points at the cut."""
-    return _events_at(round(float(d), 1))
-
-
-def window_points(d: float = 0.0) -> float:
-    """A side's mean points in the closing window when it is expected to lead by `d` at the cut."""
-    return float(_points(window_events(d)))
-
-
-def window_yards(d: float = 0.0) -> float:
-    """A side's mean yards on its closing-window TD plays (credited to the scorer on top of the draw's yards)."""
-    ev, yards = window_events(d), stored()["td_yards"]
-    return float(ev["pass_td"] * yards["rec"] + ev["rush_td"] * yards["rush"])
-
-
-def cut_lead(wanted: float, other: float, steps: int = 3) -> float:
-    """The expected lead at the cut of a side wanted at `wanted` points against `other` (both window included):
-    d = wanted - other - (its window points at d - the other's at -d), solved by a few fixed-point steps."""
-    d = wanted - other
-    for _ in range(steps):
-        d = wanted - other - (window_points(d) - window_points(-d))
-    return d
+_points = points_of
 
 
 def line_script() -> Mapping[str, float]:
     """How a team's targets and carries follow its expected margin, log volume per point: the real slope
     (sim_closing_fit) + the tuned `game.line_script_extra` (the simulated game on its own moves volume against the
     line, carries about -0.2% a point: the extra is set so sim_eval's "per line point" rows match real ones)."""
-    real = stored().get("line_script", {"targets": 0.0, "carries": 0.0})
+    real = stored()["line_script"]
     extra = params()["game"].get("line_script_extra", {})
     return {k: float(real[k]) + float(extra.get(k, 0.0)) for k in ("targets", "carries")}
 
@@ -128,7 +84,8 @@ def ending(margin: int, rng: np.random.Generator) -> tuple[dict, dict]:
 
 # ---------------- crediting the points ----------------
 
-def score_td(side, m: dict, o, kind: str | None, yards: Mapping[str, float], rng: np.random.Generator):
+def score_td(side, m: dict, o, kind: str | None, yards: Mapping[str, float],
+             rng: np.random.Generator) -> tuple[object, int, int]:
     """(offense, extra target, extra carry) with one TD credited: by a catch (`kind` "rec"), a run ("rush") or
     either (None, overtime), to a player drawn by his expected TDs, never one who left the game hurt. A pass with
     no receiver to credit goes to a rusher, and the reverse; with neither, nobody's line changes."""
@@ -160,7 +117,8 @@ def _kicks(counts: dict, events: Mapping[str, int], kicker_in: bool) -> dict:
 
 
 def close(sides: Sequence, offense: list, scored: list, points: list, returns: list, safeties: list,
-          n_targets: np.ndarray, n_carries: np.ndarray, rng: np.random.Generator, means: list, expect: list) -> tuple:
+          n_targets: np.ndarray, n_carries: np.ndarray, rng: np.random.Generator, means: list,
+          expect: list) -> tuple[list, list, list, list, list, np.ndarray, np.ndarray]:
     """The game after its closing window (see the module docstring); every argument is per side and returned
     updated as (offense, scored, points, returns, safeties, n_targets, n_carries). `expect`: each side's mean
     points (who gets the better ending of a tie)."""
@@ -185,47 +143,3 @@ def close(sides: Sequence, offense: list, scored: list, points: list, returns: l
         returns[i] += ev["ret_td"]
         safeties[i] += ev["safety"]
     return offense, scored, points, returns, safeties, n_targets, n_carries
-
-
-# ---------------- the window's means, for projections ----------------
-
-def credit_means(lines: dict[int, dict[str, float]], side, m: dict, d: float) -> None:
-    """Add the closing window's mean events (`window_events(d)`, d: the side's expected lead at the cut) to `side`'s
-    players' mean lines (sim_game._expected_players' dicts, by player): TDs shared by expected TDs among the players
-    the draw credits, with their catches, targets and yards; the passer's line follows his receivers'."""
-    per, yards = window_events(d), stored()["td_yards"]
-    rec, rush = m["rec_td"][:-1], m["rush_td"][:-1]
-    has_rec, has_rush, total = rec.sum() > 0, rush.sum() > 0, per["pass_td"] + per["rush_td"]
-    passes = (per["pass_td"] if has_rush else total) if has_rec else 0.0    # as score_td falls back
-    runs = total - passes if has_rush else 0.0
-    for i, pid in enumerate(side.receivers[:-1]):
-        share = passes * rec[i] / rec.sum() if passes else 0.0
-        line = lines.setdefault(pid, {})
-        for key, add in (("targets", share), ("rec", share), ("rec_yds", share * yards["rec"]), ("rec_td", share)):
-            line[key] = line.get(key, 0.0) + add
-    for i, pid in enumerate(side.rushers[:-1]):
-        share = runs * rush[i] / rush.sum() if runs else 0.0
-        line = lines.setdefault(pid, {})
-        for key, add in (("carries", share), ("rush_yds", share * yards["rush"]), ("rush_td", share)):
-            line[key] = line.get(key, 0.0) + add
-    if side.qb is not None and passes:
-        line = lines.setdefault(side.qb, {})
-        line["pass_yds"] = line.get("pass_yds", 0.0) + passes * yards["rec"]
-        line["pass_td"] = line.get("pass_td", 0.0) + passes
-
-
-def kicker_points(d: float) -> float:
-    """A kicker's mean points from the closing window (its field goals by band, misses and extra points)."""
-    per = window_events(d)
-    row = SimpleNamespace(**{f"made_{b}": per[f"fg_{b}"] for b in BANDS}, **{f"missed_{b}": per[f"miss_{b}"] for b in BANDS},
-                          pat_made=per["xp"], pat_att=per["xp"] + per["xp_miss"])
-    return float(kdst_model._actual_k(row))
-
-
-def defense_points(d: float) -> float:
-    """A defense's mean points from the closing window (return TDs, safeties), points allowed aside."""
-    per = window_events(d)
-    blank = SimpleNamespace(def_sacks=0, def_ints=0, def_fumble_rec=0, def_tds=0, def_safeties=0, def_blocks=0,
-                            points_against=1000)
-    scored = SimpleNamespace(**{**vars(blank), "def_tds": per["ret_td"], "def_safeties": per["safety"]})
-    return float(kdst_model._actual_dst(scored) - kdst_model._actual_dst(blank))

@@ -4,7 +4,7 @@ from collections import Counter
 import numpy as np
 import pytest
 
-from services import sim_calendar, sim_closing, sim_closing_fit, sim_draw, sim_game
+from services import sim_calendar, sim_closing, sim_closing_fit, sim_closing_means, sim_draw, sim_game
 from tests.test_sim_game import HALF, pid, world
 
 NONE = dict.fromkeys(sim_closing_fit.EVENTS, 0)
@@ -46,10 +46,20 @@ def test_endings_are_filed_by_the_margin_at_the_cut_from_the_trailers_side():
     assert not sim_closing_fit.consistent(_game([[1, 3000, "AAA", "pass_td", 20]], 7, 0))
 
 
-def test_a_trailer_scores_more_in_the_window_than_a_leader():
-    assert sim_closing.window_points(-10) > sim_closing.window_points(0) > sim_closing.window_points(10) > 0
-    lead = sim_closing.cut_lead(27.0, 17.0)
-    assert lead == pytest.approx(10.0 - sim_closing.window_points(lead) + sim_closing.window_points(-lead), abs=0.05)
+def test_a_trailer_scores_more_in_the_window_than_a_leader_and_close_games_tie_more():
+    window = sim_closing_means.window_points
+    assert window(-10, 11.0) > window(0, 11.0) > window(10, 11.0) > 0
+    tie = sim_closing_means.tie_chance
+    assert tie(0, 8.0) > tie(0, 11.0) > tie(7, 11.0) > tie(20, 11.0) > 0
+    assert tie(3, 11.0) == tie(-3, 11.0)
+    assert sim_closing_means.cut_sd(14.0) < sim_closing_means.cut_sd(36.0) < sim_closing_means.cut_sd(56.0)
+
+
+def test_the_draw_before_the_cut_plus_window_and_overtime_average_the_wanted_points():
+    pre_a, pre_b, end_a, end_b = sim_closing_means.regulation(27.0, 17.0)
+    assert pre_a + end_a.window + end_a.overtime == pytest.approx(27.0, abs=0.01)
+    assert pre_b + end_b.window + end_b.overtime == pytest.approx(17.0, abs=0.01)
+    assert end_a.lead == pytest.approx(pre_a - pre_b) and end_a.share + end_b.share == pytest.approx(1.0)
 
 
 def _setup(exits: dict | None = None):

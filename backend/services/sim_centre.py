@@ -12,12 +12,12 @@ field-goal tries = min(1, f) ** fg_power x fga_mean(yards, TDs) (capped where th
 function need no side rebuilt; one check on the scaled side's real means then corrects for the only thing the
 closed form leaves out (a TD rate reaching sim_game.MAX_TD_RATE).
 
-The wanted points include overtime and the closing window (a real line's total does): a two-team game is first
-centred on the wanted points less the overtime points a side scores on average (`ot_points`: sim_draw's overtime
-model at the measured simulated regulation tie rate), yards included; then its TD rates and field-goal tries alone
-are scaled down by the window's mean points (sim_closing.window_points; the factor's yards power 0) and its yards by
-the window TDs' mean yards (sim_closing.window_yards, credited to the scorers in the window), so the draw before the
-cut plus the window averages the wanted points (`_without_window`). A two-team game given no target is centred on
+The wanted points include overtime and the closing window (a real line's total does): sim_closing_means.regulation
+gives each side of a two-team game the points its draw before the cut must average so that, with the window's and
+overtime's mean points at the game's own expected lead and total, it averages the wanted points. The side is first
+centred on that plus its window points (less overtime), yards included; then its TD rates and field-goal tries
+alone are scaled down by the window's mean points (the factor's yards power 0) and its yards by the window TDs'
+mean yards (credited to the scorers in the window) (`_without_window`). A two-team game given no target is centred on
 its own mean points (a shift of 0), so the window and overtime never add to it. In a two-team game each side's
 targets and carries first follow its expected margin (`_scripted`, sim_closing.line_script: real favourites run
 more), before its factor is solved, so the means the draw and the projections use already have it.
@@ -26,9 +26,15 @@ import math
 from collections.abc import Mapping
 from dataclasses import replace
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 
 from services.sim_world import params
+
+if TYPE_CHECKING:
+    from services.sim_closing_means import Ending
+    from services.sim_game import _Side
 
 FACTOR_RANGE = (0.02, 8.0)       # a side's factor stays in this range
 NEWTON_STEPS = 25                # on the closed form (microseconds each); stops at CLOSED_TOLERANCE
@@ -36,17 +42,6 @@ CLOSED_TOLERANCE = 1e-3          # points, on the closed form
 TARGET_TOLERANCE = 0.05          # points, on the real means (else one correction)
 MIN_TARGET = 1.0                 # a side is never centred below this many points
 FG_POWER = 1.0                   # default of the tuned `game.fg_power`
-REGULATION_TIES = 0.042          # share of simulated games tied after regulation (measured over 2,272 games with the closing window)
-# re-measure REGULATION_TIES whenever `game.td_drives` or sim_closing.json changes: they set how often regulation ends tied
-
-
-def ot_points() -> float:
-    """The mean overtime points a side scores: ties x the chance overtime is decided x the winning score / 2."""
-    from services import sim_draw
-    field_goal = sim_draw.ot_field_goal()
-    return REGULATION_TIES * (1 - sim_draw.ot_tie()) * (3 * field_goal + 6 * (1 - field_goal)) / 2
-
-
 def fg_power() -> float:
     """How field-goal tries follow a factor below 1 (`game.fg_power`)."""
     return float(params()["game"].get("fg_power", FG_POWER))
@@ -112,21 +107,20 @@ def team_factor(world, team: str, out, shift: float) -> float:
     return factor(side, None, max(MIN_TARGET, _mean_points(m, None) + shift), m)
 
 
-def _without_window(side, against: dict | None, wanted: float, lead: float):
-    """A two-team game's side (already centred on `wanted` before the window) with the closing window's mean points
-    and TD yards at its expected lead at the cut (`lead`, sim_closing.cut_lead) taken out of its draw (see the
-    module docstring)."""
-    from services import sim_closing
+def _without_window(side: "_Side", against: dict | None, regulation: float, end: "Ending") -> "_Side":
+    """A two-team game's side, centred with its window points in, with the window's mean points and TD yards
+    (`end`: its sim_closing_means.Ending) taken out of its draw, which then averages `regulation` (see the module
+    docstring)."""
+    from services import sim_closing_means
     from services.sim_game import _side_means
     m = _side_means(side)
     yards = float(m["rec_yds"].sum() + m["rush_yds"].sum())
-    keep = max(0.0, 1.0 - sim_closing.window_yards(lead) / yards) if yards > 0 else 1.0
+    keep = max(0.0, 1.0 - sim_closing_means.window_yards(end.lead, end.sd) / yards) if yards > 0 else 1.0
     side = replace(side, ypc=side.ypc * keep, ypr=side.ypr * keep)
-    regulation = max(MIN_TARGET, wanted - sim_closing.window_points(lead))
-    return scaled(side, factor(side, against, regulation, power=0.0), 0.0)
+    return scaled(side, factor(side, against, max(MIN_TARGET, regulation), power=0.0), 0.0)
 
 
-def _scripted(side, margin: float):
+def _scripted(side: "_Side", margin: float) -> "_Side":
     """`side` with its targets and carries moved by its expected margin (sim_closing.line_script: a favourite runs
     more and throws a little less, as real ones do against the Vegas line)."""
     from services import sim_closing
@@ -136,9 +130,8 @@ def _scripted(side, margin: float):
 
 
 def _wanted(sides: dict, means: dict, against: dict, target, shift, factors) -> dict[str, float]:
-    """{team: the points its draw before overtime is centred on} for the teams given a target or a shift."""
+    """{team: the points its game should average} for the teams given a target or a shift."""
     from services.sim_game import _mean_points
-    overtime = ot_points() if len(sides) == 2 else 0.0
     wanted = {}
     for team in sides:
         if factors and team in factors:
@@ -147,11 +140,11 @@ def _wanted(sides: dict, means: dict, against: dict, target, shift, factors) -> 
         if goal is None and team in (shift or {}):
             goal = _mean_points(means[team], against.get(team)) + shift[team]       # the truth minus the belief: OT in both
         if goal is not None:
-            wanted[team] = max(MIN_TARGET, goal) - overtime
+            wanted[team] = max(MIN_TARGET, goal)
     return wanted
 
 
-def _in_week(side, week: int):
+def _in_week(side: "_Side", week: int) -> "_Side":
     """`side` with week `week`'s pass / run mix (sim_calendar: its targets, carries and yards per catch)."""
     from services import sim_calendar
     targets, carries, ypt = sim_calendar.factors(week)
@@ -170,7 +163,7 @@ def centred(sides: dict, target: Mapping[str, float] | None = None, shift: Mappi
         return sides
     if week is not None:
         sides = {team: _in_week(side, week) for team, side in sides.items()}
-    from services.sim_closing import cut_lead
+    from services import sim_closing_means
     from services.sim_game import _side_means
     from services.sim_lines import yards_power
     power = yards_power()
@@ -178,6 +171,10 @@ def centred(sides: dict, target: Mapping[str, float] | None = None, shift: Mappi
     teams = list(sides)
     against = {teams[0]: means[teams[-1]], teams[-1]: means[teams[0]]} if len(teams) == 2 else {}
     wanted = _wanted(sides, means, against, target, shift, factors)
+    ends = {}
+    if len(teams) == 2 and all(team in wanted for team in teams):
+        pre_a, pre_b, end_a, end_b = sim_closing_means.regulation(wanted[teams[0]], wanted[teams[1]], MIN_TARGET)
+        ends = {teams[0]: (pre_a, end_a), teams[1]: (pre_b, end_b)}
     out = {}
     for team, side in sides.items():
         other = next((t for t in teams if t != team), None)
@@ -186,10 +183,11 @@ def centred(sides: dict, target: Mapping[str, float] | None = None, shift: Mappi
         elif team not in wanted:
             out[team] = side
         else:
-            if other in wanted:
+            if team in ends:
+                regulation, end = ends[team]
                 side = _scripted(side, wanted[team] - wanted[other])
-                side = scaled(side, factor(side, against.get(team), wanted[team]), power)
-                out[team] = _without_window(side, against.get(team), wanted[team], cut_lead(wanted[team], wanted[other]))
+                side = scaled(side, factor(side, against.get(team), regulation + end.window), power)
+                out[team] = _without_window(side, against.get(team), regulation, end)
             else:
                 out[team] = scaled(side, factor(side, against.get(team), wanted[team], means[team]), power)
     return out

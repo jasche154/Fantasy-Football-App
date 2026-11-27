@@ -5,7 +5,7 @@ from types import MappingProxyType
 import numpy as np
 import pytest
 
-from services import replay_blob, sim_centre, sim_closing, sim_draw, sim_game, sim_lines, sim_market, sim_season, sim_world
+from services import replay_blob, sim_centre, sim_closing_means, sim_draw, sim_game, sim_lines, sim_market, sim_season, sim_world
 from tests import replay_fakes as fakes
 
 WEEK = 9
@@ -87,9 +87,9 @@ def test_a_centred_side_hits_any_reasonable_target(data, belief):
             sides = sim_centre.centred({home: sim_game._side(belief, home, away, set(), {}),
                                         away: sim_game._side(belief, away, home, set(), {})}, {home: wanted, away: 20.0})
             means = {t: sim_game._side_means(s) for t, s in sides.items()}
-            lead = sim_game._mean_points(means[home], means[away]) - sim_game._mean_points(means[away], means[home])
-            got = (sim_game._mean_points(means[home], means[away]) + sim_centre.ot_points()
-                   + sim_closing.window_points(lead))                 # the draw before the cut + the window + overtime
+            before = (sim_game._mean_points(means[home], means[away]), sim_game._mean_points(means[away], means[home]))
+            end = sim_closing_means.endings(*before)[0]
+            got = before[0] + end.window + end.overtime      # the draw before the cut + the window + overtime
             worst = max(worst, abs(got - wanted))
     assert worst < 0.05
 
@@ -108,9 +108,20 @@ def test_a_centred_game_averages_its_target_and_projections_follow(data, belief)
     rng = np.random.default_rng(3)
     drawn = np.array([[r.points[home], r.points[away]] for r in
                       (sim_game.play(belief, home, away, set(), rng, scoring, None, target) for _ in range(4000))])
-    # unbiased within 0.4 (overtime and the closing window included); a 31-point favourite's draw runs about 0.3 over
-    # the closed form (per-game volume noise on yards per catch, field-goal tries kept at 0 or more)
-    assert drawn.mean(axis=0) == pytest.approx([31.0, 13.0], abs=0.4)
+    assert drawn.mean(axis=0) == pytest.approx([31.0, 13.0], abs=0.3)        # unbiased, overtime included
+
+
+@pytest.mark.parametrize("wanted", [(17.0, 17.0), (10.0, 13.0)])
+def test_close_and_low_scoring_games_average_their_target(data, belief, wanted):
+    """The window and overtime add the most in close games (both sides kick, ties go to overtime) and their spread
+    follows the game's total (sim_closing_means): with one spread and one tie rate for every game, a 17-17 game
+    averaged +0.23 / +0.25 over its target and a 10-13 game +0.09 / +0.38 (12,000 draws, se 0.07)."""
+    game = next(g for g in data.schedule.games if g.week == WEEK)
+    home, away = game.home_team, game.away_team
+    target, scoring, rng = {home: wanted[0], away: wanted[1]}, sim_world.scoring_of(data), np.random.default_rng(5)
+    drawn = np.array([[r.points[home], r.points[away]] for r in
+                      (sim_game.play(belief, home, away, set(), rng, scoring, None, target) for _ in range(10000))])
+    assert drawn.mean(axis=0) == pytest.approx(list(wanted), abs=0.2)
 
 
 def test_touchdowns_are_drive_limited_and_never_outnumber_the_plays():

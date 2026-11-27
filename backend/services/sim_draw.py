@@ -92,9 +92,10 @@ class _Offense:
 
 
 def _split(total: int, weights: np.ndarray, sd: float | np.ndarray, rng: np.random.Generator) -> np.ndarray:
-    """`total` shared around `weights`: each weight x a lognormal game draw (relative noise, so a small role
-    stays small), renormalized, then a multinomial."""
-    drawn = weights * np.exp(sd * rng.standard_normal(len(weights)))
+    """`total` shared around `weights`: each weight x a lognormal game draw of mean 1 (relative noise, so a small
+    role stays small; without the mean correction the starting QB's wider draw, sd 0.45 against the backs' 0.15,
+    gave him about 9% more carries than his weight), renormalized, then a multinomial."""
+    drawn = weights * np.exp(sd * rng.standard_normal(len(weights)) - np.square(sd) / 2)
     return rng.multinomial(total, drawn / drawn.sum())
 
 
