@@ -31,7 +31,7 @@ from types import MappingProxyType, SimpleNamespace
 import numpy as np
 
 from services import kdst_model
-from services.sim_constants import fitted_json
+from services.sim_constants import fitted_json, params
 
 CLOSING_PATH = Path(__file__).with_name("sim_closing.json")
 CLOSING_FIT = "python -m services.sim_closing_fit --fit"
@@ -103,6 +103,15 @@ def cut_lead(wanted: float, other: float, steps: int = 3) -> float:
     for _ in range(steps):
         d = wanted - other - (window_points(d) - window_points(-d))
     return d
+
+
+def line_script() -> Mapping[str, float]:
+    """How a team's targets and carries follow its expected margin, log volume per point: the real slope
+    (sim_closing_fit) + the tuned `game.line_script_extra` (the simulated game on its own moves volume against the
+    line, carries about -0.2% a point: the extra is set so sim_eval's "per line point" rows match real ones)."""
+    real = stored().get("line_script", {"targets": 0.0, "carries": 0.0})
+    extra = params()["game"].get("line_script_extra", {})
+    return {k: float(real[k]) + float(extra.get(k, 0.0)) for k in ("targets", "carries")}
 
 
 def ot() -> Mapping:

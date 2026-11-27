@@ -4,7 +4,7 @@ from collections import Counter
 import numpy as np
 import pytest
 
-from services import sim_closing, sim_closing_fit, sim_draw, sim_game
+from services import sim_calendar, sim_closing, sim_closing_fit, sim_draw, sim_game
 from tests.test_sim_game import HALF, pid, world
 
 NONE = dict.fromkeys(sim_closing_fit.EVENTS, 0)
@@ -100,3 +100,22 @@ def test_drawn_games_average_the_projections_with_the_window_in():
     assert totals["kicker"] / games == pytest.approx(expected[kicker].points, abs=0.25)
     assert totals["qb_td"] / games == pytest.approx(expected[qb].box.pass_td, abs=0.06)
     assert totals["skill"] / games == pytest.approx(skill, rel=0.03)
+
+
+def test_late_season_games_run_more_and_throw_less_at_the_same_points():
+    early_targets, early_carries, _ = sim_calendar.factors(2)
+    late_targets, late_carries, late_ypt = sim_calendar.factors(16)
+    assert late_targets < 1.0 < early_targets and early_carries < 1.0 < late_carries and late_ypt < 1.0
+    w, target = world(), {"AAA": 24.0, "BBB": 20.0}
+    early = sim_game.expected(w, "AAA", "BBB", set(), HALF, target=target, week=2)
+    late = sim_game.expected(w, "AAA", "BBB", set(), HALF, target=target, week=16)
+    rb, qb = pid("AAA", "RB"), pid("AAA", "QB")
+    assert late[rb].box.carries > early[rb].box.carries and late[qb].box.pass_yds < early[qb].box.pass_yds
+
+
+def test_a_favourite_runs_more_than_the_same_team_as_an_underdog():
+    w, rb = world(), pid("AAA", "RB")
+    favoured = sim_game.expected(w, "AAA", "BBB", set(), HALF, target={"AAA": 30.0, "BBB": 16.0})
+    underdog = sim_game.expected(w, "AAA", "BBB", set(), HALF, target={"AAA": 16.0, "BBB": 30.0})
+    ratio = favoured[rb].box.carries / underdog[rb].box.carries
+    assert ratio == pytest.approx(np.exp(28 * sim_closing.line_script()["carries"]), rel=0.02)

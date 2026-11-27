@@ -321,7 +321,8 @@ def _side_means(side: _Side) -> dict:
 
 def expected(world: World, home: str, away: str | None, out: Collection[int], scoring: ScoringSettings,
              exits: Mapping[int, float] | None = None, target: Mapping[str, float] | None = None,
-             shift: Mapping[str, float] | None = None, factors: Mapping[str, float] | None = None) -> dict[int, Expected]:
+             shift: Mapping[str, float] | None = None, factors: Mapping[str, float] | None = None,
+             week: int | None = None) -> dict[int, Expected]:
     """Mean line and points of every active player of `home` (and of `away` when given) in their game.
     `away` None: `home` against a league-average opponent (only home's players are returned). `target`:
     {team: mean points} the game is centred on (see the module docstring); `shift`: {team: points} added to
@@ -333,7 +334,7 @@ def expected(world: World, home: str, away: str | None, out: Collection[int], sc
              else _side_of(world, team, (away if team == home else home), out) for team in teams}
     from services import sim_closing
     from services.sim_centre import ot_points
-    sides = centred(built, target, shift, factors)
+    sides = centred(built, target, shift, factors, week)
     means = {team: _side_means(side) for team, side in sides.items()}
     dst = params()["dst"]
     league = params()["league"]
@@ -402,12 +403,13 @@ def on_field(world: World, team: str, out: Collection[int]) -> dict[int, float]:
 
 def play(world: World, home: str, away: str, out: Collection[int], rng: np.random.Generator,
          scoring: ScoringSettings, exits: Mapping[int, float] | None = None,
-         target: Mapping[str, float] | None = None, shift: Mapping[str, float] | None = None) -> GameResult:
+         target: Mapping[str, float] | None = None, shift: Mapping[str, float] | None = None,
+         week: int | None = None) -> GameResult:
     """One random draw of the game (see the module docstring); `target`: {team: mean points} it is centred on,
     or `shift`: {team: points} added to each side's own mean points under `world`."""
     from services.sim_centre import centred
     from services.sim_draw import draw_game      # the random half (split out for size)
     exits = exits or {}
     sides = centred({home: _side(world, home, away, out, exits), away: _side(world, away, home, out, exits)},
-                    target, shift)
+                    target, shift, week=week)
     return draw_game((sides[home], sides[away]), rng, scoring)

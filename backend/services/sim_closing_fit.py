@@ -15,6 +15,10 @@ sim_closing plays the last WINDOW seconds of regulation from the score with what
   winner ends with a field goal, and the mean yards of an overtime-winning TD play by a catch and by a run.
 - `check`: leave-season-out, each season's real cut scores played forward with the other seasons' table, against
   that season's real end of regulation (shares of margins 1-3, 3, 7, 4-8 and ties).
+- `line_script`: how a team's volume follows its pregame expected margin (the Vegas spread), within each
+  team-season so a team's own style is not counted: log targets and log carries per point of expected margin
+  (2018-2025: favourites run about 0.9% more a point and throw about 0.1% less). Read from the database
+  (player_stats_weekly and nfl_games), applied by sim_centre before a game is centred.
 
 The scoring plays are read once with nflreadpy (the play-by-play the stats load already uses) and cached in
 PLAYS_CACHE (git-ignored); the network is needed the first time, with --refresh, or for a season not in it.
@@ -229,7 +233,46 @@ def check(games: list[Mapping], window: int, repeats: int = 20) -> dict[str, dic
     return {"real": shares(real), "played forward": shares(played)}
 
 
+def line_script(session, seasons: Iterable[int]) -> dict[str, float]:
+    """{"targets", "carries"}: the within-team-season slope of a team-game's log volume on its Vegas expected margin
+    (see the module docstring)."""
+    from sqlalchemy import text
+
+    wanted = sorted(set(seasons))
+    spreads = {}
+    for season, week, home, away, spread in session.execute(text(
+            "select season, week, home_team, away_team, spread_line from nfl_games where game_type = 'REG' "
+            "and spread_line is not null")):
+        if season in wanted:
+            spreads[(season, week, TEAM_ALIASES.get(home, home))] = (TEAM_ALIASES.get(away, away), float(spread))
+            spreads[(season, week, TEAM_ALIASES.get(away, away))] = (TEAM_ALIASES.get(home, home), -float(spread))
+    by_team: dict[tuple[int, str], list[tuple[float, float, float]]] = defaultdict(list)
+    for season, week, opponent, targets, carries in session.execute(text(
+            "select season, week, opponent_team, sum(coalesce(targets, 0)), sum(coalesce(carries, 0)) "
+            "from player_stats_weekly where season_type = 'REG' group by season, week, opponent_team")):
+        opponent = TEAM_ALIASES.get(opponent, opponent)
+        found = spreads.get((season, week, opponent))
+        if found is None or not targets or not carries:
+            continue
+        team, margin = found[0], -found[1]                 # the team facing `opponent`: its expected margin
+        by_team[(season, team)].append((margin, np.log(targets), np.log(carries)))
+    xs, ts, cs = [], [], []
+    for rows in by_team.values():
+        if len(rows) >= 4:
+            a = np.array(rows) - np.mean(rows, axis=0)
+            xs.append(a[:, 0])
+            ts.append(a[:, 1])
+            cs.append(a[:, 2])
+    x, t, c = (np.concatenate(v) for v in (xs, ts, cs))
+    return {"targets": round(float(x @ t / (x @ x)), 5), "carries": round(float(x @ c / (x @ x)), 5),
+            "team_games": int(len(x))}
+
+
 def fit(seasons: Iterable[int], window: int = WINDOW, refresh: bool = False) -> dict:
+    from database.db import SessionLocal
+
+    with SessionLocal() as session:
+        script = line_script(session, seasons)
     games = [g for g in scoring_games(seasons, refresh) if consistent(g)]
     table = endings(games, window)
     sides = [_row(inside[t]) for g in games for inside in (split(g, window)[1],) for t in (g["home"], g["away"])]
@@ -239,7 +282,7 @@ def fit(seasons: Iterable[int], window: int = WINDOW, refresh: bool = False) -> 
             "per_side": dict(zip(EVENTS, (round(float(v), 5) for v in np.mean(sides, axis=0)))),
             "table": {str(k): sorted([[n, list(t), list(lead)] for (t, lead), n in rows.items()], reverse=True)
                       for k, rows in sorted(table.items())},
-            "ot": overtime(games), "check": check(games, window)}
+            "ot": overtime(games), "line_script": script, "check": check(games, window)}
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -254,6 +297,7 @@ def main(argv: list[str] | None = None) -> None:
     result = fit(range(int(first), int(last or first) + 1), args.window, args.refresh)
     log.info("%d games, window %ds; per side %s", result["games"], result["window"], result["per_side"])
     log.info("overtime %s", result["ot"])
+    log.info("volume per point of expected margin %s", result["line_script"])
     for name, row in result["check"].items():
         log.info("%-15s %s", name, "  ".join(f"{k} {100 * v:.1f}%" for k, v in row.items()))
     if args.fit:

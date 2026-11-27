@@ -18,8 +18,11 @@ model at the measured simulated regulation tie rate), yards included; then its T
 are scaled down by the window's mean points (sim_closing.window_points; the factor's yards power 0) and its yards by
 the window TDs' mean yards (sim_closing.window_yards, credited to the scorers in the window), so the draw before the
 cut plus the window averages the wanted points (`_without_window`). A two-team game given no target is centred on
-its own mean points (a shift of 0), so the window and overtime never add to it.
+its own mean points (a shift of 0), so the window and overtime never add to it. In a two-team game each side's
+targets and carries first follow its expected margin (`_scripted`, sim_closing.line_script: real favourites run
+more), before its factor is solved, so the means the draw and the projections use already have it.
 """
+import math
 from collections.abc import Mapping
 from dataclasses import replace
 
@@ -123,6 +126,15 @@ def _without_window(side, against: dict | None, wanted: float, lead: float):
     return scaled(side, factor(side, against, regulation, power=0.0), 0.0)
 
 
+def _scripted(side, margin: float):
+    """`side` with its targets and carries moved by its expected margin (sim_closing.line_script: a favourite runs
+    more and throws a little less, as real ones do against the Vegas line)."""
+    from services import sim_closing
+    script = sim_closing.line_script()
+    return replace(side, targets=side.targets * math.exp(script["targets"] * margin),
+                   carries=side.carries * math.exp(script["carries"] * margin))
+
+
 def _wanted(sides: dict, means: dict, against: dict, target, shift, factors) -> dict[str, float]:
     """{team: the points its draw before overtime is centred on} for the teams given a target or a shift."""
     from services.sim_game import _mean_points
@@ -139,15 +151,25 @@ def _wanted(sides: dict, means: dict, against: dict, target, shift, factors) -> 
     return wanted
 
 
+def _in_week(side, week: int):
+    """`side` with week `week`'s pass / run mix (sim_calendar: its targets, carries and yards per catch)."""
+    from services import sim_calendar
+    targets, carries, ypt = sim_calendar.factors(week)
+    return replace(side, targets=side.targets * targets, carries=side.carries * carries, ypc=side.ypc * ypt)
+
+
 def centred(sides: dict, target: Mapping[str, float] | None = None, shift: Mapping[str, float] | None = None,
-            factors: Mapping[str, float] | None = None) -> dict:
+            factors: Mapping[str, float] | None = None, week: int | None = None) -> dict:
     """`sides` with each one's factor applied so its mean points (overtime and the closing window included) are
     target[team], or its own + shift[team] (kept at MIN_TARGET or more), or with factors[team] as given; a team in
-    none stays as it is, except in a two-team game given nothing, centred on its own mean points."""
+    none stays as it is, except in a two-team game given nothing, centred on its own mean points. `week`: the game's
+    week, whose pass / run mix it plays with (sim_calendar; None: the season's average)."""
     if len(sides) == 2 and not target and not shift and not factors:
         shift = {team: 0.0 for team in sides}
     if not target and not shift and not factors:
         return sides
+    if week is not None:
+        sides = {team: _in_week(side, week) for team, side in sides.items()}
     from services.sim_closing import cut_lead
     from services.sim_game import _side_means
     from services.sim_lines import yards_power
@@ -164,7 +186,10 @@ def centred(sides: dict, target: Mapping[str, float] | None = None, shift: Mappi
         elif team not in wanted:
             out[team] = side
         else:
-            side = scaled(side, factor(side, against.get(team), wanted[team], means[team]), power)
-            out[team] = (_without_window(side, against.get(team), wanted[team], cut_lead(wanted[team], wanted[other]))
-                         if other in wanted else side)
+            if other in wanted:
+                side = _scripted(side, wanted[team] - wanted[other])
+                side = scaled(side, factor(side, against.get(team), wanted[team]), power)
+                out[team] = _without_window(side, against.get(team), wanted[team], cut_lead(wanted[team], wanted[other]))
+            else:
+                out[team] = scaled(side, factor(side, against.get(team), wanted[team], means[team]), power)
     return out

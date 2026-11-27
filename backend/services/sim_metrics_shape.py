@@ -37,9 +37,11 @@ def _nth(values: list[float], n: int) -> float:
     return sorted(values, reverse=True)[n - 1] if len(values) >= n else 0.0
 
 
-def passing(data: SeasonData) -> dict[str, float]:
-    """The season's passing leader, and the spread of team passing: a team's season yards (sd, max) and a
-    team-game's yards (sd), from the QB lines."""
+def passing(data: SeasonData) -> dict[str, float | list[float]]:
+    """The season's passing leader (his yards, his lead over the 5th passer), and the spread of team passing: a
+    team's season yards (sd, max) and a team-game's yards (sd), from the QB lines. "... p95" rows are one-value
+    lists: sim_eval reports the 95th percentile over every season and seed (the passing and the receiving leader:
+    one league in twenty has a leader past it; real 2018-2025 maxima 5,316 and 1,947)."""
     leader: dict[int, float] = defaultdict(float)
     games: dict[tuple[str, int], float] = defaultdict(float)
     targets: dict[str, float] = defaultdict(float)
@@ -63,7 +65,12 @@ def passing(data: SeasonData) -> dict[str, float]:
     both = [t for t in teams if targets.get(t, 0) > 0]
     volume = np.array([targets[t] / len(played[t]) for t in both])
     per_target = np.array([teams[t] / targets[t] for t in both])
-    return {"pass yds #1": max(leader.values()),
+    receiving: dict[int, float] = defaultdict(float)
+    for (pid, _), line in data.box.items():
+        receiving[pid] += line.rec_yds
+    top = sorted(leader.values(), reverse=True)
+    return {"pass yds #1": top[0], "pass yds #1 - #5": top[0] - top[4] if len(top) > 4 else float("nan"),
+            "passing leader p95": [top[0]], "receiving leader p95": [max(receiving.values())],
             "team volume vs yds/target r": float(np.corrcoef(volume, per_target)[0, 1]) if len(both) > 2 else float("nan"), "team pass yds sd": float(np.std(list(teams.values()))),
             "team pass yds max": max(teams.values()), "team-game pass yds sd": float(np.std(list(games.values()))),
             "team-game pass yds mean": float(np.mean(list(games.values())))}

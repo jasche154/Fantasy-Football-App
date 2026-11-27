@@ -1230,7 +1230,11 @@
    "share_sd_qb_carries": 0.45,
    "td_drives": 5,
    "fg_power": 1.0,
-   "ypc_volume": 0.3
+   "ypc_volume": 0.3,
+   "line_script_extra": {
+    "targets": -0.0013,
+    "carries": 0.0024
+   }
   },
   "rates": {
    "rec_cv": 0.68

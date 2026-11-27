@@ -108,7 +108,8 @@ def projections(belief: World, schedule: Schedule, week: int, out: Collection[in
             continue
         pregame = (lines or {}).get(game.home_team)
         target = {game.home_team: pregame.home, game.away_team: pregame.away} if pregame is not None else None
-        for pid, line in expected(belief, game.home_team, game.away_team, out, scoring, target=target).items():
+        for pid, line in expected(belief, game.home_team, game.away_team, out, scoring, target=target,
+                                  week=week).items():
             if line.points >= MIN_PROJECTION:
                 found[pid] = round(line.points, 2)
     return found

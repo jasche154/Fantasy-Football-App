@@ -8,7 +8,8 @@ season's Vegas closing line; a simulated week's own line, sim_lines, stored ther
   the residual spread, the share of games won by 21+ / 28+ / 35+, the 21+ share in the most lopsided and the
   closest fifth of games by the line, the home win rate, the tie rate, close finishes (margins 1-3, 3, 7, 4-8:
   `close_games`), and team points (mean, spread, the share
-  that are 0 and the share that are rare in real games: RARE_TOTALS).
+  that are 0 and the share that are rare in real games: RARE_TOTALS), and how a team's targets and carries follow
+  its line (`line_script`).
 - tails(data, weeks): single games no real season has (team-games with catches but no QB line; 400+ and 500+
   yard passing games; the season's top single-game passing, rushing and receiving yards, targets and carries;
   200+ yard receiving and rushing games).
@@ -49,6 +50,28 @@ def close_games(margin: np.ndarray) -> dict[str, float]:
             "margin 7 %": 100 * float((m == 7).mean()), "margin 4-8 %": 100 * float(((m >= 4) & (m <= 8)).mean())}
 
 
+def line_script(data: SeasonData, weeks: Iterable[int]) -> dict[str, float]:
+    """How a team-game's targets and carries follow its pregame expected margin, within team-season (% per point;
+    real 2018-2025: targets -0.03, carries +0.76, sim_closing_fit.line_script)."""
+    by_week = getattr(data, "team_by_week", None) or {}
+    weeks, team_at = set(weeks), {(pid, w): t for pid, games in by_week.items() for w, t in games}
+    volume: dict[tuple[str, int], np.ndarray] = defaultdict(lambda: np.zeros(2))
+    for (pid, week), box in (getattr(data, "box", None) or {}).items():
+        if week in weeks and (pid, week) in team_at:
+            volume[(team_at[(pid, week)], week)] += (box.targets, box.carries)
+    rows: dict[str, list] = defaultdict(list)
+    for g in data.schedule.games:
+        for team, sign in ((g.home_team, 1.0), (g.away_team, -1.0)):
+            got = volume.get((team, g.week))
+            if g.spread_line is not None and got is not None and got.min() > 0:
+                rows[team].append((sign * g.spread_line, *np.log(got)))
+    parts = [np.array(r) - np.mean(r, axis=0) for r in rows.values() if len(r) >= 4]
+    if not parts:
+        return {}
+    x, t, c = np.concatenate(parts).T
+    return {"targets per line point %": 100 * float(x @ t / (x @ x)), "carries per line point %": 100 * float(x @ c / (x @ x))}
+
+
 def games(data: SeasonData, weeks: Iterable[int]) -> dict[str, float]:
     weeks = set(weeks)
     rows = []
@@ -70,7 +93,7 @@ def games(data: SeasonData, weeks: Iterable[int]) -> dict[str, float]:
                 "tie %": 100 * float((margin == 0).mean()), **close_games(margin), "team score mean": float(points.mean()),
                 "team score sd": float(points.std()), "team score 0 %": 100 * float((points == 0).mean()),
                 "rare score %": 100 * float(np.isin(points, RARE_TOTALS).mean())})
-    return out
+    return {**out, **line_script(data, weeks)}
 
 
 def _ranked(data: SeasonData, week: int, position: str) -> dict[int, int]:

@@ -326,7 +326,8 @@ def _simulate(base: SeasonData, seed: int, from_week: int, prior: World | None,
             exits = {pid: spell.exit_share for pid, spell in hurt.items()}
             shift = _shift(pregame.get(game.home_team), game.home_team, game.away_team, hidden)
             result = play(world, game.home_team, game.away_team, sitting,
-                          replay_state.rng(seed, "sim", "game", week, game.home_team), scoring, exits, shift=shift)
+                          replay_state.rng(seed, "sim", "game", week, game.home_team), scoring, exits, shift=shift,
+                          week=week)
             _record(tables, world, result, week)
             played_teams |= {game.home_team, game.away_team}
             fresh |= set(hurt)
