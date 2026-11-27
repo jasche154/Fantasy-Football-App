@@ -34,7 +34,7 @@ def test_weekly_and_season_metrics_cover_the_report(data):
     weekly = sim_metrics.weekly(data, range(10, 18))
     for key in ("RB1 q50", "25+ share %", "proj RMSE all", "proj rank r all", "sitting/wk RB", "team pts sd", "K mean"):
         assert key in weekly and not math.isnan(weekly[key])
-    assert {"QB cmp %", "QB att/start"} <= set(weekly)
+    assert {"QB cmp %", "QB att/start", "QB INT/start"} <= set(weekly)
     season = sim_metrics.season(data)
     assert set(season) >= {"ADP vs finish r WR", "breakouts", "busts", "games missed / top-150"}
     assert season["ADP vs finish r RB"] > 0.5          # the fake season mostly plays to its ADP
@@ -234,7 +234,7 @@ def test_passing_reads_each_team_games_passing_leader_and_skips_unrecorded_attem
     qbs = [pid for pid, p in data.players.items() if p.position == "QB"][:2]
     teams = {pid: data.team_at(pid, 1) for pid in qbs}
     backup = next(pid for pid, p in data.players.items() if p.position == "QB" and pid not in qbs)
-    box = {(qbs[0], 1): BoxLine(pass_cmp=20, pass_att=30, pass_yds=250),
+    box = {(qbs[0], 1): BoxLine(pass_cmp=20, pass_att=30, pass_yds=250, pass_int=1),
            (qbs[1], 1): BoxLine(pass_cmp=30, pass_att=40, pass_yds=300),
            (backup, 1): BoxLine(pass_cmp=5, pass_att=8, pass_yds=40),          # not his team's passing leader
            (qbs[0], 2): BoxLine(pass_yds=260)}                                 # an old save: no attempts
@@ -243,5 +243,7 @@ def test_passing_reads_each_team_games_passing_leader_and_skips_unrecorded_attem
 
     shown = sim_metrics.passing(season, [1, 2])
 
-    assert shown == {"QB cmp %": pytest.approx(100 * 50 / 70), "QB att/start": 35.0}
+    assert shown == {"QB cmp %": pytest.approx(100 * 50 / 70), "QB att/start": 35.0,
+                     "QB INT/start": pytest.approx(1 / 3)}          # INTs count the old save's start too
     assert math.isnan(sim_metrics.passing(season, [2])["QB cmp %"])
+    assert sim_metrics.passing(season, [2])["QB INT/start"] == 0.0

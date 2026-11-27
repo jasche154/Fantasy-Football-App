@@ -1608,7 +1608,10 @@ read the belief, so, as in a real season, the public learns the truth only from 
   incompletions (sacks are not attempts); an interception is drawn among the incomplete attempts, at the rate
   that keeps its mean the team's attempts x INT rate, so attempts never fall below completions + INTs. If he
   leaves hurt, his backup throws part of each receiver's catches (and the TDs among them) and the matching
-  share of the incompletions; a closing-window or overtime TD catch is one more completion and attempt. Kickers get an extra point try for each of their team's TDs and field goal tries that rise
+  share of the incompletions; a closing-window or overtime TD catch is one more completion and attempt.
+  sim_eval reports the starters' passing (2021-2025, 3 seeds, real / simulated): completion % 64.3 / 65.4 (mid)
+  and 64.9 / 64.7 (full), attempts a start 31.8 / 33.1 and 32.2 / 34.0, INTs a start 0.72 / 0.75 in both
+  (unchanged by drawing interceptions among the incomplete attempts). Kickers get an extra point try for each of their team's TDs and field goal tries that rise
   with the team's yards and fall with its TDs (drives that stall); a kicker who leaves hurt keeps only his
   share of the kicks. A defense's sacks and interceptions are the opposing offense's, and its points allowed
   are the opponent's points. Points use the league's own scoring, custom settings included. A busy passing day
