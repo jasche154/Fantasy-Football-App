@@ -475,3 +475,30 @@ def test_an_injured_players_draft_price_moves_only_through_the_news(monkeypatch)
     picks = [rg.auto_draft(rg.create_game(settings, season, 5), settings, season, 5).picks for season in (data, later)]
 
     assert picks[0] == picks[1] and any(p.player_id == star for p in picks[0])
+
+
+@pytest.mark.parametrize("superflex", [False, True])
+def test_an_out_players_draft_price_in_a_small_league_carries_only_his_injury(superflex):
+    """replay_draft._out_priced prices a hard-tagged player off the chart without the league-size taper: a QB
+    ranked past an 8-team league's starters goes where a 12-team draft puts him (healthy players stay at their raw
+    ADP in both), not as deep as the taper would value him."""
+    from dataclasses import replace as copy
+    from types import MappingProxyType
+
+    from services import replay_game as rg
+    from services.replay_pool import Injury, hard_tag_returns
+    starters = {**rs.DEFAULT_STARTERS, "SUPERFLEX": 1} if superflex else dict(rs.DEFAULT_STARTERS)
+    data = fakes.fake_season()
+    deep = sorted((p.adp, pid) for pid, p in data.players.items() if p.position == "QB" and p.adp)[19][1]   # QB20
+    injuries = {**data.injuries, **{(deep, w): Injury("O", "DNP", "Ankle") for w in (6, 7)}}
+    actual = {k: v for k, v in data.actual.items() if k not in ((deep, 6), (deep, 7))}
+    data = copy(data, injuries=MappingProxyType(injuries), actual=MappingProxyType(actual),
+                returns=MappingProxyType(hard_tag_returns(injuries, actual, data.last_week)))
+    priced = {}
+    for teams in (8, 12):
+        settings = fakes.fake_settings(start_week=7, draft_slot=4, teams=teams, starters=starters)
+        state = rg.create_game(settings, data, 5)
+        rv.clear_cache()
+        priced[teams] = rd._out_priced(state, settings, data.as_of(state.week), 5)
+    rv.clear_cache()
+    assert deep in priced[12] and priced[8][deep].adp == pytest.approx(priced[12][deep].adp)

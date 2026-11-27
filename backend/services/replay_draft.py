@@ -37,7 +37,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from functools import lru_cache
 
-from services import replay_chart, replay_fans, replay_personas, replay_pool, replay_slots, replay_state as rs
+from services import (replay_chart, replay_fans, replay_league_size, replay_personas, replay_pool, replay_slots,
+                      replay_state as rs)
 from services.replay_pool import ALL_POSITIONS, PoolPlayer, SeasonData
 from services.replay_state import Pick, Settings, State, Team
 from services import replay_values as rv
@@ -259,12 +260,15 @@ def _scores(team: Team, players: Sequence[PoolPlayer], counts: Counter, round_: 
 
 
 def _out_priced(state: State, settings: Settings, known: SeasonData, seed: int) -> dict[int, PoolPlayer]:
-    """{id: him with his chart's pick as ADP} for every player a hard tag rules out of the draft's first week."""
+    """{id: him with his chart's pick as ADP} for every player a hard tag rules out of the draft's first week: the
+    chart without the league-size taper (replay_league_size.untapered), so in a small league he stands next to the
+    healthy players' raw ADP with only his injury's discount."""
     week = max(1, state.week)
     out = [p for p in known.players.values() if (tag := known.injuries.get((p.player_id, week))) is not None and tag.hard]
     if not out:
         return {}
-    know = rv.knowledge(known, rv.league_settings(settings), state.week, settings.end_week, seed,
+    league = replay_league_size.untapered(rv.league_settings(settings))
+    know = rv.knowledge(known, league, state.week, settings.end_week, seed,
                         drafted=state.week)
     return {p.player_id: replace(p, adp=replay_chart.chart_pick(know.by_id[p.player_id].chart), adp_stdev=None)
             for p in out if p.player_id in know.by_id}

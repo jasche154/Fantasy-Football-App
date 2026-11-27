@@ -94,6 +94,12 @@ def twelve_team_rank(ranks: Sequence[float], n: int) -> float:
     return ranks[n - 1] if n <= len(ranks) else ranks[-1] + (n - len(ranks))
 
 
+def untapered(league: LeagueSettings) -> LeagueSettings:
+    """`league` at BASE_TEAMS teams when it is smaller: the chart without the taper, on the raw-ADP scale (the CPU
+    draft prices an out player on it next to healthy players at their raw ADP, replay_draft._out_priced)."""
+    return league if league.teams >= BASE_TEAMS else replace(league, teams=BASE_TEAMS)
+
+
 @lru_cache(maxsize=64)
 def sized(data: SeasonData, league: LeagueSettings) -> SeasonData:
     """The season as `league`'s size values it: each skill position's nth drafted player (by ADP) at the pick the
