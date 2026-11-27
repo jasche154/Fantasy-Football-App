@@ -4,7 +4,7 @@ from collections import Counter
 import numpy as np
 import pytest
 
-from services import sim_calendar, sim_closing, sim_closing_fit, sim_closing_means, sim_draw, sim_game
+from services import sim_calendar, sim_closing, sim_closing_fit, sim_closing_plays, sim_closing_means, sim_draw, sim_game
 from tests import sim_draws
 from tests.test_sim_game import HALF, pid, team_of, world
 
@@ -377,7 +377,7 @@ def test_scoring_plays_with_no_game_clock_are_counted_and_logged(caplog):
     """Item 7: a scoring play with a null clock is left out loudly, not silently."""
     rows = [_row(touchdown=1, td_team="AAA", rush_touchdown=1), _row(extra_point_result="good", game_seconds_remaining=None),
             _row(yards_gained=5)]
-    with caplog.at_level("WARNING", logger="services.sim_closing_fit"):
+    with caplog.at_level("WARNING", logger="services.sim_closing_plays"):
         games = sim_closing_fit.games_of(rows, 2020)
     assert [p[3] for p in games[0]["plays"]] == ["rush_td"]
     assert "2020: 1 scoring plays with no game clock" in caplog.text
@@ -387,8 +387,8 @@ def test_an_unreadable_play_by_play_cache_warns_with_the_error(caplog, monkeypat
     """Item 8: a corrupt cache is logged at WARNING with the exception before every season is downloaded again."""
     path = tmp_path / "scoring_plays.json"
     path.write_text("{not json", encoding="utf-8")
-    monkeypatch.setattr(sim_closing_fit, "PLAYS_CACHE", path)
-    with caplog.at_level("WARNING", logger="services.sim_closing_fit"):
+    monkeypatch.setattr(sim_closing_plays, "PLAYS_CACHE", path)
+    with caplog.at_level("WARNING", logger="services.sim_closing_plays"):
         assert sim_closing_fit._cached() == {}
     record = next(r for r in caplog.records if "unreadable" in r.getMessage())
     assert record.levelname == "WARNING" and record.exc_info is not None

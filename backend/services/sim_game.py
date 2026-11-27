@@ -49,6 +49,7 @@ from services.sim_world import OTHER, World, params
 
 if TYPE_CHECKING:
     from services.sim_closing_means import Ending
+    from services.sim_script import PlanInputs
 
 SNAP_TOP = {"QB": 100.0, "RB": 70.0, "WR": 92.0, "TE": 85.0}   # the lead player's snap share at a position
 SNAP_EXPONENT = 0.5              # snaps fall with the square root of his weight vs the lead player's
@@ -95,6 +96,7 @@ class _Side:
     margin: float = 0.0
     half_lead: float = 0.0
     end: "Ending | None" = None
+    plan_in: "PlanInputs | None" = None    # who may sit out of the game plan (sim_script.plan_inputs; None: worked out)
 
 
 @dataclass(frozen=True)
@@ -150,15 +152,24 @@ def _side(world: World, team: str, opponent: str | None, out: Collection[int],
         known = (world, _other(world, team, form))
         _sides[("other", id(world), team)] = known
     other_targets, other_carries = known[1]
+    carry_w = _carry_weights(rushers, qb, other_carries, exits)
+    whole = _carry_weights(rushers, qb, other_carries, {}) if exits else carry_w     # before anyone leaves
+    if qb is not None and backup is not None and qb_share < 1.0:   # the backup finishes the game: its kneels
+        rushers.append(backup)
+        carry_w, whole = np.insert(carry_w, -1, 0.0), np.insert(whole, -1, 0.0)
+    receiver_ids, rusher_ids = (*(p.player_id for p in receivers), OTHER), (*(p.player_id for p in rushers), OTHER)
+    from services import sim_script
+    plan_in = sim_script.plan_inputs(receiver_ids, np.array([*_weights(receivers, "targets", {}), other_targets]),
+                                     rusher_ids, whole, form.targets, form.carries, positions)
     return _Side(
         team=team,
-        receivers=(*(p.player_id for p in receivers), OTHER),
+        receivers=receiver_ids,
         target_w=np.array([*_weights(receivers, "targets", exits), other_targets]),
         catch=np.array([*(p.catch for p in receivers), other["catch"]]),
         ypc=np.array([*(p.ypc for p in receivers), other["ypc"]]) * pass_mult,
         rec_td=np.array([*(p.rec_td for p in receivers), other["rec_td"]]) * pass_mult,
-        rushers=(*(p.player_id for p in rushers), OTHER),
-        carry_w=_carry_weights(rushers, qb, other_carries, exits),
+        rushers=rusher_ids,
+        carry_w=carry_w,
         ypr=np.array([*(p.ypr for p in rushers), other["ypr"]]) * rush_def,
         rush_td=np.array([*(p.rush_td for p in rushers), other["rush_td"]]) * rush_def,
         fumble=np.array([*(_norm(p.position)["fumble"] for p in rushers), other["fumble"]]),
@@ -170,7 +181,8 @@ def _side(world: World, team: str, opponent: str | None, out: Collection[int],
         kicker=kicker.player_id if kicker else None,
         kicker_share=exits.get(kicker.player_id, 1.0) if kicker else 1.0,
         dst=next((p.player_id for p in roster if p.position == "DST"), None),
-        positions=positions, snaps=snaps, exited=frozenset(pid for pid, share in exits.items() if share < 1.0))
+        positions=positions, snaps=snaps, exited=frozenset(pid for pid, share in exits.items() if share < 1.0),
+        plan_in=plan_in)
 
 
 def _side_of(world: World, team: str, opponent: str | None, out: Collection[int]) -> _Side:
@@ -316,12 +328,14 @@ def _mean_points(m: dict, against: dict | None) -> float:
 def _side_means(side: _Side) -> dict:
     """The side's mean line per player (receivers' and rushers' arrays, OTHER last) and team totals. A side with a
     closing-window Ending plays in parts (sim_script): its targets and carries are both halves' plus the window's
-    plays besides its scoring ones (its kneels the starting QB's), its TDs, interceptions and sacks come from the
+    plays besides its scoring ones (never a player's who left hurt; its kneels, `kneels`, the finishing QB's), its TDs, interceptions and sacks come from the
     halves' plays at the per-play rates / the halves' share; without one the whole game's volume plays at the
     per-play rates."""
     from services import sim_script
     league = params()["league"]
-    t_share, c_share = side.target_w / side.target_w.sum(), side.carry_w / side.carry_w.sum()
+    t_share = side.target_w / side.target_w.sum()
+    weights = sim_script.carry_weights(side)
+    c_share = weights / weights.sum()
     if side.end is None:
         pre_t, pre_c, win_t, win_c, kneels, p_t, p_c = side.targets, side.carries, 0.0, 0.0, 0.0, 1.0, 1.0
     else:
@@ -329,23 +343,23 @@ def _side_means(side: _Side) -> dict:
         pre_t, pre_c = h1_t + h2_t, h1_c + h2_c
         win_t, win_c, kneels = sim_script.window_means(side)
         p_t, p_c = sim_script.scoring_share(side)
-    targets = (pre_t + win_t) * t_share
+    targets = pre_t * t_share + win_t * sim_script.window_shares(t_share, side.receivers, side.exited)
     catches = targets * side.catch
     rec_td = pre_t * t_share * side.catch * np.minimum(side.rec_td / p_t, MAX_TD_RATE)
-    carries = (pre_c + win_c) * c_share
+    carries = pre_c * c_share + win_c * sim_script.window_shares(c_share, side.rushers, side.exited)
     ypr, rush_rate = sim_script.rushing(side)
     rush_yds = carries * ypr
     fumbles = float((carries * side.fumble).sum() + (catches * side.rec_fumble).sum())     # a kneel never fumbles
-    if kneels and side.qb is not None and side.qb not in side.exited:
-        at = side.rushers.index(side.qb)
-        carries, rush_yds = carries.copy(), rush_yds.copy()
-        carries[at] += kneels
-        rush_yds[at] += kneels * sim_script.kneel_yards()
+    kneeler, knelt = sim_script.kneeler(side), np.zeros(len(carries))
+    if kneels and kneeler is not None and kneeler in side.rushers:
+        knelt[side.rushers.index(kneeler)] = kneels
+        carries, rush_yds = carries + knelt, rush_yds + knelt * sim_script.kneel_yards()
     rush_td = pre_c * c_share * np.minimum(rush_rate / p_c, MAX_TD_RATE)
     attempts = pre_t * league["attempts_per_target"]
     sacks = attempts * side.sack_rate / p_t
     return {"targets": targets, "catches": catches, "rec_yds": catches * side.ypc, "rec_td": rec_td,
-            "carries": carries, "rush_yds": rush_yds, "rush_td": rush_td, "ints": attempts * side.int_rate / p_t,
+            "carries": carries, "kneels": knelt, "rush_yds": rush_yds, "rush_td": rush_td,
+            "ints": attempts * side.int_rate / p_t,
             "sacks": sacks,
             "fumbles": fumbles + sacks * league["sack_fumble"],     # sack fumbles too
             "fg_scale": side.fg_scale}

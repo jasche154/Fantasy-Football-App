@@ -51,7 +51,7 @@ from services.sim_game import (
     MIN_SNAP_TO_RECORD, GameResult, PlayerGame, _dst_points, _fga_drawn, _mean_points, _side_means, _skill_points,
 )
 from services.sim_parts import (  # noqa: F401  (re-exported: the draw's building blocks keep their import path)
-    SHARE_CAP, TD_DRIVES, _Offense, _phi, _shares, _split, _touchdowns, _uncapped, _yards,
+    SHARE_CAP, TD_DRIVES, _Offense, _phi, _shares, _touchdowns, _uncapped, _yards,
 )
 from services.sim_world import params
 

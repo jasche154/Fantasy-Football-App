@@ -1,11 +1,12 @@
 """sim_script / sim_parts / sim_script_fit / sim_metrics_usage: a simulated game's plays follow the score, depth
 players are in the game plan only some weeks, and every mean stays the projection's."""
-from dataclasses import replace
+
+import json
 
 import numpy as np
 import pytest
 
-from services import sim_closing_fit, sim_draw, sim_game, sim_metrics_usage, sim_parts, sim_script, sim_script_fit
+from services import sim_centre, sim_closing_fit, sim_draw, sim_game, sim_metrics_usage, sim_parts, sim_script, sim_script_fit
 from tests import replay_fakes as fakes, sim_draws
 from tests.test_sim_game import HALF, pid, team_of, world
 
@@ -60,19 +61,30 @@ def test_drawn_games_follow_the_score_and_average_the_projected_volume():
     assert qb.mean() == pytest.approx(expected[pid("AAA", "QB")].box.carries, rel=0.04)
 
 
-def test_kneel_downs_are_the_starting_qbs_carries_and_never_one_who_left_hurt():
+def test_kneel_downs_are_the_quarterback_who_finishes_the_games_and_no_window_play_goes_to_one_who_left():
     side = sim_draws.centred_sides(world(), "AAA", "BBB")[0]
     rng = np.random.default_rng(2)
     plan = sim_parts.plan(side, rng)
     at = side.rushers.index(side.qb)
     knelt = sim_parts.plays(side, plan, 0, 0, 1.0, rng, kneels=3)
     assert knelt.carries[at] == 3 and knelt.rush_yds[at] == round(3 * sim_script.kneel_yards()) and knelt.tds == 0
-    hurt_side = replace(side, exited=frozenset({side.qb}))
-    events = [{"targets": 0, "carries": 3, "kneels": 3, "pass_td": 0, "rush_td": 0}] * 2
-    offense = [sim_draws.offense(hurt_side, 10, 10, rng), sim_draws.offense(hurt_side, 10, 10, rng)]
-    after, _, carries = sim_parts.window((hurt_side, hurt_side), offense, events, [plan, plan], np.ones(2), np.ones(2),
-                                         np.zeros(2, dtype=int), np.zeros(2, dtype=int), rng)
-    assert after[0].carries[at] == offense[0].carries[at] and carries.tolist() == [0, 0]
+    w, qb, rb, wr = world(), pid("AAA", "QB"), pid("AAA", "RB"), pid("AAA", "WR")
+    hurt = sim_centre.centred({"AAA": sim_game._side(w, "AAA", "BBB", set(), {qb: 0.5, rb: 0.5, wr: 0.5}),
+                               "BBB": sim_game._side(w, "BBB", "AAA", set(), {})})["AAA"]
+    backup = hurt.rushers.index(pid("AAA", "QB2"))
+    events = [{"targets": 20, "carries": 20, "kneels": 3, "pass_td": 0, "rush_td": 0}] * 2
+    for _ in range(200):
+        plan = sim_parts.plan(hurt, rng)
+        offense = [sim_draws.offense(hurt, 10, 10, rng)] * 2
+        after, _, _ = sim_parts.window((hurt, hurt), offense, events, [plan, plan], np.ones(2), np.ones(2),
+                                       np.zeros(2, dtype=int), np.zeros(2, dtype=int), rng)
+        gained_c, gained_t = after[0].carries - offense[0].carries, after[0].targets - offense[0].targets
+        for pid_ in (qb, rb):
+            assert gained_c[hurt.rushers.index(pid_)] == 0
+        assert gained_t[hurt.receivers.index(wr)] == 0 and gained_t[hurt.receivers.index(rb)] == 0
+        assert gained_c[backup] == 3                                       # the backup finished: his kneels
+    m = sim_game._side_means(hurt)
+    assert m["kneels"][backup] > 0 and m["kneels"][hurt.rushers.index(qb)] == 0
 
 
 def test_the_window_adds_a_real_endings_plays_but_no_score():
@@ -182,3 +194,99 @@ def test_projections_read_nothing_the_draws_change():
     list(sim_draws.games(w, "AAA", "BBB", HALF, 50, 1, {"AAA": 24.0, "BBB": 17.0}))
     sim_draw.draw_game(sim_draws.centred_sides(w, "AAA", "BBB"), np.random.default_rng(0), HALF)
     assert sim_game.expected(w, "AAA", "BBB", set(), HALF, target={"AAA": 24.0, "BBB": 17.0}) == before
+
+
+@pytest.mark.parametrize("target", [{"AAA": 20.0, "BBB": 20.0}, {"AAA": 27.0, "BBB": 17.0}, {"AAA": 17.0, "BBB": 27.0}])
+def test_a_quarterbacks_projection_is_his_beliefs_kneels_and_all(target):
+    """His belief carries count his kneels (box lines do), so his carries besides the kneels are his belief carries
+    less his own expected kneels: at a pick'em, as a 10-point favourite and underdog his projected carries are his
+    weight's share of the team's, his yards those at his per-carry rate, his TDs those before the cut at his rate."""
+    side = sim_draws.centred_sides(world(), "AAA", "BBB", target)[0]
+    qb = pid("AAA", "QB")
+    at = side.rushers.index(qb)
+    line = sim_game.expected(world(), "AAA", "BBB", set(), HALF, target=target)[qb].box
+    team = sum(e.box.carries for p, e in sim_game.expected(world(), "AAA", "BBB", set(), HALF, target=target).items()
+               if team_of(p) == "AAA")
+    share = side.carry_w[at] / side.carry_w.sum()
+    (_, h1), (_, h2) = sim_script.parts(side)
+    window = sim_script.window_means(side)[1]
+    assert sim_script.window_means(side)[2] > 0.1                          # he does kneel
+    belief = share * (h1 + h2 + window + sim_script.window_means(side)[2])
+    m = sim_game._side_means(side)                                        # the plays drawn, window TD runs aside
+    assert m["carries"][at] == pytest.approx(belief, rel=1e-6)
+    assert m["rush_yds"][at] == pytest.approx(belief * side.ypr[at], rel=1e-6)
+    rate = side.rush_td[at] / sim_script.before_cut("carries")
+    assert m["rush_td"][at] == pytest.approx(belief * (h1 + h2) / (h1 + h2 + window) * rate, rel=1e-6)
+    # the projection adds the window's and overtime's TD runs, by TD rate (about 1% of his carries)
+    assert line.carries == pytest.approx(belief, rel=0.015) and line.carries / team == pytest.approx(share, rel=0.02)
+
+
+def test_a_season_cached_in_another_column_layout_is_downloaded_again(monkeypatch, tmp_path, caplog):
+    """A cache written before a column was added would read every count after it one column off: such a season is
+    left out of the cache and downloaded again, the other seasons kept."""
+    good = {"season": 2024, "week": 1, "home": "AAA", "away": "BBB", "spread": 3.0,
+            "AAA": [[0] * len(sim_script_fit.COUNTS)] * 3, "BBB": [[0] * len(sim_script_fit.COUNTS)] * 3}
+    old = {**good, "season": 2023, "AAA": [[0] * (len(sim_script_fit.COUNTS) - 1)] * 3}
+    path = tmp_path / "script_segments.json"
+    path.write_text(json.dumps({"2023": [old], "2024": [good]}), encoding="utf-8")
+    monkeypatch.setattr(sim_script_fit, "SEGMENTS_CACHE", path)
+    fetched = []
+    monkeypatch.setattr(sim_script_fit, "_download", lambda season: fetched.append(season) or [{**good, "season": season}])
+    with caplog.at_level("WARNING", logger="services.sim_script_fit"):
+        games = sim_script_fit.segments([2023, 2024])
+    assert fetched == [2023] and [g["season"] for g in games] == [2023, 2024] and "column layout" in caplog.text
+    assert sim_script_fit.segments([2024], refresh=True) and fetched == [2023, 2024]
+    assert set(json.loads(path.read_text(encoding="utf-8"))) == {"2023", "2024"}     # a refresh keeps the rest
+
+
+def test_a_failed_write_leaves_no_temp_file(monkeypatch, tmp_path):
+    path = tmp_path / "sim_script.json"
+    monkeypatch.setattr(sim_script_fit.os, "replace", lambda a, b: (_ for _ in ()).throw(OSError("disk full")))
+    with pytest.raises(OSError):
+        sim_script_fit.atomic_write(path, "{}")
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_the_second_half_follows_the_first_halfs_score_at_a_fixed_line(monkeypatch):
+    """At one pregame line, a side whose first half went better than the other's runs more and throws less after
+    half time (the realized lead, not only the projected one, drives sim_script.second_half)."""
+    sides = sim_draws.centred_sides(world(), "AAA", "BBB", {"AAA": 21.0, "BBB": 21.0})
+    calls, real_half = [], sim_parts.half
+
+    def half(side, plan, volume, *args, **kwargs):
+        calls.append((side.team, np.array(volume, dtype=float)))
+        return (out := real_half(side, plan, volume, *args, **kwargs), calls.append(out))[0]
+    monkeypatch.setattr(sim_parts, "half", half)
+    rng, rows = np.random.default_rng(6), []
+    for _ in range(1500):
+        calls.clear()
+        sim_parts.before_cut(sides, [1.5, 1.5], rng)
+        firsts = [calls[1].points, calls[3].points]                 # AAA's and BBB's first halves
+        rows.append((firsts[0] - firsts[1], *calls[4][1]))         # AAA's second-half [targets, carries] means
+    lead, targets, carries = np.array(rows).T
+    assert np.corrcoef(lead, carries)[0, 1] > 0.9 and np.corrcoef(lead, targets)[0, 1] < -0.9
+
+
+def test_a_depth_players_mean_share_through_the_game_plan_is_his_weights():
+    """A player out of the plan some weeks gets his weight / q when in, so his mean share is his weight's (and the
+    projection, which uses the weights, is his draws' mean)."""
+    side = sim_draws.centred_sides(world(), "AAA", "BBB")[0]
+    inputs = side.plan_in
+    depth = [i for i, at in enumerate(inputs.receivers) if at >= 0 and inputs.q[at] < 1.0]
+    assert depth
+    rng = np.random.default_rng(9)
+    shares = np.mean([sim_parts.plan(side, rng).targets for _ in range(20_000)], axis=0)
+    weights = side.target_w / side.target_w.sum()
+    assert shares[depth] == pytest.approx(weights[depth], rel=0.04)
+
+
+def test_leaving_hurt_never_changes_who_is_in_the_game_plan():
+    """Who may sit out is worked out from the weights before anyone leaves the game: a lead receiver who leaves
+    after a third of it is still always in the plan (he played until he left)."""
+    w, wr = world(), pid("AAA", "WR")
+    healthy, hurt = (sim_game._side(w, "AAA", "BBB", set(), exits) for exits in ({}, {wr: 0.3}))
+    assert np.array_equal(healthy.plan_in.q, hurt.plan_in.q)
+    at = hurt.plan_in.receivers[hurt.receivers.index(wr)]
+    assert hurt.plan_in.q[at] == 1.0
+    rng = np.random.default_rng(3)
+    assert min(sim_parts.plan(hurt, rng).targets[hurt.receivers.index(wr)] for _ in range(2000)) > 0

@@ -2,7 +2,7 @@
 
     python -m services.sim_closing_fit --fit [--seasons 2018-2025] [--refresh]
 
-(--window other than sim_script_fit.CUT, 600 s, is refused: the endings' plays are counted for that window.)
+The window is WINDOW (600 s, chosen with sim_eval), the cut sim_script_fit counts each part's plays at (its CUT).
 
 Real margins land on exactly 3 or 7 far more often than two teams scoring independently would make them (2018-2025:
 3 in 14.4% of games, pairing each team's score with another game's opponent gives 6.1%), because play late in a game
@@ -42,11 +42,13 @@ from pathlib import Path
 import numpy as np
 
 from integrations.weekly_sources import TEAM_ALIASES
+from services.sim_closing_plays import (  # noqa: F401  (re-exported: the fit's import path)
+    PLAYS_CACHE, _band, _cached, _download, _kind, games_of, scoring_games,
+)
 
 log = logging.getLogger(__name__)
 
 CLOSING_PATH = Path(__file__).with_name("sim_closing.json")
-PLAYS_CACHE = Path(__file__).resolve().parent.parent / "data" / "cache" / "scoring_plays.json"
 EVENTS = ("pass_td", "rush_td", "ret_td", "fg_0_39", "fg_40_49", "fg_50", "miss_0_39", "miss_40_49", "miss_50",
           "xp", "xp_miss", "two", "safety", "targets", "carries", "kneels")
 PLAYS = ("targets", "carries", "kneels")       # the window's plays (sim_script_fit's cache), its scoring ones among them
@@ -61,93 +63,6 @@ CUT_VAR_START = (11.7, 0.69)     # stored until `write` measures it, when the fi
 MAX_MARGIN = 16                  # margins above this share one row set (a two-score-plus lead plays alike)
 SEASONS = range(2018, 2026)
 SHUFFLE_SEED = 7                 # the random order of a tied game's two teams (reproducible fits)
-
-
-# ---------------- the scoring plays (cached) ----------------
-
-def _band(distance: float | None) -> str:
-    d = distance or 0
-    return "0_39" if d < 40 else "40_49" if d < 50 else "50"
-
-
-def _kind(r: Mapping) -> tuple[str, str] | None:
-    """(team, event) of one play, or None when it scores nothing the box score keeps."""
-    if r["touchdown"] == 1 and r["td_team"]:
-        kind = "pass_td" if r["pass_touchdown"] == 1 else "rush_td" if r["rush_touchdown"] == 1 else "ret_td"
-        return r["td_team"], kind
-    if r["field_goal_result"] in ("made", "missed", "blocked"):
-        return r["posteam"], ("fg_" if r["field_goal_result"] == "made" else "miss_") + _band(r["kick_distance"])
-    if r["extra_point_result"] in ("good", "failed", "blocked"):
-        return r["posteam"], "xp" if r["extra_point_result"] == "good" else "xp_miss"
-    if r["two_point_conv_result"] == "success":
-        return r["posteam"], "two"
-    if r["safety"] == 1:
-        return r["defteam"], "safety"
-    return None
-
-
-def _download(season: int) -> list[dict]:
-    """One season's regular-season games: teams, final scores and every scoring play (quarter, seconds left,
-    team, event, yards gained)."""
-    import nflreadpy as nfl
-    import polars as pl
-
-    cols = ["game_id", "week", "home_team", "away_team", "home_score", "away_score", "qtr", "game_seconds_remaining",
-            "posteam", "defteam", "touchdown", "td_team", "pass_touchdown", "rush_touchdown", "field_goal_result",
-            "kick_distance", "extra_point_result", "two_point_conv_result", "safety", "yards_gained"]
-    pbp = nfl.load_pbp(season).filter(pl.col("season_type") == "REG").select(cols)
-    return games_of(pbp.iter_rows(named=True), season)
-
-
-def games_of(rows: Iterable[Mapping], season: int) -> list[dict]:
-    """The games of one season's play-by-play rows (see _download); a scoring play with no game clock is left
-    out, counted and logged at WARNING (its window cannot be told)."""
-    games: dict[str, dict] = {}
-    no_clock = 0
-    for r in rows:
-        g = games.setdefault(r["game_id"], {"week": r["week"], "home": TEAM_ALIASES.get(r["home_team"], r["home_team"]),
-                                            "away": TEAM_ALIASES.get(r["away_team"], r["away_team"]),
-                                            "home_score": r["home_score"], "away_score": r["away_score"], "plays": []})
-        kind = _kind(r)
-        if kind is not None and r["game_seconds_remaining"] is None:
-            no_clock += 1
-        elif kind is not None:
-            team = TEAM_ALIASES.get(kind[0], kind[0])
-            g["plays"].append([int(r["qtr"]), int(r["game_seconds_remaining"]), team, kind[1],
-                               int(r["yards_gained"] or 0)])
-    if no_clock:
-        log.warning("%s: %d scoring plays with no game clock left out", season, no_clock)
-    return [{"season": season, **g} for g in games.values()]
-
-
-def scoring_games(seasons: Iterable[int], refresh: bool = False) -> list[dict]:
-    """Every real game of `seasons` with its scoring plays, from PLAYS_CACHE (downloaded when missing)."""
-    wanted = sorted(set(seasons))
-    cached = {} if refresh else _cached()
-    missing = [s for s in wanted if str(s) not in cached]
-    if missing:
-        for season in missing:
-            log.info("downloading %s play-by-play", season)
-            cached[str(season)] = _download(season)
-        PLAYS_CACHE.parent.mkdir(parents=True, exist_ok=True)
-        partial = PLAYS_CACHE.with_suffix(f".{os.getpid()}.tmp")
-        partial.write_text(json.dumps(cached), encoding="utf-8")
-        os.replace(partial, PLAYS_CACHE)
-    return [g for s in wanted for g in cached[str(s)]]
-
-
-def _cached() -> dict:
-    try:
-        cached = json.loads(PLAYS_CACHE.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return {}
-    except (OSError, ValueError):
-        log.warning("%s is unreadable: downloading the play-by-play again", PLAYS_CACHE.name, exc_info=True)
-        return {}
-    if isinstance(cached, dict) and all(isinstance(v, list) for v in cached.values()):
-        return cached
-    log.warning("%s is not a {season: games} file: downloading the play-by-play again", PLAYS_CACHE.name)
-    return {}
 
 
 # ---------------- the fit ----------------
@@ -206,11 +121,12 @@ def endings(games: Iterable[Mapping], window: int, seed: int = SHUFFLE_SEED) -> 
 
 
 def with_plays(games: list[Mapping], window: int, seasons: Iterable[int], refresh: bool = False) -> list[dict]:
-    """`games` that sim_script_fit's cache has, each with its teams' window plays (`plays_in_window`)."""
+    """`games` that sim_script_fit's cache has, each with its teams' window plays (`plays_in_window`); that cache is
+    sim_script_fit's to refresh (`refresh` is for the scoring plays: one download each)."""
     from services import sim_script_fit
     if window != sim_script_fit.CUT:
         raise ValueError(f"the window plays are counted for a {sim_script_fit.CUT}s window, not {window}s")
-    cached = {(g["season"], g["week"], g["home"], g["away"]): g for g in sim_script_fit.segments(seasons, refresh)}
+    cached = {(g["season"], g["week"], g["home"], g["away"]): g for g in sim_script_fit.segments(seasons)}
     out = []
     for g in games:
         found = cached.get((g["season"], g["week"], g["home"], g["away"]))
@@ -379,8 +295,8 @@ def write(result: dict) -> dict:
     """Store `result`, then measure its cut_var on the table just stored (the measurement centres games through
     it) and store it again: one --fit is enough, and a file without cut_var can be refit."""
     from database.db import SessionLocal
-    from services import sim_closing, sim_closing_means
-    caches = (sim_closing.stored, sim_closing_means._tables, sim_closing_means._at)
+    from services import sim_closing, sim_closing_means, sim_script
+    caches = (sim_closing.stored, sim_closing_means._tables, sim_closing_means._at, sim_script._window)
     previous = CLOSING_PATH.read_text(encoding="utf-8") if CLOSING_PATH.exists() else None
     try:
         _store(dumps(result))
@@ -424,12 +340,11 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--fit", action="store_true", help="measure and write sim_closing.json")
     parser.add_argument("--seasons", default=f"{SEASONS.start}-{SEASONS.stop - 1}")
-    parser.add_argument("--window", type=int, default=WINDOW)
     parser.add_argument("--refresh", action="store_true", help="download the play-by-play again")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     first, _, last = args.seasons.partition("-")
-    result = fit(range(int(first), int(last or first) + 1), args.window, args.refresh)
+    result = fit(range(int(first), int(last or first) + 1), refresh=args.refresh)
     if args.fit:
         result = write(result)
         log.info("wrote %s", CLOSING_PATH.name)

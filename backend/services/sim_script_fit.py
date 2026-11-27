@@ -140,22 +140,33 @@ def game_counts(rows: list[Mapping], season: int) -> dict | None:
 
 
 def segments(seasons: Iterable[int], refresh: bool = False) -> list[dict]:
-    """Every real game of `seasons` with its parts' counts, from SEGMENTS_CACHE (downloaded when missing)."""
+    """Every real game of `seasons` with its parts' counts, from SEGMENTS_CACHE (downloaded when missing, written in
+    another column layout, or with `refresh`; the other seasons in the cache stay)."""
     wanted = sorted(set(seasons))
-    cached = {} if refresh else _cached()
-    missing = [s for s in wanted if str(s) not in cached]
+    cached = _cached()
+    missing = [s for s in wanted if refresh or str(s) not in cached]
     if missing:
         for season in missing:
             log.info("downloading %s play-by-play", season)
             cached[str(season)] = _download(season)
         SEGMENTS_CACHE.parent.mkdir(parents=True, exist_ok=True)
-        partial = SEGMENTS_CACHE.with_suffix(f".{os.getpid()}.tmp")
-        partial.write_text(json.dumps(cached), encoding="utf-8")
-        os.replace(partial, SEGMENTS_CACHE)
+        atomic_write(SEGMENTS_CACHE, json.dumps(cached))
     return [g for s in wanted for g in cached[str(s)]]
 
 
+def atomic_write(path: Path, text: str) -> None:
+    """`text` to `path` through a temporary file, which a failed write never leaves behind."""
+    partial = path.with_suffix(f".{os.getpid()}.tmp")
+    try:
+        partial.write_text(text, encoding="utf-8")
+        os.replace(partial, path)
+    finally:
+        partial.unlink(missing_ok=True)
+
+
 def _cached() -> dict:
+    """SEGMENTS_CACHE's seasons whose every game has len(COUNTS) counts per part (a season cached in another
+    column layout is left out, so it is downloaded again: reading it by position would mix the columns up)."""
     try:
         cached = json.loads(SEGMENTS_CACHE.read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -163,10 +174,20 @@ def _cached() -> dict:
     except (OSError, ValueError):
         log.warning("%s is unreadable: downloading the play-by-play again", SEGMENTS_CACHE.name, exc_info=True)
         return {}
-    if isinstance(cached, dict) and all(isinstance(v, list) for v in cached.values()):
-        return cached
-    log.warning("%s is not a {season: games} file: downloading the play-by-play again", SEGMENTS_CACHE.name)
-    return {}
+    if not (isinstance(cached, dict) and all(isinstance(v, list) for v in cached.values())):
+        log.warning("%s is not a {season: games} file: downloading the play-by-play again", SEGMENTS_CACHE.name)
+        return {}
+    kept = {season: games for season, games in cached.items() if all(_laid_out(g) for g in games)}
+    if len(kept) < len(cached):
+        log.warning("%s: seasons %s were cached in another column layout: downloading them again",
+                    SEGMENTS_CACHE.name, sorted(set(cached) - set(kept)))
+    return kept
+
+
+def _laid_out(game: Mapping) -> bool:
+    teams = [game.get("home"), game.get("away")]
+    return all(isinstance(game.get(t), list) and len(game[t]) == 3 and all(len(part) == len(COUNTS) for part in game[t])
+               for t in teams)
 
 
 def window_counts(game: Mapping, team: str) -> dict[str, int]:
@@ -259,20 +280,15 @@ def spread(games: list[Mapping]) -> dict[str, float]:
 
 
 def league(games: list[Mapping]) -> dict[str, float]:
-    """Mean targets and carries per team-game; a kneel-down's mean yards; and how a quarterback's other carries
-    compare with all of his (kneels in, as the box and so the belief count them): `qb_ypr_without_kneels` and
-    `qb_td_without_kneels`, the multipliers of his per-carry yards and TD rate on the carries that are not kneels
-    (a kneel never scores)."""
+    """Mean targets and carries per team-game (a team's window counts are scaled by its volume over these), a
+    kneel-down's mean yards, and the quarterback's carries and kneels per team-game (for the docs: the window's
+    endings hold the kneels of its last ten minutes, the earlier ones are the halves' share of his carries)."""
     rows = _rows(games)
-    total = {name: float(sum(_col(rows, part, name).sum() for part in range(3)))
-             for name in ("qb_carries", "qb_yards", "kneels", "kneel_yards")}
-    plain = total["qb_carries"] - total["kneels"]
-    per_carry = total["qb_yards"] / max(total["qb_carries"], 1.0)
+    total = {name: float(sum(_col(rows, part, name).sum() for part in range(3))) for name in ("kneels", "kneel_yards")}
     return {**{stat: round(float(sum(_col(rows, part, stat).mean() for part in range(3))), 3)
-               for stat in ("targets", "carries")},
-            "kneel_yards": round(total["kneel_yards"] / max(total["kneels"], 1.0), 3),
-            "qb_ypr_without_kneels": round((total["qb_yards"] - total["kneel_yards"]) / max(plain, 1.0) / per_carry, 4),
-            "qb_td_without_kneels": round(total["qb_carries"] / max(plain, 1.0), 4)}
+               for stat in ("targets", "carries", "qb_carries", "kneels")},
+            "window_kneels": round(float(_col(rows, 2, "kneels").mean()), 3),
+            "kneel_yards": round(total["kneel_yards"] / max(total["kneels"], 1.0), 3)}
 
 
 def touch_rows(session, seasons: Iterable[int]) -> list[tuple[int, str, float, int]]:
@@ -329,26 +345,36 @@ def _best(rows: np.ndarray, floor: float) -> tuple[float, float]:
 def participation(rows: list[tuple[int, str, float, int]]) -> dict:
     """{position: the participation curve and its held-out check} (see the module docstring); a position with no
     rows has none (sim_script.in_plan keeps its players always in)."""
-    floor = float(np.mean([r[3] == 0 for r in rows if r[2] >= FLOOR_TOUCHES] or [0.0]))
+    pooled = np.array([(r[0], r[2], r[3]) for r in rows], dtype=float)
     out = {}
     for position in ("RB", "WR", "TE"):
         mine = [(r[0], r[2], r[3]) for r in rows if r[1] == position]
         if mine:
-            out[position] = _curve(np.array(mine, dtype=float), floor)
+            out[position] = _curve(np.array(mine, dtype=float), pooled)
     return out
 
 
-def _curve(a: np.ndarray, pooled: float) -> dict:
-    """One position's curve from rows of (season, expected touches, real touches); its no-show floor is its own
-    players' expected FLOOR_TOUCHES or more, or `pooled` (every position's) with fewer than FLOOR_ROWS of them."""
-    big = a[a[:, 1] >= FLOOR_TOUCHES]
-    floor = float(np.mean(big[:, 2] == 0)) if len(big) >= FLOOR_ROWS else pooled
+def _floor(a: np.ndarray, pooled: np.ndarray, seasons: np.ndarray) -> float:
+    """The no-show floor from `seasons` only: the zero share of the position's players expected FLOOR_TOUCHES or
+    more, or every position's (`pooled`) with fewer than FLOOR_ROWS of them."""
+    big = a[(a[:, 1] >= FLOOR_TOUCHES) & np.isin(a[:, 0], seasons)]
+    if len(big) < FLOOR_ROWS:
+        big = pooled[(pooled[:, 1] >= FLOOR_TOUCHES) & np.isin(pooled[:, 0], seasons)]
+    return float(np.mean(big[:, 2] == 0)) if len(big) else 0.0
+
+
+def _curve(a: np.ndarray, pooled: np.ndarray) -> dict:
+    """One position's curve from rows of (season, expected touches, real touches); held out one season at a time,
+    the floor too worked out from the other seasons only."""
+    seasons = np.unique(a[:, 0])
+    floor = _floor(a, pooled, seasons)
     c, scale = _best(a, floor)
     held = without = 0.0
-    for season in np.unique(a[:, 0]):
+    for season in seasons:
         train, test = a[a[:, 0] != season], a[a[:, 0] == season]
-        held += _loss(test, *_best(train, floor), floor)
-        without += _loss(test, 0.0, 1.0, floor)
+        fold = _floor(a, pooled, seasons[seasons != season])
+        held += _loss(test, *_best(train, fold), fold)
+        without += _loss(test, 0.0, 1.0, fold)
     bands = []
     for low, high in ((0, 1), (1, 2), (2, 3), (3, 4), (4, 6), (6, 8), (8, 99)):
         k = (a[:, 1] >= low) & (a[:, 1] < high)
@@ -371,9 +397,7 @@ def fit(seasons: Iterable[int], refresh: bool = False) -> dict:
 
 
 def write(result: Mapping) -> None:
-    partial = SCRIPT_PATH.with_suffix(f".{os.getpid()}.tmp")
-    partial.write_text(json.dumps(result, indent=1) + "\n", encoding="utf-8")
-    os.replace(partial, SCRIPT_PATH)
+    atomic_write(SCRIPT_PATH, json.dumps(result, indent=1) + "\n")
 
 
 def main(argv: list[str] | None = None) -> None:

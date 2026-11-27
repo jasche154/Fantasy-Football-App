@@ -133,10 +133,11 @@ def test_an_injured_receivers_work_flows_to_his_teammates():
 def test_a_hurt_back_s_carries_go_to_the_next_back_not_to_the_quarterback():
     healthy = sim_game.expected(world(), "AAA", "BBB", set(), HALF)
     without = sim_game.expected(world(), "AAA", "BBB", {pid("AAA", "RB")}, HALF)
-    # the QB's carries besides his kneels move only by the game script, at the margin the back's absence moves
-    (_, before, kneels), (_, after, kneels_after) = _volume(set()), _volume({pid("AAA", "RB")})
-    ratio = (without[pid("AAA", "QB")].box.carries - kneels_after) / (healthy[pid("AAA", "QB")].box.carries - kneels)
-    assert ratio == pytest.approx(after / before, rel=1e-3)
+    # the QB keeps his share of the team's carries (kneels in, as his belief counts them): it moves only by the game
+    # script, at the margin the back's absence moves
+    team = lambda lines: sum(e.box.carries for p, e in lines.items() if team_of(p) == "AAA")  # noqa: E731
+    share = [lines[pid("AAA", "QB")].box.carries / team(lines) for lines in (healthy, without)]
+    assert share[1] == pytest.approx(share[0], rel=1e-3)
     assert without[pid("AAA", "RB2")].box.carries > 2 * healthy[pid("AAA", "RB2")].box.carries
 
 
@@ -225,7 +226,7 @@ def test_the_carry_split_gives_everyone_his_weight_on_average(qb_carries):
     from services import sim_draw
     weights = np.array([0.50, 0.15, 0.04, qb_carries / 27, 0.06])
     rng, total, n = np.random.default_rng(2), 27, 40_000
-    drawn = np.array([sim_draw._split(total, weights, 0.15, rng, (3, 0.45)) for _ in range(n)])
+    drawn = np.array([rng.multinomial(total, sim_draw._shares(weights, 0.15, rng, (3, 0.45))) for _ in range(n)])
     assert (drawn.sum(axis=1) == total).all()
     assert drawn.mean(axis=0) / (total * weights / weights.sum()) == pytest.approx(np.ones(5), abs=0.01)
 
@@ -236,7 +237,7 @@ def test_a_qb_carry_share_with_no_spread_is_his_weights_share():
     assert sim_draw._uncapped(0.3, 0.0) == 0.3
     weights = np.array([0.5, 0.2, 0.3])
     rng = np.random.default_rng(1)
-    drawn = np.array([sim_draw._split(30, weights, 0.15, rng, (2, 0.0)) for _ in range(4000)])
+    drawn = np.array([rng.multinomial(30, sim_draw._shares(weights, 0.15, rng, (2, 0.0))) for _ in range(4000)])
     assert (drawn.sum(axis=1) == 30).all()
     assert drawn[:, 2].mean() == pytest.approx(30 * 0.3, rel=0.02)      # se 0.04 carries: about 4.5 se
 

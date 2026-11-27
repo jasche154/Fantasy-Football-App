@@ -93,11 +93,15 @@ def _expected_players(side: _Side, m: dict, scoring: ScoringSettings,
     for i, pid in enumerate(side.rushers[:-1]):
         line = lines.setdefault(pid, {})
         line.update(carries=m["carries"][i], rush_yds=m["rush_yds"][i], rush_td=m["rush_td"][i],
-                    fumbles=line.get("fumbles", 0.0) + m["carries"][i] * side.fumble[i])
-    if side.qb is not None:      # his line also loses the sacks' lost fumbles, as the draw's does
+                    fumbles=line.get("fumbles", 0.0) + (m["carries"][i] - m["kneels"][i]) * side.fumble[i])
+    if side.qb is not None:      # the sacks' lost fumbles, split as the draw splits them by the share each played
+        sacked = m["sacks"] * params()["league"]["sack_fumble"]
         line = lines.setdefault(side.qb, {})
         line.update(pass_yds=float(m["rec_yds"].sum()), pass_td=float(m["rec_td"].sum()), pass_int=m["ints"],
-                    fumbles=line.get("fumbles", 0.0) + m["sacks"] * params()["league"]["sack_fumble"])
+                    fumbles=line.get("fumbles", 0.0) + sacked * side.qb_share)
+        if side.backup is not None and side.qb_share < 1.0:
+            line = lines.setdefault(side.backup, {})
+            line["fumbles"] = line.get("fumbles", 0.0) + sacked * (1.0 - side.qb_share)
     if end is not None:
         from services.sim_closing_means import credit_means
         credit_means(lines, side, m, end)

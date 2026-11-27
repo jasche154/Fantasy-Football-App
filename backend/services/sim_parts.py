@@ -98,12 +98,6 @@ def _shares(weights: np.ndarray, sd: float, rng: np.random.Generator, alone: tup
     return np.insert(others / others.sum() * (1.0 - mine), index, mine)
 
 
-def _split(total: int, weights: np.ndarray, sd: float, rng: np.random.Generator,
-           alone: tuple[int, float] | None = None) -> np.ndarray:
-    """`total` shared around `weights` (`_shares`, then a multinomial)."""
-    return rng.multinomial(total, _shares(weights, sd, rng, alone))
-
-
 def _uncapped(share: float, sd: float, steps: int = 3) -> float:
     """The base share whose lognormal draw, capped at SHARE_CAP, still averages `share`."""
     if share <= 0:
@@ -169,36 +163,23 @@ def environment(rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray, np.nd
     return np.exp(sd * z - sd ** 2 / 2), np.exp(plays_sd * pace - plays_sd ** 2 / 2), lean
 
 
-def touches(side) -> dict[int, float]:
-    """{player: the targets + carries he averages in a game} at the side's full volume, its QB's carries aside."""
-    out: dict[int, float] = {}
-    for weights, volume, ids in ((side.target_w, side.targets, side.receivers), (side.carry_w, side.carries, side.rushers)):
-        for pid, w in zip(ids[:-1], weights[:-1] / weights.sum() * volume):
-            if pid != side.qb:
-                out[pid] = out.get(pid, 0.0) + float(w)
-    return out
-
-
 def plan(side, rng: np.random.Generator) -> Plan:
-    """The side's game plan (see the module docstring)."""
+    """The side's game plan (see the module docstring): who is in it (`side.plan_in`, from its weights before
+    anyone left the game), then each weight x a lognormal game draw, the starting QB's carries on their own."""
     game = params()["game"]
-    expected = touches(side)
-    ids = list(expected)
-    lead = {pid for weights, ids_ in ((side.target_w, side.receivers), (side.carry_w, side.rushers))
-            for pid, share in zip(ids_[:-1], weights[:-1] / weights.sum()) if share >= sim_script.CORE_SHARE}
-    q = {pid: 1.0 if pid in lead else sim_script.in_plan(expected[pid], side.positions.get(pid, "")) for pid in ids}
-    drawn = {pid: bool(rng.random() < q[pid]) if q[pid] < 1.0 else True for pid in ids}
-    t = _planned(side.target_w, side.receivers, q, drawn, set())
-    c = _planned(side.carry_w, side.rushers, q, drawn, {side.qb})
+    inputs = side.plan_in if side.plan_in is not None else sim_script.plan_inputs(
+        side.receivers, side.target_w, side.rushers, side.carry_w, side.targets, side.carries, side.positions)
+    drawn = rng.random(len(inputs.q)) < inputs.q
+    t = _planned(side.target_w, inputs.receivers, inputs.q, drawn)
+    c = _planned(sim_script.carry_weights(side), inputs.rushers, inputs.q, drawn)
     qb = (side.rushers.index(side.qb), game["share_sd_qb_carries"]) if side.qb is not None else None
     return Plan(_shares(t, game["share_sd_targets"], rng), _shares(c, game["share_sd_carries"], rng, qb))
 
 
-def _planned(weights: np.ndarray, ids: tuple, q: dict, drawn: dict, fixed: set) -> np.ndarray:
-    keep = np.array([pid not in q or pid in fixed for pid in ids])          # OTHER and the QB keep theirs
-    q_of = np.array([1.0 if k else q[pid] for pid, k in zip(ids, keep)])
-    in_ = np.array([True if k else drawn[pid] for pid, k in zip(ids, keep)])
-    return sim_script.plan_weights(weights, q_of, in_, keep)
+def _planned(weights: np.ndarray, index: np.ndarray, q: np.ndarray, drawn: np.ndarray) -> np.ndarray:
+    keep = index < 0                                       # OTHER and the QBs keep theirs
+    at = np.where(keep, 0, index)
+    return sim_script.plan_weights(weights, np.where(keep, 1.0, q[at]), np.where(keep, True, drawn[at]), keep)
 
 
 # ---------------- the plays ----------------
@@ -207,7 +188,8 @@ def plays(side, plan: Plan, n_targets: int, n_carries: int, eff: float, rng: np.
           drives: float | None = None, kneels: int = 0, busy: float = 1.0) -> _Offense:
     """`n_targets` and `n_carries` shared out by `plan` with catches, yards (x `busy` per catch) and fumbles; with
     `drives`: TDs (drive-limited over them), interceptions and sacks at the per-play rates / the halves' share
-    (sim_script.before_cut); without: none (the window's non-scoring plays) and `kneels` to the starting QB."""
+    (sim_script.before_cut); without: none (the window's non-scoring plays) and `kneels` to the QB who finishes
+    the game (sim_script.kneeler)."""
     game, league, rates = params()["game"], params()["league"], params()["rates"]
     targets = rng.multinomial(n_targets, plan.targets)
     catches = rng.binomial(targets, np.clip(side.catch, 0, 1))
@@ -222,7 +204,7 @@ def plays(side, plan: Plan, n_targets: int, n_carries: int, eff: float, rng: np.
     zero = np.zeros(len(catches), dtype=int), np.zeros(len(carries), dtype=int)
     if drives is None:
         if kneels:
-            at = side.rushers.index(side.qb)
+            at = side.rushers.index(sim_script.kneeler(side))
             carries, rush_yds = carries.copy(), rush_yds.copy()
             carries[at] += kneels
             rush_yds[at] += int(round(kneels * sim_script.kneel_yards()))
@@ -256,7 +238,8 @@ class Half:
 def _per_play(side) -> np.ndarray:
     """[yards per target, TDs per target, yards per carry, TDs per carry] before the cut, at mean efficiency."""
     t = side.target_w / side.target_w.sum() * side.catch
-    c = side.carry_w / side.carry_w.sum()
+    weights = sim_script.carry_weights(side)
+    c = weights / weights.sum()
     p_t, p_c = sim_script.scoring_share(side)
     ypr, rush_td = sim_script.rushing(side)
     return np.array([t @ side.ypc, t @ np.minimum(side.rec_td / p_t, MAX_TD_RATE),
@@ -363,12 +346,17 @@ def before_cut(sides, fg_tries: list[float], rng: np.random.Generator) -> tuple[
 def window(sides, offense: list[_Offense], events: list, plans: list[Plan], eff: np.ndarray, busy: np.ndarray,
            n_targets: np.ndarray, n_carries: np.ndarray, rng: np.random.Generator) -> tuple[list, np.ndarray, np.ndarray]:
     """Each side's window plays besides its scoring ones (`events`: the real ending sim_closing.close gave each
-    side), added to its offense and its team counts."""
+    side), added to its offense and its team counts: shared by its game plan without the players who left the game
+    hurt (the window is the end of it), its kneels the finishing QB's."""
     offense, n_targets, n_carries = list(offense), n_targets.copy(), n_carries.copy()
     for i, side in enumerate(sides):
         targets, carries, kneels = sim_script.window_plays(side, events[i], rng)
-        kneels = kneels if side.qb is not None and side.qb not in side.exited else 0
-        offense[i] = offense[i] + plays(side, plans[i], targets, carries, float(eff[i]), rng, kneels=kneels,
+        kneels = kneels if sim_script.kneeler(side) in side.rushers else 0
+        late = Plan(sim_script.window_shares(plans[i].targets, side.receivers, side.exited),
+                    sim_script.window_shares(plans[i].carries, side.rushers, side.exited))
+        targets = targets if late.targets.sum() > 0 else 0
+        carries = carries if late.carries.sum() > 0 else 0
+        offense[i] = offense[i] + plays(side, late, targets, carries, float(eff[i]), rng, kneels=kneels,
                                         busy=float(busy[i]))
         n_targets[i] += targets
         n_carries[i] += carries + kneels
