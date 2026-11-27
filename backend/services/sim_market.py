@@ -70,7 +70,7 @@ FILL_IN_BEST = 16                # the best weekly expert rank of a fill-in QB: 
                                  # 2-4 starts, never ranked better (Flacco 2023, Dobbs 2023: QB16; median 29-32)
 OPINION_DEFAULTS = {"opinion_spread": {"QB": 0.35, "RB": 1.0, "WR": 1.0, "TE": 1.0, "K": 1.0, "DST": 1.0},
                     "opinion_keep": 0.9, "worth_step": 0.4, "fill_in_trust": 1.0,
-                    "projection_scale": {}, "join_scale": {}, "join_fade": 0.6,
+                    "projection_scale": {}, "join_scale": {}, "join_fade": 0.5,
                     "line_follow": {}}                            # defaults of the tuned `market` knobs
 
 

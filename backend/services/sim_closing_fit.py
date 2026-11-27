@@ -16,7 +16,9 @@ sim_closing plays the last WINDOW seconds of regulation from the score with what
   that season's real end of regulation (shares of margins 1-3, 3, 7, 4-8 and ties).
 - `line_script`: how a team's volume follows its pregame expected margin (the Vegas spread), within each
   team-season so a team's own style is not counted: log targets and log carries per point of expected margin
-  (2018-2025: favourites run about 0.9% more a point and throw about 0.1% less). Read from the database
+  (2018-2025: carries +0.76% a point of the favourite's expected margin, targets -0.03%; sim_closing.line_script
+  adds the tuned `game.line_script_extra`, carries +0.24, targets -0.13, because the simulated game on its own
+  moves volume the other way). Read from the database
   (player_stats_weekly and nfl_games), applied by sim_centre before a game is centred.
 
 The scoring plays are read once with nflreadpy (the play-by-play the stats load already uses) and cached in

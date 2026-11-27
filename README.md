@@ -1563,8 +1563,10 @@ read the belief, so, as in a real season, the public learns the truth only from 
   and extra points to the kicker, return TDs and safeties to the defense), and the draw before the cut is
   centred without the window's mean points, which depend on the side's expected lead (a trailer scores more in
   it), so projections stay unbiased. A favourite also **runs more and throws a little less** than an underdog
-  (real teams within a season: carries +0.9% and targets -0.1% to -0.2% per point of the Vegas spread,
-  `line_script` in `sim_closing.json` plus a tuned offset, the simulated game drifting the other way on its own),
+  (real teams within a season, 2018-2025: carries +0.76% and targets -0.03% per point of the Vegas spread,
+  `line_script` in `sim_closing.json`; the draw applies that plus a tuned offset, carries +0.24 and targets -0.13,
+  `game.line_script_extra`, because the simulated game on its own moves volume the other way; sim_eval's rows then
+  match real ones: carries per point 0.88 / 0.90 against 0.88 / 0.87, full / mid),
   and **teams throw more early in a season and run more late** (`services/sim_calendar.py`, fitted on
   2018-2025: targets x1.02 in weeks 1-4 and x0.98 in weeks 15-18, carries the reverse, yards per target about 1%
   lower late; the belief learns calendar-free volumes); both apply before a game is centred on its line, so the
@@ -1797,7 +1799,8 @@ read the belief, so, as in a real season, the public learns the truth only from 
   TE 0.99), set by the average bias; a season simulated whole uses that scale throughout. A weekly projection
   also follows the week's line only partly: it keeps `market.line_follow` (QB 0.5, RB 0.3, WR / TE 0.25) of the
   line's move away from the team's typical points (against a league-average opponent), because real ESPN /
-  Sleeper projections follow a team's implied total at 0.16-0.56 by position (`sim_metrics_join.line_follow`)
+  Sleeper projections follow a team's implied total at 0.13-0.56 by position (`sim_metrics_join.line_follow`:
+  QB 0.47, RB 0.33, WR 0.16, TE 0.17 in weeks 12-18, QB 0.56, RB 0.32, WR 0.21, TE 0.13 over whole seasons)
   and the full expectation followed it at 0.43-0.79, so simulated projections churned more than real ones. On
   sim_eval 2021-2025, 3 seeds, mid / full, real in brackets: actual minus projection -0.43 / -0.34 (-0.35 /
   -0.39; before -0.66 / -0.80), the join's projection ratio 0.98-1.00 (0.98-1.00), median week-to-week change of
