@@ -21,14 +21,17 @@ numbers for the current week), so no CPU ever sees a result or a projection from
   of the league's picks from rounds 1-EARLY_ROUNDS in its first EARLY_WEEKS weeks (unless the news has him out
   for the season), or an injured player who was above replacement or still has trade value (healthy chart
   >= KEEP_OUT_CHART) with a return date in the news (except, to cover a slot nobody plays in while its IR slot is taken, one tagged IR or PUP
-  outside the top PROTECTED_RANK), and never into a roster that can't field a lineup. For a claim or an
+  outside the top PROTECTED_RANK), and never into a roster that can't field a lineup. A player the news has out
+  for the season is none of these: he is the first it drops, whatever he was worth healthy, and with a full roster
+  it cuts him for whoever fills his spot best (`_replace_lost`), unless he sits in its IR slot. For a claim or an
   open spot it drops only one of its DROPPABLE_COUNT least valuable skill players. A kicker or defense is
   only ever swapped for another one.
 - No add takes a CPU over its positional limit (`replay_values.crowded`: 2 QB, 2 TE, 1 K, 1 DST, 6 RB,
   7 WR) unless nobody it has there plays this week, and it lets the extra one go again afterwards.
 - `cpu_ir` (before claims and free agency): a CPU brings back an IR player who lost his tag (into an open
   spot, swapping in an eligible player worth keeping, or cutting one it can spare, maybe him), then puts its
-  most valuable eligible player (by trade value) on IR. Size and this week's lineup read the active roster only; season
+  most valuable eligible player (by trade value; one expected back before one out for the season) on IR, trading
+  places with the slot's player when he is clearly worth less (`_restash`, IR_SWAP_GAP). Size and this week's lineup read the active roster only; season
   points and positional limits also count the IR player (`_Context.stash`): he is coming back.
 
 The only dice roll is `streamers`, once per game; ties go to the better-ranked player, so the same state
@@ -73,6 +76,8 @@ UPGRADE_SHARE = 1.5               # a free agent worth this x the trade value of
 UPGRADE_GAP = 100.0               # ... and this many chart points more (100: about the top 100) is added for him
 STREAMED = ("K", "DST")
 LONG_TAGS = ("IR", "PUP")         # out for most of what is left (replay_values.IR_OUT_SHARE)
+IR_SWAP_GAP = 10.0                # chart points a roster player must be worth more than the IR slot's player to take
+                                  # his place (hand-set: no trading places every week between two near-equal players)
 
 Move = tuple[int, int | None]     # (player id to add, player id to drop)
 
@@ -161,15 +166,21 @@ def _unrostered(state: State, know: Knowledge, also_taken: Iterable[int] = ()) -
 def _spare(roster: Sequence[ReplayValue], know: Knowledge, protected: frozenset[int],
            keep: frozenset[int] = frozenset()) -> list[ReplayValue]:
     """Every skill player a CPU could bear to lose, least valuable first (by healthy value, so an injury
-    alone never makes a good player droppable; nor one out a while who still has trade value)."""
+    alone never makes a good player droppable; nor one out a while who still has trade value). One the news has
+    out for the season comes first, whatever he was worth healthy and whoever protects him: nobody holds a
+    roster spot for a player who is not coming back (a CPU kept Jalen Hurts on its bench all season)."""
     def safe(value: ReplayValue) -> bool:
-        if value.position not in SKILL or value.player_id in protected:
+        if value.position not in SKILL:
             return False                              # (replacement levels exist for skill positions only)
+        if _season_over(value):
+            return True
+        if value.player_id in protected:
+            return False
         return not (value.out and (value.last_projection > know.replacement[value.position]
                                    or (value.healthy_chart >= KEEP_OUT_CHART and _coming_back(value))))
 
-    return sorted((v for v in roster if safe(v)), key=lambda v: (v.player_id in keep, v.healthy_value, v.ros_ppg,
-                                                                -v.player_id))
+    return sorted((v for v in roster if safe(v)),
+                  key=lambda v: (not _season_over(v), v.player_id in keep, v.healthy_value, v.ros_ppg, -v.player_id))
 
 
 def droppable(roster: Sequence[ReplayValue], know: Knowledge, protected: frozenset[int],
@@ -387,6 +398,18 @@ def _fill_spot(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: 
     return (add.player_id, None) if add else None
 
 
+def _replace_lost(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: _Context) -> Move | None:
+    """A player on the active roster whom the news has out for the season (its IR slot is someone else's) is cut
+    for whoever fills his spot best, as an open spot would be filled."""
+    for out in _spare(roster, ctx.know, ctx.protected, ctx.keep):
+        if not _season_over(out):
+            return None                               # they sort first: nobody further down is one
+        move = _fill_spot([v for v in roster if v is not out], free, ctx)
+        if move is not None and _legal_drops(roster, ctx.know.by_id[move[0]], [out], ctx):
+            return move[0], out.player_id
+    return None
+
+
 def _trim(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: _Context) -> Move | None:
     """Back to the positional limit after a week that needed an extra player: the least valuable one it can
     spare at an over-full position goes (never one a starting slot needs this week) for whoever fills the
@@ -405,14 +428,16 @@ def _trim(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: _Cont
 
 def _close_by_chart(spare: Sequence[ReplayValue]) -> list[ReplayValue]:
     """`spare` (least valuable first) with each run of healthy values within TRIM_CLOSE of its lowest one
-    reordered by trade value, lowest first: the model can't tell them apart (often all 0), the market can."""
+    reordered by trade value, lowest first: the model can't tell them apart (often all 0), the market can. The
+    players out for the season stay in front."""
+    lost = [v for v in spare if _season_over(v)]
     runs: list[list[ReplayValue]] = []
-    for value in spare:
+    for value in spare[len(lost):]:
         if runs and value.healthy_value - runs[-1][0].healthy_value <= TRIM_CLOSE:
             runs[-1].append(value)
         else:
             runs.append([value])
-    return [v for run in runs for v in sorted(run, key=lambda v: (v.healthy_chart, v.player_id))]
+    return [*lost, *(v for run in runs for v in sorted(run, key=lambda v: (v.healthy_chart, v.player_id)))]
 
 
 def _upgrade(roster: Sequence[ReplayValue], free: Sequence[ReplayValue], ctx: _Context) -> Move | None:
@@ -464,7 +489,8 @@ def _next_move(state: State, team_id: int, ctx: _Context, made: int) -> Move | N
     roster, ctx = [ctx.know.by_id[pid] for pid in team.roster], _for_team(ctx, team)
     free = _unrostered(state, ctx.know, state.locked)
     allowed = [v for v in free if not replay_fans.banned(team, v.team)]
-    steps = (_cover, _fill_spot, _trim, _upgrade, _stream) if made < MAX_FREE_AGENT_MOVES else (_cover,)
+    steps = ((_cover, _fill_spot, _replace_lost, _trim, _upgrade, _stream) if made < MAX_FREE_AGENT_MOVES
+             else (_cover,))
     found = next((move for step in steps if (move := step(roster, allowed, ctx)) is not None), None)
     return found if found is not None or len(allowed) == len(free) else _cover(roster, free, ctx)
 
@@ -508,10 +534,26 @@ def _stash_added(state: State, settings: Settings, know: Knowledge, team_id: int
 def _stash_pick(group: Sequence[ReplayValue], ctx: _Context) -> ReplayValue | None:
     """The most valuable (by trade value) eligible skill player, and only one the rest of `group` can field a
     lineup without (a QB-heavy superflex roster may lack a spare back). Any eligible player is better on IR
-    than on the bench: it frees his spot (testers saw season-ending injuries on benches beside an empty slot)."""
+    than on the bench: it frees his spot (testers saw season-ending injuries on benches beside an empty slot),
+    but one the news expects back comes before one it has out for the season, whatever their values."""
     keep = [v for v in group if v.position in SKILL and replay_ir.eligible(ctx.know, v.player_id)
             and rv.can_field_lineup([o.position for o in group if o is not v], ctx.settings)]
-    return max(keep, key=lambda v: (v.chart, v.healthy_value, -v.player_id), default=None)
+    return max(keep, key=lambda v: (not _season_over(v), v.chart, v.healthy_value, -v.player_id), default=None)
+
+
+def _restash(state: State, ctx: _Context, team: rs.Team) -> State:
+    """A taken IR slot goes to the roster player `_stash_pick` would rather have there: one the news expects back
+    when the slot's player is out for the season, else one worth IR_SWAP_GAP chart points more. They trade
+    places (an injury later in the season used to leave the better player on the bench all year)."""
+    held = ctx.know.by_id[team.ir[0]]
+    if not replay_ir.eligible(ctx.know, held.player_id):
+        return state                                  # he lost his tag and could not come back: still blocked
+    pick = _stash_pick([ctx.know.by_id[pid] for pid in team.roster], ctx)
+    if pick is None or _season_over(pick) > _season_over(held):
+        return state
+    if _season_over(pick) == _season_over(held) and pick.chart < held.chart + IR_SWAP_GAP:
+        return state
+    return replay_ir.activate(state, ctx.settings, ctx.know, team.id, held.player_id, swap=pick.player_id)
 
 
 def _bring_back(state: State, ctx: _Context, team: rs.Team, player_id: int) -> State:
@@ -534,8 +576,9 @@ def _bring_back(state: State, ctx: _Context, team: rs.Team, player_id: int) -> S
 
 def cpu_ir(state: State, settings: Settings, know: Knowledge, seed: int) -> State:
     """Every CPU's IR moves for this week, in waiver-priority order: at most one activation (IR-18) and then
-    one placement into an empty slot (IR-19). Never the user's team; a second call changes nothing. `seed`
-    is unused (no randomness)."""
+    one placement into an empty slot (IR-19) or one swap that gives a taken slot to a player it would rather
+    have there (`_restash`). Never the user's team; a second call changes nothing. `seed` is unused (no
+    randomness)."""
     ctx = _context(know, settings, state)
     for team_id in state.waiver_order:
         if rs.team(state, team_id).is_user:
@@ -544,7 +587,10 @@ def cpu_ir(state: State, settings: Settings, know: Knowledge, seed: int) -> Stat
         if stuck:
             state = _bring_back(state, ctx, rs.team(state, team_id), stuck[0])
         team = rs.team(state, team_id)
-        pick = None if team.ir else _stash_pick([know.by_id[pid] for pid in team.roster], ctx)
+        if team.ir:
+            state = _restash(state, ctx, team)
+            continue
+        pick = _stash_pick([know.by_id[pid] for pid in team.roster], ctx)
         if pick is not None:
             state = replay_ir.place(state, know, team_id, pick.player_id)
     return state
