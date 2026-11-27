@@ -73,7 +73,7 @@ def test_superflex_slot_takes_a_second_qb_and_flex_skips_qbs(session, league):
     row, _ = league
     row.scoring_settings = json.dumps({**json.loads(row.scoring_settings), "superflex": True})
     settings = mt.league_settings(row)
-    assert settings.superflex and mt._slots(settings).count("SUPERFLEX") == 1
+    assert settings.superflex and mt.lineup_slots(settings).count("SUPERFLEX") == 1
     assert mt._eligible("SUPERFLEX", "QB") and not mt._eligible("FLEX", "QB") and mt._eligible("FLEX", "TE")
 
 

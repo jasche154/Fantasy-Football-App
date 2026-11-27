@@ -33,23 +33,21 @@ from dataclasses import dataclass
 from functools import lru_cache
 from types import MappingProxyType, SimpleNamespace
 
-from services import (
-    lineup_gain, my_team as mt, replay_chart, replay_chart_injury, replay_slots, replay_state, replay_superflex,
-)
+from services import lineup_gain, my_team as mt, replay_chart, replay_pool, replay_slots, replay_state
+from services import replay_chart_injury  # noqa: F401 (tests reach it as rv.replay_chart_injury)
 from services.league import LeagueSettings, replacement_levels
 from services.replay_news import Report
-from services.replay_pool import PRESEASON_TAGS, SKILL, Injury, PoolPlayer, SeasonData
+from services.replay_pool import SKILL, Injury, SeasonData
+from services.replay_freeze import _absences, _frozen, _live, chart_view  # noqa: F401 (re-exported)
+from services.replay_rows import (  # noqa: F401 (re-exported)
+    IR_OUT_SHARE, OUT_SHARE, OUT_SHARE_LONG, RECENCY_WEIGHTS, RECENT_GAMES, _out_streak, _priors, _projection, _recent,
+    _ros_ppg, _row,
+)
 from services.schedule_strength import NEUTRAL, DefenseStrength, Schedule
 
-RECENCY_WEIGHTS = (4, 3, 2, 1)                        # newest first: the projections (or priors) behind ros_ppg
-OUT_SHARE = {1: 0.45, 2: 0.55, 3: 0.60, 4: 0.65, 5: 0.75}    # share of remaining games missed, by weeks out so far
-OUT_SHARE_LONG = 0.90                                 # six or more weeks out (measured, RB/WR/TE 2021-25)
-IR_OUT_SHARE = replay_chart_injury.IR_OUT_SHARE      # least share missed when tagged IR or PUP (measured 2018-25)
 FLEX_POSITIONS = replay_slots.FLEX_POSITIONS
 eligible = replay_slots.eligible                      # slot -> the positions that can play there
 BACKUPS = {"QB": 1, "RB": 3, "WR": 4, "TE": 1}        # most a CPU carries behind its starters (no spare K or DST)
-RECENT_GAMES = 5                                      # recent_points: his last games before this week (the chart's form window;
-                                                      # other readers slice their own: replay_claim_ai, replay_mood)
 
 
 @dataclass(frozen=True)
@@ -113,80 +111,6 @@ class ReplayProjector(lineup_gain.Projector):
         return value.ros_ppg
 
 
-@lru_cache(maxsize=64)
-def _priors(data: SeasonData) -> Mapping[int, float]:
-    """{player_id: preseason points per game} from ADP order and the week-1 projection curve."""
-    by_position: dict[str, list[PoolPlayer]] = defaultdict(list)
-    for player in data.players.values():
-        by_position[player.position].append(player)
-    priors: dict[int, float] = {}
-    for players in by_position.values():
-        curve = sorted((data.projection(p.player_id, 1) for p in players), reverse=True)
-        drafted = sorted((p for p in players if p.adp is not None), key=lambda p: (p.adp, p.player_id))
-        priors.update({p.player_id: data.projection(p.player_id, 1) for p in players if p.adp is None})
-        priors.update({p.player_id: curve[n] for n, p in enumerate(drafted)})
-    return MappingProxyType(priors)
-
-
-def _projection(data: SeasonData, player_id: int, week: int) -> float:
-    """That week's projection, or 0 when he carries a hard tag that week (a stale projection is not a plan)."""
-    tag = data.injuries.get((player_id, week))
-    return 0.0 if tag is not None and tag.hard else data.projection(player_id, week)
-
-
-def _recent(data: SeasonData, player_id: int, week: int) -> list[float]:
-    """His last non-zero projections up to `week`, newest first (at most one per weight)."""
-    found: list[float] = []
-    for w in range(week, 0, -1):
-        if (points := _projection(data, player_id, w)) > 0:
-            found.append(points)
-            if len(found) == len(RECENCY_WEIGHTS):
-                break
-    return found
-
-
-def _ros_ppg(recent: Sequence[float], prior: float) -> float:
-    samples = [*recent, *[prior] * (len(RECENCY_WEIGHTS) - len(recent))]
-    return sum(weight * points for weight, points in zip(RECENCY_WEIGHTS, samples)) / sum(RECENCY_WEIGHTS)
-
-
-def _out_streak(data: SeasonData, player_id: int, prior: float, week: int) -> int:
-    """Consecutive non-bye weeks ending at `week` with no projection, for a player who had one or a prior."""
-    streak = 0
-    for w in range(week, 0, -1):
-        if _projection(data, player_id, w) > 0:
-            return streak
-        if not data.on_bye(player_id, w):
-            streak += 1
-    return streak if prior > 0 else 0
-
-
-def _row(data: SeasonData, player: PoolPlayer, prior: float, week: int, team: str | None,
-         games_left: int) -> dict:
-    """Everything about a player except his value over replacement and his rank."""
-    pid = player.player_id
-    streak = _out_streak(data, pid, prior, week)
-    injury = data.injuries.get((pid, max(1, week)))     # draft time: a preseason IR/PUP/SUS (replay_pool.as_of)
-    if not week and (injury is None or injury.tag not in PRESEASON_TAGS):
-        injury = None
-    share = OUT_SHARE.get(streak, OUT_SHARE_LONG) if streak else 0.0
-    if injury is not None and injury.tag in ("IR", "PUP"):
-        share = max(share, IR_OUT_SHARE)
-    recent = _recent(data, pid, week)
-    weeks = [w for w in range(1, week) if (pid, w) in data.actual]
-    played = [data.actual[(pid, w)] for w in weeks]
-    return {
-        "player_id": pid, "name": player.name, "position": player.position, "adp": player.adp, "team": team,
-        "ros_ppg": round(_ros_ppg(recent, prior), 2),
-        "projection": _projection(data, pid, week) if week else prior,   # draft time: only what ADP knew
-        "last_projection": recent[0] if recent else 0.0, "injury": injury,
-        "out": streak > 0 or (injury is not None and injury.hard), "games_left": games_left,
-        "expected_missed": round(games_left * share, 2), "availability": round(1.0 - share, 3),
-        "games": len(played), "ppg": round(sum(played) / len(played), 2) if played else 0.0,
-        "recent_points": tuple(played[::-1][:RECENT_GAMES]), "last_game_week": weeks[-1] if weeks else 0,
-    }
-
-
 def _valued(row: dict, replacement: Mapping[str, float]) -> dict:
     """Adds the values over replacement (skill only; K and DST have none) and the trade chart value."""
     if row["position"] not in SKILL:
@@ -216,49 +140,13 @@ class _Base:
     replacement: Mapping[str, float]
     source: str
     live: Mapping[int, float]                       # healthy chart before the freeze, frozen players only
+    regular: SeasonData                             # the 1-QB season, unmoved (fill-ins are read on it)
 
-
-def _absences(data: SeasonData, week: int) -> dict[int, int]:
-    """{player: the last week before his open injury absence} (0 = preseason: hurt before week 1); `data` is as
-    of `week`. An absence starts with a hard tag and ends at the first earlier week he was available for a game:
-    he played, or his team played and he carried no hard tag (a healthy scratch or a backup with no stat line
-    is back too, so nobody stays frozen by never recording a stat again)."""
-    tagged: dict[int, set[int]] = defaultdict(set)
-    for (pid, w), tag in data.injuries.items():
-        if tag.hard and w <= week:
-            tagged[pid].add(w)
-    found: dict[int, int] = {}
-    for pid, weeks in tagged.items():
-        start = None
-        for w in range(min(weeks), week + 1):
-            if w in weeks and start is None:
-                start = w
-            if w < week and ((pid, w) in data.actual or (w not in weeks and data.schedule.opponent(
-                    data.team_at(pid, w), w) is not None)):
-                start = None                                # available that week: the absence is over
-        if start is not None:
-            found[pid] = start - 1
-    return found
-
-
-def _frozen(data: SeasonData, league: LeagueSettings, week: int, end_week: int, drafted: int) -> dict[int, float]:
-    """{player: healthy chart, without the bye bump} frozen at the last week before his open injury absence, until
-    he is available for a game again (`_absences`): the expert and model ranks of a hurt player fall while he is out (the experts price the
-    injury), and the chart's discount (replay_chart_injury) is the one price of it. Point in time: the frozen
-    week's values are built from data.as_of(that week). A player listed nowhere that week keeps his live value."""
-    found: dict[int, float] = {}
-    for pid, before in _absences(data, week).items():
-        base = _base(data.as_of(before), league, before, end_week, min(drafted, before))
-        if pid in base.rows:                        # back that week from an earlier absence: his live value then
-            row = base.rows[pid]
-            bumped = replay_chart._bye_done(data, row["team"], before)     # replay_chart re-applies today's bump
-            found[pid] = base.live.get(pid, row["healthy_chart"]) / (replay_chart.BYE_BUMP if bumped else 1.0)
-    return found
 
 
 @lru_cache(maxsize=128)
 def _base(data: SeasonData, league: LeagueSettings, week: int, end_week: int, drafted: int = 0) -> _Base:
-    regular = replay_superflex.one_qb(data)                     # superflex: non-QBs as in a 1-QB league
+    regular, chart_data, board = chart_view(data, league)       # 1-QB season, value curve, preseason picks
     priors = _priors(regular)
     weeks_left = max(0, end_week - max(1, week) + 1)
     by_team: dict[str | None, int] = {None: weeks_left}          # unknown team: every week left
@@ -272,16 +160,15 @@ def _base(data: SeasonData, league: LeagueSettings, week: int, end_week: int, dr
     rows = [_row(data, player, priors[pid], week, teams[pid], games_left(teams[pid]))
             for pid, player in data.players.items()]
     two_qb = replay_slots.two_qb(league.starters)
-    chart_data = replay_chart.superflex_view(data) if two_qb else regular        # QBs go where 2-QB drafts take them
     frozen = _frozen(data, league, week, end_week, drafted)
     since = {pid: before + 1 for pid, before in _absences(data, week).items() if pid in frozen}
     live: dict[int, float] = {}
     charts, parts, source = replay_chart.base_charts(chart_data, rows, priors, week, end_week, drafted,
-                                                     regular if two_qb else None, frozen, live, since)
+                                                     regular if two_qb else None, frozen, live, since, board)
     rows = [{**row, **charts[row["player_id"]]} for row in rows]
     replacement = replacement_levels(((r["position"], r["ros_ppg"]) for r in rows if r["position"] in SKILL), league)
     return _Base(MappingProxyType({r["player_id"]: _valued(r, replacement) for r in rows}), chart_data, parts,
-                 MappingProxyType(replacement), source, MappingProxyType(live))
+                 MappingProxyType(replacement), source, MappingProxyType(live), regular)
 
 
 @lru_cache(maxsize=32)
@@ -289,7 +176,8 @@ def _knowledge(data: SeasonData, league: LeagueSettings, week: int, end_week: in
                drafted: int) -> Knowledge:
     """`_base` plus this seed's news (which may set availability) on the hard-tagged players only."""
     base = _base(data, league, week, end_week, drafted)
-    news = replay_chart.with_news(base.chart_data, base.rows, base.rows, base.parts, week, end_week, seed)
+    news = replay_chart.with_news(base.chart_data, base.rows, base.rows, base.parts, week, end_week, seed,
+                                  base.regular)
     values = _ranked(_valued(news[pid], base.replacement) if pid in news else row for pid, row in base.rows.items())
     through = max(0, week - 1)
     return Knowledge(season=data.season, week=week, league=league, values=values,
@@ -316,6 +204,7 @@ def knowledge(data: SeasonData, league: LeagueSettings, week: int, end_week: int
 def clear_cache() -> None:
     _knowledge.cache_clear()
     _base.cache_clear()
+    _live.cache_clear()
     _priors.cache_clear()
     projector.cache_clear()
     replay_chart.clear_cache()
@@ -338,6 +227,10 @@ def projector(know: Knowledge) -> lineup_gain.Projector:
     One per Knowledge, so every team's lineup maths shares its point cache."""
     weekly = {v.player_id: SimpleNamespace(projection=v.projection) for v in know.values}
     return ReplayProjector(know, {}, weekly, max(1, know.week))
+
+
+# keyed on SeasonData (projector on a Knowledge of one): a dropped season must not stay alive
+replay_pool.EVICT_HOOKS.extend((_base.cache_clear, _knowledge.cache_clear, _priors.cache_clear, projector.cache_clear))
 
 
 def horizon(know: Knowledge, settings: "replay_state.Settings") -> lineup_gain.Horizon:

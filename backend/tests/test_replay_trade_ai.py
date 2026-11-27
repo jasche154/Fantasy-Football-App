@@ -508,3 +508,16 @@ def test_about_half_of_the_cpus_offers_favour_the_user_and_the_rest_come_close(s
     assert all(v.value_get >= (1 + replay_personas.CLOSE_EDGE[0] - ai.EDGE_SLACK) * v.value_give for v in shown)
 
 
+
+
+# ---------------- speed without a change ----------------
+
+@pytest.mark.parametrize("seed", [0, 3, 5])
+def test_cpu_trades_make_the_same_offers_with_the_old_lineup_solver(seed, seasons, monkeypatch):
+    """The faster lineup solver (lineup_gain._greedy) changes no offer: every week of a seed's season, again with
+    the slot-scan solver my_team.best_lineup, gives the same offers."""
+    from services import lineup_gain
+    from tests.test_lineup_gain import reference_greedy
+    monkeypatch.setattr(lineup_gain, "_greedy", reference_greedy)
+    replayed = play(seed)
+    assert [w.after.offers for w in replayed] == [w.after.offers for w in seasons[seed]]
