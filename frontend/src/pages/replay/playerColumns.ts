@@ -29,6 +29,8 @@ export interface BoxColumn {
 }
 
 const BOX: Record<ReplayBoxKey, BoxColumn> = {
+  pass_cmp: { key: 'pass_cmp', label: 'Cmp', title: 'Completions' },
+  pass_att: { key: 'pass_att', label: 'Att', title: 'Pass attempts' },
   pass_yds: { key: 'pass_yds', label: 'PaYd', title: 'Passing yards' },
   pass_td: { key: 'pass_td', label: 'PaTD', title: 'Passing touchdowns' },
   pass_int: { key: 'pass_int', label: 'INT', title: 'Interceptions thrown' },
@@ -46,7 +48,7 @@ const MIXED: readonly ReplayBoxKey[] = ['carries', 'rush_yds', 'rush_td', 'targe
 const BOX_KEYS: Record<ReplayPositionTab, readonly ReplayBoxKey[]> = {
   ALL: MIXED,
   FLEX: MIXED,
-  QB: ['pass_yds', 'pass_td', 'pass_int', 'rush_yds', 'rush_td'],
+  QB: ['pass_cmp', 'pass_att', 'pass_yds', 'pass_td', 'pass_int', 'rush_yds', 'rush_td'],
   RB: MIXED,
   WR: RECEIVER,
   TE: RECEIVER,
@@ -63,6 +65,12 @@ export function boxColumns(position: ReplayPositionTab | ReplayPosition): BoxCol
 export function boxText(box: ReplayBoxLine | null, key: ReplayBoxKey, isAverage = false): string {
   if (!box) return EMPTY_VALUE;
   return formatNumber(box[key], isAverage ? 1 : 0);
+}
+
+/** Completions / attempts as a box score shows them, "22/34"; a dash when they were never recorded. */
+export function passingText(box: ReplayBoxLine | null): string {
+  if (!box || box.pass_cmp === null || box.pass_att === null) return EMPTY_VALUE;
+  return `${box.pass_cmp}/${box.pass_att}`;
 }
 
 function spanColumns(span: ReplayStatsSpan, week: number | null): StatColumn[] {

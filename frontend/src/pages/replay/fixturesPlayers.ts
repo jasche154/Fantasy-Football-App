@@ -4,7 +4,7 @@ import { COLLINS, MOSTERT, playerDetail, usage } from './fixtures';
 
 /** A running back's game unless overridden. */
 export function boxLine(overrides: Partial<ReplayBoxLine> = {}): ReplayBoxLine {
-  return { pass_yds: 0, pass_td: 0, pass_int: 0, carries: 15, rush_yds: 72, rush_td: 1, targets: 4, rec: 3, rec_yds: 21, rec_td: 0, ...overrides };
+  return { pass_cmp: 0, pass_att: 0, pass_yds: 0, pass_td: 0, pass_int: 0, carries: 15, rush_yds: 72, rush_td: 1, targets: 4, rec: 3, rec_yds: 21, rec_td: 0, ...overrides };
 }
 
 export function defense(tier: ReplayDefenseRating['tier'], rank: number): ReplayDefenseRating {

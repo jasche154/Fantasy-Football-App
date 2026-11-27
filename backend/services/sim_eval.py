@@ -23,6 +23,7 @@
 - both modes report whole games (sim_metrics_games.games: the pregame line, a real season's Vegas line and a
   simulated one's own, against the result; blowouts, home wins, ties, odd team scores) and the expert ranks
   (sim_metrics_games.experts: week-to-week churn and agreement with the projections), by position.
+- both modes report the starting QBs' completion % and attempts a start (sim_metrics.passing).
 - both modes report injuries (sim_metrics.injuries: new injuries per game played, missed share, by position)
   against the real rate and the target, real x sim_injuries.INJURY_SCALE (simulated seasons have fewer on purpose).
 - --set overrides a sim_params.json value for this run (section.key=value, JSON value); --save-tuned writes

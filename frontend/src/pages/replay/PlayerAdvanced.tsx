@@ -3,6 +3,7 @@ import type { ReplayBoxLine, ReplayPlayerWeek, ReplayPosition, ReplayUsage } fro
 import { EMPTY_VALUE, formatFraction, formatInteger, formatNumber, formatPercentValue } from '../../lib/format';
 import { gamesPlayed, rate, RECENT_GAMES, seasonSummary, trend, type SeasonSummary, type Trend } from './advancedStats';
 import { opponentText } from './PlayerGameLog';
+import { passingText } from './playerColumns';
 
 /** Positions the Advanced tab is for: K and DST have no snaps, targets or carries. */
 export const ADVANCED_POSITIONS: readonly ReplayPosition[] = ['QB', 'RB', 'WR', 'TE'];
@@ -34,6 +35,7 @@ const COLUMNS: Record<string, Column> = {
   car: { key: 'car', label: 'Car', title: 'Carries', value: (g) => formatInteger(g.box?.carries) },
   ypc: { key: 'ypc', label: 'Y/Car', title: 'Rushing yards per carry', value: (g) => formatNumber(g.box && rate(g.box.rush_yds, g.box.carries)) },
   touches: { key: 'touches', label: 'Tch', title: 'Touches: carries plus receptions', value: (g) => formatInteger(g.box && g.box.carries + g.box.rec) },
+  cmpAtt: { key: 'cmpAtt', label: 'C/ATT', title: 'Completions / attempts', value: (g) => passingText(g.box) },
   passYds: { key: 'passYds', label: 'PaYd', title: 'Passing yards', value: (g) => formatInteger(g.box?.pass_yds) },
   tdInt: { key: 'tdInt', label: 'TD:INT', title: 'Passing touchdowns to interceptions', value: (g) => (g.box ? `${g.box.pass_td}:${g.box.pass_int}` : EMPTY_VALUE) },
   rushYds: { key: 'rushYds', label: 'RuYd', title: 'Rushing yards', value: (g) => formatInteger(g.box?.rush_yds) },
@@ -41,7 +43,7 @@ const COLUMNS: Record<string, Column> = {
 
 const RECEIVER = ['snap', 'tgt', 'share', 'rec', 'catch', 'ypt', 'ypr'];
 const COLUMN_KEYS: Partial<Record<ReplayPosition, string[]>> = {
-  QB: ['snap', 'passYds', 'tdInt', 'car', 'rushYds', 'ypc'],
+  QB: ['snap', 'cmpAtt', 'passYds', 'tdInt', 'car', 'rushYds', 'ypc'],
   RB: ['snap', 'car', 'ypc', 'touches', ...RECEIVER.slice(1)],
   WR: RECEIVER,
   TE: RECEIVER,
@@ -61,10 +63,11 @@ const TILES: Record<string, Tile> = {
   catch: { label: 'Catch %', value: (s) => formatFraction(s.catchPct, 0) },
   ypt: { label: 'Yds / target', value: (s) => formatNumber(s.ydsPerTarget) },
   ypc: { label: 'Yds / carry', value: (s) => formatNumber(s.ydsPerCarry) },
+  cmp: { label: 'Cmp %', value: (s) => formatFraction(s.cmpPct, 0) },
 };
 
 const TILE_KEYS: Partial<Record<ReplayPosition, string[]>> = {
-  QB: ['games', 'snap', 'car', 'ypc'],
+  QB: ['games', 'snap', 'cmp', 'car', 'ypc'],
   RB: ['games', 'snap', 'car', 'ypc', 'share', 'tgt', 'catch', 'ypt'],
   WR: ['games', 'snap', 'share', 'tgt', 'catch', 'ypt'],
   TE: ['games', 'snap', 'share', 'tgt', 'catch', 'ypt'],

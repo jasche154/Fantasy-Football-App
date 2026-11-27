@@ -32,7 +32,7 @@ describe('seasonSummary', () => {
 
   it('is all empty before he has played', () => {
     expect(seasonSummary([])).toEqual({ games: 0, snapPct: null, targetShare: null, targetsPerGame: null, carriesPerGame: null,
-      catchPct: null, ydsPerTarget: null, ydsPerCarry: null });
+      catchPct: null, ydsPerTarget: null, ydsPerCarry: null, cmpPct: null });
   });
 
   it('adds box lines stat by stat', () => {

@@ -16,7 +16,7 @@ def test_a_backs_two_games_give_every_rate_from_the_span_totals():
     assert tuple(line) == adv.KEYS
     assert line == {"snap_pct": 70.0, "target_share": 10.0, "targets_pg": 5.0, "carries_pg": 15.0,
                     "touches_pg": 19.0, "ypc": 4.3, "ypr": 7.5, "ypt": 6.0, "catch_rate": 80.0, "total_td": 2,
-                    "td_rate": 5.3, "pass_ypg": None, "td_int": None}
+                    "td_rate": 5.3, "pass_ypg": None, "td_int": None, "cmp_pct": None}
 
 
 def test_per_game_tds_for_last4_and_usage_means():
@@ -29,7 +29,8 @@ def test_zero_denominators_and_missing_usage_are_null():
     line = adv.line([BoxLine()], [])
 
     assert line["snap_pct"] is line["target_share"] is None
-    assert all(line[key] is None for key in ("ypc", "ypr", "ypt", "catch_rate", "td_rate", "pass_ypg", "td_int"))
+    assert all(line[key] is None for key in ("ypc", "ypr", "ypt", "catch_rate", "td_rate", "pass_ypg", "td_int",
+                                                "cmp_pct"))
     assert (line["targets_pg"], line["carries_pg"], line["touches_pg"], line["total_td"]) == (0, 0, 0, 0)
 
 
@@ -51,3 +52,10 @@ def test_a_quarterbacks_touchdowns_count_his_passes_but_his_td_rate_does_not():
     line = adv.line([PASSER, BoxLine(pass_yds=200, pass_td=1, carries=5, rush_td=1)], [], per_game_td=True)
 
     assert (line["total_td"], line["td_rate"], line["pass_ypg"], line["td_int"]) == (2.0, 12.5, 225.0, 3.0)
+
+
+def test_completion_percentage_from_the_spans_totals_and_null_without_a_recorded_attempt():
+    games = [BoxLine(pass_cmp=20, pass_att=30, pass_yds=220), BoxLine(pass_cmp=25, pass_att=35, pass_yds=280)]
+
+    assert adv.line(games, [])["cmp_pct"] == 69.2
+    assert adv.line([PASSER], [])["cmp_pct"] is None              # an old save's line: attempts never recorded

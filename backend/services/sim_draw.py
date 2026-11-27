@@ -161,10 +161,12 @@ def _offense(side, n_targets: int, n_carries: int, eff: float, rng: np.random.Ge
     rec_td, rush_td = _touchdowns(catches, rec_rate, carries, rush_rate, game.get("td_drives", TD_DRIVES), rng)
     attempts = int(n_targets + rng.binomial(n_targets, max(0.0, league["attempts_per_target"] - 1)))
     sacks = int(rng.binomial(attempts, min(0.5, side.sack_rate)))
+    # an interception is an incomplete attempt: drawn among them at the rate that keeps rate x attempts its mean
+    missed = attempts - int(catches.sum())
+    int_rate = min(0.5, side.int_rate / eff ** game["int_power"]) * attempts / max(missed, 1)
     return _Offense(targets, catches, rec_yds, rec_td, rng.binomial(catches, side.rec_fumble), carries, rush_yds,
-                    rush_td, rng.binomial(carries, side.fumble), attempts,
-                    int(rng.binomial(attempts, min(0.5, side.int_rate / eff ** game["int_power"]))), sacks,
-                    int(rng.binomial(sacks, league["sack_fumble"])))
+                    rush_td, rng.binomial(carries, side.fumble), attempts, int(rng.binomial(missed, min(1.0, int_rate))),
+                    sacks, int(rng.binomial(sacks, league["sack_fumble"])))
 
 
 def _touchdowns(catches: np.ndarray, rec_rate: np.ndarray, carries: np.ndarray, rush_rate: np.ndarray,
@@ -220,14 +222,17 @@ def _receiver_lines(side, o: _Offense, n_targets: int) -> dict[int, dict]:
 
 def _passers(side, o: _Offense, rng: np.random.Generator, regulation: _Offense | None = None) -> dict[int, dict]:
     """The QB line(s): the receivers' sums, split with the backup when the starter left hurt. Only `regulation`'s
-    catches (the offense before overtime, else `o`'s) are split: an overtime catch is the backup's, as the
-    starter had left."""
+    catches (the offense before the closing window and overtime, else `o`'s) are split: a later catch is the
+    backup's, as the starter had left. Attempts are each passer's completions + interceptions + his share of the
+    other incomplete attempts (drawn like his catches, from regulation's: a later TD catch adds an attempt and a
+    catch), so attempts >= completions + interceptions for each; sacks are not attempts."""
     if side.qb is None:
         return {}
     catches, yards, tds = o.catches, o.rec_yds, o.rec_td
     if side.backup is None or side.qb_share >= 1.0:
         mine = (catches, yards, tds)
         shares = {side.qb: 1.0}
+        missed = o.attempts - int(catches.sum()) - o.ints
     else:
         base = regulation or o
         kept = rng.binomial(base.catches, side.qb_share)
@@ -235,12 +240,16 @@ def _passers(side, o: _Offense, rng: np.random.Generator, regulation: _Offense |
         kept_tds = rng.hypergeometric(base.rec_td, base.catches - base.rec_td, kept)   # his TDs among the catches he threw
         mine = (kept, kept_yards, kept_tds)
         shares = {side.qb: side.qb_share, side.backup: 1.0 - side.qb_share}
+        missed = int(rng.binomial(base.attempts - int(base.catches.sum()) - base.ints, side.qb_share))
+    ints = int(round(o.ints * shares[side.qb]))
     out = {}
     for pid, share in shares.items():
-        c, y, t = mine if pid == side.qb else (catches - mine[0], yards - mine[1], tds - mine[2])
-        out[pid] = {"pass_yds": int(y.sum()), "pass_td": int(t.sum()), "completions": int(c.sum()),
-                    "pass_int": int(round(o.ints * share)) if pid == side.qb else o.ints - int(round(o.ints * share)),
-                    "fumbles": int(round(o.sack_fumbles * share)) if pid == side.qb
+        starter = pid == side.qb
+        c, y, t = mine if starter else (catches - mine[0], yards - mine[1], tds - mine[2])
+        att = int(c.sum()) + ints + missed if starter else o.attempts - out[side.qb]["pass_att"]   # backup: the rest
+        out[pid] = {"pass_cmp": int(c.sum()), "pass_att": att, "pass_yds": int(y.sum()), "pass_td": int(t.sum()),
+                    "pass_int": ints if starter else o.ints - ints,
+                    "fumbles": int(round(o.sack_fumbles * share)) if starter
                     else o.sack_fumbles - int(round(o.sack_fumbles * share)), "snap": 100.0 * share}
     return out
 
@@ -295,7 +304,7 @@ def draw_game(sides: Sequence, rng: np.random.Generator, scoring: ScoringSetting
         lines = _receiver_lines(side, o, int(n_targets[i]))
         for pid, passing in _passers(side, o, rng, regulation[i]).items():
             line = lines.setdefault(pid, {"share": 0.0})
-            line.update({k: v for k, v in passing.items() if k not in ("fumbles", "completions")})
+            line.update({k: v for k, v in passing.items() if k != "fumbles"})
             line["fumbles"] = line.get("fumbles", 0) + passing["fumbles"]
             line["snap"] = passing["snap"]
         for pid, line in lines.items():

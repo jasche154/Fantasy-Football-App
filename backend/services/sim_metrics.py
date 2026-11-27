@@ -8,7 +8,9 @@ Tiers are preseason ADP position ranks (QB / TE: 1-12, 13-24; RB / WR: 1-12, 13-
   PROJECTED_MIN or more), the same-team QB-WR and QB-TE correlation of (actual - projection), tiered players
   sitting out per week by position (team plays, no game), and team skill points per game (mean, spread
   across games, spread of season means), K and D/ST points per game, and the count of skill games of 25+ /
-  30+ / 35+ points (BIG_GAMES; ADP-free), and `injuries`.
+  30+ / 35+ points (BIG_GAMES; ADP-free), `injuries` and `passing`.
+- passing(data, weeks): each team game's starting QB (its passing-yards leader): completion % and pass attempts
+  a start, over starts with recorded attempts.
 - injuries(data, weeks): for the top-150 ADP skill players, by position: new injuries per game played (he played
   a game in `weeks` and missed his team's next one with an injury tag, any of Q/D/O/IR/PUP: the sim_injuries fit's
   own definition, since a real player ruled out on game day often keeps his Q/D) and the share of his team's
@@ -27,6 +29,7 @@ from collections.abc import Iterable
 import numpy as np
 
 from services.replacement_eval import spearman  # noqa: F401  (tied values share their average rank)
+from services.replay_box import BoxLine
 from services.replay_pool import SeasonData
 from services.sim_injuries_fit import _hurt
 
@@ -81,6 +84,22 @@ def _qb_pairs(data: SeasonData, weeks: set[int], teams: dict) -> dict[str, list[
     return pairs
 
 
+def passing(data: SeasonData, weeks: Iterable[int]) -> dict[str, float]:
+    """Each team game's starting QB (its passing-yards leader, as sim_qb.walk reads it): completion % and attempts
+    a start, over the starts with recorded attempts."""
+    weeks, teams = set(weeks), _teams(data)
+    starter: dict[tuple[str | None, int], BoxLine] = {}
+    for (pid, week), line in data.box.items():
+        key = (teams.get((pid, week)), week)
+        if week in weeks and data.players[pid].position == "QB" and line.pass_att > 0 and (
+                key not in starter or line.pass_yds > starter[key].pass_yds):
+            starter[key] = line
+    starts = list(starter.values())
+    attempts = sum(line.pass_att for line in starts)
+    return {"QB cmp %": 100.0 * sum(line.pass_cmp for line in starts) / attempts if attempts else float("nan"),
+            "QB att/start": attempts / len(starts) if starts else float("nan")}
+
+
 def weekly(data: SeasonData, weeks: Iterable[int]) -> dict[str, float]:
     weeks = set(weeks)
     tier_of, teams = tiers(data), _teams(data)
@@ -95,7 +114,7 @@ def weekly(data: SeasonData, weeks: Iterable[int]) -> dict[str, float]:
                 sitting[data.players[pid].position] += 1
     for position in SKILL:
         out[f"sitting/wk {position}"] = sitting[position] / max(1, len(weeks))
-    return {**out, **_team_scores(data, weeks, teams), **injuries(data, weeks)}
+    return {**out, **_team_scores(data, weeks, teams), **injuries(data, weeks), **passing(data, weeks)}
 
 
 def injuries(data: SeasonData, weeks: Iterable[int]) -> dict[str, float]:

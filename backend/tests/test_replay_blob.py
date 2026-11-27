@@ -86,6 +86,26 @@ def test_an_old_save_reads_with_defaults_and_a_newer_one_is_refused():
         replay_blob.loads(b"not a blob")
 
 
+def test_a_save_from_before_completions_and_attempts_loads_and_its_passing_lines_show_no_cmp_att():
+    from services import replay_box
+    qb = next(pid for pid, p in DATA.players.items() if p.position == "QB")
+    passing = {key: replace(box, pass_cmp=21, pass_att=33, pass_yds=250, pass_td=2) if key[0] == qb else box
+               for key, box in DATA.box.items()}
+    payload = json.loads(zlib.decompress(replay_blob.dumps(replace(DATA, box=MappingProxyType(passing)))))
+    del payload["box"]["v"]["pass_cmp"], payload["box"]["v"]["pass_att"]      # saved before they were kept
+
+    old = replay_blob.loads(zlib.compress(json.dumps(payload).encode()))
+
+    line = next(box for key, box in old.box.items() if key[0] == qb)
+    assert (line.pass_cmp, line.pass_att, line.pass_yds) == (0, 0, 250)
+    shown = replay_box.shown(line)
+    assert shown["pass_cmp"] is None and shown["pass_att"] is None and shown["pass_yds"] == 250
+    rushing = next(box for key, box in old.box.items() if key[0] != qb)       # no passing: 0, not "never recorded"
+    assert replay_box.shown(rushing)["pass_att"] == 0
+    back = replay_blob.loads(replay_blob.dumps(replace(DATA, box=MappingProxyType(passing))))
+    assert next(box for key, box in back.box.items() if key[0] == qb).pass_att == 33
+
+
 def test_why_a_save_is_unreadable_is_logged_by_type_without_its_contents(caplog):
     with caplog.at_level("WARNING", logger="services.replay_blob"), pytest.raises(replay_blob.UnreadableSeason):
         replay_blob.loads(b"secret-looking bytes")
