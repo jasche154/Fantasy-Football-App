@@ -138,6 +138,9 @@ def with_plays(games: list[Mapping], window: int, seasons: Iterable[int], refres
         if found is not None:
             out.append({**g, "spread": found["spread"],
                         "plays_in_window": {t: sim_script_fit.window_counts(found, t) for t in (g["home"], g["away"])}})
+    if len(out) < len(games):
+        log.warning("%d of %d games have no play counts in sim_script_fit's cache: left out of the endings",
+                    len(games) - len(out), len(games))
     return out
 
 
@@ -287,6 +290,7 @@ def _cut_var(session) -> list[float]:
 def fit(seasons: Iterable[int], window: int = WINDOW, refresh: bool = False) -> dict:
     from database.db import SessionLocal
 
+    seasons = sorted(set(seasons))                       # read three times below: a generator would run out
     with SessionLocal() as session:
         script = line_script(session, seasons)
     try:

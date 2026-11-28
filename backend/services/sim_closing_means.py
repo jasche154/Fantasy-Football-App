@@ -100,8 +100,8 @@ def _tables(edge: float) -> tuple[np.ndarray, np.ndarray]:
         elif m > 0:
             w = sim_closing.near(shares, spreads, -edge)
             rows.append(w @ lead)
-        else:
-            w = sim_closing.near(shares, spreads, edge)
+        else:                                           # tied: one weighting for both sides, as the draw's
+            w = sim_closing.near_tie(shares, spreads, edge)
             rows.append(w @ (trail + lead) / 2)
         ties.append(float(w @ closes))
     return np.array(rows), np.array(ties)

@@ -421,3 +421,47 @@ def test_a_refresh_downloads_the_asked_seasons_again_and_keeps_the_others(monkey
     assert sim_closing_plays.scoring_games([2024]) == [{"season": 2024, "old": True}] and fetched == []
     assert sim_closing_plays.scoring_games([2024], refresh=True) == [{"season": 2024}] and fetched == [2024]
     assert json.loads(path.read_text(encoding="utf-8")) == {"2023": [{"season": 2023}], "2024": [{"season": 2024}]}
+
+
+def test_a_game_tied_at_the_cut_weighs_its_endings_alike_in_the_draw_and_for_both_sides():
+    """Tied at the cut, either team is the "trailer": the draw and both sides' projections centre the spread kernel
+    on the edge and on its negative at half weight each (the projection read side 1's tie row at -edge, the draw at
+    side 0's edge: window points 5.73 against 4.98 at an edge of 14)."""
+    from services.sim_closing_means import SPAN, _tables
+    rows, ties = _tables(14.0)
+    flipped, flipped_ties = _tables(-14.0)
+    assert rows[SPAN] == pytest.approx(flipped[SPAN]) and ties[SPAN] == pytest.approx(flipped_ties[SPAN])
+    shares, endings, spreads = sim_closing.stored()["rows"][0]
+    want = sim_closing.near_tie(shares, spreads, 14.0)
+    rng = np.random.default_rng(3)
+    drawn = Counter(id(sim_closing.ending(0, rng, 14.0)) for _ in range(20_000))
+    got = np.array([drawn[id(e)] for e in endings]) / 20_000
+    assert np.abs(got - want).max() < 0.01
+
+
+def test_a_closing_table_without_its_spread_column_names_the_fit(monkeypatch, tmp_path):
+    """A sim_closing.json from before the endings carried their pregame spread would read every one as an even
+    game's: it is refused with the command that rebuilds it."""
+    found = json.loads(sim_closing.CLOSING_PATH.read_text(encoding="utf-8"))
+    found["table"] = {m: [r[:3] for r in rows] for m, rows in found["table"].items()}
+    path = tmp_path / "sim_closing.json"
+    path.write_text(json.dumps(found), encoding="utf-8")
+    monkeypatch.setattr(sim_closing, "CLOSING_PATH", path)
+    sim_closing.stored.cache_clear()
+    try:
+        with pytest.raises(RuntimeError, match="sim_closing_fit"):
+            sim_closing.stored()
+    finally:
+        sim_closing.stored.cache_clear()
+
+
+def test_games_without_play_counts_are_left_out_loudly(monkeypatch, caplog):
+    from services import sim_script_fit
+    counts = [[0] * len(sim_script_fit.COUNTS)] * 3
+    seg = {"season": 2024, "week": 1, "home": "AAA", "away": "BBB", "spread": 3.0, "AAA": counts, "BBB": counts}
+    monkeypatch.setattr(sim_script_fit, "segments", lambda seasons, refresh=False: [seg])
+    games = [{"season": 2024, "week": 1, "home": "AAA", "away": "BBB"}, {"season": 2024, "week": 2, "home": "AAA",
+                                                                       "away": "CCC"}]
+    with caplog.at_level("WARNING", logger="services.sim_closing_fit"):
+        out = sim_closing_fit.with_plays(games, sim_closing_fit.WINDOW, [2024])
+    assert [g["week"] for g in out] == [1] and out[0]["spread"] == 3.0 and "1 of 2 games" in caplog.text

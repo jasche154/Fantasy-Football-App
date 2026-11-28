@@ -148,6 +148,14 @@ def _yards_scored(plays: np.ndarray, mean: np.ndarray, sd: np.ndarray, shift: fl
     return out, float(spread @ score), float(spread @ spread)
 
 
+def td_yards_rho() -> float:
+    """`game.td_yards_rho` (sim_params.json's tuned section, or sim_eval --set): a correlation, so within [-1, 1]."""
+    rho = float(params()["game"].get("td_yards_rho", 0.0))
+    if not -1.0 <= rho <= 1.0:
+        raise ValueError(f"game.td_yards_rho must be within [-1, 1], got {rho}")
+    return rho
+
+
 def _binomial_at(u: float, n: int, p: float) -> int:
     """The Binomial(n, p) count at quantile `u` (its inverse distribution function)."""
     if p >= 1.0:
@@ -272,7 +280,7 @@ def plays(side, plan: Plan, n_targets: int, n_carries: int, eff: float, rng: np.
     spread = rec_var + rush_var
     score = (rec_score + rush_score) / math.sqrt(spread) if spread > 0 else 0.0
     rec_td, rush_td = _touchdowns(catches, rec_rate, carries, rush_rate, drives, rng, slack=0, yards=score,
-                                  rho=game.get("td_yards_rho", 0.0))
+                                  rho=td_yards_rho())
     sacks = int(rng.binomial(attempts, min(0.5, side.sack_rate / p_t)))
     return _Offense(targets, catches, rec_yds, rec_td, rec_fumbles, carries, rush_yds, rush_td, rush_fumbles,
                     attempts, 0, sacks, int(rng.binomial(sacks, league["sack_fumble"])))

@@ -53,8 +53,10 @@ def stored() -> Mapping:
     found = fitted_json(CLOSING_PATH, CLOSING_FIT, SECTIONS)
     events, table = found["events"], {}
     for margin, rows in found["table"].items():
+        if any(len(r) < 4 for r in rows):              # read as spread 0, it would draw every ending as an even game's
+            raise RuntimeError(f"{CLOSING_PATH.name}'s endings at margin {margin} have no pregame spread: run {CLOSING_FIT}")
         counts = np.array([r[0] for r in rows], dtype=float)
-        spreads = np.array([float(r[3]) if len(r) > 3 else 0.0 for r in rows])
+        spreads = np.array([float(r[3]) for r in rows])
         table[int(margin)] = (counts / counts.sum(), [(dict(zip(events, r[1])), dict(zip(events, r[2]))) for r in rows],
                               spreads)
     missing = sorted(set(range(max(table, default=-1) + 1)) - set(table))
@@ -82,7 +84,8 @@ def ending(margin: int, rng: np.random.Generator, edge: float | None = None) -> 
     `near(edge)` weights: the trailer's expected margin (None: every ending alike)."""
     s = stored()
     shares, rows, spreads = s["rows"][min(margin, s["top"])]
-    return rows[int(rng.choice(len(rows), p=near(shares, spreads, edge)))]
+    weights = near_tie(shares, spreads, edge) if margin == 0 else near(shares, spreads, edge)
+    return rows[int(rng.choice(len(rows), p=weights))]
 
 
 def near(shares: np.ndarray, spreads: np.ndarray, edge: float | None) -> np.ndarray:
@@ -94,6 +97,14 @@ def near(shares: np.ndarray, spreads: np.ndarray, edge: float | None) -> np.ndar
     weights = shares * np.exp(-0.5 * ((spreads - edge) / EDGE_WIDTH) ** 2)
     total = weights.sum()
     return weights / total if total > 0 else shares
+
+
+def near_tie(shares: np.ndarray, spreads: np.ndarray, edge: float | None) -> np.ndarray:
+    """`near` for a game tied at the cut, the same for both sides: a tied ending's "trailer" is either team, so the
+    kernel is centred on `edge` and on -`edge` at half weight each."""
+    if edge is None:
+        return shares
+    return (near(shares, spreads, edge) + near(shares, spreads, -edge)) / 2
 
 
 # ---------------- crediting the points ----------------

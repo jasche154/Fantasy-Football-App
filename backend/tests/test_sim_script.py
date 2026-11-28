@@ -502,3 +502,10 @@ def test_a_thin_roster_s_game_plan_renormalizes_without_negatives_or_nans():
     assert out[0] / out[1] == pytest.approx((0.3 / 0.5) / (0.2 / 0.4))
     none = sim_script.plan_weights(weights, q, np.array([False, False, True]), fixed)
     assert not np.isnan(none).any() and (none[:2] == 0).all() and none[2] == 0.5
+
+
+def test_a_td_yards_correlation_outside_minus_one_to_one_is_refused(monkeypatch):
+    """A correlation set past 1 by sim_eval --set gets a clear error, not math's domain error mid-draw."""
+    monkeypatch.setattr(sim_parts, "params", lambda: {"game": {"td_yards_rho": 1.2}})
+    with pytest.raises(ValueError, match="td_yards_rho"):
+        sim_parts.td_yards_rho()
