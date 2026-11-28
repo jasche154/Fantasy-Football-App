@@ -30,6 +30,7 @@ from types import MappingProxyType
 
 import numpy as np
 
+from services import sim_script
 from services.sim_constants import fitted_json
 
 CLOSING_PATH = Path(__file__).with_name("sim_closing.json")
@@ -100,11 +101,10 @@ def near(shares: np.ndarray, spreads: np.ndarray, edge: float | None) -> np.ndar
 def score_td(side, m: dict, o, kind: str | None, yards: Mapping[str, float],
              rng: np.random.Generator) -> tuple[object, int, int]:
     """(offense, extra target, extra carry) with one TD credited: by a catch (`kind` "rec"), a run ("rush") or
-    either (None, overtime), to a player drawn by his expected TDs, never one who left the game hurt. A pass with
-    no receiver to credit goes to a rusher, and the reverse; with neither, nobody's line changes."""
-    left = side.exited
-    rec = m["rec_td"][:-1] * np.array([pid not in left for pid in side.receivers[:-1]], dtype=float)
-    rush = m["rush_td"][:-1] * np.array([pid not in left for pid in side.rushers[:-1]], dtype=float)
+    either (None, overtime), to a player drawn by his expected TDs x the share of his part he keeps in the window
+    (sim_script.window_tds: none for one who left before the cut). A pass with no receiver to credit goes to a
+    rusher, and the reverse; with neither, nobody's line changes."""
+    rec, rush = sim_script.window_tds(side, m)
     if kind == "rec" and rec.sum() <= 0 or kind == "rush" and rush.sum() <= 0:
         kind = None
     weights = np.concatenate([rec if kind != "rush" else 0 * rec, rush if kind != "rec" else 0 * rush])

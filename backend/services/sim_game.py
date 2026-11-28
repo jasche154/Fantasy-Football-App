@@ -89,7 +89,9 @@ class _Side:
     positions: Mapping[int, str] = field(default_factory=dict)
     snaps: Mapping[int, float] = field(default_factory=dict)
     fg_scale: float = 1.0               # field-goal tries x this (the centring factor, sim_centre)
-    exited: frozenset[int] = frozenset()   # players who leave the game hurt (no overtime score)
+    exited: frozenset[int] = frozenset()   # players who leave the game hurt (the backup kneels for a starter)
+    # each one's share of his halves' weight he keeps in the window, (targets, carries): sim_script.exit_parts
+    late: Mapping[int, tuple[float, float]] = field(default_factory=dict)
     # a two-team game's script (sim_centre sets them; sim_script): its expected margin, mean lead at half time and
     # closing-window Ending. None: no parts, the whole game's volume plays at the per-play rates (one team alone).
     margin: float = 0.0
@@ -98,6 +100,10 @@ class _Side:
     # (target, carry) weights before anyone left the game hurt, when an exit changed them: who is in the game plan
     # is decided on these (sim_parts.plan); None: the weights above
     whole: tuple[np.ndarray, np.ndarray] | None = None
+    # (target, carry) weights in a game's halves when an exit changed them (sim_script.exit_parts: he plays them
+    # until his share of the game runs out); sim_centre._scripted puts them in place. The weights above are the
+    # whole-game rule (his weight x his share), which a side without parts plays.
+    halves: tuple[np.ndarray, np.ndarray] | None = None
     # what the centring never changes, worked out once per scripted side (sim_script.structural; sim_centre._scripted)
     cache: dict | None = field(default=None, compare=False, repr=False)
 
@@ -156,12 +162,16 @@ def _side(world: World, team: str, opponent: str | None, out: Collection[int],
         _sides[("other", id(world), team)] = known
     other_targets, other_carries = known[1]
     from services import sim_script
+    parts = {pid: (sim_script.exit_parts(s, "targets"), sim_script.exit_parts(s, "carries")) for pid, s in exits.items()}
+    early_t = {pid: t[0] for pid, (t, _) in parts.items()}         # the halves' weight: he played s of the game
+    early_c = {pid: c[0] for pid, (_, c) in parts.items()}
     scale = sim_script.qb_share_scale()
     carry_w = _carry_weights(rushers, qb, other_carries, exits, scale)
     whole = _carry_weights(rushers, qb, other_carries, {}, scale) if exits else carry_w   # before any exit
+    early = _carry_weights(rushers, qb, other_carries, early_c, scale) if exits else carry_w
     if qb is not None and backup is not None and qb_share < 1.0:   # the backup finishes the game: its kneels
         rushers.append(backup)
-        carry_w, whole = np.insert(carry_w, -1, 0.0), np.insert(whole, -1, 0.0)
+        carry_w, whole, early = (np.insert(w, -1, 0.0) for w in (carry_w, whole, early))
     receiver_ids, rusher_ids = (*(p.player_id for p in receivers), OTHER), (*(p.player_id for p in rushers), OTHER)
     target_w = np.array([*_weights(receivers, "targets", exits), other_targets])
     before = (np.array([*_weights(receivers, "targets", {}), other_targets]), whole) if exits else None
@@ -186,7 +196,9 @@ def _side(world: World, team: str, opponent: str | None, out: Collection[int],
         kicker_share=exits.get(kicker.player_id, 1.0) if kicker else 1.0,
         dst=next((p.player_id for p in roster if p.position == "DST"), None),
         positions=positions, snaps=snaps, exited=frozenset(pid for pid, share in exits.items() if share < 1.0),
-        whole=before, cache={})
+        late={pid: tuple(_late(*part) for part in pair) for pid, pair in parts.items() if exits[pid] < 1.0},
+        whole=before, cache={},
+        halves=(np.array([*_weights(receivers, "targets", early_t), other_targets]), early) if exits else None)
 
 
 def _side_of(world: World, team: str, opponent: str | None, out: Collection[int]) -> _Side:
@@ -232,6 +244,11 @@ def _other(world: World, team: str, form) -> tuple[float, float]:
         targets += empty * _norm(position)["depth_targets"]
         carries += empty * _norm(position)["depth_carries"]
     return max(form.other_targets, targets), max(form.other_carries, carries)
+
+
+def _late(early: float, late: float) -> float:
+    """The share of his halves' weight a player who left keeps in the window (0 when he left before the cut)."""
+    return late / early if early > 0 else 0.0
 
 
 def _weights(group, attr: str, exits: Mapping[int, float]) -> list[float]:

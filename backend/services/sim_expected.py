@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from services import sim_script
 from services.replay_box import BoxLine
 from services.scoring import ScoringSettings
 from services.sim_game import (
@@ -97,12 +98,13 @@ def _expected_players(side: _Side, m: dict, scoring: ScoringSettings,
                     fumbles=line.get("fumbles", 0.0) + (m["carries"][i] - m["kneels"][i]) * side.fumble[i])
     if side.qb is not None:      # the sacks' lost fumbles, split as the draw splits them by the share each played
         sacked = m["sacks"] * params()["league"]["sack_fumble"]
+        early = 1.0 if side.backup is None or side.qb_share >= 1.0 else             sim_script.exit_parts(side.qb_share, "targets")[0]        # sacks come from the halves only
         line = lines.setdefault(side.qb, {})
         line.update(pass_yds=float(m["rec_yds"].sum()), pass_td=float(m["rec_td"].sum()), pass_int=m["ints"],
-                    fumbles=line.get("fumbles", 0.0) + sacked * side.qb_share)
-        if side.backup is not None and side.qb_share < 1.0:
+                    fumbles=line.get("fumbles", 0.0) + sacked * early)
+        if early < 1.0:
             line = lines.setdefault(side.backup, {})
-            line["fumbles"] = line.get("fumbles", 0.0) + sacked * (1.0 - side.qb_share)
+            line["fumbles"] = line.get("fumbles", 0.0) + sacked * (1.0 - early)
     if end is not None:
         from services.sim_closing_means import credit_means
         credit_means(lines, side, m, end)

@@ -14,7 +14,8 @@ side's volume against the league's): the leader runs and kneels, the trailer thr
 Kneels are the quarterback's who finishes the game (`kneeler`). The starter's belief carries count his kneels (the
 box does), so in a game in parts his other carries are his belief carries less his own expected kneels
 (`carry_weights`), at the yards and TDs per carry that keep his belief yards and TDs (`rushing`): his projection is
-the belief's. The window's plays never go to a player who left the game hurt (`window_shares`).
+the belief's. A player who left the game hurt plays the halves until his share of the game runs out, then the
+window (`exit_parts`, `window_shares`): one gone before the cut gets none of the window.
 
 Only plays before the cut score: their TD rates are divided by the halves' share of the game's volume (`before_cut`),
 so the game's mean touchdowns are what a whole game's volume at the per-play rates gives (the window's scoring is
@@ -56,6 +57,31 @@ def before_cut(stat: str) -> float:
     """The halves' share of a game's `stat` ("targets" or "carries")."""
     shares = stored()["shares"][stat]
     return float(shares[0] + shares[1])
+
+
+def exit_parts(s: float, stat: str) -> tuple[float, float]:
+    """(halves, window) factors on the weight of a player who plays share `s` of a game for `stat`: he plays the
+    halves until s runs out, then the window, so his mean is s of his whole-game work; one who left before the
+    cut gets no window play."""
+    bc = before_cut(stat)
+    return min(1.0, s / bc), max(0.0, (s - bc) / (1.0 - bc))
+
+
+def window_keep(side, group: str) -> np.ndarray | None:
+    """Per player of `group` ("receivers" / "rushers", OTHER last) the share of his plan weight he keeps in the
+    window (_Side.late: 1 for those who did not leave); None when nobody left."""
+    if not side.late:
+        return None
+    at = 0 if group == "receivers" else 1
+    return np.array([side.late[pid][at] if pid in side.late else 1.0 for pid in getattr(side, group)])
+
+
+def window_tds(side, m: Mapping) -> tuple[np.ndarray, np.ndarray]:
+    """The weights a window or overtime TD is credited by, receivers' and rushers' (OTHER left out): each player's
+    expected TDs (`m`, sim_game._side_means) x the share of his part he keeps in the window."""
+    rec, rush = m["rec_td"][:-1], m["rush_td"][:-1]
+    t, c = window_keep(side, "receivers"), window_keep(side, "rushers")
+    return (rec if t is None else rec * t[:-1]), (rush if c is None else rush * c[:-1])
 
 
 def scoring_share(side) -> tuple[float, float]:
@@ -271,32 +297,32 @@ def plan_inputs(receivers: tuple, target_w: np.ndarray, rushers: tuple, carry_w:
                       np.array([index.get(pid, -1) for pid in rushers]))
 
 
-def window_shares(shares: np.ndarray, ids: tuple, exited: frozenset) -> np.ndarray:
-    """`shares` without the players who left the game hurt (the window is the end of the game), renormalized."""
-    if not exited:
+def window_shares(shares: np.ndarray, keep: np.ndarray | None) -> np.ndarray:
+    """`shares` with each player who left hurt keeping `keep` of his (`window_keep`; none for one gone before the
+    cut, the window being the end of the game), renormalized."""
+    if keep is None:
         return shares
-    out = np.where([pid in exited for pid in ids], 0.0, shares)
+    out = shares * keep
     total = out.sum()
     return out / total if total > 0 else out
 
 
-def window_split(drawn: np.ndarray, mean: np.ndarray, ids: tuple, exited: frozenset) -> np.ndarray:
-    """One game's window shares: the drawn plan's (`drawn`) without the players who left hurt, their part shared out
-    by the side's mean window shares (`mean`: `window_shares` of the weights' shares). Linear in the drawn shares, so
-    its mean is `mean` exactly (renormalizing each drawn plan gave a back who sits out some plans' teammates up to
-    60% more window carries than the projection)."""
-    if not exited:
+def window_split(drawn: np.ndarray, mean: np.ndarray, keep: np.ndarray | None) -> np.ndarray:
+    """One game's window shares: the drawn plan's (`drawn`) with each player who left hurt keeping `keep` of his, the
+    rest shared out by the side's mean window shares (`mean`: `window_shares` of the weights' shares). Linear in the
+    drawn shares, so its mean is `mean` exactly (renormalizing each drawn plan gave a back who sits out some plans'
+    teammates up to 60% more window carries than the projection)."""
+    if keep is None:
         return drawn
-    gone = np.array([pid in exited for pid in ids])
-    return np.where(gone, 0.0, drawn) + drawn[gone].sum() * mean
+    return drawn * keep + (drawn * (1.0 - keep)).sum() * mean
 
 
 def shares(side) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """(target shares, carry shares, their window shares without the exited players) of the side's weights."""
+    """(target shares, carry shares, their window shares with each exited player's part) of the side's weights."""
     return structural(side, "shares", _shares_of)
 
 
 def _shares_of(side) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     weights = carry_weights(side)
     t, c = side.target_w / side.target_w.sum(), weights / weights.sum()
-    return t, c, window_shares(t, side.receivers, side.exited), window_shares(c, side.rushers, side.exited)
+    return t, c, window_shares(t, window_keep(side, "receivers")), window_shares(c, window_keep(side, "rushers"))

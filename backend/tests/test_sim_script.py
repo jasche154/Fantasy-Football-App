@@ -324,13 +324,18 @@ def test_the_windows_split_keeps_each_players_mean_share_when_the_one_who_left_h
     """Two drawn plans whose mean is the weights' shares, the lead back (gone hurt) holding 0.8 of one and 0.4 of the
     other and the third back out of the first: the others' window shares average the projection's (renormalizing
     each plan gave the second back 0.83 for 0.75)."""
-    ids, exited = (1, 2, 3), frozenset({1})
+    keep = np.array([0.0, 1.0, 1.0])                         # the lead back left before the cut
     plans = np.array([[0.8, 0.2, 0.0], [0.4, 0.4, 0.2]])
-    mean = sim_script.window_shares(plans.mean(axis=0), ids, exited)
-    split = np.array([sim_script.window_split(plan, mean, ids, exited) for plan in plans])
+    mean = sim_script.window_shares(plans.mean(axis=0), keep)
+    split = np.array([sim_script.window_split(plan, mean, keep) for plan in plans])
     assert split.sum(axis=1) == pytest.approx([1.0, 1.0]) and (split[:, 0] == 0).all()
     assert split.mean(axis=0) == pytest.approx(mean) and mean == pytest.approx([0.0, 0.75, 0.25])
-    assert sim_script.window_split(mean, mean, ids, frozenset()) is mean                 # nobody left: the plan's own
+    assert sim_script.window_split(mean, mean, None) is mean                             # nobody left: the plan's own
+    part = np.array([0.5, 1.0, 1.0])                         # one who left during the window keeps half of his
+    mean = sim_script.window_shares(plans.mean(axis=0), part)
+    split = np.array([sim_script.window_split(plan, mean, part) for plan in plans])
+    assert split.sum(axis=1) == pytest.approx([1.0, 1.0]) and split.mean(axis=0) == pytest.approx(mean)
+    assert mean[0] == pytest.approx(0.3 / 0.7)
 
 
 def test_with_players_leaving_hurt_every_players_projection_is_his_draws_mean():
@@ -414,3 +419,33 @@ def test_the_held_out_check_works_out_each_folds_no_show_floor_without_its_seaso
     got = sim_script_fit.participation(rows)["RB"]["check"]["held_out_loss"]
     assert got == held(lambda s: sim_script_fit._floor(a, a, seasons[seasons != s]))
     assert got != held(lambda s: sim_script_fit._floor(a, a, seasons))
+
+
+def test_a_player_who_leaves_hurt_gets_his_share_of_the_game_halves_then_window():
+    """He plays the halves until his share of the game runs out, then the window (sim_script.exit_parts): his mean
+    work is his share s of his healthy work, up to the others' weights renormalizing as on a whole game (one team
+    alone, no parts), never the 0.805 x s the halves alone gave; the draws agree, and a starting QB leaving at half
+    time throws about half the team's passing."""
+    w, target = world(), {"AAA": 21.0, "BBB": 20.0}
+
+    def ratio(name, s, stat, opponent="BBB", **kw):
+        p = pid("AAA", name)
+        got = lambda ex: getattr(sim_game.expected(w, "AAA", opponent, set(), HALF, exits=ex, **kw)[p].box, stat)  # noqa: E731
+        return got({p: s}) / got({})
+    for name, s, stat in (("WR", 0.3, "targets"), ("WR", 0.6, "targets"), ("RB", 0.5, "carries"), ("RB", 0.9, "carries")):
+        parts, whole = ratio(name, s, stat, target=target), ratio(name, s, stat, opponent=None)
+        assert s - 0.01 <= parts <= whole + 0.01 and parts > 0.9 * whole, (name, s, parts, whole)
+    assert sim_script.exit_parts(0.9, "carries")[1] > 0 == sim_script.exit_parts(0.5, "carries")[1]
+    exits = {pid("AAA", "WR"): 0.6, pid("AAA", "RB"): 0.9, pid("AAA", "QB"): 0.5}
+    projected = sim_game.expected(w, "AAA", "BBB", set(), HALF, exits=exits, target=target)
+    sides = sim_centre.centred({"AAA": sim_game._side(w, "AAA", "BBB", set(), exits),
+                                "BBB": sim_game._side(w, "BBB", "AAA", set(), {})}, target)
+    rng, n, sums = np.random.default_rng(8), 2500, np.zeros(3)
+    for _ in range(n):
+        players = sim_draw.draw_game((sides["AAA"], sides["BBB"]), rng, HALF).players
+        sums += [players[pid("AAA", "WR")].box.targets, players[pid("AAA", "RB")].box.carries,
+                 players[pid("AAA", "QB")].box.pass_yds]
+    drawn = sums / n
+    assert drawn[0] == pytest.approx(projected[pid("AAA", "WR")].box.targets, rel=0.04)
+    assert drawn[1] == pytest.approx(projected[pid("AAA", "RB")].box.carries, rel=0.04)
+    assert drawn[2] / projected[pid("AAA", "QB")].box.pass_yds == pytest.approx(0.5, abs=0.04)   # the team's passing

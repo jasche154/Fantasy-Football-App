@@ -409,15 +409,16 @@ def before_cut(sides, fg_tries: list[float], rng: np.random.Generator) -> tuple[
 def window(sides, offense: list[_Offense], events: list, plans: list[Plan], eff: np.ndarray, busy: np.ndarray,
            n_targets: np.ndarray, n_carries: np.ndarray, rng: np.random.Generator) -> tuple[list, np.ndarray, np.ndarray]:
     """Each side's window plays besides its scoring ones (`events`: the real ending sim_closing.close gave each
-    side), added to its offense and its team counts: shared by its game plan without the players who left the game
-    hurt (the window is the end of it), its kneels the finishing QB's."""
+    side), added to its offense and its team counts: shared by its game plan, each player who left the game hurt
+    keeping only his part of the window (sim_script.window_keep: none if he left before the cut), its kneels the
+    finishing QB's."""
     offense, n_targets, n_carries = list(offense), n_targets.copy(), n_carries.copy()
     for i, side in enumerate(sides):
         targets, carries, kneels = sim_script.window_plays(side, events[i], rng)
         kneels = kneels if sim_script.kneeler(side) in side.rushers else 0
         _, _, t_win, c_win = sim_script.shares(side)
-        late = Plan(sim_script.window_split(plans[i].targets, t_win, side.receivers, side.exited),
-                    sim_script.window_split(plans[i].carries, c_win, side.rushers, side.exited))
+        late = Plan(sim_script.window_split(plans[i].targets, t_win, sim_script.window_keep(side, "receivers")),
+                    sim_script.window_split(plans[i].carries, c_win, sim_script.window_keep(side, "rushers")))
         targets = targets if late.targets.sum() > 0 else 0
         carries = carries if late.carries.sum() > 0 else 0
         offense[i] = offense[i] + plays(side, late, targets, carries, float(eff[i]), rng, kneels=kneels,

@@ -175,9 +175,8 @@ def credit_means(lines: dict[int, dict[str, float]], side: "_Side", m: dict, end
     kind, by expected TDs among the players the draw credits, with their catches, targets and yards; an overtime TD
     by catch or run alike, by the same weights; the passer's line follows his receivers'."""
     per, s = window_events(end.lead, end.sd, end.edge), sim_closing.stored()
-    left = side.exited                                   # never one who left the game hurt, as score_td
-    rec = m["rec_td"][:-1] * np.array([pid not in left for pid in side.receivers[:-1]], dtype=float)
-    rush = m["rush_td"][:-1] * np.array([pid not in left for pid in side.rushers[:-1]], dtype=float)
+    from services import sim_script
+    rec, rush = sim_script.window_tds(side, m)           # as score_td weighs them
     ot_td = end.ot_wins * (1.0 - float(s["ot"]["field_goal"]))
     either = rec.sum() + rush.sum()
     ot_rec = ot_td * rec.sum() / either if either > 0 else 0.0

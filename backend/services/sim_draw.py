@@ -43,7 +43,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from services import kdst_model, sim_closing, sim_parts
+from services import kdst_model, sim_closing, sim_parts, sim_script
 from services.replay_box import BoxLine
 from services.replay_pool import Usage
 from services.scoring import ScoringSettings
@@ -79,28 +79,35 @@ def _receiver_lines(side, o: _Offense, n_targets: int) -> dict[int, dict]:
     return lines
 
 
-def _passers(side, o: _Offense, rng: np.random.Generator, regulation: _Offense | None = None) -> dict[int, dict]:
-    """The QB line(s): the receivers' sums, split with the backup when the starter left hurt. Only `regulation`'s
-    catches (the offense before the closing window and overtime, else `o`'s) are split: a later catch is the
-    backup's, as the starter had left. Attempts are each passer's completions + interceptions + his share of the
-    other incomplete attempts (drawn like his catches, from regulation's: a later TD catch adds an attempt and a
-    catch), so attempts >= completions + interceptions for each; sacks are not attempts."""
+def _passers(side, o: _Offense, rng: np.random.Generator, regulation: _Offense | None = None,
+             windowed: _Offense | None = None) -> dict[int, dict]:
+    """The QB line(s): the receivers' sums, split with the backup when the starter left hurt. A starter who played
+    share s of the game threw sim_script.exit_parts(s) of `regulation`'s passes (the halves, else `o`'s) and of the
+    window's (`windowed` less `regulation`: none when he left before the cut); the rest, overtime's too, are the
+    backup's. Attempts are each passer's completions + interceptions + his share of the other incomplete attempts
+    (drawn like his catches: a later TD catch adds an attempt and a catch), so attempts >= completions +
+    interceptions for each; sacks are not attempts."""
     if side.qb is None:
         return {}
     catches, yards, tds = o.catches, o.rec_yds, o.rec_td
+    early = 1.0
     if side.backup is None or side.qb_share >= 1.0:
         mine = (catches, yards, tds)
         shares = {side.qb: 1.0}
         missed = o.attempts - int(catches.sum()) - o.ints
     else:
         base = regulation or o
-        kept = rng.binomial(base.catches, side.qb_share)
-        kept_yards = np.where(base.catches > 0, np.round(base.rec_yds * kept / np.maximum(base.catches, 1)), 0).astype(int)
-        kept_tds = rng.hypergeometric(base.rec_td, base.catches - base.rec_td, kept)   # his TDs among the catches he threw
-        mine = (kept, kept_yards, kept_tds)
+        early, late = sim_script.exit_parts(side.qb_share, "targets")
+        mine, missed = _thrown(base.catches, base.rec_yds, base.rec_td, base.attempts - int(base.catches.sum()) - base.ints,
+                               early, rng)
+        if windowed is not None and windowed is not base:
+            more, also = _thrown(windowed.catches - base.catches, windowed.rec_yds - base.rec_yds,
+                                 windowed.rec_td - base.rec_td, windowed.attempts - base.attempts
+                                 - int(windowed.catches.sum() - base.catches.sum()), late, rng)
+            mine, missed = tuple(a + b for a, b in zip(mine, more)), missed + also
         shares = {side.qb: side.qb_share, side.backup: 1.0 - side.qb_share}
-        missed = int(rng.binomial(base.attempts - int(base.catches.sum()) - base.ints, side.qb_share))
-    ints = int(round(o.ints * shares[side.qb]))
+    ints = int(round(o.ints * early))                     # interceptions and sacks come from the halves only
+    sacked = int(round(o.sack_fumbles * early))
     out = {}
     for pid, share in shares.items():
         starter = pid == side.qb
@@ -108,9 +115,18 @@ def _passers(side, o: _Offense, rng: np.random.Generator, regulation: _Offense |
         att = int(c.sum()) + ints + missed if starter else o.attempts - out[side.qb]["pass_att"]   # backup: the rest
         out[pid] = {"pass_cmp": int(c.sum()), "pass_att": att, "pass_yds": int(y.sum()), "pass_td": int(t.sum()),
                     "pass_int": ints if starter else o.ints - ints,
-                    "fumbles": int(round(o.sack_fumbles * share)) if starter
-                    else o.sack_fumbles - int(round(o.sack_fumbles * share)), "snap": 100.0 * share}
+                    "fumbles": sacked if starter else o.sack_fumbles - sacked, "snap": 100.0 * share}
     return out
+
+
+def _thrown(catches: np.ndarray, yards: np.ndarray, tds: np.ndarray, incomplete: int, q: float,
+            rng: np.random.Generator) -> tuple[tuple[np.ndarray, np.ndarray, np.ndarray], int]:
+    """((catches, yards, TDs) per receiver, other incomplete attempts) the starter threw of these, each with
+    chance `q`: his yards in proportion to his catches, his TDs among the catches he threw."""
+    kept = rng.binomial(catches, q)
+    kept_yards = np.where(catches > 0, np.round(yards * kept / np.maximum(catches, 1)), 0).astype(int)
+    kept_tds = rng.hypergeometric(tds, catches - tds, kept)
+    return (kept, kept_yards, kept_tds), int(rng.binomial(max(0, incomplete), q))
 
 
 def _scripted(sides: Sequence) -> Sequence:
@@ -159,6 +175,7 @@ def draw_game(sides: Sequence, rng: np.random.Generator, scoring: ScoringSetting
     offense, scored, points, returns, safeties, n_targets, n_carries = sim_closing.close(
         sides, offense, scored, cut, returns, list(safeties), n_targets, n_carries, rng, means, expect, events)
     offense, n_targets, n_carries = sim_parts.window(sides, offense, events, plans, eff, busy, n_targets, n_carries, rng)
+    windowed = offense
     recovered = [offense[1 - i].fumbles + extra[i] for i in range(2)]     # the window's fumbles count for the D/ST
     if points[0] == points[1]:
         offense, scored, points, n_targets, n_carries = _overtime(sides, offense, scored, points, n_targets,
@@ -167,7 +184,7 @@ def draw_game(sides: Sequence, rng: np.random.Generator, scoring: ScoringSetting
     for i, side in enumerate(sides):
         o, opp = offense[i], offense[1 - i]
         lines = _receiver_lines(side, o, int(n_targets[i]))
-        for pid, passing in _passers(side, o, rng, regulation[i]).items():
+        for pid, passing in _passers(side, o, rng, regulation[i], windowed[i]).items():
             line = lines.setdefault(pid, {"share": 0.0})
             line.update({k: v for k, v in passing.items() if k != "fumbles"})
             line["fumbles"] = line.get("fumbles", 0) + passing["fumbles"]

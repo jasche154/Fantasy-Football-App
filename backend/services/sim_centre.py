@@ -138,7 +138,8 @@ def _scripted(side: "_Side", margin: float, end: "Ending") -> "_Side":
     half's share of its expected lead at the cut (`end.lead`), its window `end`. Its halves' volumes follow the line and the score, its window's a real ending's (a favourite runs more
     and throws a little less, as real ones do against the Vegas line)."""
     from services import sim_script
-    return replace(side, margin=margin, half_lead=sim_script.half_share() * end.lead, end=end, cache={})
+    weights = {} if side.halves is None else {"target_w": side.halves[0], "carry_w": side.halves[1]}
+    return replace(side, margin=margin, half_lead=sim_script.half_share() * end.lead, end=end, cache={}, **weights)
 
 
 def _wanted(sides: dict, means: dict, against: dict, target, shift, factors) -> dict[str, float]:
