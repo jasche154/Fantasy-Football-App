@@ -1690,7 +1690,11 @@ read the belief, so, as in a real season, the public learns the truth only from 
   targets on held-out seasons and worse for carries, 10 and 14 worse for both, so one linear slope), both halves
   also per point of the pregame line (targets +0.43% / +0.57%, carries +0.22% / +0.40%). The window's plays are the
   real ending's own (sim_closing.json's endings carry their targets, carries and kneel-downs, scaled by the team's
-  volume): a leader runs out the clock and kneels, a trailer throws; nobody who left the game hurt gets any of them.
+  volume): a leader runs out the clock and kneels, a trailer throws. A player who leaves the game hurt plays the halves until
+  his share of the game runs out, then the window: one gone at half time gets none of the window, one hurt in the
+  last minutes his part of it, so his mean work is his share of the game (a receiver leaving at 0.6 had 0.54 of his
+  healthy targets with no window play, now 0.64, the others' weights renormalizing as on a whole game; a starting
+  QB leaving at half time throws 0.47 of the team's passing, was 0.38).
   Only the halves' plays score (their TD rates, interceptions and sacks per play divided by the halves' share; the
   window's scoring is its real ending's), so team points stay on the line, and every projection is the draw's mean:
   the second half's response uses the projected lead at half time plus how far each side's first half beat its own
@@ -1745,8 +1749,10 @@ read the belief, so, as in a real season, the public learns the truth only from 
   without it his share was 0.127 against a real 0.153). His **kneel-downs** are his carries, as the box score
   counts them (the window's real endings carry 0.61 of the 0.77 a team-game; the 0.16 before half time stay inside
   his belief carries), the finishing QB's when the starter left hurt, and his other carries are his belief carries
-  less his own expected kneels, at the yards and TDs per carry that keep his belief's: his projection is his
-  belief's. QB carries a team-game, belief / projected / drawn / real (2023-2025, 2 seeds): mid (weeks 12+) 3.99 /
+  less the kneels a QB averages (0.61), at the yards and TDs per carry that keep his belief's, the same whatever the
+  line; this game's kneels come on top, so a big favourite's QB kneels more that day and over a season his
+  projection is his belief's (taking out this game's kneels instead squeezed a pocket passer's few other carries
+  into ones worth 20-60 yards as a big favourite; his other carries are at least half his belief carries). QB carries a team-game, belief / projected / drawn / real (2023-2025, 2 seeds): mid (weeks 12+) 3.99 /
   4.04 / 3.95 / 4.03; full 3.40 / 3.38 / 3.38 / 4.20 (the August belief's last-season weights); rushing yards 18.0 /
   17.8 / 17.9 / 17.7 and 15.9 / 15.6 / 15.9 / 18.5. The window's plays split linearly: a player who left hurt gives
   his part of the drawn plan to the others by their mean window shares, so with a QB, lead back and lead receiver

@@ -6,7 +6,10 @@ import json
 import numpy as np
 import pytest
 
-from services import sim_centre, sim_closing_fit, sim_draw, sim_game, sim_metrics_usage, sim_parts, sim_script, sim_script_fit
+from services import (
+    sim_centre, sim_closing_fit, sim_draw, sim_game, sim_metrics_usage, sim_parts, sim_script, sim_script_fit,
+    sim_script_segments,
+)
 from tests import replay_fakes as fakes, sim_draws
 from tests.test_sim_game import HALF, pid, team_of, world
 
@@ -230,10 +233,10 @@ def test_a_season_cached_in_another_column_layout_is_downloaded_again(monkeypatc
     old = {**good, "season": 2023, "AAA": [[0] * (len(sim_script_fit.COUNTS) - 1)] * 3}
     path = tmp_path / "script_segments.json"
     path.write_text(json.dumps({"2023": [old], "2024": [good]}), encoding="utf-8")
-    monkeypatch.setattr(sim_script_fit, "SEGMENTS_CACHE", path)
+    monkeypatch.setattr(sim_script_segments, "SEGMENTS_CACHE", path)
     fetched = []
-    monkeypatch.setattr(sim_script_fit, "_download", lambda season: fetched.append(season) or [{**good, "season": season}])
-    with caplog.at_level("WARNING", logger="services.sim_script_fit"):
+    monkeypatch.setattr(sim_script_segments, "_download", lambda season: fetched.append(season) or [{**good, "season": season}])
+    with caplog.at_level("WARNING", logger="services.sim_script_segments"):
         games = sim_script_fit.segments([2023, 2024])
     assert fetched == [2023] and [g["season"] for g in games] == [2023, 2024] and "column layout" in caplog.text
     assert sim_script_fit.segments([2024], refresh=True) and fetched == [2023, 2024]
@@ -242,7 +245,7 @@ def test_a_season_cached_in_another_column_layout_is_downloaded_again(monkeypatc
 
 def test_a_failed_write_leaves_no_temp_file(monkeypatch, tmp_path):
     path = tmp_path / "sim_script.json"
-    monkeypatch.setattr(sim_script_fit.os, "replace", lambda a, b: (_ for _ in ()).throw(OSError("disk full")))
+    monkeypatch.setattr(sim_script_segments.os, "replace", lambda a, b: (_ for _ in ()).throw(OSError("disk full")))
     with pytest.raises(OSError):
         sim_script_fit.atomic_write(path, "{}")
     assert list(tmp_path.iterdir()) == []
@@ -390,7 +393,7 @@ def test_writing_sim_script_json_is_atomic(monkeypatch, tmp_path):
     path = tmp_path / "sim_script.json"
     path.write_text("old", encoding="utf-8")
     monkeypatch.setattr(sim_script_fit, "SCRIPT_PATH", path)
-    monkeypatch.setattr(sim_script_fit.os, "replace", lambda a, b: (_ for _ in ()).throw(OSError("locked")))
+    monkeypatch.setattr(sim_script_segments.os, "replace", lambda a, b: (_ for _ in ()).throw(OSError("locked")))
     with pytest.raises(OSError):
         sim_script_fit.write({"shares": {}})
     assert path.read_text(encoding="utf-8") == "old" and list(tmp_path.iterdir()) == [path]
@@ -506,6 +509,77 @@ def test_a_thin_roster_s_game_plan_renormalizes_without_negatives_or_nans():
 
 def test_a_td_yards_correlation_outside_minus_one_to_one_is_refused(monkeypatch):
     """A correlation set past 1 by sim_eval --set gets a clear error, not math's domain error mid-draw."""
-    monkeypatch.setattr(sim_parts, "params", lambda: {"game": {"td_yards_rho": 1.2}})
+    from services import sim_play_draws
+    monkeypatch.setattr(sim_play_draws, "params", lambda: {"game": {"td_yards_rho": 1.2}})
     with pytest.raises(ValueError, match="td_yards_rho"):
         sim_parts.td_yards_rho()
+
+
+def _segment(season: int, week: int, home: str, away: str, spread: float, parts: dict) -> dict:
+    """A cached segment game: parts[team] = [(margin, targets, carries)] x 3."""
+    def row(margin, targets, carries):
+        c = dict.fromkeys(sim_script_fit.COUNTS, 0.0)
+        c.update(margin=margin, targets=targets, carries=carries)
+        return [c[k] for k in sim_script_fit.COUNTS]
+    return {"season": season, "week": week, "home": home, "away": away, "spread": spread,
+            **{team: [row(*p) for p in rows] for team, rows in parts.items()}}
+
+
+def test_the_halves_fit_recovers_known_slopes_within_team_seasons():
+    """Synthetic games whose halves follow known slopes per point of the spread and of the half-time margin (each
+    team-season balanced, so its mean is the base): `halves` gives them back; a team-season with no volume at all
+    reads as no change (no NaN)."""
+    games, week = [], 0
+    for season in (2020, 2021, 2022):
+        for s in (-6.0, -3.0, 0.0, 3.0, 6.0):
+            for m in (-7.0, 0.0, 7.0):
+                week += 1
+                parts = {}
+                for team, sign in (("AAA", 1.0), ("BBB", -1.0)):
+                    sp, mg = sign * s, sign * m
+                    parts[team] = [(0.0, 30 * (1 - 0.002 * sp), 15 * (1 + 0.004 * sp)),
+                                   (mg, 20 * (1 + 0.005 * sp - 0.01 * mg), 10 * (1 + 0.003 * sp + 0.006 * mg)),
+                                   (mg, 6.0, 5.0)]
+                games.append(_segment(season, week, "AAA", "BBB", s, parts))
+        games.append(_segment(season, week + 1, "YYY", "ZZZ", 0.0,
+                              {t: [(0.0, 0.0, 0.0)] * 3 for t in ("YYY", "ZZZ")}))
+    out = sim_script_fit.halves(games)
+    assert out["first_half"] == pytest.approx({"targets": -0.002, "carries": 0.004}, abs=1e-5)
+    assert out["second_half"]["targets"] == pytest.approx({"spread": 0.005, "margin": -0.01}, abs=1e-5)
+    assert out["second_half"]["carries"] == pytest.approx({"spread": 0.003, "margin": 0.006}, abs=1e-5)
+    assert not any(np.isnan(v) for stat in out["check"].values() for v in stat.values())
+    assert sum(out["shares"]["targets"]) == pytest.approx(1.0, abs=1e-3)
+
+
+def test_the_qb_share_groups_and_held_out_check_use_their_own_rows():
+    """Each group's factor is its real carries over its share x team carries; the held-out check fits each fold's
+    factor without its season (seasons with different ratios, so a single factor for every fold would differ)."""
+    rows = []
+    for season, ratio in ((2020, 1.0), (2021, 1.5), (2022, 2.0)):
+        for share, dressed in ((0.05, 2.0), (0.10, 3.0), (0.20, 4.0)):
+            rows.append((season, share, ratio * share * 25.0 + (0.5 if dressed > 3 else 0.0), 25.0, dressed))
+    a = np.array(rows)
+    season, share, qb, team, dressed = a.T
+
+    def factor(k):
+        return qb[k].sum() / (share[k] * team[k]).sum()
+    got = sim_script_fit.qb_share(rows)
+    assert got["groups"]["share small"] == pytest.approx(factor(share < 0.07), abs=1e-4)
+    assert got["groups"]["share large"] == pytest.approx(factor(share > 0.15), abs=1e-4)
+    assert got["groups"]["dressed heavy"] == pytest.approx(factor(dressed > 3.0), abs=1e-4)
+    held = sum(np.sum((qb[season == s] - factor(season != s) * (share * team)[season == s]) ** 2) for s in (2020, 2021, 2022))
+    assert got["check"]["held_out_sse"] == pytest.approx(held / len(a), abs=1e-3)
+    pooled = sum(np.sum((qb[season == s] - factor(season > 0) * (share * team)[season == s]) ** 2) for s in (2020, 2021, 2022))
+    assert abs(held - pooled) / len(a) > 0.01
+
+
+def test_a_side_put_in_its_week_works_out_its_volumes_again():
+    """sim_centre._in_week changes a side's volumes (the week's pass / run mix), so it gets a fresh structural cache:
+    sharing the unweeked side's would keep the old volumes."""
+    from services import sim_calendar
+    week = next(w for w in range(1, 19) if abs(sim_calendar.factors(w)[0] - 1.0) > 0.01)
+    side = sim_game._side(world(), "AAA", "BBB", set(), {})
+    plain = float(sim_game._side_means(side)["targets"].sum())            # fills side.cache
+    weeked = sim_centre._in_week(side, week)
+    assert weeked.cache is not side.cache
+    assert float(sim_game._side_means(weeked)["targets"].sum()) == pytest.approx(plain * sim_calendar.factors(week)[0])
