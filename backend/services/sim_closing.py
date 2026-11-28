@@ -38,9 +38,9 @@ TD_POINTS = 6
 SAFETY_POINTS = 2
 EDGE_WIDTH = 4.0                 # points: the spread kernel's sd, set by hand. Whole seasons: the cut lead follows
                                  # the line 1.08 a point (real 0.99, 1.22 without the kernel). On the stored table
-                                 # it gives about two thirds of the real within-margin slope (0.13 of 0.20); a
-                                 # narrower one leaves big lines too few endings (under 5 effective games in 12%
-                                 # of draws at a 17-point line already)
+                                 # it gives about two thirds of the real within-margin slope; a narrower one
+                                 # leaves big lines too few endings (under 5 effective games in 12% of draws at
+                                 # a 17-point line already)
 BANDS = ("0_39", "40_49", "50")
 SECTIONS = ("window", "events", "table", "td_yards", "ot", "line_script", "cut_var")
 

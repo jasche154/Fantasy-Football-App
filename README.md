@@ -1606,7 +1606,7 @@ read the belief, so, as in a real season, the public learns the truth only from 
   game's ending is drawn from the real games (2018-2025 play-by-play, `sim_closing_fit`, cached in
   `backend/data/cache/scoring_plays.json`) that stood at the same margin then, weighted toward those whose pregame
   spread was near the side's expected margin (a Gaussian kernel of 4 points, `sim_closing.near`, set by hand: at the same cut
-  margin a real favourite gains 0.21 points in the window per point of the spread; on the stored endings the kernel gives about two thirds of that, and a narrower one leaves a 17-point line under 5 real endings to draw from more than one game in eight), the trailing team's scoring going
+  margin a real favourite gains 0.21 points in the window per point of the spread; on the stored endings the kernel gives about two thirds of that, and at this width a 17-point line already draws from under 5 real endings one game in eight), the trailing team's scoring going
   to the trailing side and the leader's to the leader. So a tied or close game is decided by a field goal as
   often as a real one, a team down 4-8 chases a touchdown and a big lead is run out: real margins land on exactly
   3 or 7 far more often than two teams scoring on their own would (pairing each real team's score with another
@@ -1760,7 +1760,7 @@ read the belief, so, as in a real season, the public learns the truth only from 
   team losing big still runs about 1.2 times more than a real one (real teams that fall behind also run fewer plays:
   the draw's plays do not depend on how its drives go); full mode's team carries spread 6.7 against 7.6 and its
   corr(carries, targets) is -0.22 against -0.40 (simulated teams' volumes vary less game to game); players with only
-  1-2 targets 2.9 / 2.8 against 3.2; full mode's QB carries 0.8 under real (3.4 against 4.2: the August belief); full mode's carries per point of the line 0.71 against 0.88 (the halves' slopes are fitted on 2018-2025, above); team scores spread 10.3 against 10.1 / 9.9 and shutouts are 1.6% / 1.4% of team-games against 1.4% / 1.1% (field goals follow both a half's TDs and its yards); D/ST projections run 0.5-0.8 points under the draws' mean (older than the game in parts; TDs with yards add about 0.17 through the extra shutouts); a season takes about 15% longer to simulate (three play draws a side a game for one); a starting QB throws
+  1-2 targets 2.9 / 2.8 against 3.2; full mode's QB carries 0.8 under real (3.4 against 4.2: the August belief); full mode's carries per point of the line 0.71 against 0.88 (the halves' slopes are fitted on 2018-2025, above); team scores spread 10.3 against 10.1 / 9.9 and shutouts are 1.6% / 1.4% of team-games against 1.4% / 1.1% (field goals follow both a half's TDs and its yards); D/ST projections run 0.3-0.8 points under the draws' mean (0.6 and 0.3 at 15-13, 0.8 for a 34-10 favourite: the gap above, older than the game in parts; TDs with yards add about 0.17 through the extra shutouts); a season takes about 15% longer to simulate (three play draws a side a game for one); a starting QB throws
   about 1 attempt a start more than a real one (32.6 / 33.3 against 31.8 / 32.2), as real starters share late
   passes in blowouts with their backups.
 - **Injuries** come from what really happened to fantasy-relevant players in 2018-2025
