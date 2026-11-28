@@ -474,3 +474,31 @@ def test_a_pocket_quarterbacks_carries_keep_their_rate_as_a_big_favourite():
         favourite, base = rate(carries, {"AAA": 31.0, "BBB": 14.0})
         assert favourite / base == pytest.approx(even / even_base, rel=0.15), carries     # the floor binds at one only
         assert 0 < favourite <= 2 * base - sim_script.kneel_yards() + 1e-9, carries
+
+
+def test_a_side_with_only_its_quarterback_and_the_other_bucket_draws_a_game():
+    """A thin pool (a new season's ADP players only) can leave a team no back, receiver or tight end: its game plan
+    has nobody who may sit out, and the game is drawn (the "other" bucket takes the work)."""
+    from types import MappingProxyType
+
+    from services.sim_world import World
+    full = world()
+    w = World(MappingProxyType({p: x for p, x in full.players.items()
+                                if team_of(p) == "BBB" or x.position not in ("RB", "WR", "TE")}), full.teams)
+    sides = sim_centre.centred({"AAA": sim_game._side(w, "AAA", "BBB", set(), {}),
+                                "BBB": sim_game._side(w, "BBB", "AAA", set(), {})}, {"AAA": 17.0, "BBB": 24.0})
+    assert sim_parts.plan_inputs(sides["AAA"]).q.size == 0
+    result = sim_draw.draw_game((sides["AAA"], sides["BBB"]), np.random.default_rng(1), HALF)
+    assert result.points["AAA"] >= 0 and pid("AAA", "QB") in result.players
+
+
+def test_a_thin_roster_s_game_plan_renormalizes_without_negatives_or_nans():
+    """plan_weights' thin-roster branch: no always-in player and the drawn players outweigh the room they share, so
+    the non-fixed weights are scaled to that room; with nobody drawn in, nothing is NaN; fixed entries unchanged."""
+    weights = np.array([0.3, 0.2, 0.5])
+    q, fixed = np.array([0.5, 0.4, 1.0]), np.array([False, False, True])
+    out = sim_script.plan_weights(weights, q, np.array([True, True, True]), fixed)
+    assert out[:2].sum() == pytest.approx(0.5) and (out >= 0).all() and out[2] == 0.5
+    assert out[0] / out[1] == pytest.approx((0.3 / 0.5) / (0.2 / 0.4))
+    none = sim_script.plan_weights(weights, q, np.array([False, False, True]), fixed)
+    assert not np.isnan(none).any() and (none[:2] == 0).all() and none[2] == 0.5

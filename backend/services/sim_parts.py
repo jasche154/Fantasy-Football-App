@@ -229,6 +229,8 @@ def plan_inputs(side) -> "sim_script.PlanInputs":
 
 
 def _planned(weights: np.ndarray, index: np.ndarray, q: np.ndarray, drawn: np.ndarray) -> np.ndarray:
+    if not len(q):                                         # no skill player but QBs (a thin pool): all keep theirs
+        return np.asarray(weights, dtype=float)
     keep = index < 0                                       # OTHER and the QBs keep theirs
     at = np.where(keep, 0, index)
     return sim_script.plan_weights(weights, np.where(keep, 1.0, q[at]), np.where(keep, True, drawn[at]), keep)
