@@ -53,7 +53,7 @@ def test_a_trailer_scores_more_in_the_window_than_a_leader_and_close_games_tie_m
     assert window(-10, 11.0) > window(0, 11.0) > window(10, 11.0) > 0
     tie = sim_closing_means.tie_chance
     assert tie(0, 8.0) > tie(0, 11.0) > tie(7, 11.0) > tie(20, 11.0) > 0
-    assert tie(3, 11.0) == tie(-3, 11.0)
+    assert tie(3, 11.0) == pytest.approx(tie(-3, 11.0), rel=1e-12)      # the two sums add in another order
     assert sim_closing_means.cut_sd(7.0, 7.0) < sim_closing_means.cut_sd(18.0, 18.0) < sim_closing_means.cut_sd(28.0, 28.0)
     assert sim_closing_means.cut_sd(32.0, 4.0) < sim_closing_means.cut_sd(18.0, 18.0)          # a lopsided game spreads less
 
