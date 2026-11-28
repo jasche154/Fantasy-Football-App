@@ -12,9 +12,10 @@ mean. The window's plays are a real game's ending (sim_closing.json's table, the
 side's volume against the league's): the leader runs and kneels, the trailer throws.
 
 Kneels are the quarterback's who finishes the game (`kneeler`). The starter's belief carries count his kneels (the
-box does), so in a game in parts his other carries are his belief carries less his own expected kneels
-(`carry_weights`), at the yards and TDs per carry that keep his belief yards and TDs (`rushing`): his projection is
-the belief's. A player who left the game hurt plays the halves until his share of the game runs out, then the
+box does), so in a game in parts his other carries are his belief carries less the kneels a QB averages
+(`carry_weights`, `_qb_carries`; at least half his belief carries), at the yards and TDs per carry that keep his
+belief yards and TDs (`rushing`), the same whatever the line; this game's kneels come on top, so over a season his
+projection is the belief's and a big favourite's QB kneels more that day. A player who left the game hurt plays the halves until his share of the game runs out, then the
 window (`exit_parts`, `window_shares`): one gone before the cut gets none of the window.
 
 Only plays before the cut score: their TD rates are divided by the halves' share of the game's volume (`before_cut`),
@@ -143,16 +144,28 @@ def kneeler(side) -> int | None:
     return side.backup if side.qb in side.exited and side.backup is not None else side.qb
 
 
+QB_OTHER_FLOOR = 0.5     # a QB's carries besides kneels are at least this share of his belief carries
+
+
 def _qb_carries(side) -> tuple[int, float, float, float]:
-    """(his index among the rushers, his belief carries in the game, his own expected kneels, his other carries)
-    for the starting QB of a side in parts."""
+    """(his index among the rushers, his belief carries in the game, this game's kneels of his, his other carries)
+    for the starting QB of a side in parts. His belief carries hold the kneels a QB averages (sim_script.json's
+    `window_kneels`), not this game's, so his other carries and their per-carry rates do not move with the line: a
+    big favourite's QB just kneels more that day, as a real one does. A QB whose belief carries barely cover those
+    kneels keeps half of them as other carries (`QB_OTHER_FLOOR`), so no carry is worth tens of yards."""
     at = side.rushers.index(side.qb)
     share = float(side.carry_w[at] / side.carry_w.sum())
     plays = parts(side)[:, 1].sum()
     _, window, kneels = window_means(side)
     own = kneels if kneeler(side) == side.qb else 0.0
-    team = plays + window + kneels
-    return at, share * team, own, max(0.0, share * team - own)
+    usual = average_kneels()
+    belief = share * (plays + window + usual)
+    return at, belief, own, max(belief - usual, QB_OTHER_FLOOR * belief)
+
+
+def average_kneels() -> float:
+    """The window's kneel-downs a team-game averages (real endings, 2018-2025), inside every QB's belief carries."""
+    return float(stored()["league"]["window_kneels"])
 
 
 def structural(side, name: str, work):
@@ -188,15 +201,16 @@ def _carry_weights(side) -> np.ndarray:
 
 def rushing(side) -> tuple[np.ndarray, np.ndarray]:
     """(yards per carry, TDs per carry) of the side's rushers on carries that are not kneels: in a game in parts the
-    starting QB's are the ones that keep his belief yards and TDs once his kneels (sim_script.json's `kneel_yards`
-    each, never a TD) are taken out; else the side's rates."""
+    starting QB's are the ones that keep his belief yards and TDs once the kneels his belief holds (sim_script.json's
+    `kneel_yards` each, never a TD; `_qb_carries`) are taken out, the same whatever the line; else the side's rates."""
     if side.end is None or side.qb is None:
         return side.ypr, side.rush_td
     at, belief, own, other = structural(side, "qb", _qb_carries)
     if other <= 0:
         return side.ypr, side.rush_td
     ypr, td = side.ypr.copy(), side.rush_td.copy()
-    ypr[at] = (belief * side.ypr[at] - own * kneel_yards()) / other
+    held = belief - other                                 # the kneels his belief carries hold (the average, or less)
+    ypr[at] = (belief * side.ypr[at] - held * kneel_yards()) / other
     td[at] = belief * side.rush_td[at] / other
     return ypr, td
 

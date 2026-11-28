@@ -198,27 +198,28 @@ def test_projections_read_nothing_the_draws_change():
 
 @pytest.mark.parametrize("target", [{"AAA": 20.0, "BBB": 20.0}, {"AAA": 27.0, "BBB": 17.0}, {"AAA": 17.0, "BBB": 27.0}])
 def test_a_quarterbacks_projection_is_his_beliefs_kneels_and_all(target):
-    """His belief carries count his kneels (box lines do), so his carries besides the kneels are his belief carries
-    less his own expected kneels: at a pick'em, as a 10-point favourite and underdog his projected carries are his
-    weight's share of the team's, his yards those at his per-carry rate, his TDs those before the cut at his rate."""
+    """His belief carries count the kneels a QB averages (box lines do), so his carries besides the kneels are his
+    belief carries less those, at the same per-carry rates whatever the line, and this game's kneels come on top:
+    at a pick'em, as a 10-point favourite and underdog his projected carries are his weight's share of the team's
+    less the average kneels plus his own this game, his yards those at his rate, his TDs those before the cut."""
     side = sim_draws.centred_sides(world(), "AAA", "BBB", target)[0]
     qb = pid("AAA", "QB")
     at = side.rushers.index(qb)
-    line = sim_game.expected(world(), "AAA", "BBB", set(), HALF, target=target)[qb].box
-    team = sum(e.box.carries for p, e in sim_game.expected(world(), "AAA", "BBB", set(), HALF, target=target).items()
-               if team_of(p) == "AAA")
     share = side.carry_w[at] / side.carry_w.sum()
     (_, h1), (_, h2) = sim_script.parts(side)
-    window = sim_script.window_means(side)[1]
-    assert sim_script.window_means(side)[2] > 0.1                          # he does kneel
-    belief = share * (h1 + h2 + window + sim_script.window_means(side)[2])
+    window, kneels = sim_script.window_means(side)[1:]
+    assert kneels > 0.1                                                    # he does kneel
+    usual = sim_script.average_kneels()
+    belief = share * (h1 + h2 + window + usual)
     m = sim_game._side_means(side)                                        # the plays drawn, window TD runs aside
-    assert m["carries"][at] == pytest.approx(belief, rel=1e-6)
-    assert m["rush_yds"][at] == pytest.approx(belief * side.ypr[at], rel=1e-6)
+    assert m["carries"][at] == pytest.approx(belief - usual + kneels, rel=1e-6)
+    k = sim_script.kneel_yards()
+    assert m["rush_yds"][at] == pytest.approx(belief * side.ypr[at] - usual * k + kneels * k, rel=1e-6)
     rate = side.rush_td[at] / sim_script.before_cut("carries")
     assert m["rush_td"][at] == pytest.approx(belief * (h1 + h2) / (h1 + h2 + window) * rate, rel=1e-6)
     # the projection adds the window's and overtime's TD runs, by TD rate (about 1% of his carries)
-    assert line.carries == pytest.approx(belief, rel=0.015) and line.carries / team == pytest.approx(share, rel=0.02)
+    line = sim_game.expected(world(), "AAA", "BBB", set(), HALF, target=target)[qb].box
+    assert line.carries == pytest.approx(belief - usual + kneels, rel=0.015)
 
 
 def test_a_season_cached_in_another_column_layout_is_downloaded_again(monkeypatch, tmp_path, caplog):
@@ -449,3 +450,27 @@ def test_a_player_who_leaves_hurt_gets_his_share_of_the_game_halves_then_window(
     assert drawn[0] == pytest.approx(projected[pid("AAA", "WR")].box.targets, rel=0.04)
     assert drawn[1] == pytest.approx(projected[pid("AAA", "RB")].box.carries, rel=0.04)
     assert drawn[2] / projected[pid("AAA", "QB")].box.pass_yds == pytest.approx(0.5, abs=0.04)   # the team's passing
+
+
+def test_a_pocket_quarterbacks_carries_keep_their_rate_as_a_big_favourite():
+    """A QB with 2-7% of his team's carries: his carries besides kneels keep one per-carry rate whatever the line (a
+    17-point favourite's QB kneels more; the rate went 4.9 -> 59 yards as his share fell to 0.04 when this game's
+    kneels came out of them), and with barely more carries than the average kneels half his belief carries stay
+    other carries, so a carry is worth at most twice his base rate less a kneel's yards (yards are kept, kneels
+    lose them)."""
+    from dataclasses import replace as with_
+    from types import MappingProxyType
+
+    from services.sim_world import World
+    w, qb = world(), pid("AAA", "QB")
+
+    def rate(carries: float, target: dict) -> tuple[float, float]:
+        low = World(MappingProxyType({**w.players, qb: with_(w.players[qb], carries=carries)}), w.teams)
+        side = sim_draws.centred_sides(low, "AAA", "BBB", target)[0]
+        at = side.rushers.index(qb)
+        return float(sim_script.rushing(side)[0][at]), float(side.ypr[at])    # side.ypr: after the centring's yards
+    for carries in (0.06, 0.05, 0.04, 0.02):
+        even, even_base = rate(carries, {"AAA": 22.5, "BBB": 22.5})
+        favourite, base = rate(carries, {"AAA": 31.0, "BBB": 14.0})
+        assert favourite / base == pytest.approx(even / even_base, rel=0.15), carries     # the floor binds at one only
+        assert 0 < favourite <= 2 * base - sim_script.kneel_yards() + 1e-9, carries

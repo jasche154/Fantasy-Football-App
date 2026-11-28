@@ -133,11 +133,11 @@ def test_an_injured_receivers_work_flows_to_his_teammates():
 def test_a_hurt_back_s_carries_go_to_the_next_back_not_to_the_quarterback():
     healthy = sim_game.expected(world(), "AAA", "BBB", set(), HALF)
     without = sim_game.expected(world(), "AAA", "BBB", {pid("AAA", "RB")}, HALF)
-    # the QB keeps his share of the team's carries (kneels in, as his belief counts them): it moves only by the game
-    # script, at the margin the back's absence moves
+    # the QB keeps his share of the team's carries: it moves only by the game script at the margin the back's absence
+    # moves (and his kneels, which come on top of his other carries, with it)
     team = lambda lines: sum(e.box.carries for p, e in lines.items() if team_of(p) == "AAA")  # noqa: E731
     share = [lines[pid("AAA", "QB")].box.carries / team(lines) for lines in (healthy, without)]
-    assert share[1] == pytest.approx(share[0], rel=1e-3)
+    assert share[1] == pytest.approx(share[0], rel=1e-2)
     assert without[pid("AAA", "RB2")].box.carries > 2 * healthy[pid("AAA", "RB2")].box.carries
 
 
