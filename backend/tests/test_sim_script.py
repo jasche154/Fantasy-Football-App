@@ -595,3 +595,41 @@ def test_a_side_put_in_its_week_works_out_its_volumes_again():
     weeked = sim_centre._in_week(side, week)
     assert weeked.cache is not side.cache
     assert float(sim_game._side_means(weeked)["targets"].sum()) == pytest.approx(plain * sim_calendar.factors(week)[0])
+
+
+@pytest.mark.parametrize("s", [0.5, 0.9])
+def test_the_projection_splits_a_hurt_starters_sack_fumbles_as_the_draw_does(monkeypatch, s):
+    """Of the sacks' lost fumbles the starter's are his part of the halves (exit_parts: sacks come from the halves
+    only), the backup's the rest; none for the backup of a starter who played all the halves."""
+    from services import sim_expected
+    w, qb, qb2 = world(), pid("AAA", "QB"), pid("AAA", "QB2")
+    side = sim_game._side(w, "AAA", "BBB", set(), {qb: s})
+    m, points, seen = sim_game._side_means(side), sim_expected._skill_points, []
+    monkeypatch.setattr(sim_expected, "_skill_points",
+                        lambda box, fumbles, *rest: seen.append(fumbles) or points(box, fumbles, *rest))
+    fumbles = dict(zip(sim_expected._expected_players(side, m, HALF), seen))      # one call per player, in order
+    sacked, early = m["sacks"] * sim_game.params()["league"]["sack_fumble"], sim_script.exit_parts(s, "targets")[0]
+
+    def running(p: int) -> float:                                                 # his carries' own lost fumbles
+        at = side.rushers.index(p) if p in side.rushers else None
+        return 0.0 if at is None else float((m["carries"][at] - m["kneels"][at]) * side.fumble[at])
+
+    assert sacked > 0 and (early < 1.0) == (s == 0.5)
+    assert fumbles[qb] - running(qb) == pytest.approx(sacked * early)
+    assert fumbles.get(qb2, 0.0) - running(qb2) == pytest.approx(sacked * (1 - early), abs=1e-12)
+
+
+def test_a_window_td_is_credited_by_the_part_of_each_role_a_player_keeps_in_the_window():
+    """One who left during the window keeps a share of his targets and another of his carries (_Side.late): his
+    catching TDs weigh by the first, his rushing TDs by the second, and the OTHER bucket scores none."""
+    from dataclasses import replace as with_
+    side, rb = sim_draws.centred_sides(world(), "AAA", "BBB")[0], pid("AAA", "RB")
+    m = sim_game._side_means(side)
+    rec, rush = sim_script.window_tds(side, m)
+    assert len(rec) == len(side.receivers) - 1 and len(rush) == len(side.rushers) - 1
+    assert np.array_equal(rec, m["rec_td"][:-1]) and np.array_equal(rush, m["rush_td"][:-1])     # nobody left
+    late_rec, late_rush = sim_script.window_tds(with_(side, late={rb: (0.0, 0.5)}), m)
+    r, c = side.receivers.index(rb), side.rushers.index(rb)
+    assert rec[r] > 0 and late_rec[r] == 0 and late_rush[c] == pytest.approx(0.5 * rush[c])
+    assert np.array_equal(np.delete(late_rec, r), np.delete(rec, r))
+    assert np.array_equal(np.delete(late_rush, c), np.delete(rush, c))
