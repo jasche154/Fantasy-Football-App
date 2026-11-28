@@ -106,8 +106,9 @@ def _passers(side, o: _Offense, rng: np.random.Generator, regulation: _Offense |
                                  - int(windowed.catches.sum() - base.catches.sum()), late, rng)
             mine, missed = tuple(a + b for a, b in zip(mine, more)), missed + also
         shares = {side.qb: side.qb_share, side.backup: 1.0 - side.qb_share}
-    ints = int(round(o.ints * early))                     # interceptions and sacks come from the halves only
-    sacked = int(round(o.sack_fumbles * early))
+    ints, sacked = o.ints, o.sack_fumbles                 # interceptions and sacks come from the halves only
+    if early < 1.0:                                       # each his with chance `early` (rounding gave him nearly all)
+        ints, sacked = int(rng.binomial(o.ints, early)), int(rng.binomial(o.sack_fumbles, early))
     out = {}
     for pid, share in shares.items():
         starter = pid == side.qb

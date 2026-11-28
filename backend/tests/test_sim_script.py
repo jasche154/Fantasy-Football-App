@@ -425,7 +425,7 @@ def test_the_held_out_check_works_out_each_folds_no_show_floor_without_its_seaso
     assert got != held(lambda s: sim_script_fit._floor(a, a, seasons))
 
 
-def test_a_player_who_leaves_hurt_gets_his_share_of_the_game_halves_then_window():
+def test_a_player_who_leaves_hurt_gets_his_share_of_the_game_halves_then_window(monkeypatch):
     """He plays the halves until his share of the game runs out, then the window (sim_script.exit_parts): his mean
     work is his share s of his healthy work, up to the others' weights renormalizing as on a whole game (one team
     alone, no parts), never the 0.805 x s the halves alone gave; the draws agree, and a starting QB leaving at half
@@ -444,15 +444,27 @@ def test_a_player_who_leaves_hurt_gets_his_share_of_the_game_halves_then_window(
     projected = sim_game.expected(w, "AAA", "BBB", set(), HALF, exits=exits, target=target)
     sides = sim_centre.centred({"AAA": sim_game._side(w, "AAA", "BBB", set(), exits),
                                 "BBB": sim_game._side(w, "BBB", "AAA", set(), {})}, target)
+    passers, split = sim_draw._passers, []
+    monkeypatch.setattr(sim_draw, "_passers", lambda *a, **k: split.append(passers(*a, **k)) or split[-1])
     rng, n, sums = np.random.default_rng(8), 2500, np.zeros(3)
     for _ in range(n):
         players = sim_draw.draw_game((sides["AAA"], sides["BBB"]), rng, HALF).players
         sums += [players[pid("AAA", "WR")].box.targets, players[pid("AAA", "RB")].box.carries,
                  players[pid("AAA", "QB")].box.pass_yds]
     drawn = sums / n
+    early = sim_script.exit_parts(0.5, "targets")[0]      # of the halves' interceptions and sack fumbles, his by chance
+    for stat, within in (("pass_int", 0.05), ("fumbles", 0.08)):
+        his, backups = (sum(s[pid("AAA", name)][stat] for s in split if pid("AAA", "QB") in s) for name in ("QB", "QB2"))
+        assert his / (his + backups) == pytest.approx(early, abs=within), stat      # rounding gave him 0.75 and 0.9
     assert drawn[0] == pytest.approx(projected[pid("AAA", "WR")].box.targets, rel=0.04)
     assert drawn[1] == pytest.approx(projected[pid("AAA", "RB")].box.carries, rel=0.04)
     assert drawn[2] / projected[pid("AAA", "QB")].box.pass_yds == pytest.approx(0.5, abs=0.04)   # the team's passing
+    late = {"AAA": sim_game._side(w, "AAA", "BBB", set(), {pid("AAA", "QB"): 0.9}), "BBB": sides["BBB"]}
+    late, thrown = sim_centre.centred(late, target), np.zeros(2)
+    for _ in range(1500):                                  # he left during the window: he threw part of it
+        players = sim_draw.draw_game((late["AAA"], late["BBB"]), rng, HALF).players
+        thrown += [players[p].box.pass_yds if p in players else 0 for p in (pid("AAA", "QB"), pid("AAA", "QB2"))]
+    assert thrown[0] / thrown.sum() == pytest.approx(0.89, abs=0.04)        # 0.79 with the halves' passes only
 
 
 def test_a_pocket_quarterbacks_carries_keep_their_rate_as_a_big_favourite():
