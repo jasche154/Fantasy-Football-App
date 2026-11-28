@@ -5,7 +5,7 @@ from types import MappingProxyType
 import numpy as np
 import pytest
 
-from services import sim_game
+from services import sim_centre, sim_game
 from services.replay_scoring import ScoringRules, scoring_settings
 from services.scoring import scoring_for
 from services.sim_world import Player, Team, World
@@ -107,14 +107,16 @@ def test_dst_interceptions_equal_the_opposing_quarterbacks(monkeypatch):
         assert seen == [thrown["BBB"], thrown["AAA"]]          # AAA's defense first, then BBB's
 
 
-def _scripted(out: set[int], kind: str) -> float:
-    """exp(line-script slope x the change in AAA's expected margin when `out` sit): how far its volume moves."""
-    from services import sim_closing
-
-    def margin(sitting: set[int]) -> float:
-        a, b = (sim_game._side_means(sim_game._side_of(world(), t, o, sitting)) for t, o in (("AAA", "BBB"), ("BBB", "AAA")))
-        return sim_game._mean_points(a, b) - sim_game._mean_points(b, a)
-    return float(np.exp(sim_closing.line_script()[kind] * (margin(out) - margin(set()))))
+def _volume(out: set[int]) -> tuple[float, float, float]:
+    """AAA's mean (targets, carries besides kneels, kneels) in its game with `out` sitting, as the game is centred:
+    its volume moves only by its game script (sim_script), at the margin his absence moves."""
+    from services import sim_script
+    from tests import sim_draws
+    w = world()
+    side = sim_draws.centred_sides(w, "AAA", "BBB") if not out else tuple(sim_centre.centred(
+        {t: sim_game._side(w, t, o, out, {}) for t, o in (("AAA", "BBB"), ("BBB", "AAA"))}).values())
+    m, kneels = sim_game._side_means(side[0]), sim_script.window_means(side[0])[2]
+    return float(m["targets"].sum()), float(m["carries"].sum()) - kneels, kneels
 
 
 def test_an_injured_receivers_work_flows_to_his_teammates():
@@ -124,16 +126,18 @@ def test_an_injured_receivers_work_flows_to_his_teammates():
     for name in ("WR2", "WR3", "TE", "RB"):
         assert without[pid("AAA", name)].box.targets > healthy[pid("AAA", name)].box.targets
     total = lambda lines: sum(e.box.targets for p, e in lines.items() if team_of(p) == "AAA")  # noqa: E731
-    # the team's targets move only by the line script, at the margin his absence moves (sim_closing.line_script)
-    assert total(without) / total(healthy) == pytest.approx(_scripted({pid("AAA", "WR")}, "targets"), rel=1e-3)
+    # the team's targets move only by its game script, at the margin his absence moves (sim_script)
+    assert total(without) / total(healthy) == pytest.approx(_volume({pid("AAA", "WR")})[0] / _volume(set())[0], rel=1e-3)
 
 
 def test_a_hurt_back_s_carries_go_to_the_next_back_not_to_the_quarterback():
     healthy = sim_game.expected(world(), "AAA", "BBB", set(), HALF)
     without = sim_game.expected(world(), "AAA", "BBB", {pid("AAA", "RB")}, HALF)
-    # the QB's carries move only by the line script, at the margin the back's absence moves
-    ratio = without[pid("AAA", "QB")].box.carries / healthy[pid("AAA", "QB")].box.carries
-    assert ratio == pytest.approx(_scripted({pid("AAA", "RB")}, "carries"), rel=1e-3)
+    # the QB keeps his share of the team's carries: it moves only by the game script at the margin the back's absence
+    # moves (and his kneels, which come on top of his other carries, with it)
+    team = lambda lines: sum(e.box.carries for p, e in lines.items() if team_of(p) == "AAA")  # noqa: E731
+    share = [lines[pid("AAA", "QB")].box.carries / team(lines) for lines in (healthy, without)]
+    assert share[1] == pytest.approx(share[0], rel=1e-2)
     assert without[pid("AAA", "RB2")].box.carries > 2 * healthy[pid("AAA", "RB2")].box.carries
 
 
@@ -222,7 +226,7 @@ def test_the_carry_split_gives_everyone_his_weight_on_average(qb_carries):
     from services import sim_draw
     weights = np.array([0.50, 0.15, 0.04, qb_carries / 27, 0.06])
     rng, total, n = np.random.default_rng(2), 27, 40_000
-    drawn = np.array([sim_draw._split(total, weights, 0.15, rng, (3, 0.45)) for _ in range(n)])
+    drawn = np.array([rng.multinomial(total, sim_draw._shares(weights, 0.15, rng, (3, 0.45))) for _ in range(n)])
     assert (drawn.sum(axis=1) == total).all()
     assert drawn.mean(axis=0) / (total * weights / weights.sum()) == pytest.approx(np.ones(5), abs=0.01)
 
@@ -233,7 +237,7 @@ def test_a_qb_carry_share_with_no_spread_is_his_weights_share():
     assert sim_draw._uncapped(0.3, 0.0) == 0.3
     weights = np.array([0.5, 0.2, 0.3])
     rng = np.random.default_rng(1)
-    drawn = np.array([sim_draw._split(30, weights, 0.15, rng, (2, 0.0)) for _ in range(4000)])
+    drawn = np.array([rng.multinomial(30, sim_draw._shares(weights, 0.15, rng, (2, 0.0))) for _ in range(4000)])
     assert (drawn.sum(axis=1) == 30).all()
     assert drawn[:, 2].mean() == pytest.approx(30 * 0.3, rel=0.02)      # se 0.04 carries: about 4.5 se
 
@@ -243,11 +247,12 @@ def test_passers_completions_and_attempts_add_up_after_the_closing_window_and_ov
     """Late TD catches (sim_closing.score_td: the closing window's and overtime's) are completions and attempts
     too; each passer throws at least his completions + interceptions, and the two add up to the team's."""
     from services import sim_closing, sim_draw
+    from tests import sim_draws
     side = sim_game._side(world(), "AAA", "BBB", set(), exits)
     means = sim_game._side_means(side)
     rng = np.random.default_rng(11)
     for _ in range(300):
-        regulation = sim_draw._offense(side, int(rng.integers(0, 45)), 25, 1.0, rng)
+        regulation = sim_draws.offense(side, int(rng.integers(0, 45)), 25, rng)
         final = regulation
         for _ in range(int(rng.integers(0, 3))):
             final = sim_closing.score_td(side, means, final, "rec", {"rec": 12.0, "rush": 3.0}, rng)[0]
@@ -261,12 +266,12 @@ def test_passers_completions_and_attempts_add_up_after_the_closing_window_and_ov
 
 def test_interceptions_are_incomplete_attempts_and_keep_their_mean():
     """An interception is drawn among the incomplete attempts, at the rate that keeps rate x attempts its mean."""
-    from services import sim_draw
+    from tests import sim_draws
     side = sim_game._side(world(), "AAA", "BBB", set(), {})
     rng = np.random.default_rng(12)
-    offenses = [sim_draw._offense(side, 34, 25, 1.0, rng) for _ in range(4000)]
+    offenses = [sim_draws.offense(side, 34, 25, rng) for _ in range(4000)]
     assert all(o.ints <= o.attempts - o.catches.sum() for o in offenses)
-    tiny = [sim_draw._offense(side, 1, 25, 1.0, rng) for _ in range(500)]
+    tiny = [sim_draws.offense(side, 1, 25, rng) for _ in range(500)]
     assert all(o.ints <= o.attempts - o.catches.sum() for o in tiny)
     mean_ints, mean_attempts = np.mean([o.ints for o in offenses]), np.mean([o.attempts for o in offenses])
     assert mean_ints == pytest.approx(mean_attempts * side.int_rate, rel=0.06)

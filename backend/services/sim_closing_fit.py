@@ -1,6 +1,8 @@
 """Simulated seasons: fit the closing minutes and overtime of a game from real play-by-play (writes sim_closing.json).
 
-    python -m services.sim_closing_fit --fit [--seasons 2018-2025] [--window 300] [--refresh]
+    python -m services.sim_closing_fit --fit [--seasons 2018-2025] [--refresh]
+
+The window is WINDOW (600 s, chosen with sim_eval), the cut sim_script_fit counts each part's plays at (its CUT).
 
 Real margins land on exactly 3 or 7 far more often than two teams scoring independently would make them (2018-2025:
 3 in 14.4% of games, pairing each team's score with another game's opponent gives 6.1%), because play late in a game
@@ -8,20 +10,25 @@ follows the score: a tied or close team kicks to win, a team down 4-8 chases a t
 sim_closing plays the last WINDOW seconds of regulation from the score with what real teams did from that score:
 
 - `table`: for each margin at the cut (0-MAX_MARGIN, the trailing team's deficit; larger ones pooled), every real
-  game's scoring events after it, the trailer's and the leader's (for a tie: the two teams in random order), as
-  (count, trailer events, leader events) with the events in EVENTS order. A drawn row is a real game's ending.
+  game's scoring events after it, the trailer's and the leader's (for a tie: the two teams in random order) and the
+  trailer's Vegas spread (sim_closing draws an ending near the game's own expected margin: real favourites gain
+  0.21 points a point of the spread in the window at the same cut margin), with
+  its plays there (targets, carries and kneel-downs, PLAYS, from sim_script_fit's cache: run that fit first), as
+  (count, trailer events, leader events) with the events in EVENTS order. A drawn row is a real game's ending: the
+  leader runs and kneels, the trailer throws (sim_script).
 - `ot`: overtime from the same play-by-play: the share of overtimes that end tied, the share of decided ones the
   winner ends with a field goal, and the mean yards of an overtime-winning TD play by a catch and by a run.
-- `cut_var`: the spread of a simulated game's margin at the cut as a + b x its expected points before the cut
+- `cut_var`: the spread of a simulated game's margin at the cut, a x (pa ^ b + pb ^ b) of its two sides' expected
+  points before the cut
   (`cut_spread`, measured on the simulator's own draws, CUT_SEASON's belief; re-measure when the draw changes);
 - `check`: leave-season-out, each season's real cut scores played forward with the other seasons' table, against
   that season's real end of regulation (shares of margins 1-3, 3, 7, 4-8 and ties).
 - `line_script`: how a team's volume follows its pregame expected margin (the Vegas spread), within each
   team-season so a team's own style is not counted: log targets and log carries per point of expected margin
-  (2018-2025: carries +0.76% a point of the favourite's expected margin, targets -0.03%; sim_closing.line_script
-  adds the tuned `game.line_script_extra`, carries +0.24, targets -0.13, because the simulated game on its own
-  moves volume the other way). Read from the database
-  (player_stats_weekly and nfl_games), applied by sim_centre before a game is centred.
+  (2018-2025: carries +0.76% a point of the favourite's expected margin, targets -0.03%). Read from the database
+  (player_stats_weekly and nfl_games); a real reference for sim_eval's "per line point" rows. The simulated game
+  follows the line through its parts (sim_script: the halves' fitted slopes, the second half's response to the
+  lead and the window's real endings), not through this number.
 
 The scoring plays are read once with nflreadpy (the play-by-play the stats load already uses) and cached in
 PLAYS_CACHE (git-ignored); the network is needed the first time, with --refresh, or for a season not in it.
@@ -38,13 +45,16 @@ from pathlib import Path
 import numpy as np
 
 from integrations.weekly_sources import TEAM_ALIASES
+from services.sim_closing_plays import (  # noqa: F401  (re-exported: the fit's import path)
+    PLAYS_CACHE, _band, _cached, _download, _kind, games_of, scoring_games,
+)
 
 log = logging.getLogger(__name__)
 
 CLOSING_PATH = Path(__file__).with_name("sim_closing.json")
-PLAYS_CACHE = Path(__file__).resolve().parent.parent / "data" / "cache" / "scoring_plays.json"
 EVENTS = ("pass_td", "rush_td", "ret_td", "fg_0_39", "fg_40_49", "fg_50", "miss_0_39", "miss_40_49", "miss_50",
-          "xp", "xp_miss", "two", "safety")
+          "xp", "xp_miss", "two", "safety", "targets", "carries", "kneels")
+PLAYS = ("targets", "carries", "kneels")       # the window's plays (sim_script_fit's cache), its scoring ones among them
 POINTS = {"pass_td": 6, "rush_td": 6, "ret_td": 6, "fg_0_39": 3, "fg_40_49": 3, "fg_50": 3, "xp": 1, "two": 2,
           "safety": 2}
 WINDOW = 600                     # seconds of regulation played from the score (chosen with sim_eval: see sim_closing)
@@ -52,97 +62,10 @@ TRIES = ("xp", "xp_miss", "two")
 CUT_SEASON, CUT_WEEK, CUT_GAMES = 2024, 9, 3          # the belief the cut margin's spread is measured on
 CUT_TARGETS = ((10, 13), (14, 10), (17, 17), (24, 20), (28, 28), (31, 13), (38, 10), (21, 21), (35, 30))
 CUT_DRAWS = 1500
-CUT_VAR_START = (42.0, 2.2)      # stored until `write` measures it, when the file has none
+CUT_VAR_START = (12.0, 0.6)      # stored until `write` measures it, when the file has none
 MAX_MARGIN = 16                  # margins above this share one row set (a two-score-plus lead plays alike)
 SEASONS = range(2018, 2026)
 SHUFFLE_SEED = 7                 # the random order of a tied game's two teams (reproducible fits)
-
-
-# ---------------- the scoring plays (cached) ----------------
-
-def _band(distance: float | None) -> str:
-    d = distance or 0
-    return "0_39" if d < 40 else "40_49" if d < 50 else "50"
-
-
-def _kind(r: Mapping) -> tuple[str, str] | None:
-    """(team, event) of one play, or None when it scores nothing the box score keeps."""
-    if r["touchdown"] == 1 and r["td_team"]:
-        kind = "pass_td" if r["pass_touchdown"] == 1 else "rush_td" if r["rush_touchdown"] == 1 else "ret_td"
-        return r["td_team"], kind
-    if r["field_goal_result"] in ("made", "missed", "blocked"):
-        return r["posteam"], ("fg_" if r["field_goal_result"] == "made" else "miss_") + _band(r["kick_distance"])
-    if r["extra_point_result"] in ("good", "failed", "blocked"):
-        return r["posteam"], "xp" if r["extra_point_result"] == "good" else "xp_miss"
-    if r["two_point_conv_result"] == "success":
-        return r["posteam"], "two"
-    if r["safety"] == 1:
-        return r["defteam"], "safety"
-    return None
-
-
-def _download(season: int) -> list[dict]:
-    """One season's regular-season games: teams, final scores and every scoring play (quarter, seconds left,
-    team, event, yards gained)."""
-    import nflreadpy as nfl
-    import polars as pl
-
-    cols = ["game_id", "week", "home_team", "away_team", "home_score", "away_score", "qtr", "game_seconds_remaining",
-            "posteam", "defteam", "touchdown", "td_team", "pass_touchdown", "rush_touchdown", "field_goal_result",
-            "kick_distance", "extra_point_result", "two_point_conv_result", "safety", "yards_gained"]
-    pbp = nfl.load_pbp(season).filter(pl.col("season_type") == "REG").select(cols)
-    return games_of(pbp.iter_rows(named=True), season)
-
-
-def games_of(rows: Iterable[Mapping], season: int) -> list[dict]:
-    """The games of one season's play-by-play rows (see _download); a scoring play with no game clock is left
-    out, counted and logged at WARNING (its window cannot be told)."""
-    games: dict[str, dict] = {}
-    no_clock = 0
-    for r in rows:
-        g = games.setdefault(r["game_id"], {"week": r["week"], "home": TEAM_ALIASES.get(r["home_team"], r["home_team"]),
-                                            "away": TEAM_ALIASES.get(r["away_team"], r["away_team"]),
-                                            "home_score": r["home_score"], "away_score": r["away_score"], "plays": []})
-        kind = _kind(r)
-        if kind is not None and r["game_seconds_remaining"] is None:
-            no_clock += 1
-        elif kind is not None:
-            team = TEAM_ALIASES.get(kind[0], kind[0])
-            g["plays"].append([int(r["qtr"]), int(r["game_seconds_remaining"]), team, kind[1],
-                               int(r["yards_gained"] or 0)])
-    if no_clock:
-        log.warning("%s: %d scoring plays with no game clock left out", season, no_clock)
-    return [{"season": season, **g} for g in games.values()]
-
-
-def scoring_games(seasons: Iterable[int], refresh: bool = False) -> list[dict]:
-    """Every real game of `seasons` with its scoring plays, from PLAYS_CACHE (downloaded when missing)."""
-    wanted = sorted(set(seasons))
-    cached = {} if refresh else _cached()
-    missing = [s for s in wanted if str(s) not in cached]
-    if missing:
-        for season in missing:
-            log.info("downloading %s play-by-play", season)
-            cached[str(season)] = _download(season)
-        PLAYS_CACHE.parent.mkdir(parents=True, exist_ok=True)
-        partial = PLAYS_CACHE.with_suffix(f".{os.getpid()}.tmp")
-        partial.write_text(json.dumps(cached), encoding="utf-8")
-        os.replace(partial, PLAYS_CACHE)
-    return [g for s in wanted for g in cached[str(s)]]
-
-
-def _cached() -> dict:
-    try:
-        cached = json.loads(PLAYS_CACHE.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return {}
-    except (OSError, ValueError):
-        log.warning("%s is unreadable: downloading the play-by-play again", PLAYS_CACHE.name, exc_info=True)
-        return {}
-    if isinstance(cached, dict) and all(isinstance(v, list) for v in cached.values()):
-        return cached
-    log.warning("%s is not a {season: games} file: downloading the play-by-play again", PLAYS_CACHE.name)
-    return {}
 
 
 # ---------------- the fit ----------------
@@ -183,18 +106,42 @@ def _row(c: Counter) -> tuple[int, ...]:
 
 
 def endings(games: Iterable[Mapping], window: int, seed: int = SHUFFLE_SEED) -> dict[int, Counter]:
-    """{margin at the cut (capped at MAX_MARGIN + 1): Counter((trailer events, leader events))}."""
+    """{margin at the cut (capped at MAX_MARGIN + 1): Counter((trailer events, leader events, the trailer's Vegas
+    spread))}; a game's window plays (`plays_in_window`: {team: {PLAYS name: count}}) ride on its events when it has
+    them, its spread (`spread`, the home side's) when it has one (0.0 else)."""
     rnd = random.Random(seed)
     table: dict[int, Counter] = defaultdict(Counter)
     for g in games:
         before, inside, _ = split(g, window)
+        for team, counts in g.get("plays_in_window", {}).items():
+            inside[team].update(counts)
         home, away = g["home"], g["away"]
         margin = _points(before[home]) - _points(before[away])
         trail, lead = (home, away) if margin < 0 else (away, home)
         if margin == 0 and rnd.random() < 0.5:
             trail, lead = lead, trail
-        table[min(abs(margin), MAX_MARGIN + 1)][(_row(inside[trail]), _row(inside[lead]))] += 1
+        spread = float(g.get("spread", 0.0)) * (1.0 if trail == home else -1.0)      # the trailer's Vegas edge
+        table[min(abs(margin), MAX_MARGIN + 1)][(_row(inside[trail]), _row(inside[lead]), round(spread * 2) / 2)] += 1
     return table
+
+
+def with_plays(games: list[Mapping], window: int, seasons: Iterable[int], refresh: bool = False) -> list[dict]:
+    """`games` that sim_script_fit's cache has, each with its teams' window plays (`plays_in_window`); that cache is
+    sim_script_fit's to refresh (`refresh` is for the scoring plays: one download each)."""
+    from services import sim_script_fit
+    if window != sim_script_fit.CUT:
+        raise ValueError(f"the window plays are counted for a {sim_script_fit.CUT}s window, not {window}s")
+    cached = {(g["season"], g["week"], g["home"], g["away"]): g for g in sim_script_fit.segments(seasons)}
+    out = []
+    for g in games:
+        found = cached.get((g["season"], g["week"], g["home"], g["away"]))
+        if found is not None:
+            out.append({**g, "spread": found["spread"],
+                        "plays_in_window": {t: sim_script_fit.window_counts(found, t) for t in (g["home"], g["away"])}})
+    if len(out) < len(games):
+        log.warning("%d of %d games have no play counts in sim_script_fit's cache: left out of the endings",
+                    len(games) - len(out), len(games))
+    return out
 
 
 def td_yards(games: Iterable[Mapping], window: int) -> dict[str, float]:
@@ -234,7 +181,7 @@ def play_forward(cut: tuple[int, int], table: Mapping[int, Counter], rng: random
     home, away = cut
     margin = abs(home - away)
     rows = table[min(margin, MAX_MARGIN + 1)]
-    trail_row, lead_row = rng.choices(list(rows), weights=list(rows.values()))[0]
+    trail_row, lead_row = rng.choices(list(rows), weights=list(rows.values()))[0][:2]
     gained = _points(dict(zip(EVENTS, lead_row))) - _points(dict(zip(EVENTS, trail_row)))
     if margin == 0:
         return gained if rng.random() < 0.5 else -gained
@@ -297,7 +244,9 @@ def line_script(session, seasons: Iterable[int]) -> dict[str, float]:
 
 
 def cut_spread(world, games: Iterable[tuple[str, str]], draws: int = CUT_DRAWS, seed: int = 0) -> list[float]:
-    """[a, b] of the cut margin's variance a + b x the two sides' expected points before the cut, least squares over
+    """[a, b] of the cut margin's variance a x (pa ^ b + pb ^ b), pa and pb the two sides' expected points before the
+    cut (each side's points spread with its own; a lopsided game's margin spreads less than an even one's at the same
+    total), fitted on logs (b on a grid, a its best then) over
     `games` ((home, away) under `world`) at each of CUT_TARGETS: the margin at the cut (sim_draw.draw_game's
     until_cut) around its expected value, over `draws` draws each (sim_closing_means.cut_sd reads it)."""
     from services.scoring import scoring_for
@@ -313,10 +262,20 @@ def cut_spread(world, games: Iterable[tuple[str, str]], draws: int = CUT_DRAWS, 
             before = (_mean_points(m[home], m[away]), _mean_points(m[away], m[home]))
             cuts = np.array([draw_game((sides[home], sides[away]), rng, scoring_for("half"), until_cut=True)
                              for _ in range(draws)], dtype=float)
-            rows.append((sum(before), float(np.var(cuts[:, 0] - cuts[:, 1] - (before[0] - before[1])))))
-    totals, variances = np.array(rows).T
-    b, a = np.polyfit(totals, variances, 1)
-    return [round(float(a), 2), round(float(b), 3)]
+            rows.append((*before, float(np.var(cuts[:, 0] - cuts[:, 1] - (before[0] - before[1])))))
+    return fit_cut_var(np.array(rows))
+
+
+def fit_cut_var(rows: np.ndarray) -> list[float]:
+    """[a, b] of var = a x (pa ^ b + pb ^ b) over rows of (pa, pb, variance), least squares on logs."""
+    pa, pb, var = (np.maximum(rows[:, j], 1.0) for j in range(3))
+
+    def misfit(b: float) -> tuple[float, float]:
+        shape = np.log(pa ** b + pb ** b)
+        log_a = float(np.mean(np.log(var) - shape))
+        return float(np.sum((np.log(var) - shape - log_a) ** 2)), log_a
+    best = min(np.arange(0.2, 1.5001, 0.005), key=lambda b: misfit(b)[0])
+    return [round(float(np.exp(misfit(best)[1])), 3), round(float(best), 4)]
 
 
 def _cut_var(session) -> list[float]:
@@ -331,6 +290,7 @@ def _cut_var(session) -> list[float]:
 def fit(seasons: Iterable[int], window: int = WINDOW, refresh: bool = False) -> dict:
     from database.db import SessionLocal
 
+    seasons = sorted(set(seasons))                       # read three times below: a generator would run out
     with SessionLocal() as session:
         script = line_script(session, seasons)
     try:
@@ -343,12 +303,12 @@ def fit(seasons: Iterable[int], window: int = WINDOW, refresh: bool = False) -> 
     every = scoring_games(seasons, refresh)
     # the endings need every scoring play. Overtime reads every game: a tied one shows in the score alone; a
     # decided one still needs its quarter-5 play (one with no game clock is lost: games_of logs those)
-    games = [g for g in every if consistent(g)]
+    games = with_plays([g for g in every if consistent(g)], window, seasons, refresh)
     table = endings(games, window)
     return {"seasons": [min(g["season"] for g in games), max(g["season"] for g in games)], "games": len(games),
             "window": window, "events": list(EVENTS), "max_margin": MAX_MARGIN,
             "td_yards": td_yards(games, window),
-            "table": {str(k): sorted([[n, list(t), list(lead)] for (t, lead), n in rows.items()], reverse=True)
+            "table": {str(k): sorted([[n, list(t), list(lead), spread] for (t, lead, spread), n in rows.items()], reverse=True)
                       for k, rows in sorted(table.items())},
             "ot": overtime(every), "line_script": script, "cut_var": cut_var, "check": check(games, window)}
 
@@ -357,8 +317,9 @@ def write(result: dict) -> dict:
     """Store `result`, then measure its cut_var on the table just stored (the measurement centres games through
     it) and store it again: one --fit is enough, and a file without cut_var can be refit."""
     from database.db import SessionLocal
-    from services import sim_closing, sim_closing_means
-    caches = (sim_closing.stored, sim_closing_means._tables, sim_closing_means._at)
+    from services import sim_closing, sim_closing_means, sim_script
+    caches = (sim_closing.stored, sim_closing_means._endings, sim_closing_means._tables, sim_closing_means._at,
+              sim_script._window)
     previous = CLOSING_PATH.read_text(encoding="utf-8") if CLOSING_PATH.exists() else None
     try:
         _store(dumps(result))
@@ -402,20 +363,20 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--fit", action="store_true", help="measure and write sim_closing.json")
     parser.add_argument("--seasons", default=f"{SEASONS.start}-{SEASONS.stop - 1}")
-    parser.add_argument("--window", type=int, default=WINDOW)
     parser.add_argument("--refresh", action="store_true", help="download the play-by-play again")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     first, _, last = args.seasons.partition("-")
-    result = fit(range(int(first), int(last or first) + 1), args.window, args.refresh)
+    result = fit(range(int(first), int(last or first) + 1), refresh=args.refresh)
     if args.fit:
         result = write(result)
         log.info("wrote %s", CLOSING_PATH.name)
     log.info("%d games, window %ds", result["games"], result["window"])
     log.info("overtime %s", result["ot"])
     log.info("volume per point of expected margin %s", result["line_script"])
-    log.info("cut margin variance%s = %s + %s x expected points before the cut",
-             "" if args.fit else " (stored, not re-measured)", *result["cut_var"])
+    a, b = result["cut_var"]
+    log.info("cut margin variance%s = %s x (pa ^ %s + pb ^ %s), pa / pb a side's expected points before the cut",
+             "" if args.fit else " (stored, not re-measured)", a, b, b)
     for name, row in result["check"].items():
         log.info("%-15s %s", name, "  ".join(f"{k} {100 * v:.1f}%" for k, v in row.items()))
 

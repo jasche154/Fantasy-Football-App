@@ -5,10 +5,9 @@ Run through `python -m services.sim_eval --fit [--seasons 2021-2025]`. Read-only
 - league / positions: per team-game volumes and per-position rates (catch rate, yards per catch, TDs per
   catch, yards and TDs per carry, lost fumbles per touch) from player_stats_weekly; sacks, INTs and points
   from team_game_stats.
-- game: the environment's spreads by the method of moments on team-game residuals (each team-season's mean
-  taken out): Var(log targets) = sd^2 + script^2, Cov(own targets, own carries) = -script_t script_c,
-  Cov(opposing carries) = -script_c^2, Cov(opposing targets) = sd^2 pace_shared - script_t^2. Efficiency:
-  the variance of log(yards per target) left after the per-target sampling noise, and its opponent share.
+- game: the efficiency spread by the method of moments on team-game residuals (each team-season's mean taken
+  out): the variance of log(yards per target) left after the per-target sampling noise, and its opponent share (how
+  a game's volume spreads and follows the score is sim_script's, fitted on play-by-play by sim_script_fit).
   Share spread (a player's weight x exp(sd z) in a game): Var(count - n p) - n p (1 - p) = sd^2 (n p (1 - p))^2,
   p = his share over nearby games (LOCAL_WEEKS) with the same regulars active, so slow role changes and
   absences are not counted as game noise. (The simulator's volume and multinomial draws already explain
@@ -135,27 +134,15 @@ def _moments(teams: dict, target_variance: float) -> dict:
     for (season, _, team), t in teams.items():
         by_season[(season, team)].append(t)
     for rows in by_season.values():
-        mt, mc = mean(r["targets"] for r in rows), mean(r["carries"] for r in rows)
         my = sum(r["rec_yds"] for r in rows) / max(1, sum(r["targets"] for r in rows))
         for r in rows:
-            r["dt"] = math.log(max(r["targets"], 1) / mt) - 0.5 / mt
-            r["dc"] = math.log(max(r["carries"], 1) / mc) - 0.5 / mc
             r["dy"] = math.log(max(r["rec_yds"], 1) / max(r["targets"], 1) / my)
             r["noise_y"] = target_variance / (max(r["targets"], 1) * my ** 2)    # sampling variance of the log
     rows = list(teams.values())
     pairs = [(t, teams[(s, w, t["opponent"])]) for (s, w, _), t in teams.items() if (s, w, t["opponent"]) in teams]
-    var_t = np.var([r["dt"] for r in rows]) - mean(1 / max(r["targets"], 1) for r in rows)
-    var_c = np.var([r["dc"] for r in rows]) - mean(1 / max(r["carries"], 1) for r in rows)
     cov = lambda a, b, items: float(np.cov([x[0][a] for x in items], [x[1][b] for x in items])[0, 1])   # noqa: E731
-    same = [(r, r) for r in rows]
-    c_script = math.sqrt(max(0.0, -cov("dc", "dc", pairs)))
-    t_script = max(0.0, (-cov("dt", "dc", same) + cov("dt", "dc", pairs)) / 2 / max(c_script, 1e-6))
-    t_sd = math.sqrt(max(1e-4, var_t - t_script ** 2))
     eff_var = max(1e-4, np.var([r["dy"] for r in rows]) - mean(r["noise_y"] for r in rows))
-    return {"targets_sd": t_sd, "carries_sd": math.sqrt(max(1e-4, var_c - c_script ** 2)),
-            "script_targets": t_script, "script_carries": c_script,
-            "pace_shared": min(0.9, max(0.0, (cov("dt", "dt", pairs) + t_script ** 2) / t_sd ** 2)),
-            "eff_sd": math.sqrt(eff_var), "eff_shared": min(0.9, max(0.0, cov("dy", "dy", pairs) / eff_var))}
+    return {"eff_sd": math.sqrt(eff_var), "eff_shared": min(0.9, max(0.0, cov("dy", "dy", pairs) / eff_var))}
 
 
 def _share_sd(lines: list[dict], teams: dict, stat: str, positions: tuple[str, ...] = ("RB", "WR", "TE")) -> float:

@@ -1604,7 +1604,9 @@ read the belief, so, as in a real season, the public learns the truth only from 
   2018-2025 play-by-play (118 overtimes). **The last ten minutes are played from the score**
   (`services/sim_closing.py`): the game is drawn up to ten minutes before the end of regulation, then a real
   game's ending is drawn from the real games (2018-2025 play-by-play, `sim_closing_fit`, cached in
-  `backend/data/cache/scoring_plays.json`) that stood at the same margin then, the trailing team's scoring going
+  `backend/data/cache/scoring_plays.json`) that stood at the same margin then, weighted toward those whose pregame
+  spread was near the side's expected margin (a Gaussian kernel of 4 points, `sim_closing.near`, set by hand: at the same cut
+  margin a real favourite gains 0.21 points in the window per point of the spread; on the stored endings the kernel gives about two thirds of that, and at this width a 17-point line already draws from under 5 real endings one game in eight), the trailing team's scoring going
   to the trailing side and the leader's to the leader. So a tied or close game is decided by a field goal as
   often as a real one, a team down 4-8 chases a touchdown and a big lead is run out: real margins land on exactly
   3 or 7 far more often than two teams scoring on their own would (pairing each real team's score with another
@@ -1612,22 +1614,24 @@ read the belief, so, as in a real season, the public learns the truth only from 
   touchdown catch to a receiver, with the passer's line still his receivers' sum, a run to a rusher, field goals
   and extra points to the kicker, return TDs and safeties to the defense), and the draw before the cut is
   centred without the window's and overtime's mean points (`services/sim_closing_means.py`), worked out from the
-  game's own expected lead and total: the margin at the cut spreads more in a high-scoring game (sd^2 = 44.5 +
-  2.12 x the two sides' expected points before the cut, `cut_var`, measured by the fit: 8.6 at 14 points, 12.8 at 56), and over that
+  game's own expected lead and total: the margin at the cut spreads more in a high-scoring game (sd^2 = 14.0 x
+  (pa^0.525 + pb^0.525) of the two sides' expected points before the cut, `cut_var`, measured by the fit on the
+  current draw: 8.6 for a 5-8 game, 11.0 for 16-16, 12.6 for 30-25; a lopsided game spreads less than an even one at
+  the same total), and over that
   spread the real endings give each side's mean window points (a trailer scores more in it, and the closer the
   cut the more both kick) and the chance regulation ends tied, which sets each side's overtime points. So
-  projections stay unbiased: over 12,000 draws a game averages its target within 0.12 points from 10-13 to 38-10
-  (one spread and one tie rate for every game had a 17-17 game at +0.23 / +0.25 and a 10-13 one at +0.38). A favourite also **runs more and throws a little less** than an underdog
-  (real teams within a season, 2018-2025: carries +0.76% and targets -0.03% per point of the Vegas spread,
-  `line_script` in `sim_closing.json`; the draw applies that plus a tuned offset, carries +0.24 and targets -0.13,
-  `game.line_script_extra`, because the simulated game on its own moves volume the other way; sim_eval's rows then
-  match real ones: carries per point 0.88 / 0.90 against 0.88 / 0.87, full / mid),
-  and **teams throw more early in a season and run more late** (`services/sim_calendar.py`, fitted on
+  projections stay unbiased: over 12,000 draws a game averages its target within 0.13 points (se 0.07-0.09) at
+  15-13, 20.5-20.5, 27-17 and 31-26 (one spread and one tie rate for every game had a 17-17 game at +0.23 / +0.25
+  and a 10-13 one at +0.38); its players' projections are their draws' means too (quarterbacks within 0.18 points,
+  all skill players together within 0.25; a QB's lost sack fumbles, which the draw charges him, are in his
+  projection). A favourite **runs more and throws a little less** than an underdog, and the **game itself follows
+  the score** (below); and **teams throw more early in a season and run more late** (`services/sim_calendar.py`, fitted on
   2018-2025: targets x1.02 in weeks 1-4 and x0.98 in weeks 15-18, carries the reverse, yards per target about 1%
   lower late; the belief learns calendar-free volumes); both apply before a game is centred on its line, so the
   points stay the line's and only the mix moves. The hidden strength, the widened edge and the drive count are
   tuned so simulated results against the sim's own line look like real results against Vegas (sim_eval
-  2021-2025, 3 seeds, full / mid mode, real in brackets: line vs result correlation 0.45 / 0.49 (0.46 / 0.53),
+  2021-2025, 3 seeds, full / mid mode, real in brackets, measured before games were drawn in parts: the 8-seed
+  rows since are with the usage numbers below; line vs result correlation 0.45 / 0.49 (0.46 / 0.53),
   results around the line spread 12.6 / 12.9 (12.6 / 12.0), margins of 21+ 16.7% / 18.4% (16.9% / 17.2%), 21+ in
   the most lopsided fifth of lines 25.7% / 32.1% (25.1% / 29.0%; mid mode's 3-seed figure moves by 3 points from
   run to run, 30.5% over 8 seeds), in the closest fifth 13.2% / 13.0% (12.0% / 7.9%), team scores mean 23.2 / 22.3
@@ -1645,11 +1649,10 @@ read the belief, so, as in a real season, the public learns the truth only from 
   projection in a lopsided game (0.56 at 31-13; 0.52 before the closing window); and a tie's chance is a normal
   spread's, while real cut margins are lumpier, so it runs 9-24% under the drawn one in close and low-scoring
   games (0.01-0.04 points of overtime a side).
-- **Games are played top-down,** so box scores always add up (`services/sim_game.py`): first each
-  team's targets and carries (its volume, a shared game draw for shootouts, the leader running more and the
-  trailer passing more), then they are split among the active players by their roles (an injured player's
-  work goes to his teammates, a rookie takes some from everyone), then catches, yards and touchdowns per
-  player. The quarterback's passing line is the sum of his receivers' lines, so a QB's completions, yards and
+- **Games are played top-down,** so box scores always add up (`services/sim_game.py`, `sim_parts.py`): each
+  team's plays half by half (below), split into targets and carries, then shared among the players in the day's
+  game plan by their roles (an injured player's work goes to his teammates, a rookie takes some from everyone),
+  then catches, yards and touchdowns per player. The quarterback's passing line is the sum of his receivers' lines, so a QB's completions, yards and
   TDs always match his receivers'. His attempts are his completions, his interceptions and the other
   incompletions (sacks are not attempts); an interception is drawn among the incomplete attempts, at the rate
   that keeps its mean the team's attempts x INT rate, so attempts never fall below completions + INTs. If he
@@ -1674,6 +1677,98 @@ read the belief, so, as in a real season, the public learns the truth only from 
   team-games without a QB line, real 0), and in full mode the season's shape (sim_metrics_shape: 4,000-yard
   passers, 1,000-yard receivers and rushers, the WR and TE leaders, target and carry shares, yards per target
   spread) and the standings (best and worst record, team points spread, games decided by 1-3 and by 8 or fewer).
+- **Play calling follows the score** (`services/sim_script.py`, fitted on 2018-2025 play-by-play by
+  `python -m services.sim_script_fit --fit` -> `sim_script.json`; run it before `sim_closing_fit`, whose endings
+  read the window's plays from its cache and whose cut spread is measured on draws that read `sim_script.json`). A
+  game is drawn in three parts: the first half, the second half up to the closing window's cut, and the window. A
+  half's plays are a Poisson count around its share of the team's volume (real: 50% / 30% / 20% of targets and
+  carries), split into targets and carries at the team's pass share plus a small lean for the day (a pass-first or
+  run-first plan, sd 0.027, measured beyond the binomial within team-seasons; there is no pace draw: real plays
+  before the cut spread 6.8 a game within a team-season, a Poisson's 6.9). The second half's mix follows the score
+  at half time (fitted within team-seasons: per point of lead, targets -1.1% and carries +0.65%, so a team down 14
+  after the half throws about 16% more and runs about 9% less; a clip of the lead at 21 points is a hair better for
+  targets on held-out seasons and worse for carries, 10 and 14 worse for both, so one linear slope), both halves
+  also per point of the pregame line (targets +0.43% / +0.57%, carries +0.22% / +0.40%). The window's plays are the
+  real ending's own (sim_closing.json's endings carry their targets, carries and kneel-downs, scaled by the team's
+  volume): a leader runs out the clock and kneels, a trailer throws. A player who leaves the game hurt plays the halves until
+  his share of the game runs out, then the window: one gone at half time gets none of the window, one hurt in the
+  last minutes his part of it, so his mean work is his share of the game (a receiver leaving at 0.6 had 0.54 of his
+  healthy targets with no window play, now 0.64, the others' weights renormalizing as on a whole game; a starting
+  QB leaving at half time throws 0.47 of the team's passing, was 0.38).
+  Only the halves' plays score (their TD rates, interceptions and sacks per play divided by the halves' share; the
+  window's scoring is its real ending's), so team points stay on the line, and every projection is the draw's mean:
+  the second half's response uses the projected lead at half time plus how far each side's first half beat its own
+  mean, which averages out. The game's touchdown drives (`game.td_drives`) are split between the halves, a half's
+  field-goal tries move per TD and per yard as much as a whole game's do (with each half's own base, results around
+  the line spread 0.5 points too wide), and interceptions are drawn once on both halves' attempts. Second quarters
+  respond to the first quarter's score too, but weakly (targets -0.55% and carries +0.21% a point), so the game is
+  not cut into quarters. A half's **touchdowns come with its yards**: its TD count is the same Binomial, drawn at a
+  quantile that leans on how far the half's yards beat their mean (`game.td_yards_rho` 0.9, tuned in sim_eval), so
+  no mean moves; a real team-game's yards and TDs correlate 0.63 / 0.61 (mid / full), the draw apart gave 0.31, now
+  0.63 / 0.60, and team fantasy points spread 20.6 / 20.1 a team-game against a real 22.1 / 21.9 (19.0 / 18.7 with
+  the TDs apart, main 20.3 / 20.2, whose wider spread came from team volumes too wide, carries sd 9.0 / 8.4 against
+  7.5 / 7.6). sim_eval's usage rows (`sim_metrics_usage`, per team-game; real / main / now, mid then full mode,
+  2021-2025, 8 seeds): corr(final margin, carries) 0.51 / 0.34 / 0.48 and 0.52 / 0.30 / 0.46; corr(margin, targets)
+  -0.18 / +0.02 / -0.24 and -0.23 / +0.05 / -0.25; corr(carries, targets) -0.37 / -0.20 / -0.26 and -0.40 / -0.17 /
+  -0.22; team carries sd 7.5 / 9.0 / 7.3 and 7.6 / 8.4 / 6.7; carries when losing by 14+ 21.5 / 23.3 / 22.5 and 20.8
+  / 23.6 / 22.7, when winning by 14+ 32.8 / 32.0 / 32.5 and 32.3 / 31.2 / 31.4; targets when winning by 14+ 28.5 /
+  32.1 / 28.0 and 28.2 / 32.7 / 28.5; a loss by 14+ with 30+ carries (a team losing 28-6 does not run 30 times) 9.7%
+  / 19.2% / 12.0% and 7.0% / 19.6% / 10.8%; carries + targets a team-game 58.5 / 58.9 / 58.4 and 58.4 / 59.1 / 58.5;
+  targets per point of the line -0.23 / -0.30 / -0.23 and -0.09 / -0.17 / -0.17, carries 0.87 / 0.90 / 0.83 and 0.88
+  / 0.82 / 0.71 (2021-2025 ran more as favourites than 2018-2020: the first half's carries per line point were 0.07%
+  in 2018-2020, 0.21% in 2021-2023 and 0.45% in 2024-2025, the fit pools 2018-2025 at 0.22%, and real 2018-2025
+  team-games move 0.76% a point). Results against the line (real / main / now, mid then full): line vs result r
+  0.53 / 0.49 / 0.47 and 0.46 / 0.45 / 0.45, results around the line sd 12.0 / 12.5 / 12.7 and 12.6 / 12.6 / 12.7,
+  team score sd 10.1 / 10.0 / 10.3 and 9.9 / 10.0 / 10.3 (TDs with yards also move field goals, which follow both);
+  21+ wins by fifth of lines, closest first (mid: real 8.6 / 7.7 / 13.7 / 21.2 / 29.0%, main 11.0 / 13.0 / 13.6 /
+  18.5 / 28.4%, now 10.7 / 14.3 / 13.5 / 18.6 / 25.8%; full: real 13.3 / 11.6 / 12.3 / 19.3 / 25.1%, main 12.6 /
+  12.1 / 14.7 / 16.8 / 26.6%, now 11.9 / 12.2 / 13.0 / 17.1 / 27.0%).
+- **Work is shared like a real team's.** Real depth players are lumpy, no touch in many games and several in a
+  few, backs most of all: a healthy back the belief expects 3-4 touches of has none in 46% of his games, a
+  receiver in 17%, where a draw around their means leaves them without one in about 3%. So each week a player is in
+  the game plan with a chance fitted by position on the touches the belief expects of him (`participation` in
+  sim_script.json: q = 1 - c exp(-touches / scale); RB c 0.92 and scale 3.5, WR 0.92 / 1.75, TE 1.0 / 0.75; fitted on
+  2019-2025, the belief before weeks 6, 10 and 14 against the next four weeks, the no-show floor and the curve
+  worked out without the held-out season; held-out seasons score better with it), decided on his weights before
+  anyone left the game hurt; in the plan his weight is divided by q and out of it he gets nothing, and the players
+  always in the plan (a chance of 0.97 or more, or a quarter of the team's targets or carries) take up the
+  difference, so every mean, and every projection, is the belief's. The belief's own depth weights were checked
+  and are not too high (its expected touches match or trail real ones at every depth rank, 2019-2025). Usage rows
+  (real / before / after, mid then full): players with a target 7.8 / 8.6 / 7.8 and 7.9 / 8.2 / 7.6; non-QBs with a
+  carry 3.0 / 3.6 / 3.2 and 3.0 / 3.4 / 3.1; backs with a carry 2.4 / 2.7 / 2.4 (both modes); the game's third back's
+  share of the non-QB carries 0.04 / 0.09 / 0.08 (both); the targets after the fifth receiver's 0.13 / 0.18 / 0.15 and
+  0.14 / 0.15 / 0.13. A player's available games with no touch (his team played, he was on it with no hard tag),
+  real / before / after, mid: backs averaging 1.5-3 touches 45% / 26% / 54%, 3-6 26% / 5% / 28%, 6+ 5.9% / 0.2% /
+  2.3%; receivers 1.5-3 20% / 13% / 25%, 3-6 6.5% / 2.1% / 6.9%, 6+ 2.1% / 0.2% / 0.4% (full mode alike).
+- **Who carries.** A quarterback's share of his team's carries is his full-strength share (his weight over his
+  own and the backs' at full strength) x one league factor, `qb_share.scale` in sim_script.json (1.136, fitted
+  on 2019-2025 and checked leave-season-out, where it beats no factor by 6% of the squared error: the share the
+  belief gives each starter against his real one; small, middle and
+  large shares alone give 1.14 / 1.02 / 1.20, light and heavy backfields 1.13 / 1.14), the same in the belief and
+  the truth, week 1 or 18, whoever played before (a Luce weight is a share of the players a team dresses, so
+  without it his share was 0.127 against a real 0.153). His **kneel-downs** are his carries, as the box score
+  counts them (the window's real endings carry 0.61 of the 0.77 a team-game; the 0.16 before half time stay inside
+  his belief carries), the finishing QB's when the starter left hurt, and his other carries are his belief carries
+  less the kneels a QB averages (0.61), at the yards and TDs per carry that keep his belief's, the same whatever the
+  line; this game's kneels come on top, so a big favourite's QB kneels more that day and over a season his
+  projection is his belief's (taking out this game's kneels instead squeezed a pocket passer's few other carries
+  into ones worth 20-60 yards as a big favourite; his other carries are at least half his belief carries). QB carries a team-game, belief / projected / drawn / real (2023-2025, 2 seeds): mid (weeks 12+) 3.99 /
+  4.04 / 3.95 / 4.03; full 3.40 / 3.38 / 3.38 / 4.20 (the August belief's last-season weights); rushing yards 18.0 /
+  17.8 / 17.9 / 17.7 and 15.9 / 15.6 / 15.9 / 18.5. The window's plays split linearly: a player who left hurt gives
+  his part of the drawn plan to the others by their mean window shares, so with a QB, lead back and lead receiver
+  leaving, every player's projected targets, carries and TDs are his draws' means.
+  Still short: the game's lead back takes 61% of the non-QB carries against a real 67% (a back with 20+ carries in
+  17% / 17% of team-games against 23% / 20%), because a real lead back misses about 7% of his healthy games untagged
+  or while listed Questionable / Doubtful (his backup then leads), and simulated absences are always tagged Out
+  (lead roles miss 2.1% / 3.3% of available games against 5.9% / 6.5%); small roles are a little too lumpy (a back
+  averaging 1.5-3 touches has none in 53% / 57% of his games against 45% / 53%: the fit is on the belief's expected
+  touches, these bands on the realized mean, and the draw's own zeros beyond a Poisson's add under half a point); a
+  team losing big still runs about 1.2 times more than a real one (real teams that fall behind also run fewer plays:
+  the draw's plays do not depend on how its drives go); full mode's team carries spread 6.7 against 7.6 and its
+  corr(carries, targets) is -0.22 against -0.40 (simulated teams' volumes vary less game to game); players with only
+  1-2 targets 2.9 / 2.8 against 3.2; full mode's QB carries 0.8 under real (3.4 against 4.2: the August belief); full mode's carries per point of the line 0.71 against 0.88 (the halves' slopes are fitted on 2018-2025, above); team scores spread 10.3 against 10.1 / 9.9 and shutouts are 1.6% / 1.4% of team-games against 1.4% / 1.1% (field goals follow both a half's TDs and its yards); D/ST projections run 0.3-0.8 points under the draws' mean (0.6 and 0.3 at 15-13, 0.8 for a 34-10 favourite: the gap above, older than the game in parts; TDs with yards add about 0.17 through the extra shutouts); a season takes about 15% longer to simulate (three play draws a side a game for one); a starting QB throws
+  about 1 attempt a start more than a real one (32.6 / 33.3 against 31.8 / 32.2), as real starters share late
+  passes in blowouts with their backups.
 - **Injuries** come from what really happened to fantasy-relevant players in 2018-2025
   (`services/sim_injuries.py`, rates in `sim_injuries.json`): by position, the chance a player who plays a
   game gets hurt in it, how many games he then misses (the real lengths, season-enders included), how much
@@ -2029,8 +2124,10 @@ python -m services.sim_eval --fit [--seasons 2021-2025]             # refit the 
 python -m services.sim_injuries --fit --seasons 2018-2025 [--check] # refit injuries (sim_injuries.json)
 python -m services.sim_next_year_fit --fit [--seasons 2019-2025]    # refit the offseason + rookie premium (sim_next_year.json)
 python -m services.sim_depth --fit --seasons 2018-2025              # refit split backfields (sim_depth.json)
-python -m services.sim_closing_fit --fit [--seasons 2018-2025] [--window 600] [--refresh]   # closing minutes,
-                                                     # overtime, run / pass by the line (sim_closing.json; play-by-play cached)
+python -m services.sim_script_fit --fit [--seasons 2018-2025] [--refresh]   # play calling by part of the game,
+                                                     # game plans, QB carry share (sim_script.json); run it first
+python -m services.sim_closing_fit --fit [--seasons 2018-2025] [--refresh]  # closing minutes (fixed 600 s),
+                                                     # overtime, run / pass by the line, cut spread (sim_closing.json)
 python -m services.sim_calendar --fit [--seasons 2018-2025]         # pass / run mix by week (sim_calendar.json)
 python -m services.sim_carryover --check --seasons 2018-2024        # carried injuries vs real cross-season returns
 ```

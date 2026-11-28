@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from services import sim_script
 from services.replay_box import BoxLine
 from services.scoring import ScoringSettings
 from services.sim_game import (
@@ -56,7 +57,8 @@ def expected(world: World, home: str, away: str | None, out: Collection[int], sc
     before = {team: _mean_points(m, means.get(other[team])) for team, m in means.items()}
     ends = {}                                        # the draw adds the closing window and overtime (sim_closing_means)
     if away is not None and not factors:
-        ends = dict(zip((home, away), closing_means.endings(before[home], before[away])))
+        edge = sides[home].end.edge if sides[home].end is not None else 0.0      # the endings drawn near it
+        ends = dict(zip((home, away), closing_means.endings(before[home], before[away], edge)))
     team_points = {team: before[team] + (ends[team].window + ends[team].overtime if team in ends else 0.0)
                    for team in means}
     out_lines: dict[int, Expected] = {}
@@ -93,10 +95,16 @@ def _expected_players(side: _Side, m: dict, scoring: ScoringSettings,
     for i, pid in enumerate(side.rushers[:-1]):
         line = lines.setdefault(pid, {})
         line.update(carries=m["carries"][i], rush_yds=m["rush_yds"][i], rush_td=m["rush_td"][i],
-                    fumbles=line.get("fumbles", 0.0) + m["carries"][i] * side.fumble[i])
-    if side.qb is not None:
+                    fumbles=line.get("fumbles", 0.0) + (m["carries"][i] - m["kneels"][i]) * side.fumble[i])
+    if side.qb is not None:      # the sacks' lost fumbles, split as the draw splits them by the share each played
+        sacked = m["sacks"] * params()["league"]["sack_fumble"]
+        early = 1.0 if side.backup is None or side.qb_share >= 1.0 else             sim_script.exit_parts(side.qb_share, "targets")[0]        # sacks come from the halves only
         line = lines.setdefault(side.qb, {})
-        line.update(pass_yds=float(m["rec_yds"].sum()), pass_td=float(m["rec_td"].sum()), pass_int=m["ints"])
+        line.update(pass_yds=float(m["rec_yds"].sum()), pass_td=float(m["rec_td"].sum()), pass_int=m["ints"],
+                    fumbles=line.get("fumbles", 0.0) + sacked * early)
+        if early < 1.0:
+            line = lines.setdefault(side.backup, {})
+            line["fumbles"] = line.get("fumbles", 0.0) + sacked * (1.0 - early)
     if end is not None:
         from services.sim_closing_means import credit_means
         credit_means(lines, side, m, end)

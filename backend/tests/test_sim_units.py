@@ -5,7 +5,7 @@ from types import MappingProxyType, SimpleNamespace
 import numpy as np
 import pytest
 
-from services import sim_centre, sim_draw, sim_game, sim_lines, sim_metrics_games, sim_season, sim_talent, sim_world
+from services import sim_centre, sim_draw, sim_game, sim_lines, sim_metrics_games, sim_script, sim_season, sim_talent, sim_world
 from tests import replay_fakes as fakes
 
 WEEK = 9
@@ -136,7 +136,8 @@ def test_a_hurt_starter_threw_his_share_of_regulations_other_incompletions(share
     after = SimpleNamespace(**{**vars(regulation), "attempts": 45})       # five later throws: none of them his
     draws = [sim_draw._passers(side, after, np.random.default_rng(seed), regulation) for seed in range(2000)]
     missed = [line[1]["pass_att"] - line[1]["pass_cmp"] - line[1]["pass_int"] for line in draws]
-    assert np.mean(missed) == pytest.approx(share * 18, abs=0.3)
+    early = sim_script.exit_parts(share, "targets")[0]      # his part of the halves, which regulation holds
+    assert np.mean(missed) == pytest.approx(early * 18, abs=0.3)
     assert all(line[1]["pass_int"] + line[2]["pass_int"] == 2 and line[1]["pass_att"] + line[2]["pass_att"] == 45
                for line in draws)
 

@@ -1,12 +1,13 @@
 """sim_closing / sim_closing_fit: a game's closing window played from the score, and overtime's measured rates."""
+import json
 from collections import Counter
 
 import numpy as np
 import pytest
 
-from services import sim_calendar, sim_closing, sim_closing_fit, sim_closing_means, sim_draw, sim_game
+from services import sim_calendar, sim_closing, sim_closing_fit, sim_closing_plays, sim_closing_means, sim_draw, sim_game
 from tests import sim_draws
-from tests.test_sim_game import HALF, pid, world
+from tests.test_sim_game import HALF, pid, team_of, world
 
 NONE = dict.fromkeys(sim_closing_fit.EVENTS, 0)
 
@@ -39,7 +40,7 @@ def test_endings_are_filed_by_the_margin_at_the_cut_from_the_trailers_side():
              _game([[1, 3000, "AAA", "pass_td", 20], [1, 3000, "AAA", "xp", 0], [5, 400, "BBB", "fg_0_39", 0]], 7, 3)]
     assert all(sim_closing_fit.consistent(g) for g in games)
     table = sim_closing_fit.endings(games, 600)
-    (trail, lead), = table[3]                       # BBB trailed 0-3 and scored a TD and the extra point
+    (trail, lead, spread), = table[3]               # BBB trailed 0-3 and scored a TD and the extra point
     assert dict(zip(sim_closing_fit.EVENTS, trail))["rush_td"] == 1 and not any(lead)
     assert sum(table[7].values()) == 1              # the second game: no scoring in its window (OT is not the window)
     ot = sim_closing_fit.overtime(games)
@@ -52,8 +53,9 @@ def test_a_trailer_scores_more_in_the_window_than_a_leader_and_close_games_tie_m
     assert window(-10, 11.0) > window(0, 11.0) > window(10, 11.0) > 0
     tie = sim_closing_means.tie_chance
     assert tie(0, 8.0) > tie(0, 11.0) > tie(7, 11.0) > tie(20, 11.0) > 0
-    assert tie(3, 11.0) == tie(-3, 11.0)
-    assert sim_closing_means.cut_sd(14.0) < sim_closing_means.cut_sd(36.0) < sim_closing_means.cut_sd(56.0)
+    assert tie(3, 11.0) == pytest.approx(tie(-3, 11.0), rel=1e-12)      # the two sums add in another order
+    assert sim_closing_means.cut_sd(7.0, 7.0) < sim_closing_means.cut_sd(18.0, 18.0) < sim_closing_means.cut_sd(28.0, 28.0)
+    assert sim_closing_means.cut_sd(32.0, 4.0) < sim_closing_means.cut_sd(18.0, 18.0)          # a lopsided game spreads less
 
 
 def test_the_draw_before_the_cut_plus_window_and_overtime_average_the_wanted_points():
@@ -68,7 +70,7 @@ def _setup(exits: dict | None = None):
     sides = [sim_game._side(w, "AAA", "BBB", set(), exits or {}), sim_game._side(w, "BBB", "AAA", set(), {})]
     means = [sim_game._side_means(s) for s in sides]
     rng = np.random.default_rng(4)
-    offense = [sim_draw._offense(s, 33, 27, 1.0, rng) for s in sides]
+    offense = [sim_draws.offense(s, 33, 27, rng) for s in sides]
     counts = {"made": np.zeros(3, dtype=int), "missed": np.zeros(3, dtype=int), "pat_made": 0, "pat_att": 0}
     return sides, means, offense, counts, rng
 
@@ -77,7 +79,7 @@ def test_the_trailers_ending_goes_to_the_trailing_side_and_to_real_players(monke
     star = pid("AAA", "WR")
     sides, means, offense, counts, rng = _setup({star: 0.1})
     ending = (_events(pass_td=2, fg_40_49=1, xp=2), _events(ret_td=1, safety=1))
-    monkeypatch.setattr(sim_closing, "ending", lambda margin, rng: ending)
+    monkeypatch.setattr(sim_closing, "ending", lambda margin, rng, edge=None: ending)
     for _ in range(50):
         out = sim_closing.close(sides, offense, [(10, counts), (17, counts)], [10, 17], [0, 0], [0, 0],
                                 np.array([33, 33]), np.array([27, 27]), rng, means, [20.0, 20.0])
@@ -125,11 +127,16 @@ def test_late_season_games_run_more_and_throw_less_at_the_same_points():
 
 
 def test_a_favourite_runs_more_than_the_same_team_as_an_underdog():
-    w, rb = world(), pid("AAA", "RB")
+    """A 14-point favourite runs more and throws less than the same team as a 14-point underdog (sim_script: its
+    halves follow the line and its lead, its window a leader's ending); real teams' carries move +0.76% a point of
+    the Vegas spread within a season (sim_closing.json's line_script), e^(28 x 0.0076) = 1.24 here."""
+    w, rb, qb = world(), pid("AAA", "RB"), pid("AAA", "QB")
     favoured = sim_game.expected(w, "AAA", "BBB", set(), HALF, target={"AAA": 30.0, "BBB": 16.0})
     underdog = sim_game.expected(w, "AAA", "BBB", set(), HALF, target={"AAA": 16.0, "BBB": 30.0})
-    ratio = favoured[rb].box.carries / underdog[rb].box.carries
-    assert ratio == pytest.approx(np.exp(28 * sim_closing.line_script()["carries"]), rel=0.02)
+    team = lambda lines, key: sum(getattr(e.box, key) for p, e in lines.items() if team_of(p) == "AAA")  # noqa: E731
+    assert 1.12 < favoured[rb].box.carries / underdog[rb].box.carries < 1.4
+    assert team(favoured, "targets") < team(underdog, "targets")
+    assert favoured[qb].box.carries > underdog[qb].box.carries          # the leader's kneel-downs
 
 
 def test_over_many_games_the_box_adds_up_to_the_points_and_no_try_comes_without_a_touchdown(monkeypatch):
@@ -213,7 +220,11 @@ def test_the_cut_margins_spread_matches_the_measured_one(wanted):
     before = (sim_game._mean_points(m[home], m[away]), sim_game._mean_points(m[away], m[home]))
     rng = np.random.default_rng(6)
     cuts = np.array([sim_draw.draw_game((sides[home], sides[away]), rng, HALF, until_cut=True) for _ in range(1500)])
-    assert np.std(cuts[:, 0] - cuts[:, 1]) == pytest.approx(sim_closing_means.cut_sd(sum(before)), rel=0.06)       # the sd of 1,500 draws: se about 1.8%
+    # the sd of 1,500 draws: se about 1.8%. The fixture's 10-13 game makes its points with more field goals than a
+    # real one at the same points (0.58 tries for 0.41 TDs against 0.44 for 0.47), so it spreads about 5% less than
+    # cut_sd, which reads only the points (4.7% over 6,000 draws; 35-30: 1.8% less)
+    tolerance = 0.08 if sum(wanted) < 30 else 0.06
+    assert np.std(cuts[:, 0] - cuts[:, 1]) == pytest.approx(sim_closing_means.cut_sd(*before), rel=tolerance)
 
 
 def test_an_overtime_that_ends_tied_without_a_score_still_counts():
@@ -270,6 +281,7 @@ def test_fit_counts_overtime_on_every_game_and_warns_when_nothing_is_stored(monk
     def unreadable():
         raise RuntimeError("sim_closing.json is unreadable")
     monkeypatch.setattr(sim_closing_fit, "scoring_games", lambda seasons, refresh=False: [*plain, tied])
+    monkeypatch.setattr(sim_closing_fit, "with_plays", lambda games, window, seasons, refresh=False: games)
     monkeypatch.setattr(sim_closing_fit, "line_script", lambda session, seasons: {"targets": 0.0, "carries": 0.0})
     monkeypatch.setattr("database.db.SessionLocal", nullcontext)
     monkeypatch.setattr(sim_closing, "stored", unreadable)
@@ -299,7 +311,7 @@ def test_a_window_touchdown_with_no_one_to_credit_goes_to_the_other_pool_or_to_n
     exits = {pid_: 0.5 for group in groups for pid_ in _ids(base, group)}
     sides, means, offense, counts, rng = _setup(exits)
     tds = _events(pass_td=1, rush_td=1, xp=2)
-    monkeypatch.setattr(sim_closing, "ending", lambda margin, rng: (tds, _events()))
+    monkeypatch.setattr(sim_closing, "ending", lambda margin, rng, edge=None: (tds, _events()))
     for _ in range(30):
         after, _, points, *_ = _close_once(sides, means, offense, counts, rng, tds)
         assert points[0] == 10 + 14                              # AAA trailed: the ending's points, credited or not
@@ -343,7 +355,7 @@ def test_a_hurt_kickers_window_kicks_count_for_his_team_not_his_line(monkeypatch
     kicker = sim_game._side(w, "AAA", "BBB", set(), {}).kicker
     sides, means, offense, counts, rng = _setup({kicker: 0.5})
     assert sides[0].kicker_share == 0.5
-    monkeypatch.setattr(sim_closing, "ending", lambda margin, rng: (_events(fg_40_49=1, rush_td=1, xp=1), _events()))
+    monkeypatch.setattr(sim_closing, "ending", lambda margin, rng, edge=None: (_events(fg_40_49=1, rush_td=1, xp=1), _events()))
     _, scored, points, *_ = _close_once(sides, means, offense, counts, rng, None)
     assert points[0] == 10 + 3 + 7
     assert scored[0][0] == 10 + 10 and scored[0][1] is counts             # no kick added to his line
@@ -353,7 +365,7 @@ def test_a_tied_games_better_ending_goes_to_each_side_by_its_share_of_the_points
     """Item 5: at a tie, the better of the two endings goes to side 0 with its share of the mean points (30 of 40)."""
     sides, means, offense, counts, rng = _setup()
     good, bad = _events(fg_0_39=1), _events()
-    monkeypatch.setattr(sim_closing, "ending", lambda margin, rng: (bad, good))      # the better one second
+    monkeypatch.setattr(sim_closing, "ending", lambda margin, rng, edge=None: (bad, good))      # the better one second
     wins = sum(_close_once(sides, means, offense, counts, rng, None, (10, 10), (30.0, 10.0))[2][0] == 13
                for _ in range(4000))
     assert wins / 4000 == pytest.approx(0.75, abs=0.025)
@@ -371,7 +383,7 @@ def test_scoring_plays_with_no_game_clock_are_counted_and_logged(caplog):
     """Item 7: a scoring play with a null clock is left out loudly, not silently."""
     rows = [_row(touchdown=1, td_team="AAA", rush_touchdown=1), _row(extra_point_result="good", game_seconds_remaining=None),
             _row(yards_gained=5)]
-    with caplog.at_level("WARNING", logger="services.sim_closing_fit"):
+    with caplog.at_level("WARNING", logger="services.sim_closing_plays"):
         games = sim_closing_fit.games_of(rows, 2020)
     assert [p[3] for p in games[0]["plays"]] == ["rush_td"]
     assert "2020: 1 scoring plays with no game clock" in caplog.text
@@ -381,8 +393,8 @@ def test_an_unreadable_play_by_play_cache_warns_with_the_error(caplog, monkeypat
     """Item 8: a corrupt cache is logged at WARNING with the exception before every season is downloaded again."""
     path = tmp_path / "scoring_plays.json"
     path.write_text("{not json", encoding="utf-8")
-    monkeypatch.setattr(sim_closing_fit, "PLAYS_CACHE", path)
-    with caplog.at_level("WARNING", logger="services.sim_closing_fit"):
+    monkeypatch.setattr(sim_closing_plays, "PLAYS_CACHE", path)
+    with caplog.at_level("WARNING", logger="services.sim_closing_plays"):
         assert sim_closing_fit._cached() == {}
     record = next(r for r in caplog.records if "unreadable" in r.getMessage())
     assert record.levelname == "WARNING" and record.exc_info is not None
@@ -398,3 +410,58 @@ def test_a_write_that_cannot_replace_the_file_leaves_no_temp_file(monkeypatch, t
         sim_closing_fit._store("new")
 
     assert path.read_text(encoding="utf-8") == "old" and list(tmp_path.iterdir()) == [path]
+
+
+def test_a_refresh_downloads_the_asked_seasons_again_and_keeps_the_others(monkeypatch, tmp_path):
+    path = tmp_path / "scoring_plays.json"
+    path.write_text(json.dumps({"2023": [{"season": 2023}], "2024": [{"season": 2024, "old": True}]}), encoding="utf-8")
+    monkeypatch.setattr(sim_closing_plays, "PLAYS_CACHE", path)
+    fetched = []
+    monkeypatch.setattr(sim_closing_plays, "_download", lambda season: fetched.append(season) or [{"season": season}])
+    assert sim_closing_plays.scoring_games([2024]) == [{"season": 2024, "old": True}] and fetched == []
+    assert sim_closing_plays.scoring_games([2024], refresh=True) == [{"season": 2024}] and fetched == [2024]
+    assert json.loads(path.read_text(encoding="utf-8")) == {"2023": [{"season": 2023}], "2024": [{"season": 2024}]}
+
+
+def test_a_game_tied_at_the_cut_weighs_its_endings_alike_in_the_draw_and_for_both_sides():
+    """Tied at the cut, either team is the "trailer": the draw and both sides' projections centre the spread kernel
+    on the edge and on its negative at half weight each (the projection read side 1's tie row at -edge, the draw at
+    side 0's edge: window points 5.73 against 4.98 at an edge of 14)."""
+    from services.sim_closing_means import SPAN, _tables
+    rows, ties = _tables(14.0)
+    flipped, flipped_ties = _tables(-14.0)
+    assert rows[SPAN] == pytest.approx(flipped[SPAN]) and ties[SPAN] == pytest.approx(flipped_ties[SPAN])
+    shares, endings, spreads = sim_closing.stored()["rows"][0]
+    want = sim_closing.near_tie(shares, spreads, 14.0)
+    rng = np.random.default_rng(3)
+    drawn = Counter(id(sim_closing.ending(0, rng, 14.0)) for _ in range(20_000))
+    got = np.array([drawn[id(e)] for e in endings]) / 20_000
+    assert np.abs(got - want).max() < 0.01
+
+
+def test_a_closing_table_without_its_spread_column_names_the_fit(monkeypatch, tmp_path):
+    """A sim_closing.json from before the endings carried their pregame spread would read every one as an even
+    game's: it is refused with the command that rebuilds it."""
+    found = json.loads(sim_closing.CLOSING_PATH.read_text(encoding="utf-8"))
+    found["table"] = {m: [r[:3] for r in rows] for m, rows in found["table"].items()}
+    path = tmp_path / "sim_closing.json"
+    path.write_text(json.dumps(found), encoding="utf-8")
+    monkeypatch.setattr(sim_closing, "CLOSING_PATH", path)
+    sim_closing.stored.cache_clear()
+    try:
+        with pytest.raises(RuntimeError, match="sim_closing_fit"):
+            sim_closing.stored()
+    finally:
+        sim_closing.stored.cache_clear()
+
+
+def test_games_without_play_counts_are_left_out_loudly(monkeypatch, caplog):
+    from services import sim_script_fit
+    counts = [[0] * len(sim_script_fit.COUNTS)] * 3
+    seg = {"season": 2024, "week": 1, "home": "AAA", "away": "BBB", "spread": 3.0, "AAA": counts, "BBB": counts}
+    monkeypatch.setattr(sim_script_fit, "segments", lambda seasons, refresh=False: [seg])
+    games = [{"season": 2024, "week": 1, "home": "AAA", "away": "BBB"}, {"season": 2024, "week": 2, "home": "AAA",
+                                                                       "away": "CCC"}]
+    with caplog.at_level("WARNING", logger="services.sim_closing_fit"):
+        out = sim_closing_fit.with_plays(games, sim_closing_fit.WINDOW, [2024])
+    assert [g["week"] for g in out] == [1] and out[0]["spread"] == 3.0 and "1 of 2 games" in caplog.text

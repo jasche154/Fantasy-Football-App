@@ -96,3 +96,4 @@ def usual_passer(team: str, seen: _Seen, players: Mapping[int, Player], week: in
         return weighted / yards
     qbs = [p for p in players.values() if p.team == team and p.position == "QB"]
     return max(qbs, key=lambda p: p.starts).quality if qbs else 1.0
+

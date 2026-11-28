@@ -7,9 +7,9 @@ import numpy as np
 import pytest
 
 from database.models import DepthChartEntry, Player, PlayerStatus
-from services import replay_fillin, sim_draw, sim_game, sim_market, sim_qb, sim_setup, sim_world
+from services import replay_fillin, sim_game, sim_market, sim_qb, sim_setup, sim_world
 from services.replay_pool import Injury
-from tests import replay_fakes as fakes
+from tests import sim_draws, replay_fakes as fakes
 from tests import test_replay_fillin as fillin_tests
 
 WEEK = 9
@@ -21,17 +21,19 @@ def belief():
 
 
 def test_a_busy_passing_day_gets_shorter_catches(belief):
-    """`game.ypc_volume`: yards per catch at twice the side's usual targets are below those at half."""
-    team = sorted(belief.teams)[0]
-    side = sim_game._side_of(belief, team, None, set())
-    def per_catch(n_targets: int) -> float:
-        rng, catches, yards = np.random.default_rng(1), 0, 0
-        for _ in range(300):
-            o = sim_draw._offense(side, n_targets, 25, 1.0, rng)
-            catches, yards = catches + int(o.catches.sum()), yards + int(o.rec_yds.sum())
-        return yards / catches
-    usual = round(side.targets)
-    assert per_catch(2 * usual) < per_catch(max(1, usual // 2)) * 0.85            # 4x volume ** -0.3 ~ 0.66
+    """`game.ypc_volume`: in games drawn before the cut, a side's yards per catch fall as its targets rise (the busy
+    day's factor, sim_parts.before_cut), by about the volume ratio ** -0.3."""
+    from services import sim_parts
+    teams = sorted(belief.teams)
+    sides = sim_draws.centred_sides(belief, teams[0], teams[1])
+    rng, rows = np.random.default_rng(1), []
+    for _ in range(600):
+        halves, *_ = sim_parts.before_cut(sides, [1.5, 1.5], rng)
+        o = halves[0].offense
+        rows.append((int(o.targets.sum()), int(o.rec_yds.sum()) / max(1, int(o.catches.sum()))))
+    targets, per_catch = np.array(rows, dtype=float).T
+    busy, quiet = per_catch[targets >= np.percentile(targets, 75)], per_catch[targets <= np.percentile(targets, 25)]
+    assert busy.mean() < quiet.mean() * 0.95
 
 
 def _player(session, name: str, gsis: str | None = None, position: str = "QB") -> Player:
